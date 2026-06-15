@@ -2,7 +2,7 @@ import { useAuth } from "@/lib/auth-context";
 import { getApiUrl } from "@/lib/api-config";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { ArrowLeft, FileText, Download, CheckCircle2, XCircle, Building2, Calendar, User as UserIcon, Hash, IndianRupee, Briefcase } from "lucide-react";
+import { ArrowLeft, FileText, Download, CheckCircle2, XCircle, Building2, Calendar, User as UserIcon, Hash, IndianRupee, Briefcase, ExternalLink } from "lucide-react";
 import { formatINR, type ApprovalStep } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
@@ -209,17 +209,26 @@ const headerItems = [
           </Section>
 
           {/* Section B: PDF */}
-       <Section title="Purchase Order Document">
-  <div className="rounded-lg border border-border overflow-hidden">
-    <iframe
-      src={getApiUrl(`/api/pdf?poNo=${encodeURIComponent(poNo)}`)}
-      width="100%"
-      height="800"
-      title="PO PDF"
-      style={{ border: "none" }}
-    />
-  </div>
-</Section>
+          <Section title="Purchase Order Document">
+            <div className="flex flex-col items-center justify-center rounded-xl border border-border border-dashed p-8 text-center bg-card/50">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary mb-4">
+                <FileText className="h-7 w-7" />
+              </div>
+              <h3 className="text-base font-semibold mb-1">Generated PO PDF</h3>
+              <p className="text-sm text-muted-foreground max-w-sm mb-6">
+                The official purchase order document is ready. Click below to view the PDF details in a new page.
+              </p>
+              <a
+                href={getApiUrl(`/api/pdf?poNo=${encodeURIComponent(poNo)}`)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-6 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition shadow-sm"
+              >
+                <span>View PDF Details</span>
+                <ExternalLink className="h-4 w-4" />
+              </a>
+            </div>
+          </Section>
 
           {/* Section D: Remarks */}
           <Section title="Remarks">
