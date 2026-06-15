@@ -41,3 +41,4 @@ obj/
 **/obj/
 **/appsettings.Development.json
 
+.vercel/
