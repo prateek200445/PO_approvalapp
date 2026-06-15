@@ -29,4 +29,5 @@ app.UseSwagger();
 app.UseSwaggerUI();
 
 app.MapControllers();
+app.MapGet("/", () => Results.Ok("PO Approval API is running!"));
 app.Run();
