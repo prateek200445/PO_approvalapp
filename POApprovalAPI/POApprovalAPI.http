@@ -1,0 +1,6 @@
+@POApprovalAPI_HostAddress = https://doing-cassette-decorating-parcel.trycloudflare.com
+
+GET {{POApprovalAPI_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
