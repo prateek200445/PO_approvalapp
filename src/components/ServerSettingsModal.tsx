@@ -86,6 +86,12 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
       new URL(targetUrl);
       setApiBaseUrl(targetUrl);
       toast.success("Server URL updated successfully!");
+      
+      // Ping the newly saved URL to trigger a cold start
+      fetch(targetUrl, { method: "GET" })
+        .then(() => console.log("New server URL pinged for cold start:", targetUrl))
+        .catch((err) => console.warn("Failed to ping new server URL:", err));
+
       onClose();
     } catch (e) {
       toast.error("Please enter a valid URL (e.g. http://192.168.0.188:5000)");

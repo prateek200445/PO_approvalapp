@@ -35,6 +35,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setReady(true);
+
+    // Wake up the backend immediately when the page loads to start the Render server's cold start
+    const pingUrl = getApiUrl("/");
+    console.log("Triggering backend cold-start ping to:", pingUrl);
+    fetch(pingUrl, { method: "GET" })
+      .then((res) => {
+        console.log("Backend cold-start ping responded with status:", res.status);
+      })
+      .catch((err) => {
+        console.warn("Backend cold-start ping dispatched, awaiting server wake-up:", err);
+      });
   }, []);
 
   async function login(
