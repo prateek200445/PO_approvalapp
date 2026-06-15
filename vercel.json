@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://po-approval-api.onrender.com/api/:path*"
+      "destination": "https://po-approvalapp.onrender.com/api/:path*"
     }
   ]
 }
