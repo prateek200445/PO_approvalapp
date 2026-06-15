@@ -53,12 +53,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     password: string,
     remember: boolean
   ) {
-    console.log("Login started");
-console.log("USERNAME SENT =", username);
-console.log("PASSWORD SENT =", password);
-   console.log("Calling API...");
-const response = await fetch(
-     getApiUrl("/api/Auth/login"),
+    const response = await fetch(
+      getApiUrl("/api/Auth/login"),
       {
         method: "POST",
         headers: {
@@ -71,11 +67,7 @@ const response = await fetch(
       }
     );
 
-    console.log("Status:", response.status);
-
     const data = await response.json();
-
-    console.log("Response:", data);
 
     if (!response.ok) {
       throw new Error("Invalid Username or Password");

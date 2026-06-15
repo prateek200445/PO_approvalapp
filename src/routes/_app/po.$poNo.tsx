@@ -26,19 +26,14 @@ const [loading, setLoading] = useState(true);
 const [remarks, setRemarks] = useState("");
 const [confirm, setConfirm] = useState<null | "approve" | "reject">(null);
 useEffect(() => {
-  console.log("PO NO =", poNo);
-
   fetch(
     getApiUrl(`/api/PO/details?poNo=${encodeURIComponent(poNo)}`)
   )
     .then((r) => r.json())
     .then(async (data) => {
-      console.log("PO DETAILS =", data);
-
       setPo(data);
 
       const username = user?.username;
-      console.log("USERNAME =", username);
 
       const approvalRes = await fetch(
         getApiUrl(`/api/PO/approval?poNo=${encodeURIComponent(poNo)}&username=${username}`)
@@ -46,22 +41,18 @@ useEffect(() => {
 
       const approvalData = await approvalRes.json();
 
-console.log("APPROVAL =", approvalData);
+      setApproval(approvalData);
 
-setApproval(approvalData);
+      // WORKFLOW API
+      const workflowRes = await fetch(
+        getApiUrl(`/api/PO/workflow?poNo=${encodeURIComponent(poNo)}`)
+      );
 
-// WORKFLOW API
-const workflowRes = await fetch(
-  getApiUrl(`/api/PO/workflow?poNo=${encodeURIComponent(poNo)}`)
-);
+      const workflowData = await workflowRes.json();
 
-const workflowData = await workflowRes.json();
+      setWorkflow(workflowData);
 
-console.log("WORKFLOW =", workflowData);
-
-setWorkflow(workflowData);
-
-setLoading(false);
+      setLoading(false);
     })
     .catch((err) => {
       console.error("DETAIL ERROR =", err);
@@ -87,8 +78,7 @@ if (!po || po.length === 0) {
 }
 
 const poData = Array.isArray(po) ? po[0] : null;
-console.log("FULL PO =", po);
-console.log("PO DATA =", poData);
+
 
 
  async function handleConfirm() {
@@ -98,7 +88,7 @@ console.log("PO DATA =", poData);
   }
 
   try {
-   console.log("APPROVAL DATA =", JSON.stringify(approval, null, 2));
+
     if (confirm === "approve") {
       await fetch(
         getApiUrl(`/api/PO/approve/${approval.TransId}`),
@@ -129,8 +119,7 @@ console.log("PO DATA =", poData);
   }
 }
 const grandTotal = Number(poData?.TotalAmount || 0);
-console.log("TOTAL AMOUNT =", poData?.TotalAmount);
-console.log("GRAND TOTAL =", grandTotal);
+
 const headerItems = [
   { icon: Hash, label: "PO Number", value: poData.PurchaseCode },
   { icon: Building2, label: "Vendor", value: poData.FirmName },

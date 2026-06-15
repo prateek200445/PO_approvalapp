@@ -16,34 +16,21 @@ function PendingList() {
 
   const [pendingPOs, setPendingPOs] = useState<any[]>([]);
   useEffect(() => {
-  if (!user?.username) return;
+    if (!user?.username) return;
 
-  fetch(getApiUrl(`/api/PO/pending/${user.username}`))
-    .then((res) => res.json())
-    .then((data) => {
-      console.log("Pending POs:", data);
-      setPendingPOs(data);
-    })
-    .catch((err) => {
-      console.error("Pending API Error:", err);
-    });
-}, [user]);
+    fetch(getApiUrl(`/api/PO/pending/${user.username}`))
+      .then((res) => res.json())
+      .then((data) => {
+        setPendingPOs(data);
+      })
+      .catch((err) => {
+        console.error("Pending API Error:", err);
+      });
+  }, [user]);
+
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"All" | POStatus>("Pending");
   const [sortDesc, setSortDesc] = useState(true);
-  useEffect(() => {
-  if (!user?.username) return;
-
-  fetch(getApiUrl(`/api/PO/pending/${user.username}`))
-    .then((response) => response.json())
-    .then((data) => {
-      console.log("Pending POs:", data);
-      setPendingPOs(data);
-    })
-    .catch((error) => {
-      console.error(error);
-    });
-}, [user]);
  
 
 

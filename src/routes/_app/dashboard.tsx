@@ -28,14 +28,12 @@ function Dashboard() {
     fetch(getApiUrl(`/api/Dashboard/stats/${user.username}`))
       .then((response) => response.json())
       .then((data) => {
-  console.log("Dashboard Stats:", data);
-
-  setStats({
-    pending: data.pending ?? data.Pending ?? 0,
-    approved: data.approved ?? data.Approved ?? 0,
-    rejected: data.rejected ?? data.Rejected ?? 0,
-  });
-})
+        setStats({
+          pending: data.pending ?? data.Pending ?? 0,
+          approved: data.approved ?? data.Approved ?? 0,
+          rejected: data.rejected ?? data.Rejected ?? 0,
+        });
+      })
       .catch((error) => {
         console.error(error);
       });

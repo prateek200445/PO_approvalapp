@@ -11,23 +11,17 @@ export const Route = createFileRoute("/_app/history")({
 });
 
 function History() {
-   console.log("HISTORY COMPONENT LOADED");
   const { user } = useAuth();
   const [history, setHistory] = useState<any[]>([]);
 
- useEffect(() => {
-  console.log("USE EFFECT RUNNING");
-  console.log("USER =", user);
-
-  if (!user?.username) return;
+  useEffect(() => {
+    if (!user?.username) return;
 
     fetch(getApiUrl(`/api/PO/history/${user.username}`))
       .then((response) => response.json())
-     .then((data) => {
-  console.log("HISTORY =", data);
-  
-  setHistory(data);
-})
+      .then((data) => {
+        setHistory(data);
+      })
       .catch((error) => {
         console.error(error);
       });
