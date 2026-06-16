@@ -1,7 +1,7 @@
 import { useAuth } from "@/lib/auth-context";
 import { getApiUrl } from "@/lib/api-config";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ArrowLeft, FileText, Download, CheckCircle2, XCircle, Building2, Calendar, User as UserIcon, Hash, IndianRupee, Briefcase, ExternalLink, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader2 } from "lucide-react";
 import { formatINR, type ApprovalStep } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -122,48 +122,7 @@ function PODetails() {
     };
   }, [poNo]);
 
-  // Render the current page
-  useEffect(() => {
-    if (!pdfDoc) return;
 
-    let isCurrent = true;
-
-    const renderPage = async () => {
-      try {
-        const page = await pdfDoc.getPage(pageNum);
-        const canvas = document.getElementById("pdf-render-canvas") as HTMLCanvasElement;
-        if (!canvas || !isCurrent) return;
-
-        const context = canvas.getContext("2d");
-        if (!context) return;
-
-        const viewport = page.getViewport({ scale });
-        const dpr = window.devicePixelRatio || 1;
-
-        canvas.width = viewport.width * dpr;
-        canvas.height = viewport.height * dpr;
-        canvas.style.width = `${viewport.width}px`;
-        canvas.style.height = `${viewport.height}px`;
-
-        context.scale(dpr, dpr);
-
-        const renderContext = {
-          canvasContext: context,
-          viewport: viewport
-        };
-
-        await page.render(renderContext).promise;
-      } catch (err) {
-        console.error("PDF render error:", err);
-      }
-    };
-
-    renderPage();
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [pdfDoc, pageNum, scale]);
 
   const handlePrevPage = () => {
     if (pageNum <= 1) return;
@@ -410,7 +369,7 @@ const headerItems = [
 
                 {/* PDF Render Canvas */}
                 <div className="w-full overflow-auto bg-muted/20 border border-border rounded-xl p-2 flex justify-center items-start min-h-[400px] max-h-[600px] shadow-inner">
-                  <canvas id="pdf-render-canvas" className="shadow-md border border-border/30 bg-white" />
+                  <PdfCanvasViewer pdfDoc={pdfDoc} pageNum={pageNum} scale={scale} />
                 </div>
               </div>
             )}
@@ -529,6 +488,66 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       </header>
       <div className="p-5">{children}</div>
     </section>
+  );
+}
+
+interface PdfCanvasViewerProps {
+  pdfDoc: any;
+  pageNum: number;
+  scale: number;
+}
+
+function PdfCanvasViewer({ pdfDoc, pageNum, scale }: PdfCanvasViewerProps) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (!pdfDoc) return;
+
+    let isCurrent = true;
+
+    const renderPage = async () => {
+      try {
+        const page = await pdfDoc.getPage(pageNum);
+        const canvas = canvasRef.current;
+        if (!canvas || !isCurrent) return;
+
+        const context = canvas.getContext("2d");
+        if (!context) return;
+
+        const viewport = page.getViewport({ scale });
+        const dpr = window.devicePixelRatio || 1;
+
+        canvas.width = viewport.width * dpr;
+        canvas.height = viewport.height * dpr;
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+
+        context.scale(dpr, dpr);
+
+        const renderContext = {
+          canvasContext: context,
+          viewport: viewport
+        };
+
+        const renderTask = page.render(renderContext);
+        await renderTask.promise;
+      } catch (err) {
+        console.error("PDF render error:", err);
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      renderPage();
+    }, 50);
+
+    return () => {
+      isCurrent = false;
+      clearTimeout(timeoutId);
+    };
+  }, [pdfDoc, pageNum, scale]);
+
+  return (
+    <canvas ref={canvasRef} className="shadow-md border border-border/30 bg-white" />
   );
 }
 
