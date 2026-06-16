@@ -528,6 +528,7 @@ interface PdfCanvasViewerProps {
 
 function PdfCanvasViewer({ pdfDoc, pageNum, scale }: PdfCanvasViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const renderTaskRef = useRef<any>(null);
 
   useEffect(() => {
     if (!pdfDoc) return;
@@ -543,6 +544,16 @@ function PdfCanvasViewer({ pdfDoc, pageNum, scale }: PdfCanvasViewerProps) {
         const context = canvas.getContext("2d");
         if (!context) return;
 
+        // Cancel previous render task if active
+        if (renderTaskRef.current) {
+          try {
+            renderTaskRef.current.cancel();
+          } catch (e) {
+            // Ignore cancel exceptions
+          }
+          renderTaskRef.current = null;
+        }
+
         const viewport = page.getViewport({ scale });
         const dpr = window.devicePixelRatio || 1;
 
@@ -551,6 +562,8 @@ function PdfCanvasViewer({ pdfDoc, pageNum, scale }: PdfCanvasViewerProps) {
         canvas.style.width = `${viewport.width}px`;
         canvas.style.height = `${viewport.height}px`;
 
+        // Reset transform to identity matrix before scaling to prevent cumulative transforms
+        context.setTransform(1, 0, 0, 1, 0, 0);
         context.scale(dpr, dpr);
 
         const renderContext = {
@@ -559,9 +572,14 @@ function PdfCanvasViewer({ pdfDoc, pageNum, scale }: PdfCanvasViewerProps) {
         };
 
         const renderTask = page.render(renderContext);
+        renderTaskRef.current = renderTask;
+
         await renderTask.promise;
-      } catch (err) {
-        console.error("PDF render error:", err);
+      } catch (err: any) {
+        // Do not log cancellation warnings
+        if (err && err.name !== "RenderingCancelledException") {
+          console.error("PDF render error:", err);
+        }
       }
     };
 
@@ -572,6 +590,11 @@ function PdfCanvasViewer({ pdfDoc, pageNum, scale }: PdfCanvasViewerProps) {
     return () => {
       isCurrent = false;
       clearTimeout(timeoutId);
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+        } catch (e) {}
+      }
     };
   }, [pdfDoc, pageNum, scale]);
 
