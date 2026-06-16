@@ -40,5 +40,7 @@ obj/
 **/bin/
 **/obj/
 **/appsettings.Development.json
+**/Publish/
 
 .vercel/
+
