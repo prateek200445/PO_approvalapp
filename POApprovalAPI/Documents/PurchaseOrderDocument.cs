@@ -39,12 +39,12 @@ public class PurchaseOrderDocument : IDocument
                     {
                         table.ColumnsDefinition(columns =>
                         {
-                            columns.RelativeColumn(4);
-                            columns.RelativeColumn();
-                            columns.RelativeColumn();
-                            columns.RelativeColumn();
-                            columns.RelativeColumn();
-                            columns.RelativeColumn();
+                            columns.RelativeColumn(3.5f); // Item description
+                            columns.RelativeColumn(0.8f); // Unit
+                            columns.RelativeColumn(1.2f); // Qty
+                            columns.RelativeColumn(1.2f); // Rate
+                            columns.RelativeColumn(1.0f); // Discount
+                            columns.RelativeColumn(1.8f); // Amount
                         });
 
                         table.Header(header =>

@@ -17,6 +17,7 @@ function PODetails() {
   const { poNo } = Route.useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const [po, setPo] = useState<any>(null);
   const [workflow, setWorkflow] = useState<any[]>([]);
@@ -121,6 +122,34 @@ function PODetails() {
       isMounted = false;
     };
   }, [poNo]);
+
+  // Automatically adjust scale to fit container width on load
+  useEffect(() => {
+    if (!pdfDoc || !containerRef.current) return;
+    
+    const adjustScale = async () => {
+      try {
+        const page = await pdfDoc.getPage(1);
+        const viewport = page.getViewport({ scale: 1.0 });
+        const containerWidth = containerRef.current.clientWidth;
+        
+        // Subtract padding/border spacing
+        const paddedWidth = containerWidth - 24;
+        const optimalScale = Number((paddedWidth / viewport.width).toFixed(2));
+        
+        // Ensure scale is within acceptable bounds (0.5 to 2.0)
+        setScale(Math.max(0.5, Math.min(optimalScale, 2.0)));
+      } catch (err) {
+        console.error("Error adjusting scale:", err);
+      }
+    };
+    
+    const timeoutId = setTimeout(() => {
+      adjustScale();
+    }, 100);
+    
+    return () => clearTimeout(timeoutId);
+  }, [pdfDoc]);
 
 
 
@@ -368,7 +397,7 @@ const headerItems = [
                 </div>
 
                 {/* PDF Render Canvas */}
-                <div className="w-full overflow-auto bg-muted/20 border border-border rounded-xl p-2 flex justify-center items-start min-h-[400px] max-h-[600px] shadow-inner">
+                <div ref={containerRef} className="w-full overflow-auto bg-muted/20 border border-border rounded-xl p-2 flex justify-center items-start min-h-[400px] max-h-[600px] shadow-inner">
                   <PdfCanvasViewer pdfDoc={pdfDoc} pageNum={pageNum} scale={scale} />
                 </div>
               </div>
