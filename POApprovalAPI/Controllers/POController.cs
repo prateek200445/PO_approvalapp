@@ -164,19 +164,33 @@ public async Task<IActionResult> Approve(int transId)
                 ApprovalName = po.ApprovalName
             });
 
+        // Update PoSignal to '*' in PurchasePayment for final approval
+        await connection.ExecuteAsync(
+            @"UPDATE PurchasePayment
+              SET PoSignal = '*'
+              WHERE PurchaseCode = @PoNo",
+            new { PoNo = po.PoNo });
+
         return Ok(new { success = true });
     }
 
-   // Non-final authority
-await connection.ExecuteAsync(
-    @"UPDATE ApprovePO
-      SET Status = 'Approved',
-          ApprovalDate = GETDATE()
-      WHERE TransId = @transId",
-    new
-    {
-        transId
-    });
+    // Non-final authority
+    await connection.ExecuteAsync(
+        @"UPDATE ApprovePO
+          SET Status = 'Approved',
+              ApprovalDate = GETDATE()
+          WHERE TransId = @transId",
+        new
+        {
+            transId
+        });
+
+    // Update PoSignal to '#' in PurchasePayment for intermediate approval
+    await connection.ExecuteAsync(
+        @"UPDATE PurchasePayment
+          SET PoSignal = '#'
+          WHERE PurchaseCode = @PoNo",
+        new { PoNo = po.PoNo });
 
     return Ok(new { success = true });
 }
