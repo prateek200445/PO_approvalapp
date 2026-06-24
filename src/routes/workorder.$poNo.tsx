@@ -293,7 +293,7 @@ const headerItems = [
 ];
 
   return (
-    <div className="space-y-5 pb-24 md:pb-0">
+    <div className="space-y-5 pb-24 md:pb-0 max-w-full overflow-x-hidden">
       <div className="flex items-center justify-between">
         <button onClick={() => navigate({ to: "/workorders" })} className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back
@@ -323,14 +323,14 @@ const headerItems = [
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-3">
-        <div className="space-y-5 lg:col-span-2">
+      <div className="grid gap-5 lg:grid-cols-3 min-w-0 w-full">
+        <div className="space-y-5 lg:col-span-2 min-w-0 w-full">
           {/* Section A: Summary */}
           <Section title="Work Order Summary">
             <p className="text-sm text-muted-foreground">
   {poData.ItemDesc}
 </p>
-            <div className="mt-4 overflow-hidden rounded-lg border border-border">
+            <div className="mt-4 overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-sm">
                 <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
@@ -464,7 +464,7 @@ const headerItems = [
         </div>
 
         {/* Section C: Workflow */}
-        <div className="lg:col-span-1">
+        <div className="lg:col-span-1 min-w-0 w-full">
          <Section title="Approval Workflow">
   <div className="space-y-3">
     {workflow.map((step: any) => (
