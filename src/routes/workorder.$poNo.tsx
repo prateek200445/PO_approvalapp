@@ -444,7 +444,7 @@ const headerItems = [
                 </div>
 
                 {/* PDF Render Canvas */}
-                <div ref={containerRef} className="w-full overflow-auto bg-muted/20 border border-border rounded-xl p-2 flex justify-center items-start min-h-[400px] max-h-[600px] shadow-inner">
+                <div ref={containerRef} className="w-full overflow-auto bg-muted/20 border border-border rounded-xl p-2 min-h-[400px] max-h-[600px] shadow-inner">
                   <PdfCanvasViewer pdfDoc={pdfDoc} pageNum={pageNum} scale={scale} />
                 </div>
               </div>
@@ -646,7 +646,7 @@ function PdfCanvasViewer({ pdfDoc, pageNum, scale }: PdfCanvasViewerProps) {
   }, [pdfDoc, pageNum, scale]);
 
   return (
-    <canvas ref={canvasRef} className="shadow-md border border-border/30 bg-white" />
+    <canvas ref={canvasRef} className="mx-auto block shadow-md border border-border/30 bg-white" />
   );
 }
 
