@@ -33,7 +33,12 @@ function WorkOrderDetails() {
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [pageNum, setPageNum] = useState(1);
   const [numPages, setNumPages] = useState(0);
-  const [scale, setScale] = useState(1.1);
+  const [scale, setScale] = useState(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      return 0.5;
+    }
+    return 1.1;
+  });
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
@@ -166,7 +171,11 @@ const containerWidth = container.clientWidth;
         
         // Subtract padding/border spacing
         const paddedWidth = containerWidth - 24;
-        const optimalScale = Number((paddedWidth / viewport.width).toFixed(2));
+        let optimalScale = Number((paddedWidth / viewport.width).toFixed(2));
+        
+        if (window.innerWidth < 768) {
+          optimalScale = 0.5;
+        }
         
         // Ensure scale is within acceptable bounds (0.5 to 2.0)
         setScale(Math.max(0.5, Math.min(optimalScale, 2.0)));
@@ -199,7 +208,7 @@ const containerWidth = container.clientWidth;
   };
 
   const handleZoomOut = () => {
-    setScale((prev) => Math.max(prev - 0.2, 0.6));
+    setScale((prev) => Math.max(prev - 0.2, 0.5));
   };
   if (loading) {
   return <div className="p-8">Loading...</div>;
@@ -415,7 +424,7 @@ const headerItems = [
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={handleZoomOut}
-                      disabled={scale <= 0.6}
+                      disabled={scale <= 0.5}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input bg-background text-foreground hover:bg-accent disabled:opacity-50 transition"
                       title="Zoom Out"
                     >
