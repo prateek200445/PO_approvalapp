@@ -26,12 +26,12 @@ export function AppShell() {
   }
 
   const nav = [
-  { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/pending", icon: ClipboardList, label: "Purchase Orders" },
-  { to: "/workorders", icon: FileText, label: "Work Orders" },
-  { to: "/indents", icon: FileText, label: "Indent Approval" },
-  { to: "/profile", icon: User, label: "Profile" },
-];
+    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", shortLabel: "Dashboard" },
+    { to: "/pending", icon: ClipboardList, label: "Purchase Orders", shortLabel: "POs" },
+    { to: "/workorders", icon: FileText, label: "Work Orders", shortLabel: "Work Orders" },
+    { to: "/indents", icon: FileText, label: "Indent Approval", shortLabel: "Indents" },
+    { to: "/profile", icon: User, label: "Profile", shortLabel: "Profile" },
+  ];
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
@@ -107,12 +107,12 @@ export function AppShell() {
               key={n.to}
               to={n.to}
               className={cn(
-                "flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
+                "flex flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium tracking-tight transition-colors",
                 active ? "text-primary" : "text-muted-foreground",
               )}
             >
               <n.icon className={cn("h-5 w-5", active && "stroke-[2.5]")} />
-              {n.label}
+              <span className="truncate w-full text-center px-0.5">{n.shortLabel}</span>
             </Link>
           );
         })}
