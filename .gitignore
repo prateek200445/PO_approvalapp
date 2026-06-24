@@ -44,3 +44,8 @@ obj/
 
 .vercel/
 
+# Environment files
+.env
+.env.*
+
+

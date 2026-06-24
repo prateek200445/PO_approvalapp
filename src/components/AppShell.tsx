@@ -99,7 +99,7 @@ export function AppShell() {
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-4 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-5 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
         {nav.map((n) => {
           const active = path.startsWith(n.to);
           return (
