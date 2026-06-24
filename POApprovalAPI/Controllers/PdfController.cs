@@ -116,4 +116,71 @@ return File(pdfBytes, "application/pdf");
     });
 }
     }
+   [HttpGet("workorder")]
+public async Task<IActionResult> GetWorkOrderPdf([FromQuery] string poNo)
+{
+    try
+    {
+        using var connection = _database.CreateConnection();
+
+       var items = await connection.QueryAsync(
+    @"SELECT
+        PurchaseCode,
+        CompanyName,
+        FirmName,
+        ItemDesc,
+        Unit,
+        Qty,
+        Rate,
+        Discount,
+        Total,
+        Note,
+        TotalAmount
+      FROM Vw_PurchaseOrder
+      WHERE PurchaseCode = @poNo",
+    new { poNo });
+
+        var first = items.FirstOrDefault();
+
+        if (first == null)
+            return NotFound($"Work Order not found: {poNo}");
+
+        var model = new PurchaseOrderPdfModel
+        {
+            PoNo = first.PurchaseCode ?? "",
+            CompanyName = first.CompanyName ?? "",
+            VendorName = first.FirmName ?? "",
+            Note = first.Note ?? "",
+            TotalAmount = Convert.ToDecimal(first.TotalAmount ?? 0)
+        };
+
+        foreach (var item in items)
+        {
+            model.Items.Add(new PurchaseOrderItem
+            {
+                ItemDesc = item.ItemDesc ?? "",
+                Unit = item.Unit ?? "",
+                Qty = Convert.ToDecimal(item.Qty ?? 0),
+                Rate = Convert.ToDecimal(item.Rate ?? 0),
+                Discount = Convert.ToDecimal(item.Discount ?? 0),
+                Amount = Convert.ToDecimal(item.Total ?? 0)
+            });
+        }
+
+        var document = new WorkOrderDocument(model);
+
+        var pdfBytes = document.GeneratePdf();
+
+        Response.Headers["Content-Disposition"] = "inline";
+        return File(pdfBytes, "application/pdf");
+    }
+    catch (Exception ex)
+    {
+        return BadRequest(new
+        {
+            Success = false,
+            Error = ex.ToString()
+        });
+    }
+} 
 }

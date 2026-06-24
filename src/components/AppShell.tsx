@@ -1,5 +1,5 @@
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, ClipboardList, User, Factory, Moon, Sun, LogOut } from "lucide-react";
+import { LayoutDashboard, ClipboardList, User, Factory, Moon, Sun, LogOut, FileText } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,9 @@ export function AppShell() {
 
   const nav = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-  { to: "/pending", icon: ClipboardList, label: "Pending" },
+  { to: "/pending", icon: ClipboardList, label: "Purchase Orders" },
+  { to: "/workorders", icon: FileText, label: "Work Orders" },
+  { to: "/indents", icon: FileText, label: "Indent Approval" },
   { to: "/profile", icon: User, label: "Profile" },
 ];
 
