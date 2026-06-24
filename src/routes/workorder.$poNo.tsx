@@ -232,54 +232,48 @@ const poData = Array.isArray(po) ? po[0] : null;
 
 
 
- async function handleConfirm() {
-  if (confirm === "reject" && !remarks.trim()) {
-    toast.error("Remarks are mandatory for rejection");
-    return;
-  }
-
-  try {
-
-    if (confirm === "approve") {
-
-  console.log("APPROVAL OBJECT =", approval);
-
-console.log("TRANSID DB =", approval["Transid"]);
-
-const transId = approval["Transid"];
-
-  console.log("FINAL TRANSID =", transId);
-
- console.log("FINAL TRANSID =", transId);
-
-await fetch(
-  getApiUrl(`/api/WorkOrder/approve/${transId}`),
-  {
-    method: "POST",
-  }
-);
-
-  toast.success("PO approved successfully");
-}
-
-    if (confirm === "reject") {
+  async function handleApprove() {
+    try {
+      const transId = approval["Transid"];
       await fetch(
-  getApiUrl(`/api/WorkOrder/reject/${approval.Transid}`),
-  {
-    method: "POST",
+        getApiUrl(`/api/WorkOrder/approve/${transId}`),
+        {
+          method: "POST",
+        }
+      );
+      toast.success("PO approved successfully");
+      setTimeout(() => navigate({ to: "/workorders" }), 600);
+    } catch (err) {
+      console.error(err);
+      toast.error("Operation failed");
+    }
   }
-);
 
-      toast.success("PO rejected successfully");
+  async function handleConfirm() {
+    if (confirm === "reject" && !remarks.trim()) {
+      toast.error("Remarks are mandatory for rejection");
+      return;
     }
 
-    setConfirm(null);
-    setTimeout(() => navigate({ to: "/workorders" }), 600);
-  } catch (err) {
-    console.error(err);
-    toast.error("Operation failed");
+    try {
+      if (confirm === "reject") {
+        await fetch(
+          getApiUrl(`/api/WorkOrder/reject/${approval.Transid}`),
+          {
+            method: "POST",
+          }
+        );
+
+        toast.success("PO rejected successfully");
+      }
+
+      setConfirm(null);
+      setTimeout(() => navigate({ to: "/workorders" }), 600);
+    } catch (err) {
+      console.error(err);
+      toast.error("Operation failed");
+    }
   }
-}
 const grandTotal = Number(poData?.TotalAmount || 0);
 
 const headerItems = [
@@ -525,7 +519,7 @@ const headerItems = [
           </button>
           <button
             disabled={false}
-            onClick={() => setConfirm("approve")}
+            onClick={handleApprove}
             className="h-11 flex-1 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:flex-none md:px-6"
           >
             Approve
@@ -534,28 +528,26 @@ const headerItems = [
       </div>
 
       {/* Confirmation dialog */}
-      {confirm && (
+      {confirm === "reject" && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center" onClick={() => setConfirm(null)}>
           <div className="w-full max-w-sm rounded-xl bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className={`mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full ${confirm === "approve" ? "bg-success/15 text-success" : "bg-destructive/15 text-destructive"}`}>
-              {confirm === "approve" ? <CheckCircle2 className="h-5 w-5" /> : <XCircle className="h-5 w-5" />}
+            <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+              <XCircle className="h-5 w-5" />
             </div>
-            <h3 className="text-base font-semibold">{confirm === "approve" ? "Approve this PO?" : "Reject this PO?"}</h3>
+            <h3 className="text-base font-semibold">Reject this PO?</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              {confirm === "approve"
-  ? `You are approving ${poData.PurchaseCode} for ${formatINR(poData.Total)}.`
-                : "This action will reject the PO and notify the requester."}
+              This action will reject the PO and notify the requester.
             </p>
-            {confirm === "reject" && !remarks.trim() && (
+            {!remarks.trim() && (
               <p className="mt-2 text-xs font-medium text-destructive">Remarks are required to reject.</p>
             )}
             <div className="mt-5 flex gap-2">
               <button onClick={() => setConfirm(null)} className="h-10 flex-1 rounded-md border border-input bg-surface text-sm font-medium hover:bg-secondary">Cancel</button>
               <button
                 onClick={handleConfirm}
-                className={`h-10 flex-1 rounded-md text-sm font-semibold text-primary-foreground ${confirm === "approve" ? "bg-success hover:bg-success/90" : "bg-destructive hover:bg-destructive/90"}`}
+                className="h-10 flex-1 rounded-md text-sm font-semibold text-primary-foreground bg-destructive hover:bg-destructive/90"
               >
-                Confirm {confirm === "approve" ? "Approve" : "Reject"}
+                Confirm Reject
               </button>
             </div>
           </div>
