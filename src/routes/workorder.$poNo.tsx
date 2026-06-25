@@ -217,9 +217,9 @@ const containerWidth = container.clientWidth;
 if (!po || po.length === 0) {
   return (
     <div className="rounded-xl border border-border bg-card p-8 text-center">
-      <p>PO not found.</p>
+      <p>Work Order not found.</p>
       <Link
-        to="/pending"
+        to="/workorders"
         className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
       >
         Back to list
@@ -248,7 +248,7 @@ const poData = Array.isArray(po) ? po[0] : null;
       if (!response.ok) {
         throw new Error("Failed to approve work order");
       }
-      toast.success("PO approved successfully");
+      toast.success("Work Order approved successfully");
       setTimeout(() => navigate({ to: "/workorders" }), 600);
     } catch (err) {
       console.error(err);
@@ -279,7 +279,7 @@ const poData = Array.isArray(po) ? po[0] : null;
           throw new Error("Failed to reject work order");
         }
 
-        toast.success("PO rejected successfully");
+        toast.success("Work Order rejected successfully");
       }
 
       setConfirm(null);
@@ -292,14 +292,14 @@ const poData = Array.isArray(po) ? po[0] : null;
 const grandTotal = Number(poData?.TotalAmount || 0);
 
 const headerItems = [
-  { icon: Hash, label: "PO Number", value: poData.PurchaseCode },
+  { icon: Hash, label: "WO Number", value: poData.PurchaseCode },
   { icon: Building2, label: "Vendor", value: poData.FirmName },
-  { icon: Calendar, label: "PO Date", value: poData.deliverydate },
+  { icon: Calendar, label: "WO Date", value: poData.deliverydate },
   { icon: Briefcase, label: "Department", value: poData.DepttName },
   { icon: UserIcon, label: "Requested By", value: poData.FirmName },
   {
     icon: IndianRupee,
-    label: "PO Amount",
+    label: "WO Amount",
     value: formatINR(grandTotal),
     strong: true,
   },
@@ -549,9 +549,9 @@ const headerItems = [
             <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-destructive/15 text-destructive">
               <XCircle className="h-5 w-5" />
             </div>
-            <h3 className="text-base font-semibold">Reject this PO?</h3>
+            <h3 className="text-base font-semibold">Reject this WO?</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              This action will reject the PO and notify the requester.
+              This action will reject the WO and notify the requester.
             </p>
             {!remarks.trim() && (
               <p className="mt-2 text-xs font-medium text-destructive">Remarks are required to reject.</p>
