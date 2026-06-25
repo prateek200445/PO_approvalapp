@@ -139,8 +139,7 @@ public async Task<IActionResult> Approve(int transId)
         // Update all OTHER pending approvers
         await connection.ExecuteAsync(
             @"UPDATE ApprovePO
-              SET Status = @Status,
-                  ApprovalDate = GETDATE()
+              SET Status = @Status
               WHERE PoNo = @PoNo
                 AND ApprovalName <> @ApprovalName
                 AND Status = 'Pending'",
