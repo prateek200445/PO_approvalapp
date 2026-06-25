@@ -130,7 +130,7 @@ public async Task<IActionResult> Approve(int transId)
     var authority = await connection.QueryFirstOrDefaultAsync<int>(
         @"SELECT authority
           FROM poallocation
-          WHERE username = @ApprovalNam ",
+          WHERE username = @ApprovalName",
         new { ApprovalName = po.ApprovalName });
 
     // Final Authority (authority = 1)

@@ -234,13 +234,20 @@ const poData = Array.isArray(po) ? po[0] : null;
 
   async function handleApprove() {
     try {
-      const transId = approval["Transid"];
-      await fetch(
+      const transId = approval?.TransId;
+      if (!transId) {
+        toast.error("Approval transaction ID not found");
+        return;
+      }
+      const response = await fetch(
         getApiUrl(`/api/WorkOrder/approve/${transId}`),
         {
           method: "POST",
         }
       );
+      if (!response.ok) {
+        throw new Error("Failed to approve work order");
+      }
       toast.success("PO approved successfully");
       setTimeout(() => navigate({ to: "/workorders" }), 600);
     } catch (err) {
@@ -257,12 +264,20 @@ const poData = Array.isArray(po) ? po[0] : null;
 
     try {
       if (confirm === "reject") {
-        await fetch(
-          getApiUrl(`/api/WorkOrder/reject/${approval.Transid}`),
+        const transId = approval?.TransId;
+        if (!transId) {
+          toast.error("Approval transaction ID not found");
+          return;
+        }
+        const response = await fetch(
+          getApiUrl(`/api/WorkOrder/reject/${transId}`),
           {
             method: "POST",
           }
         );
+        if (!response.ok) {
+          throw new Error("Failed to reject work order");
+        }
 
         toast.success("PO rejected successfully");
       }

@@ -203,12 +203,20 @@ const poData = Array.isArray(po) ? po[0] : null;
 
   async function handleApprove() {
     try {
-      await fetch(
-        getApiUrl(`/api/PO/approve/${approval.TransId}`),
+      const transId = approval?.TransId;
+      if (!transId) {
+        toast.error("Approval transaction ID not found");
+        return;
+      }
+      const response = await fetch(
+        getApiUrl(`/api/PO/approve/${transId}`),
         {
           method: "POST",
         }
       );
+      if (!response.ok) {
+        throw new Error("Failed to approve PO");
+      }
       toast.success("PO approved successfully");
       setTimeout(() => navigate({ to: "/pending" }), 600);
     } catch (err) {
@@ -225,12 +233,20 @@ const poData = Array.isArray(po) ? po[0] : null;
 
     try {
       if (confirm === "reject") {
-        await fetch(
-          getApiUrl(`/api/PO/reject/${approval.TransId}`),
+        const transId = approval?.TransId;
+        if (!transId) {
+          toast.error("Approval transaction ID not found");
+          return;
+        }
+        const response = await fetch(
+          getApiUrl(`/api/PO/reject/${transId}`),
           {
             method: "POST",
           }
         );
+        if (!response.ok) {
+          throw new Error("Failed to reject PO");
+        }
 
         toast.success("PO rejected successfully");
       }
