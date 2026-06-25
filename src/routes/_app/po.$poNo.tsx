@@ -203,7 +203,7 @@ const poData = Array.isArray(po) ? po[0] : null;
 
   async function handleApprove() {
     try {
-      const transId = approval?.TransId;
+      const transId = approval?.TransId ?? approval?.Transid;
       if (!transId) {
         toast.error("Approval transaction ID not found");
         return;
@@ -233,7 +233,7 @@ const poData = Array.isArray(po) ? po[0] : null;
 
     try {
       if (confirm === "reject") {
-        const transId = approval?.TransId;
+        const transId = approval?.TransId ?? approval?.Transid;
         if (!transId) {
           toast.error("Approval transaction ID not found");
           return;
