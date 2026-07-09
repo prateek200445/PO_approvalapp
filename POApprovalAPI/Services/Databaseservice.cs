@@ -11,11 +11,14 @@ namespace POApprovalAPI.Services
             _configuration = configuration;
         }
 
-        public SqlConnection CreateConnection()
-        {
-            return new SqlConnection(
-                _configuration.GetConnectionString("DefaultConnection")
-            );
-        }
+      public SqlConnection CreateConnection()
+{
+    var connection = new SqlConnection(
+        _configuration.GetConnectionString("DefaultConnection")
+    );
+
+    connection.Open();
+    return connection;
+}
     }
 }

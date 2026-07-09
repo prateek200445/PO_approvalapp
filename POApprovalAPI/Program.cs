@@ -10,6 +10,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddSingleton<DatabaseService>();
+builder.Services.AddScoped<PaymentService>();
 
 builder.Services.AddCors(options =>
 {

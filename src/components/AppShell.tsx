@@ -1,5 +1,5 @@
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, ClipboardList, User, Factory, Moon, Sun, LogOut, FileText } from "lucide-react";
+import { LayoutDashboard, ClipboardList, User, Factory, Moon, Sun, LogOut, FileText, CreditCard  } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -26,12 +26,18 @@ export function AppShell() {
   }
 
   const nav = [
-    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", shortLabel: "Dashboard" },
-    { to: "/pending", icon: ClipboardList, label: "Purchase Orders", shortLabel: "POs" },
-    { to: "/workorders", icon: FileText, label: "Work Orders", shortLabel: "Work Orders" },
-    { to: "/indents", icon: FileText, label: "Indent Approval", shortLabel: "Indents" },
-    { to: "/profile", icon: User, label: "Profile", shortLabel: "Profile" },
-  ];
+  { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", shortLabel: "Dashboard" },
+
+  { to: "/pending", icon: ClipboardList, label: "Purchase Orders", shortLabel: "POs" },
+
+  { to: "/workorders", icon: FileText, label: "Work Orders", shortLabel: "Work Orders" },
+
+  { to: "/payments", icon: CreditCard, label: "Payment Approval", shortLabel: "Payments" },
+
+  { to: "/indents", icon: FileText, label: "Indent Approval", shortLabel: "Indents" },
+
+  { to: "/profile", icon: User, label: "Profile", shortLabel: "Profile" },
+];
 
   return (
     <div className="min-h-screen bg-background pb-20 md:pb-0">
@@ -99,7 +105,7 @@ export function AppShell() {
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-5 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-6 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
         {nav.map((n) => {
           const active = path.startsWith(n.to);
           return (
