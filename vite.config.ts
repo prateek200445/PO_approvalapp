@@ -23,7 +23,7 @@ export default defineConfig({
     server: {
       proxy: {
         "/api": {
-          target: process.env.VITE_API_URL || "https://doing-cassette-decorating-parcel.trycloudflare.com",
+         target: process.env.VITE_API_URL || "https://localhost:7115",
           changeOrigin: true,
           secure: false,
         },

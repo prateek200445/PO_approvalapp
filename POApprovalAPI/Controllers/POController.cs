@@ -21,32 +21,60 @@ public async Task<IActionResult> GetPending(string username)
 {
     using var connection = _database.CreateConnection();
 
-  var data = await connection.QueryAsync(
-    @"SELECT
-        a.PoNo,
-        a.ApprovalName,
-        a.Status,
-        a.PODate,
-        a.ApprovalDate,
-        a.TransId,
-       MAX(ISNULL(p.TotalAmount,0)) AS Total,
-MAX(v.FirmName) AS FirmName
+    var sql = @"
+SELECT
+    a.PoNo,
+    a.ApprovalName,
+    a.Status,
+    a.PODate,
+    a.ApprovalDate,
+    a.TransId,
+    MAX(ISNULL(p.TotalAmount,0)) AS Total,
+    MAX(v.FirmName) AS FirmName
 FROM ApprovePO a
 LEFT JOIN Vw_PurchaseOrder v
     ON a.PoNo = v.PurchaseCode
 LEFT JOIN PurchasePayment p
     ON a.PoNo = p.PurchaseCode
-      WHERE a.ApprovalName = @username
-        AND a.Status = 'Pending'
-      GROUP BY
-        a.PoNo,
-        a.ApprovalName,
-        a.Status,
-        a.PODate,
-        a.ApprovalDate,
-        a.TransId
-      ORDER BY a.PODate DESC",
-    new { username });
+WHERE a.ApprovalName = @username
+  AND a.Status = 'Pending'
+GROUP BY
+    a.PoNo,
+    a.ApprovalName,
+    a.Status,
+    a.PODate,
+    a.ApprovalDate,
+    a.TransId
+
+UNION ALL
+
+SELECT
+    a.PoNo,
+    a.ApprovalName,
+    a.Status,
+    a.PODate,
+    a.ApprovalDate,
+    a.TransId,
+    MAX(ISNULL(p.TotalAmount,0)) AS Total,
+    MAX(v.FirmName) AS FirmName
+FROM ApprovePOHOD a
+LEFT JOIN Vw_PurchaseOrder v
+    ON a.PoNo = v.PurchaseCode
+LEFT JOIN PurchasePayment p
+    ON a.PoNo = p.PurchaseCode
+WHERE a.ApprovalName = @username
+  AND a.Status = 'Pending'
+GROUP BY
+    a.PoNo,
+    a.ApprovalName,
+    a.Status,
+    a.PODate,
+    a.ApprovalDate,
+    a.TransId
+
+ORDER BY PODate DESC;";
+
+    var data = await connection.QueryAsync(sql, new { username });
 
     return Ok(data);
 }
