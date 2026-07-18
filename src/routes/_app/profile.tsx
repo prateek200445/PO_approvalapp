@@ -79,7 +79,7 @@ function Profile() {
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center" onClick={() => setShowPwd(false)}>
           <div className="w-full max-w-sm rounded-xl bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold">Change Password</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Enter your current and new password.</p>
+            <p className="mt-1 text-sm text-muted-foreground">Enter your current and  password.</p>
             <div className="mt-4 space-y-3">
               <input type="password" placeholder="Current password" className="h-10 w-full rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20" />
               <input type="password" placeholder="New password" className="h-10 w-full rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20" />
