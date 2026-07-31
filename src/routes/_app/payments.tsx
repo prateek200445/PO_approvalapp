@@ -15,20 +15,28 @@ function PendingList() {
   const { user } = useAuth();
 
   const [pendingPayments, setPendingPayments] = useState<any[]>([]);
-  useEffect(() => {
-    if (!user?.username) return;
+   const [q, setQ] = useState("");
+  const [amount, setAmount] = useState("");
+  const [filterType, setFilterType] = useState("gte");
+  
+ useEffect(() => {
+  if (!user?.username) return;
 
-    fetch(getApiUrl(`/api/Payment/pending/${user.username}`))
-      .then((res) => res.json())
-      .then((data) => {
-        setPendingPayments(data);
-      })
-      .catch((err) => {
-        console.error("Pending API Error:", err);
-      });
-  }, [user]);
+  fetch(
+    getApiUrl(
+      `/api/Payment/pending/${user.username}?amount=${amount}&filterType=${filterType}`
+    )
+  )
+    .then((res) => res.json())
+    .then((data) => {
+      setPendingPayments(data);
+    })
+    .catch((err) => {
+      console.error("Pending API Error:", err);
+    });
+}, [user?.username, amount, filterType]);
 
-  const [q, setQ] = useState("");
+ 
   const [status, setStatus] = useState<"All" | POStatus>("Pending");
   const [sortDesc, setSortDesc] = useState(true);
  
@@ -61,6 +69,24 @@ function PendingList() {
           />
         </div>
         <div className="flex gap-2">
+         <input
+  type="number"
+  value={amount}
+  onChange={(e) => setAmount(e.target.value)}
+  placeholder="Amount"
+  className="h-10 w-32 rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+/> 
+          <select
+  value={filterType}
+  onChange={(e) => setFilterType(e.target.value)}
+  className="h-10 rounded-md border border-input bg-surface px-3 text-sm outline-none"
+>
+  <option value="gt">{">"}</option>
+  <option value="lt">{"<"}</option>
+  <option value="eq">{"="}</option>
+  <option value="gte">{">="}</option>
+  <option value="lte">{"<="}</option>
+</select>
           <div className="relative">
             <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <select

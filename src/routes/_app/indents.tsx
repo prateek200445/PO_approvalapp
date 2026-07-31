@@ -15,10 +15,16 @@ function PendingList() {
   const { user } = useAuth();
 
   const [pendingPOs, setPendingPOs] = useState<any[]>([]);
+  const [amount, setAmount] = useState("");
+const [filterType, setFilterType] = useState("gte");
   useEffect(() => {
     if (!user?.username) return;
 
-    fetch(getApiUrl(`/api/Indent/pending/${user.username}`))
+   fetch(
+  getApiUrl(
+    `/api/Indent/pending/${user.username}?amount=${amount}&filterType=${filterType}`
+  )
+)
       .then((res) => res.json())
       .then((data) => {
         setPendingPOs(data);
@@ -26,7 +32,7 @@ function PendingList() {
       .catch((err) => {
         console.error("Pending API Error:", err);
       });
-  }, [user]);
+ }, [user?.username, amount, filterType]);
 
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("Pending");

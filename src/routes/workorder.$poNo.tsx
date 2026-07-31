@@ -232,30 +232,55 @@ const poData = Array.isArray(po) ? po[0] : null;
 
 
 
-  async function handleApprove() {
-    try {
-      const transId = approval?.TransId ?? approval?.Transid;
-      if (!transId) {
-        toast.error("Approval transaction ID not found");
-        return;
-      }
-      const response = await fetch(
-        getApiUrl(`/api/WorkOrder/approve/${transId}`),
-        {
-          method: "POST",
-        }
-      );
-      if (!response.ok) {
-        throw new Error("Failed to approve work order");
-      }
-      toast.success("Work Order approved successfully");
-      setTimeout(() => navigate({ to: "/workorders" }), 600);
-    } catch (err) {
-      console.error(err);
-      toast.error("Operation failed");
-    }
-  }
+ async function handleApprove() {
+  try {
+    const transId = approval?.TransId ?? approval?.Transid;
 
+    if (!transId) {
+      toast.error("Approval transaction ID not found");
+      return;
+    }
+
+    const response = await fetch(
+  getApiUrl(`/api/WorkOrder/approve/${transId}`),
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      remarks: remarks,
+    }),
+  }
+);
+
+    if (!response.ok) {
+      throw new Error("Failed to approve work order");
+    }
+
+    toast.success("Work Order approved successfully");
+
+    // Get latest pending work orders
+    const pending = await fetch(
+      getApiUrl(`/api/WorkOrder/pending/${user?.username}`)
+    ).then(r => r.json());
+
+    if (pending.length > 0) {
+      navigate({
+        to: "/workorder/$poNo",
+        params: {
+          poNo: pending[0].PoNo
+        }
+      });
+    } else {
+      navigate({ to: "/workorders" });
+    }
+
+  } catch (err) {
+    console.error(err);
+    toast.error("Operation failed");
+  }
+}
   async function handleConfirm() {
     if (confirm === "reject" && !remarks.trim()) {
       toast.error("Remarks are mandatory for rejection");

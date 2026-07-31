@@ -25,7 +25,7 @@ function History() {
       .catch((error) => {
         console.error(error);
       });
-  }, [user]);
+  }, [user?.username]);
 
   return (
     <div className="space-y-5">

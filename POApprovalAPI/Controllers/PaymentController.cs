@@ -15,12 +15,18 @@ public PaymentController(PaymentService paymentService)
 {
     _paymentService = paymentService;
 }
-  [HttpGet("pending/{username}")]
-public async Task<IActionResult> GetPending(string username)
+ [HttpGet("pending/{username}")]
+public async Task<IActionResult> GetPending(
+    string username,
+    [FromQuery] decimal? amount,
+    [FromQuery] string? filterType)
 {
     try
     {
-        var data = await _paymentService.GetPendingPayments(username);
+       var data = await _paymentService.GetPendingPayments(
+    username,
+    amount,
+    filterType);
 
         return Ok(data);
     }
