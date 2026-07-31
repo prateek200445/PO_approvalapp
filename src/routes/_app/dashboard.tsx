@@ -48,7 +48,7 @@ function Dashboard() {
       });
 
     setRecent([]);
-  }, [user]);
+  }, [user?.username]);
 
 
 

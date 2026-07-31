@@ -254,9 +254,32 @@ const paymentData = payment;
       throw new Error(await response.text());
     }
 
-    toast.success("Payment approved successfully");
+   toast.success("Payment approved successfully");
 
-    setTimeout(() => navigate({ to: "/payments" }), 600);
+// Get latest pending payments
+const pending = await fetch(
+    getApiUrl(`/api/Payment/pending/${user?.username}`)
+).then(r => r.json());
+
+// Find current payment
+const currentIndex = pending.findIndex(
+    (x: any) => x.paymentNo === paymentNo
+);
+
+// Since the current payment has already been approved,
+// it won't exist in the new list.
+
+if (pending.length > 0) {
+    navigate({
+        to: "/payment/$paymentNo",
+        params: {
+            paymentNo: pending[0].paymentNo
+        }
+    });
+}
+else {
+    navigate({ to: "/payments" });
+}
   } catch (err) {
     console.error(err);
     toast.error("Approval failed");
