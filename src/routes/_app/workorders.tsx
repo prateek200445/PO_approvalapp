@@ -31,11 +31,42 @@ function PendingList() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"All" | POStatus>("Pending");
   const [sortDesc, setSortDesc] = useState(true);
+  const [amount, setAmount] = useState("");
+const [filterType, setFilterType] = useState("gte");
  
 
 
 
-  const filtered = pendingPOs;
+ const filtered = pendingPOs
+  .filter((p) => {
+    const search = q.toLowerCase();
+
+    const matchesSearch =
+      p.PoNo?.toLowerCase().includes(search) ||
+      p.ApprovalName?.toLowerCase().includes(search) ||
+      p.Status?.toLowerCase().includes(search) ||
+      String(p.Total || "").includes(search);
+
+    const matchesStatus =
+      status === "All" || p.Status === status;
+
+    const workOrderAmount = Number(p.Total || 0);
+    const enteredAmount = Number(amount || 0);
+
+    const matchesAmount =
+      amount === ""
+        ? true
+        : filterType === "gte"
+        ? workOrderAmount >= enteredAmount
+        : workOrderAmount <= enteredAmount;
+
+    return matchesSearch && matchesStatus && matchesAmount;
+  })
+  .sort((a, b) =>
+    sortDesc
+      ? new Date(b.PODate).getTime() - new Date(a.PODate).getTime()
+      : new Date(a.PODate).getTime() - new Date(b.PODate).getTime()
+  );
   return (
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-3">
@@ -59,7 +90,23 @@ function PendingList() {
             className="h-10 w-full rounded-md border border-input bg-surface pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
           />
         </div>
-        <div className="flex gap-2">
+       <div className="flex flex-wrap gap-2">
+          <input
+  type="number"
+  value={amount}
+  onChange={(e) => setAmount(e.target.value)}
+  placeholder="Amount"
+  className="h-10 w-28 rounded-md border border-input bg-surface px-3 text-sm"
+/>
+
+<select
+  value={filterType}
+  onChange={(e) => setFilterType(e.target.value)}
+  className="h-10 rounded-md border border-input bg-surface px-3 text-sm"
+>
+  <option value="gte">≥</option>
+  <option value="lte">≤</option>
+</select>
           <div className="relative">
             <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <select
@@ -114,12 +161,13 @@ function PendingList() {
       <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
         <table className="w-full text-sm">
           <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-4 py-3 font-medium">PO Number</th>
-              <th className="px-4 py-3 font-medium">Date</th>
-              <th className="px-4 py-3 text-right font-medium">Amount</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-            </tr>
+           <tr>
+  <th className="px-4 py-3 font-medium">Work Order</th>
+  <th className="px-4 py-3 font-medium">Approved By</th>
+  <th className="px-4 py-3 font-medium">Date</th>
+  <th className="px-4 py-3 text-right font-medium">Amount</th>
+  <th className="px-4 py-3 font-medium">Status</th>
+</tr>
           </thead>
           <tbody className="divide-y divide-border">
             {filtered.map((p) => (

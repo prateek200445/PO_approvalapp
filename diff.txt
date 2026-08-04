@@ -1,0 +1,32 @@
+diff --git a/src/routes/_app/pending.tsx b/src/routes/_app/pending.tsx
+index 0359a8c..3ad8199 100644
+--- a/src/routes/_app/pending.tsx
++++ b/src/routes/_app/pending.tsx
+@@ -32,10 +32,14 @@ function PendingList() {
+   const [status, setStatus] = useState<"All" | POStatus>("Pending");
+   const [sortDesc, setSortDesc] = useState(true);
+  
++ 
+ 
+ 
+ 
+   const filtered = pendingPOs;
++
++ 
++
+   return (
+     <div className="space-y-5">
+       <div className="flex items-end justify-between gap-3">
+@@ -90,8 +94,10 @@ function PendingList() {
+             params={{ poNo: p.PoNo }}
+             className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
+           >
+-            <div className="flex items-start justify-between gap-3">
+-              <div className="min-w-0">
++           <div className="flex items-start gap-3">
++  
++
++  <div className="min-w-0">
+                 <div className="font-semibold">{p.PoNo}</div>
+                 <div className="mt-0.5 truncate text-sm text-muted-foreground">{p.ApprovalName}</div>
+               </div>
