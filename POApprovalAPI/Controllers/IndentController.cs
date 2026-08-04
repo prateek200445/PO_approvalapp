@@ -86,6 +86,7 @@ public async Task<IActionResult> Approve(
 
     foreach (var subCode in request.IndentSubCodes)
     {
+        // Existing query (keep this as it is)
         await connection.ExecuteAsync(
             @"UPDATE ApproveIndent
               SET Status = 'Approved',
@@ -97,6 +98,16 @@ public async Task<IActionResult> Approve(
             {
                 subCode,
                 username = request.Username
+            });
+
+        // New query (add this below)
+        await connection.ExecuteAsync(
+            @"UPDATE ItemInfo
+              SET Approved = 'Approved'
+              WHERE code = @subCode",
+            new
+            {
+                subCode
             });
     }
 
@@ -127,6 +138,7 @@ public async Task<IActionResult> Reject(
                 username = request.Username
             });
     }
+    
 
     return Ok(new
     {

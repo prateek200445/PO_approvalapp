@@ -37,11 +37,40 @@ const [filterType, setFilterType] = useState("gte");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("Pending");
   const [sortDesc, setSortDesc] = useState(true);
- 
+  const [selectedIndents, setSelectedIndents] = useState<string[]>([]);
 
 
 
-  const filtered = pendingPOs;
+  const filtered = pendingPOs
+  .filter((p) => {
+    const search = q.toLowerCase();
+
+    const matchesSearch =
+      p.IndentNo?.toLowerCase().includes(search) ||
+      String(p.TotalItems || "").includes(search);
+
+    const matchesStatus =
+      status === "All" || p.Status === status;
+
+    return matchesSearch && matchesStatus;
+  })
+  .sort((a, b) =>
+    sortDesc
+      ? new Date(b.IndentDate).getTime() -
+        new Date(a.IndentDate).getTime()
+      : new Date(a.IndentDate).getTime() -
+        new Date(b.IndentDate).getTime()
+  );
+
+  const toggleIndent = (indentNo: string) => {
+  if (selectedIndents.includes(indentNo)) {
+    setSelectedIndents(
+      selectedIndents.filter((id) => id !== indentNo)
+    );
+  } else {
+    setSelectedIndents([...selectedIndents, indentNo]);
+  }
+};
   return (
     <div className="space-y-5">
       <div className="flex items-end justify-between gap-3">
@@ -63,7 +92,7 @@ const [filterType, setFilterType] = useState("gte");
             className="h-10 w-full rounded-md border border-input bg-surface pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
           />
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <div className="relative">
             <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <select
@@ -96,7 +125,14 @@ to="/indent/$indentNo"
 params={{ indentNo: p.IndentNo }}
             className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
           >
-           <div className="flex items-start justify-between gap-3">
+           <div className="flex items-start gap-3">
+  <input
+    type="checkbox"
+    checked={selectedIndents.includes(p.IndentNo)}
+    onClick={(e) => e.preventDefault()}
+    onChange={() => toggleIndent(p.IndentNo)}
+  />
+
   <div className="min-w-0">
     <div className="font-semibold">{p.IndentNo}</div>
     <div className="mt-0.5 truncate text-sm text-muted-foreground">
