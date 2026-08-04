@@ -40,9 +40,11 @@ function PODetails() {
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
-  useEffect(() => {
+ useEffect(() => {
+    if (!user?.username) return;
+
     fetch(
-      getApiUrl(`/api/PO/details?poNo=${encodeURIComponent(poNo)}`)
+        getApiUrl(`/api/PO/details?poNo=${encodeURIComponent(poNo)}`)
     )
       .then((r) => r.json())
       .then(async (data) => {
@@ -73,7 +75,7 @@ function PODetails() {
         console.error("DETAIL ERROR =", err);
         setLoading(false);
       });
-  }, [poNo]);
+  }, [poNo, user?.username]);
 
   // Dynamically load PDF.js from CDN and fetch PDF buffer
   useEffect(() => {
@@ -136,7 +138,7 @@ function PODetails() {
       try {
         const page = await pdfDoc.getPage(1);
         const viewport = page.getViewport({ scale: 1.0 });
-        const containerWidth = containerRef.current.clientWidth;
+        const containerWidth = containerRef.current!.clientWidth;
         
         // Subtract padding/border spacing
         const paddedWidth = containerWidth - 24;
@@ -208,17 +210,46 @@ const poData = Array.isArray(po) ? po[0] : null;
         toast.error("Approval transaction ID not found");
         return;
       }
-      const response = await fetch(
-        getApiUrl(`/api/PO/approve/${transId}`),
-        {
-          method: "POST",
-        }
-      );
+     const response = await fetch(
+  getApiUrl(`/api/PO/approve/${transId}`),
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      remarks: remarks,
+    }),
+  }
+);
       if (!response.ok) {
         throw new Error("Failed to approve PO");
       }
-      toast.success("PO approved successfully");
-      setTimeout(() => navigate({ to: "/pending" }), 600);
+     toast.success("PO approved successfully");
+
+// Get latest pending POs
+const pending = await fetch(
+  getApiUrl(`/api/PO/pending/${user?.username}`)
+).then(r => r.json());
+
+alert("Next PO: " + pending[0]?.PoNo);
+
+console.log("Pending API Response:", pending);
+console.log("First Item:", pending[0]);
+console.log("Pending POs:", pending);
+
+if (pending.length > 0) {
+  console.log("Next PO:", pending[0].PoNo);
+
+  navigate({
+    to: "/po/$poNo",
+    params: {
+      poNo: pending[0].PoNo,
+    },
+  });
+} else {
+  navigate({ to: "/pending" });
+}
     } catch (err) {
       console.error(err);
       toast.error("Operation failed");

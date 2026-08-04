@@ -15,9 +15,11 @@ public class IndentController : ControllerBase
 {
     _database = database;
 }
-
-   [HttpGet("pending/{username}")]
-public async Task<IActionResult> GetPending(string username)
+[HttpGet("pending/{username}")]
+public async Task<IActionResult> GetPending(
+    string username,
+    [FromQuery] decimal? amount,
+    [FromQuery] string? filterType)
 {
     using var connection = _database.CreateConnection();
 

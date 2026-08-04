@@ -16,6 +16,7 @@ function IndentDetailsPage() {
   const [workflow, setWorkflow] = useState<any[]>([]);
 
   useEffect(() => {
+  if (!user?.username) return;
     fetch(
       getApiUrl(
         `/api/Indent/details?indentNo=${encodeURIComponent(indentNo)}`
@@ -36,7 +37,7 @@ function IndentDetailsPage() {
     )
       .then((r) => r.json())
       .then(setWorkflow);
-  }, [indentNo]);
+  }, [indentNo, user?.username]);
   async function approveIndent() {
   try {
     console.log("User:", user?.username);
@@ -58,14 +59,30 @@ console.log("Selected Items:", selectedItems);
     const result = await response.json();
 
     if (result.success) {
-      alert(
-        `${result.approvedItems} item(s) approved successfully`
-      );
+  alert(`${result.approvedItems} item(s) approved successfully`);
 
-      window.location.reload();
-    } else {
-      alert("Approval failed");
-    }
+  const pendingResponse = await fetch(
+  getApiUrl(`/api/Indent/pending/${user?.username}`)
+);
+
+if (!pendingResponse.ok) {
+  alert("Unable to load next pending indent.");
+  window.location.href = "/pending";
+  return;
+}
+
+const pending = await pendingResponse.json();
+
+if (pending.length > 0) {
+  window.location.href = `/indent/${encodeURIComponent(
+    pending[0].IndentNo
+  )}`;
+} else {
+  window.location.href = "/pending";
+}
+} else {
+  alert("Approval failed");
+}
   } catch (err) {
     console.error(err);
     alert("Error while approving indent");

@@ -6,13 +6,20 @@ namespace POApprovalAPI.Services;
 public class PaymentService
 {
     private readonly DatabaseService _database;
+private readonly EmailService _emailService;
 
-    public PaymentService(DatabaseService database)
-    {
-        _database = database;
-    }
+public PaymentService(
+    DatabaseService database,
+    EmailService emailService)
+{
+    _database = database;
+    _emailService = emailService;
+}
 
-    public async Task<IEnumerable<PaymentRequestModel>> GetPendingPayments(string username)
+    public async Task<IEnumerable<PaymentRequestModel>> GetPendingPayments(
+    string username,
+    decimal? amount = null,
+    string? filterType = null)
     {
         using var connection = _database.CreateConnection();
 
@@ -43,15 +50,30 @@ INNER JOIN BillPaymentEntry e
     ON a.PaymentNo = e.PaymentNo
 WHERE
     a.Status = 'Pending'
-    AND a.ApprovalName = @UserName
-ORDER BY e.SysDate DESC";
-
-        return await connection.QueryAsync<PaymentRequestModel>(
-            sql,
-            new
-            {
-                UserName = username
-            });
+    AND a.ApprovalName = @UserName";
+    if (amount != null)
+{
+    sql += filterType switch
+    {
+        "lt" => " AND a.PaymentAmount < @Amount",
+        "gt" => " AND a.PaymentAmount > @Amount",
+        "eq" => " AND a.PaymentAmount = @Amount",
+        "lte" => " AND a.PaymentAmount <= @Amount",
+        "gte" => " AND a.PaymentAmount >= @Amount",
+        _ => ""
+    };
+}
+sql += " ORDER BY e.SysDate DESC";
+Console.WriteLine($"Amount = {amount}");
+Console.WriteLine($"FilterType = {filterType}");
+Console.WriteLine(sql);
+       return await connection.QueryAsync<PaymentRequestModel>(
+    sql,
+    new
+    {
+        UserName = username,
+        Amount = amount
+    });
     }
 
    public async Task<PaymentDetailsModel?> GetPaymentDetails(string paymentNo)
@@ -169,6 +191,17 @@ public async Task<bool> ApprovePayment(PaymentApprovalRequest request)
             transaction.Rollback();
             return false;
         }
+           var email = await connection.QueryFirstOrDefaultAsync<string>(
+    @"SELECT lr.email
+      FROM BillPaymentEntry b
+      INNER JOIN loginentry..loginrights lr
+          ON lr.NAME = b.LoginName
+      WHERE b.PaymentNo = @PaymentNo",
+    new
+    {
+        request.PaymentNo
+    },
+    transaction); 
         var authority = await connection.QueryFirstOrDefaultAsync<int>(
     @"SELECT Authority
       FROM BillPaymentApprovalAllocation
@@ -196,7 +229,19 @@ public async Task<bool> ApprovePayment(PaymentApprovalRequest request)
             UserName = request.UserName
         },
         transaction);
-
+        if (!string.IsNullOrWhiteSpace(email))
+{
+    await _emailService.SendMail(
+        email,
+        $"Payment {request.PaymentNo} Approved",
+        $"Dear Sir,\n\n" +
+        $"Payment No: {request.PaymentNo}\n" +
+        $"Approved By: {request.UserName}\n" +
+        $"Remarks: {request.Comment}\n\n" +
+        $"Regards,\n" +
+        $"{request.UserName}"
+    );
+}
     await connection.ExecuteAsync(
         @"UPDATE BillPaymentHODApproval
           SET Status = @Status
@@ -273,6 +318,17 @@ return true;
             transaction.Rollback();
             return false;
         }
+        var email = await connection.QueryFirstOrDefaultAsync<string>(
+    @"SELECT lr.email
+      FROM BillPaymentEntry b
+      INNER JOIN loginentry..loginrights lr
+          ON lr.NAME = b.LoginName
+      WHERE b.PaymentNo = @PaymentNo",
+    new
+    {
+        request.PaymentNo
+    },
+    transaction);
 
         await connection.ExecuteAsync(
             @"UPDATE BillPaymentHODApproval
@@ -298,6 +354,19 @@ return true;
                 request.PaymentNo
             },
             transaction);
+          if (!string.IsNullOrWhiteSpace(email))
+{
+    await _emailService.SendMail(
+        email,
+        $"Payment {request.PaymentNo} Rejected",
+        $"Dear Sir,\n\n" +
+        $"Payment No: {request.PaymentNo}\n" +
+        $"Rejected By: {request.UserName}\n" +
+        $"Remarks: {request.Comment}\n\n" +
+        $"Regards,\n" +
+        $"{request.UserName}"
+    );
+}  
 
         transaction.Commit();
         return true;

@@ -1,5 +1,7 @@
 using POApprovalAPI.Services;
 using QuestPDF.Infrastructure;
+using POApprovalAPI.Interfaces;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +13,13 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddSingleton<DatabaseService>();
 builder.Services.AddScoped<PaymentService>();
+builder.Services.AddScoped<DailyReportService>();
+builder.Services.AddScoped<HtmlParserService>();
+builder.Services.AddScoped<MessageFormatterService>();
+builder.Services.AddScoped<ManagerService>();
+builder.Services.AddScoped<IWhatsAppService, WhatsAppService>();
+builder.Services.AddScoped<DailyReportProcessorService>();
+builder.Services.AddScoped<EmailService>();
 
 builder.Services.AddCors(options =>
 {
