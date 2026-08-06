@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using System.Data;
 
 namespace POApprovalAPI.Services
 {
@@ -29,6 +30,27 @@ namespace POApprovalAPI.Services
 
             connection.Open();
             return connection;
+        }
+
+        /// <summary>
+        /// Safely closes and disposes a connection, returning it to the connection pool
+        /// </summary>
+        public void CloseConnection(SqlConnection connection)
+        {
+            if (connection != null)
+            {
+                try
+                {
+                    if (connection.State == ConnectionState.Open)
+                    {
+                        connection.Close(); // Returns to pool
+                    }
+                }
+                finally
+                {
+                    connection?.Dispose(); // Cleanup resources
+                }
+            }
         }
     }
 }

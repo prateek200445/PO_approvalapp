@@ -5,6 +5,9 @@ import { Search, ArrowUpDown, Filter } from "lucide-react";
 import { formatINR, type POStatus } from "@/lib/mock-data";
 import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useQuery } from "@tanstack/react-query";
+import { useDebounce } from "@/hooks/useDebounce";
+import { SkeletonPendingList } from "@/components/SkeletonLoader";
 
 export const Route = createFileRoute("/_app/payments")({
   head: () => ({ meta: [{ title: "Pending Payments — Approval Portal" }] }),
@@ -14,29 +17,34 @@ export const Route = createFileRoute("/_app/payments")({
 function PendingList() {
   const { user } = useAuth();
 
-  const [pendingPayments, setPendingPayments] = useState<any[]>([]);
   const [q, setQ] = useState("");
   const [amount, setAmount] = useState("");
   const [filterType, setFilterType] = useState("gte");
   const [status, setStatus] = useState<"All" | POStatus>("Pending");
   const [sortDesc, setSortDesc] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
-  useEffect(() => {
-    if (!user?.username) return;
+  // Debounce the amount input (500ms delay)
+  const debouncedAmount = useDebounce(amount, 500);
 
-    fetch(
-      getApiUrl(
-        `/api/Payment/pending/${user.username}?amount=${amount}&filterType=${filterType}`,
-      ),
-    )
-      .then((res) => res.json())
-      .then((data) => {
-        setPendingPayments(data);
-      })
-      .catch((err) => {
-        console.error("Pending API Error:", err);
-      });
-  }, [user?.username, amount, filterType]);
+  // Fetch payments with React Query and debounced amount filter
+  const { data: pendingPayments = [], isLoading } = useQuery({
+    queryKey: ['payment-list', user?.username, debouncedAmount, filterType],
+    queryFn: async () => {
+      if (!user?.username) throw new Error('No username');
+      const response = await fetch(
+        getApiUrl(
+          `/api/Payment/pending/${user.username}?amount=${debouncedAmount}&filterType=${filterType}`
+        )
+      );
+      if (!response.ok) throw new Error('Failed to fetch payments');
+      return response.json();
+    },
+    staleTime: 0, // Always refetch to ensure fresh data after approvals
+    refetchOnMount: 'always', // Always refetch when component mounts
+    enabled: !!user?.username && typeof window !== 'undefined', // Only fetch on client
+  });
 
   const filtered = pendingPayments
     .filter((p) => {
@@ -66,6 +74,18 @@ function PendingList() {
         ? new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime()
         : new Date(a.paymentDate).getTime() - new Date(b.paymentDate).getTime(),
     );
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [q, amount, status, filterType, sortDesc]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedData = filtered.slice(startIndex, endIndex);
+
   console.log(filtered);
   return (
     <div className="space-y-5">
@@ -75,7 +95,7 @@ function PendingList() {
             Payment Approvals
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {filtered.length} result{filtered.length !== 1 ? "s" : ""}
+            {filtered.length} result{filtered.length !== 1 ? "s" : ""} {totalPages > 1 && `(Page ${currentPage} of ${totalPages})`}
           </p>
         </div>
       </div>
@@ -133,67 +153,77 @@ function PendingList() {
 
       {/* Mobile cards */}
       <div className="grid gap-3 md:hidden">
-        {filtered.filter(Boolean).map((p) => (
-          <Link
-            key={p.paymentNo}
-            to="/payment/$paymentNo"
-            params={{ paymentNo: p.paymentNo }}
-            className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-semibold">{p.paymentNo}</div>
-                <div className="mt-0.5 truncate text-sm text-muted-foreground">
-                  {p.VendorName}
+        {isLoading ? (
+          <SkeletonPendingList />
+        ) : filtered.length === 0 ? (
+          <EmptyState />
+        ) : (
+          paginatedData.filter(Boolean).map((p) => (
+            <Link
+              key={p.paymentNo}
+              to="/payment/$paymentNo"
+              params={{ paymentNo: p.paymentNo }}
+              className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-semibold">{p.paymentNo}</div>
+                  <div className="mt-0.5 truncate text-sm text-muted-foreground">
+                    {p.VendorName}
+                  </div>
+                </div>
+                <StatusBadge status="Pending" />
+              </div>
+              <div className="mt-3 flex items-end justify-between">
+                <div className="text-xs text-muted-foreground">
+                  {new Date(p.paymentDate).toLocaleDateString()}
+                </div>
+                <div className="text-base font-semibold tabular-nums">
+                  {formatINR(p.paymentAmount || 0)}
                 </div>
               </div>
-              <StatusBadge status="Pending" />
-            </div>
-            <div className="mt-3 flex items-end justify-between">
-              <div className="text-xs text-muted-foreground">
-                {new Date(p.paymentDate).toLocaleDateString()}
-              </div>
-              <div className="text-base font-semibold tabular-nums">
-                {formatINR(p.paymentAmount || 0)}
-              </div>
-            </div>
-          </Link>
-        ))}
-        {filtered.length === 0 && <EmptyState />}
+            </Link>
+          ))
+        )}
       </div>
 
       {/* Desktop table */}
       <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
-        <table className="w-full text-sm">
-          <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-4 py-3 font-medium">Payment No</th>
-              <th className="px-4 py-3 font-medium">Vendor</th>
-              <th className="px-4 py-3 font-medium">Payment Date</th>
-              <th className="px-4 py-3 text-right font-medium">Amount</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-            </tr>
-          </thead>
+        {isLoading ? (
+          <div className="p-6">
+            <SkeletonPendingList />
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">Payment No</th>
+                <th className="px-4 py-3 font-medium">Vendor</th>
+                <th className="px-4 py-3 font-medium">Payment Date</th>
+                <th className="px-4 py-3 text-right font-medium">Amount</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+              </tr>
+            </thead>
 
-          <tbody className="divide-y divide-border">
-            {filtered.filter(Boolean).map((p) => (
-              <tr key={p.paymentNo} className="hover:bg-secondary/40">
-                <td className="px-4 py-3 font-medium">
-                  <Link
-                    to="/payment/$paymentNo"
-                    params={{ paymentNo: p.paymentNo }}
-                    className="hover:text-primary hover:underline"
-                  >
-                    {p.paymentNo}
-                  </Link>
-                </td>
+            <tbody className="divide-y divide-border">
+              {paginatedData.filter(Boolean).map((p) => (
+                <tr key={p.paymentNo} className="hover:bg-secondary/40">
+                  <td className="px-4 py-3 font-medium">
+                    <Link
+                      to="/payment/$paymentNo"
+                      params={{ paymentNo: p.paymentNo }}
+                      className="hover:text-primary hover:underline"
+                    >
+                      {p.paymentNo}
+                    </Link>
+                  </td>
 
-                <td className="px-4 py-3 text-muted-foreground">
-                  {p.VendorName}
-                </td>
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {p.VendorName}
+                  </td>
 
-                <td className="px-4 py-3 text-muted-foreground">
-                  {new Date(p.paymentDate).toLocaleDateString()}
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {new Date(p.paymentDate).toLocaleDateString()}
                 </td>
 
                 <td className="px-4 py-3 text-right font-semibold tabular-nums">
@@ -205,11 +235,92 @@ function PendingList() {
                 </td>
               </tr>
             ))}
-          </tbody>
-        </table>
-
-        {filtered.length === 0 && <EmptyState />}
+            </tbody>
+          </table>
+        )}
       </div>
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between border-t border-border bg-card px-4 py-3 sm:px-6 rounded-b-xl">
+          <div className="flex flex-1 justify-between sm:hidden">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="relative inline-flex items-center rounded-md border border-input bg-surface px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="relative ml-3 inline-flex items-center rounded-md border border-input bg-surface px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+          <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">
+                Showing <span className="font-medium">{startIndex + 1}</span> to <span className="font-medium">{Math.min(endIndex, filtered.length)}</span> of{" "}
+                <span className="font-medium">{filtered.length}</span> results
+              </p>
+            </div>
+            <div>
+              <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="relative inline-flex items-center rounded-l-md border border-input bg-surface px-2 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="sr-only">Previous</span>
+                  <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clipRule="evenodd" />
+                  </svg>
+                </button>
+                
+                {/* Page numbers */}
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`relative inline-flex items-center border border-input px-4 py-2 text-sm font-medium ${
+                        currentPage === pageNum
+                          ? "z-10 bg-primary text-primary-foreground"
+                          : "bg-surface hover:bg-secondary"
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="relative inline-flex items-center rounded-r-md border border-input bg-surface px-2 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="sr-only">Next</span>
+                  <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </nav>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

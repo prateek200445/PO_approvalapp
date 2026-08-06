@@ -5,6 +5,24 @@ using POApprovalAPI.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Load secrets from environment variables
+var dbPassword = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "";
+var emailPassword = Environment.GetEnvironmentVariable("EMAIL_PASSWORD") ?? "";
+
+// Build connection strings with secrets from environment
+var defaultConnection = builder.Configuration.GetConnectionString("DefaultConnection");
+var loginConnection = builder.Configuration.GetConnectionString("LoginEntryConnection");
+
+if (!string.IsNullOrEmpty(dbPassword))
+{
+    defaultConnection = $"{defaultConnection}Password={dbPassword};";
+    loginConnection = $"{loginConnection}Password={dbPassword};";
+}
+
+// Override connection strings in configuration
+builder.Configuration["ConnectionStrings:DefaultConnection"] = defaultConnection;
+builder.Configuration["ConnectionStrings:LoginEntryConnection"] = loginConnection;
+
 QuestPDF.Settings.License = LicenseType.Community;
 
 builder.Services.AddControllers();

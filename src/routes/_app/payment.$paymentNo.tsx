@@ -6,6 +6,8 @@ import { ArrowLeft, FileText, Download, CheckCircle2, XCircle, Building2, Calend
 import { formatINR, type ApprovalStep } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { SkeletonCard, SkeletonSection, SkeletonTable, SkeletonWorkflow } from "@/components/SkeletonLoader";
 
 export const Route = createFileRoute("/_app/payment/$paymentNo")({
  head: ({ params }) => ({
@@ -18,16 +20,14 @@ export const Route = createFileRoute("/_app/payment/$paymentNo")({
 function PaymentDetails() {
   const { paymentNo } = Route.useParams();
   const navigate = useNavigate();
- const { user, ready } = useAuth();
+  const { user } = useAuth();
   const containerRef = useRef<HTMLDivElement | null>(null);
-
- const [payment, setPayment] = useState<any>(null);
-  const [workflow, setWorkflow] = useState<any[]>([]);
-  const [approval, setApproval] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
   const [remarks, setRemarks] = useState("");
   const [confirm, setConfirm] = useState<null | "approve" | "reject">(null);
+  const [isApproving, setIsApproving] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);
 
   // PDF.js Inline Viewer State
   const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -42,67 +42,35 @@ function PaymentDetails() {
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
-  useEffect(() => {
-   if (!ready) return; 
-  fetch(
-getApiUrl(`/api/Payment/details?paymentNo=${encodeURIComponent(paymentNo)}`)
-)
-      .then((r) => r.json())
-      .then(async (data) => {
-        console.log("PAYMENT DETAILS =", data);
-        setPayment(data);
+  // Fetch Payment details with React Query (cache indefinitely - immutable data)
+  const { data: paymentData, isLoading: paymentLoading } = useQuery({
+    queryKey: ['payment-details', paymentNo],
+    queryFn: async () => {
+      const response = await fetch(getApiUrl(`/api/Payment/details?paymentNo=${encodeURIComponent(paymentNo)}`));
+      if (!response.ok) throw new Error('Failed to fetch Payment details');
+      return response.json();
+    },
+    staleTime: Infinity, // Cache indefinitely
+  });
 
+  // Fetch workflow/history with React Query
+  const { data: workflowData } = useQuery({
+    queryKey: ['payment-workflow', paymentNo],
+    queryFn: async () => {
+      const response = await fetch(getApiUrl(`/api/Payment/history?paymentNo=${encodeURIComponent(paymentNo)}`));
+      if (!response.ok) throw new Error('Failed to fetch workflow');
+      return response.json();
+    },
+    staleTime: Infinity, // Cache indefinitely
+  });
 
-       const username = user?.username;
-       console.log("USER OBJECT =", user);
-
-
-console.log("USERNAME =", username);
-console.log("PONO =", paymentNo);
-/*
-const approvalRes = await fetch(
-  getApiUrl(`/api/Payment/approval?poNo=${encodeURIComponent(paymentNo)}&username=${username}`)
-);
-
-console.log("APPROVAL RESPONSE =", approvalRes.status);
-
-const text = await approvalRes.text();
-
-console.log("RAW APPROVAL RESPONSE =", text);
-
-let approvalData = null;
-
-if (text) {
-  approvalData = JSON.parse(text);
-}
-
-
-*/
-
-
-
-        // WORKFLOW API
-      const workflowRes = await fetch(
-  getApiUrl(
-    `/api/Payment/history?paymentNo=${encodeURIComponent(paymentNo)}`
-  )
-);
-
-        const workflowData = await workflowRes.json();
-
-        setWorkflow(workflowData);
-
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("DETAIL ERROR =", err);
-        setLoading(false);
-      });
-  }, [paymentNo]);
+  // Transform data to match original format
+  const payment = paymentData;
+  const workflow = Array.isArray(workflowData) ? workflowData : [];
+  const loading = paymentLoading;
 
   // Dynamically load PDF.js from CDN and fetch PDF buffer
   useEffect(() => {
-    if (!ready) return;
     let isMounted = true;
 
     const loadPdf = async () => {
@@ -212,8 +180,22 @@ const containerWidth = container.clientWidth;
     setScale((prev) => Math.max(prev - 0.2, 0.5));
   };
   if (loading) {
-  return <div className="p-8">Loading...</div>;
-}
+    return (
+      <div className="space-y-5 pb-24 md:pb-0">
+        <SkeletonCard />
+        <div className="grid gap-5 lg:grid-cols-3">
+          <div className="space-y-5 lg:col-span-2">
+            <SkeletonSection title="Payment Details" />
+            <SkeletonSection title="Payment Document" />
+            <SkeletonSection title="Remarks" />
+          </div>
+          <div>
+            <SkeletonSection title="Approval Workflow" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
 if (!payment) {
   return (
@@ -229,11 +211,10 @@ if (!payment) {
   );
 }
 
-const paymentData = payment;
-
-
-
   async function handleApprove() {
+  if (isApproving) return; // Prevent double-click
+  
+  setIsApproving(true);
   try {
     const response = await fetch(
       getApiUrl("/api/Payment/approve"),
@@ -254,39 +235,65 @@ const paymentData = payment;
       throw new Error(await response.text());
     }
 
-   toast.success("Payment approved successfully");
+    toast.success("Payment approved successfully");
 
-// Get latest pending payments
-const pending = await fetch(
-    getApiUrl(`/api/Payment/pending/${user?.username}`)
-).then(r => r.json());
+    // CRITICAL: Invalidate ALL related caches with proper patterns
+    await Promise.all([
+      queryClient.invalidateQueries({ 
+        queryKey: ['payment-list'],
+        refetchType: 'all' 
+      }),
+      queryClient.invalidateQueries({ 
+        queryKey: ['dashboard-stats'],
+        refetchType: 'all'
+      }),
+      queryClient.invalidateQueries({ 
+        queryKey: ['pending-list-dashboard'],
+        refetchType: 'all'
+      }),
+    ]);
 
-// Find current payment
-const currentIndex = pending.findIndex(
-    (x: any) => x.paymentNo === paymentNo
-);
+    // Fetch fresh pending payments after cache invalidation
+    const pending = await fetch(
+      getApiUrl(`/api/Payment/pending/${user?.username}`)
+    ).then(r => r.json());
 
-// Since the current payment has already been approved,
-// it won't exist in the new list.
-
-if (pending.length > 0) {
-    navigate({
-        to: "/payment/$paymentNo",
-        params: {
-            paymentNo: pending[0].paymentNo
-        }
-    });
-}
-else {
-    navigate({ to: "/payments" });
-}
+    // Navigate to next payment or back to list
+    if (Array.isArray(pending) && pending.length > 0) {
+      // Find next payment (exclude current one)
+      const nextPayment = pending.find(p => p.paymentNo !== paymentNo);
+      if (nextPayment) {
+        navigate({
+          to: "/payment/$paymentNo",
+          params: { paymentNo: nextPayment.paymentNo }
+        });
+      } else {
+        // No more pending payments
+        navigate({ to: "/payments" });
+      }
+    } else {
+      // No pending payments left
+      navigate({ to: "/payments" });
+    }
   } catch (err) {
     console.error(err);
     toast.error("Approval failed");
+  } finally {
+    setIsApproving(false);
   }
 }
 
   async function handleConfirm() {
+  if (confirm !== "reject") return;
+  
+  if (!remarks.trim()) {
+    toast.error("Remarks are mandatory for rejection");
+    return;
+  }
+
+  if (isRejecting) return; // Prevent double-click
+  
+  setIsRejecting(true);
   try {
     const response = await fetch(
       getApiUrl("/api/Payment/reject"),
@@ -309,65 +316,103 @@ else {
 
     toast.success("Payment rejected successfully");
 
+    // CRITICAL: Invalidate ALL related caches with proper patterns
+    await Promise.all([
+      queryClient.invalidateQueries({ 
+        queryKey: ['payment-list'],
+        refetchType: 'all' 
+      }),
+      queryClient.invalidateQueries({ 
+        queryKey: ['dashboard-stats'],
+        refetchType: 'all'
+      }),
+      queryClient.invalidateQueries({ 
+        queryKey: ['pending-list-dashboard'],
+        refetchType: 'all'
+      }),
+    ]);
+
     setConfirm(null);
 
-    setTimeout(() => {
+    // Fetch fresh pending payments after cache invalidation
+    const pending = await fetch(
+      getApiUrl(`/api/Payment/pending/${user?.username}`)
+    ).then(r => r.json());
+
+    // Navigate to next payment or back to list
+    if (Array.isArray(pending) && pending.length > 0) {
+      // Find next payment (exclude current one)
+      const nextPayment = pending.find(p => p.paymentNo !== paymentNo);
+      if (nextPayment) {
+        navigate({
+          to: "/payment/$paymentNo",
+          params: { paymentNo: nextPayment.paymentNo },
+        });
+      } else {
+        // No more pending payments
+        navigate({ to: "/payments" });
+      }
+    } else {
+      // No pending payments left
       navigate({ to: "/payments" });
-    }, 600);
+    }
   } catch (err) {
     console.error(err);
     toast.error("Operation failed");
+  } finally {
+    setIsRejecting(false);
   }
 }
-const grandTotal = Number(paymentData?.paymentAmount || 0);
+
+const grandTotal = Number(payment?.paymentAmount || 0);
 
 const headerItems = [
   {
     icon: Hash,
     label: "Payment No",
-    value: paymentData.paymentNo,
+    value: payment?.paymentNo,
   },
   {
     icon: Building2,
     label: "Vendor",
-    value: paymentData.vendorName,
+    value: payment?.vendorName,
   },
   {
     icon: Calendar,
     label: "Payment Date",
-    value: paymentData.paymentDate,
+    value: payment?.paymentDate,
   },
   {
     icon: Briefcase,
     label: "Company",
-    value: paymentData.companyName,
+    value: payment?.companyName,
   },
   {
     icon: UserIcon,
     label: "Requested By",
-    value: paymentData.requestedBy,
+    value: payment?.requestedBy,
   },
   {
     icon: IndianRupee,
     label: "Payment Amount",
-    value: formatINR(paymentData.paymentAmount || 0),
+    value: formatINR(payment?.paymentAmount || 0),
     strong: true,
   },
   {
     icon: Hash,
     label: "Bill No",
-    value: paymentData.billNo,
+    value: payment?.billNo,
   },
  {
     icon: Wallet,
     label: "Bill Amount",
-    value: formatINR(paymentData.billAmount),
+    value: formatINR(payment?.billAmount),
     strong: true,
 },
 {
     icon: Landmark,
     label: "Payment Amount",
-    value: formatINR(paymentData.paymentAmount),
+    value: formatINR(payment?.paymentAmount),
     strong: true,
 },
 ];
@@ -389,11 +434,11 @@ const headerItems = [
 </div>
 
 <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
-    {paymentData.paymentNo}
+    {payment?.paymentNo}
 </h1>
 
 <p className="mt-1 text-sm text-muted-foreground">
-    {paymentData.vendorName}
+    {payment?.vendorName}
 </p>
         <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 md:grid-cols-3">
           {headerItems.map((h) => (
@@ -416,47 +461,47 @@ const headerItems = [
 
         <div>
             <strong>Company</strong>
-            <div>{paymentData.companyName}</div>
+            <div>{payment?.companyName}</div>
         </div>
 
         <div>
             <strong>Vendor</strong>
-            <div>{paymentData.vendorName}</div>
+            <div>{payment?.vendorName}</div>
         </div>
 
         <div>
             <strong>Bill No</strong>
-            <div>{paymentData.billNo}</div>
+            <div>{payment?.billNo}</div>
         </div>
 
         <div>
             <strong>MRN No</strong>
-            <div>{paymentData.mrnNo}</div>
+            <div>{payment?.mrnNo}</div>
         </div>
 
         <div>
             <strong>Bill Date</strong>
-            <div>{paymentData.billDate}</div>
+            <div>{payment?.billDate}</div>
         </div>
 
         <div>
             <strong>Payment Date</strong>
-            <div>{paymentData.paymentDate}</div>
+            <div>{payment?.paymentDate}</div>
         </div>
 
         <div>
             <strong>Payment Terms</strong>
-            <div>{paymentData.paymentTerms}</div>
+            <div>{payment?.paymentTerms}</div>
         </div>
 
         <div>
             <strong>Currency</strong>
-            <div>{paymentData.currency}</div>
+            <div>{payment?.currency}</div>
         </div>
 
         <div>
             <strong>Remarks</strong>
-            <div>{paymentData.remarks}</div>
+            <div>{payment?.remarks}</div>
         </div>
 
     </div>
@@ -608,18 +653,32 @@ download={`${paymentNo}.pdf`}
             Back
           </button>
           <button
-            disabled={false}
+            disabled={isRejecting || isApproving}
             onClick={() => setConfirm("reject")}
-            className="h-11 flex-1 rounded-md border border-destructive/30 bg-destructive/10 px-4 text-sm font-semibold text-destructive hover:bg-destructive/20 disabled:opacity-50 md:flex-none md:px-6"
+            className="h-11 flex-1 rounded-md border border-destructive/30 bg-destructive/10 px-4 text-sm font-semibold text-destructive hover:bg-destructive/20 disabled:opacity-50 disabled:cursor-not-allowed md:flex-none md:px-6"
           >
-            Reject
+            {isRejecting ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Rejecting...
+              </span>
+            ) : (
+              "Reject"
+            )}
           </button>
           <button
-            disabled={false}
+            disabled={isApproving || isRejecting}
             onClick={handleApprove}
-            className="h-11 flex-1 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:flex-none md:px-6"
+            className="h-11 flex-1 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed md:flex-none md:px-6"
           >
-            Approve
+            {isApproving ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Approving...
+              </span>
+            ) : (
+              "Approve"
+            )}
           </button>
         </div>
       </div>
@@ -642,9 +701,17 @@ download={`${paymentNo}.pdf`}
               <button onClick={() => setConfirm(null)} className="h-10 flex-1 rounded-md border border-input bg-surface text-sm font-medium hover:bg-secondary">Cancel</button>
               <button
                 onClick={handleConfirm}
-                className="h-10 flex-1 rounded-md text-sm font-semibold text-primary-foreground bg-destructive hover:bg-destructive/90"
+                disabled={isRejecting}
+                className="h-10 flex-1 rounded-md text-sm font-semibold text-primary-foreground bg-destructive hover:bg-destructive/90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Confirm Reject
+                {isRejecting ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Rejecting...
+                  </span>
+                ) : (
+                  "Confirm Reject"
+                )}
               </button>
             </div>
           </div>

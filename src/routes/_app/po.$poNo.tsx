@@ -6,6 +6,8 @@ import { ArrowLeft, FileText, Download, CheckCircle2, XCircle, Building2, Calend
 import { formatINR, type ApprovalStep } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { SkeletonCard, SkeletonSection, SkeletonTable, SkeletonWorkflow } from "@/components/SkeletonLoader";
 
 export const Route = createFileRoute("/_app/po/$poNo")({
   head: ({ params }) => ({ meta: [{ title: `${params.poNo} — PO Details` }] }),
@@ -18,14 +20,12 @@ function PODetails() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const containerRef = useRef<HTMLDivElement | null>(null);
-
-  const [po, setPo] = useState<any>(null);
-  const [workflow, setWorkflow] = useState<any[]>([]);
-  const [approval, setApproval] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
   const [remarks, setRemarks] = useState("");
   const [confirm, setConfirm] = useState<null | "approve" | "reject">(null);
+  const [isApproving, setIsApproving] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);
 
   // PDF.js Inline Viewer State
   const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -40,42 +40,48 @@ function PODetails() {
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
- useEffect(() => {
-    if (!user?.username) return;
+  // Fetch PO details with React Query (cache indefinitely - immutable data)
+  const { data: poData, isLoading: poLoading } = useQuery({
+    queryKey: ['po-details', poNo],
+    queryFn: async () => {
+      const response = await fetch(getApiUrl(`/api/PO/details?poNo=${encodeURIComponent(poNo)}`));
+      if (!response.ok) throw new Error('Failed to fetch PO details');
+      return response.json();
+    },
+    staleTime: Infinity, // Cache indefinitely
+  });
 
-    fetch(
-        getApiUrl(`/api/PO/details?poNo=${encodeURIComponent(poNo)}`)
-    )
-      .then((r) => r.json())
-      .then(async (data) => {
-        setPo(data);
+  // Fetch approval data with React Query
+  const { data: approvalData } = useQuery({
+    queryKey: ['po-approval', poNo, user?.username],
+    queryFn: async () => {
+      const response = await fetch(
+        getApiUrl(`/api/PO/approval?poNo=${encodeURIComponent(poNo)}&username=${user?.username}`)
+      );
+      if (!response.ok) throw new Error('Failed to fetch approval');
+      return response.json();
+    },
+    staleTime: 1000 * 60 * 30, // Cache for 30 minutes
+    enabled: !!user?.username,
+  });
 
-        const username = user?.username;
+  // Fetch workflow with React Query
+  const { data: workflowData } = useQuery({
+    queryKey: ['po-workflow', poNo],
+    queryFn: async () => {
+      const response = await fetch(getApiUrl(`/api/PO/workflow?poNo=${encodeURIComponent(poNo)}`));
+      if (!response.ok) throw new Error('Failed to fetch workflow');
+      return response.json();
+    },
+    staleTime: Infinity, // Cache indefinitely
+  });
 
-        const approvalRes = await fetch(
-          getApiUrl(`/api/PO/approval?poNo=${encodeURIComponent(poNo)}&username=${username}`)
-        );
-
-        const approvalData = await approvalRes.json();
-
-        setApproval(approvalData);
-
-        // WORKFLOW API
-        const workflowRes = await fetch(
-          getApiUrl(`/api/PO/workflow?poNo=${encodeURIComponent(poNo)}`)
-        );
-
-        const workflowData = await workflowRes.json();
-
-        setWorkflow(workflowData);
-
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("DETAIL ERROR =", err);
-        setLoading(false);
-      });
-  }, [poNo, user?.username]);
+  // Transform data to match original format
+  const po = poData;
+  const poDetails = Array.isArray(po) ? po[0] : po;
+  const approval = approvalData;
+  const workflow = Array.isArray(workflowData) ? workflowData : [];
+  const loading = poLoading;
 
   // Dynamically load PDF.js from CDN and fetch PDF buffer
   useEffect(() => {
@@ -182,128 +188,213 @@ function PODetails() {
     setScale((prev) => Math.max(prev - 0.2, 0.5));
   };
   if (loading) {
-  return <div className="p-8">Loading...</div>;
-}
+    return (
+      <div className="space-y-5 pb-24 md:pb-0">
+        <SkeletonCard />
+        <div className="grid gap-5 lg:grid-cols-3">
+          <div className="space-y-5 lg:col-span-2">
+            <SkeletonSection title="Purchase Order Summary" />
+            <SkeletonSection title="Purchase Order Document" />
+            <SkeletonSection title="Remarks" />
+          </div>
+          <div>
+            <SkeletonSection title="Approval Workflow" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-if (!po || po.length === 0) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-8 text-center">
-      <p>PO not found.</p>
-      <Link
-        to="/pending"
-        className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
-      >
-        Back to list
-      </Link>
-    </div>
-  );
-}
-
-const poData = Array.isArray(po) ? po[0] : null;
-
-
+  if (!po) {
+    return (
+      <div className="rounded-xl border border-border bg-card p-8 text-center">
+        <p>PO not found.</p>
+        <Link
+          to="/pending"
+          className="mt-3 inline-block text-sm font-medium text-primary hover:underline"
+        >
+          Back to list
+        </Link>
+      </div>
+    );
+  }
 
   async function handleApprove() {
+    if (isApproving) return; // Prevent double-click
+    
+    setIsApproving(true);
     try {
       const transId = approval?.TransId ?? approval?.Transid;
       if (!transId) {
         toast.error("Approval transaction ID not found");
         return;
       }
-     const response = await fetch(
-  getApiUrl(`/api/PO/approve/${transId}`),
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      remarks: remarks,
-    }),
-  }
-);
+      
+      const response = await fetch(
+        getApiUrl(`/api/PO/approve/${transId}`),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            remarks: remarks,
+          }),
+        }
+      );
+      
       if (!response.ok) {
         throw new Error("Failed to approve PO");
       }
-     toast.success("PO approved successfully");
+      
+      toast.success("PO approved successfully");
 
-// Get latest pending POs
-const pending = await fetch(
-  getApiUrl(`/api/PO/pending/${user?.username}`)
-).then(r => r.json());
+      // CRITICAL: Invalidate ALL related caches with proper patterns
+      await Promise.all([
+        queryClient.invalidateQueries({ 
+          queryKey: ['pending-list'],
+          refetchType: 'all' 
+        }),
+        queryClient.invalidateQueries({ 
+          queryKey: ['dashboard-stats'],
+          refetchType: 'all'
+        }),
+        queryClient.invalidateQueries({ 
+          queryKey: ['pending-list-dashboard'],
+          refetchType: 'all'
+        }),
+      ]);
 
-alert("Next PO: " + pending[0]?.PoNo);
+      // Fetch fresh pending list after cache invalidation
+      const pending = await fetch(
+        getApiUrl(`/api/PO/pending/${user?.username}`)
+      ).then(r => r.json());
 
-console.log("Pending API Response:", pending);
-console.log("First Item:", pending[0]);
-console.log("Pending POs:", pending);
-
-if (pending.length > 0) {
-  console.log("Next PO:", pending[0].PoNo);
-
-  navigate({
-    to: "/po/$poNo",
-    params: {
-      poNo: pending[0].PoNo,
-    },
-  });
-} else {
-  navigate({ to: "/pending" });
-}
+      // Navigate to next PO or back to list
+      if (Array.isArray(pending) && pending.length > 0) {
+        // Find next PO (exclude current one)
+        const nextPO = pending.find(p => p.PoNo !== poNo);
+        if (nextPO) {
+          navigate({
+            to: "/po/$poNo",
+            params: { poNo: nextPO.PoNo },
+          });
+        } else {
+          // No more pending POs
+          navigate({ to: "/pending" });
+        }
+      } else {
+        // No pending POs left
+        navigate({ to: "/pending" });
+      }
     } catch (err) {
       console.error(err);
       toast.error("Operation failed");
+    } finally {
+      setIsApproving(false);
     }
   }
 
   async function handleConfirm() {
-    if (confirm === "reject" && !remarks.trim()) {
+    if (confirm !== "reject") return;
+    
+    if (!remarks.trim()) {
       toast.error("Remarks are mandatory for rejection");
       return;
     }
 
+    if (isRejecting) return; // Prevent double-click
+    
+    setIsRejecting(true);
     try {
-      if (confirm === "reject") {
-        const transId = approval?.TransId ?? approval?.Transid;
-        if (!transId) {
-          toast.error("Approval transaction ID not found");
-          return;
+      const transId = approval?.TransId ?? approval?.Transid;
+      if (!transId) {
+        toast.error("Approval transaction ID not found");
+        return;
+      }
+      
+      const response = await fetch(
+        getApiUrl(`/api/PO/reject/${transId}`),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            remarks: remarks,
+          }),
         }
-        const response = await fetch(
-          getApiUrl(`/api/PO/reject/${transId}`),
-          {
-            method: "POST",
-          }
-        );
-        if (!response.ok) {
-          throw new Error("Failed to reject PO");
-        }
-
-        toast.success("PO rejected successfully");
+      );
+      
+      if (!response.ok) {
+        throw new Error("Failed to reject PO");
       }
 
+      toast.success("PO rejected successfully");
+      
+      // CRITICAL: Invalidate ALL related caches with proper patterns
+      await Promise.all([
+        queryClient.invalidateQueries({ 
+          queryKey: ['pending-list'],
+          refetchType: 'all' 
+        }),
+        queryClient.invalidateQueries({ 
+          queryKey: ['dashboard-stats'],
+          refetchType: 'all'
+        }),
+        queryClient.invalidateQueries({ 
+          queryKey: ['pending-list-dashboard'],
+          refetchType: 'all'
+        }),
+      ]);
+
       setConfirm(null);
-      setTimeout(() => navigate({ to: "/pending" }), 600);
+
+      // Fetch fresh pending list after cache invalidation
+      const pending = await fetch(
+        getApiUrl(`/api/PO/pending/${user?.username}`)
+      ).then(r => r.json());
+
+      // Navigate to next PO or back to list
+      if (Array.isArray(pending) && pending.length > 0) {
+        // Find next PO (exclude current one)
+        const nextPO = pending.find(p => p.PoNo !== poNo);
+        if (nextPO) {
+          navigate({
+            to: "/po/$poNo",
+            params: { poNo: nextPO.PoNo },
+          });
+        } else {
+          // No more pending POs
+          navigate({ to: "/pending" });
+        }
+      } else {
+        // No pending POs left
+        navigate({ to: "/pending" });
+      }
     } catch (err) {
       console.error(err);
       toast.error("Operation failed");
+    } finally {
+      setIsRejecting(false);
     }
   }
-const grandTotal = Number(poData?.TotalAmount || 0);
 
-const headerItems = [
-  { icon: Hash, label: "PO Number", value: poData.PurchaseCode },
-  { icon: Building2, label: "Vendor", value: poData.FirmName },
-  { icon: Calendar, label: "PO Date", value: poData.deliverydate },
-  { icon: Briefcase, label: "Department", value: poData.DepttName },
-  { icon: UserIcon, label: "Requested By", value: poData.FirmName },
-  {
-    icon: IndianRupee,
-    label: "PO Amount",
-    value: formatINR(grandTotal),
-    strong: true,
-  },
-];
+  const grandTotal = Number(poDetails?.TotalAmount || 0);
+
+  const headerItems = [
+    { icon: Hash, label: "PO Number", value: poDetails.PurchaseCode },
+    { icon: Building2, label: "Vendor", value: poDetails.FirmName },
+    { icon: Calendar, label: "PO Date", value: poDetails.deliverydate },
+    { icon: Briefcase, label: "Department", value: poDetails.DepttName },
+    { icon: UserIcon, label: "Requested By", value: poDetails.FirmName },
+    {
+      icon: IndianRupee,
+      label: "PO Amount",
+      value: formatINR(grandTotal),
+      strong: true,
+    },
+  ];
 
   return (
     <div className="space-y-5 pb-24 md:pb-0 max-w-full overflow-x-hidden">
@@ -318,10 +409,10 @@ const headerItems = [
       <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Purchase Order</div>
        <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
-  {poData.PurchaseCode}
+  {poDetails.PurchaseCode}
 </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-  {poData.FirmName}
+  {poDetails.FirmName}
 </p>
         <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 md:grid-cols-3">
           {headerItems.map((h) => (
@@ -341,7 +432,7 @@ const headerItems = [
           {/* Section A: Summary */}
           <Section title="Purchase Order Summary">
             <p className="text-sm text-muted-foreground">
-  {poData.ItemDesc}
+  {poDetails.ItemDesc}
 </p>
             <div className="mt-4 overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-sm">
@@ -521,18 +612,32 @@ const headerItems = [
             Back
           </button>
           <button
-            disabled={false}
+            disabled={isRejecting || isApproving}
             onClick={() => setConfirm("reject")}
-            className="h-11 flex-1 rounded-md border border-destructive/30 bg-destructive/10 px-4 text-sm font-semibold text-destructive hover:bg-destructive/20 disabled:opacity-50 md:flex-none md:px-6"
+            className="h-11 flex-1 rounded-md border border-destructive/30 bg-destructive/10 px-4 text-sm font-semibold text-destructive hover:bg-destructive/20 disabled:opacity-50 disabled:cursor-not-allowed md:flex-none md:px-6"
           >
-            Reject
+            {isRejecting ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Rejecting...
+              </span>
+            ) : (
+              "Reject"
+            )}
           </button>
           <button
-            disabled={false}
+            disabled={isApproving || isRejecting}
             onClick={handleApprove}
-            className="h-11 flex-1 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:flex-none md:px-6"
+            className="h-11 flex-1 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed md:flex-none md:px-6"
           >
-            Approve
+            {isApproving ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Approving...
+              </span>
+            ) : (
+              "Approve"
+            )}
           </button>
         </div>
       </div>
@@ -555,9 +660,17 @@ const headerItems = [
               <button onClick={() => setConfirm(null)} className="h-10 flex-1 rounded-md border border-input bg-surface text-sm font-medium hover:bg-secondary">Cancel</button>
               <button
                 onClick={handleConfirm}
-                className="h-10 flex-1 rounded-md text-sm font-semibold text-primary-foreground bg-destructive hover:bg-destructive/90"
+                disabled={isRejecting}
+                className="h-10 flex-1 rounded-md text-sm font-semibold text-primary-foreground bg-destructive hover:bg-destructive/90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Confirm Reject
+                {isRejecting ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Rejecting...
+                  </span>
+                ) : (
+                  "Confirm Reject"
+                )}
               </button>
             </div>
           </div>

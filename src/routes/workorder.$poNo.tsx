@@ -6,6 +6,8 @@ import { ArrowLeft, FileText, Download, CheckCircle2, XCircle, Building2, Calend
 import { formatINR, type ApprovalStep } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { SkeletonCard, SkeletonSection, SkeletonTable, SkeletonWorkflow } from "@/components/SkeletonLoader";
 
 export const Route = createFileRoute("/workorder/$poNo")({
  head: ({ params }) => ({
@@ -18,16 +20,14 @@ export const Route = createFileRoute("/workorder/$poNo")({
 function WorkOrderDetails() {
   const { poNo } = Route.useParams();
   const navigate = useNavigate();
- const { user, ready } = useAuth();
+  const { user } = useAuth();
   const containerRef = useRef<HTMLDivElement | null>(null);
-
-  const [po, setPo] = useState<any>(null);
-  const [workflow, setWorkflow] = useState<any[]>([]);
-  const [approval, setApproval] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
   const [remarks, setRemarks] = useState("");
   const [confirm, setConfirm] = useState<null | "approve" | "reject">(null);
+  const [isApproving, setIsApproving] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);
 
   // PDF.js Inline Viewer State
   const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -42,68 +42,52 @@ function WorkOrderDetails() {
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
-  useEffect(() => {
-   if (!ready) return; 
-   fetch(
-  getApiUrl(`/api/WorkOrder/details?poNo=${encodeURIComponent(poNo)}`)
-    )
-      .then((r) => r.json())
-      .then(async (data) => {
-        console.log("WORKORDER DETAILS =", data);
-        setPo(data);
+  // Fetch Work Order details with React Query (cache indefinitely - immutable data)
+  const { data: woData, isLoading: woLoading } = useQuery({
+    queryKey: ['workorder-details', poNo],
+    queryFn: async () => {
+      const response = await fetch(getApiUrl(`/api/WorkOrder/details?poNo=${encodeURIComponent(poNo)}`));
+      if (!response.ok) throw new Error('Failed to fetch Work Order details');
+      return response.json();
+    },
+    staleTime: Infinity, // Cache indefinitely
+  });
 
+  // Fetch approval data with React Query
+  const { data: approvalData } = useQuery({
+    queryKey: ['workorder-approval', poNo, user?.username],
+    queryFn: async () => {
+      const response = await fetch(
+        getApiUrl(`/api/WorkOrder/approval?poNo=${encodeURIComponent(poNo)}&username=${user?.username}`)
+      );
+      if (!response.ok) throw new Error('Failed to fetch approval');
+      const text = await response.text();
+      return text ? JSON.parse(text) : null;
+    },
+    staleTime: 1000 * 60 * 30, // Cache for 30 minutes
+    enabled: !!user?.username,
+  });
 
-       const username = user?.username;
-       console.log("USER OBJECT =", user);
+  // Fetch workflow with React Query
+  const { data: workflowData } = useQuery({
+    queryKey: ['workorder-workflow', poNo],
+    queryFn: async () => {
+      const response = await fetch(getApiUrl(`/api/WorkOrder/workflow?poNo=${encodeURIComponent(poNo)}`));
+      if (!response.ok) throw new Error('Failed to fetch workflow');
+      return response.json();
+    },
+    staleTime: Infinity, // Cache indefinitely
+  });
 
-
-console.log("USERNAME =", username);
-console.log("PONO =", poNo);
-
-const approvalRes = await fetch(
-  getApiUrl(`/api/WorkOrder/approval?poNo=${encodeURIComponent(poNo)}&username=${username}`)
-);
-
-console.log("APPROVAL RESPONSE =", approvalRes.status);
-
-const text = await approvalRes.text();
-
-console.log("RAW APPROVAL RESPONSE =", text);
-
-let approvalData = null;
-
-if (text) {
-  approvalData = JSON.parse(text);
-}
-
-console.log("APPROVAL DATA =", approvalData);
-
-setApproval(approvalData);
-
-console.log("APPROVAL DATA =", approvalData);
-
-setApproval(approvalData);
-
-        // WORKFLOW API
-       const workflowRes = await fetch(
-  getApiUrl(`/api/WorkOrder/workflow?poNo=${encodeURIComponent(poNo)}`)
-);
-
-        const workflowData = await workflowRes.json();
-
-        setWorkflow(workflowData);
-
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("DETAIL ERROR =", err);
-        setLoading(false);
-      });
-  }, [poNo]);
+  // Transform data to match original format
+  const po = woData;
+  const woDetails = Array.isArray(po) ? po[0] : po;
+  const approval = approvalData;
+  const workflow = Array.isArray(workflowData) ? workflowData : [];
+  const loading = woLoading;
 
   // Dynamically load PDF.js from CDN and fetch PDF buffer
   useEffect(() => {
-    if (!ready) return;
     let isMounted = true;
 
     const loadPdf = async () => {
@@ -211,8 +195,22 @@ const containerWidth = container.clientWidth;
     setScale((prev) => Math.max(prev - 0.2, 0.5));
   };
   if (loading) {
-  return <div className="p-8">Loading...</div>;
-}
+    return (
+      <div className="space-y-5 pb-24 md:pb-0">
+        <SkeletonCard />
+        <div className="grid gap-5 lg:grid-cols-3">
+          <div className="space-y-5 lg:col-span-2">
+            <SkeletonSection title="Work Order Summary" />
+            <SkeletonSection title="Work Order Document" />
+            <SkeletonSection title="Remarks" />
+          </div>
+          <div>
+            <SkeletonSection title="Approval Workflow" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
 if (!po || po.length === 0) {
   return (
@@ -228,11 +226,10 @@ if (!po || po.length === 0) {
   );
 }
 
-const poData = Array.isArray(po) ? po[0] : null;
-
-
-
  async function handleApprove() {
+  if (isApproving) return; // Prevent double-click
+  
+  setIsApproving(true);
   try {
     const transId = approval?.TransId ?? approval?.Transid;
 
@@ -242,17 +239,17 @@ const poData = Array.isArray(po) ? po[0] : null;
     }
 
     const response = await fetch(
-  getApiUrl(`/api/WorkOrder/approve/${transId}`),
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      remarks: remarks,
-    }),
-  }
-);
+      getApiUrl(`/api/WorkOrder/approve/${transId}`),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          remarks: remarks,
+        }),
+      }
+    );
 
     if (!response.ok) {
       throw new Error("Failed to approve work order");
@@ -260,80 +257,157 @@ const poData = Array.isArray(po) ? po[0] : null;
 
     toast.success("Work Order approved successfully");
 
-    // Get latest pending work orders
+    // CRITICAL: Invalidate ALL related caches with proper patterns
+    await Promise.all([
+      queryClient.invalidateQueries({ 
+        queryKey: ['workorder-list'],
+        refetchType: 'all' 
+      }),
+      queryClient.invalidateQueries({ 
+        queryKey: ['dashboard-stats'],
+        refetchType: 'all'
+      }),
+      queryClient.invalidateQueries({ 
+        queryKey: ['pending-list-dashboard'],
+        refetchType: 'all'
+      }),
+    ]);
+
+    // Fetch fresh pending work orders after cache invalidation
     const pending = await fetch(
       getApiUrl(`/api/WorkOrder/pending/${user?.username}`)
     ).then(r => r.json());
 
-    if (pending.length > 0) {
-      navigate({
-        to: "/workorder/$poNo",
-        params: {
-          poNo: pending[0].PoNo
-        }
-      });
+    // Navigate to next WO or back to list
+    if (Array.isArray(pending) && pending.length > 0) {
+      // Find next WO (exclude current one)
+      const nextWO = pending.find(w => w.PoNo !== poNo);
+      if (nextWO) {
+        navigate({
+          to: "/workorder/$poNo",
+          params: { poNo: nextWO.PoNo }
+        });
+      } else {
+        // No more pending WOs
+        navigate({ to: "/workorders" });
+      }
     } else {
+      // No pending WOs left
       navigate({ to: "/workorders" });
     }
 
   } catch (err) {
     console.error(err);
     toast.error("Operation failed");
+  } finally {
+    setIsApproving(false);
   }
 }
   async function handleConfirm() {
-    if (confirm === "reject" && !remarks.trim()) {
+    if (confirm !== "reject") return;
+    
+    if (!remarks.trim()) {
       toast.error("Remarks are mandatory for rejection");
       return;
     }
 
+    if (isRejecting) return; // Prevent double-click
+    
+    setIsRejecting(true);
     try {
-      if (confirm === "reject") {
-        const transId = approval?.TransId ?? approval?.Transid;
-        if (!transId) {
-          toast.error("Approval transaction ID not found");
-          return;
+      const transId = approval?.TransId ?? approval?.Transid;
+      if (!transId) {
+        toast.error("Approval transaction ID not found");
+        return;
+      }
+      
+      const response = await fetch(
+        getApiUrl(`/api/WorkOrder/reject/${transId}`),
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            remarks: remarks,
+          }),
         }
-        const response = await fetch(
-          getApiUrl(`/api/WorkOrder/reject/${transId}`),
-          {
-            method: "POST",
-          }
-        );
-        if (!response.ok) {
-          throw new Error("Failed to reject work order");
-        }
-
-        toast.success("Work Order rejected successfully");
+      );
+      
+      if (!response.ok) {
+        throw new Error("Failed to reject work order");
       }
 
+      toast.success("Work Order rejected successfully");
+      
+      // CRITICAL: Invalidate ALL related caches with proper patterns
+      await Promise.all([
+        queryClient.invalidateQueries({ 
+          queryKey: ['workorder-list'],
+          refetchType: 'all' 
+        }),
+        queryClient.invalidateQueries({ 
+          queryKey: ['dashboard-stats'],
+          refetchType: 'all'
+        }),
+        queryClient.invalidateQueries({ 
+          queryKey: ['pending-list-dashboard'],
+          refetchType: 'all'
+        }),
+      ]);
+
       setConfirm(null);
-      setTimeout(() => navigate({ to: "/workorders" }), 600);
+
+      // Fetch fresh pending work orders after cache invalidation
+      const pending = await fetch(
+        getApiUrl(`/api/WorkOrder/pending/${user?.username}`)
+      ).then(r => r.json());
+
+      // Navigate to next WO or back to list
+      if (Array.isArray(pending) && pending.length > 0) {
+        // Find next WO (exclude current one)
+        const nextWO = pending.find(w => w.PoNo !== poNo);
+        if (nextWO) {
+          navigate({
+            to: "/workorder/$poNo",
+            params: { poNo: nextWO.PoNo },
+          });
+        } else {
+          // No more pending WOs
+          navigate({ to: "/workorders" });
+        }
+      } else {
+        // No pending WOs left
+        navigate({ to: "/workorders" });
+      }
     } catch (err) {
       console.error(err);
       toast.error("Operation failed");
+    } finally {
+      setIsRejecting(false);
     }
   }
-const grandTotal = Number(poData?.TotalAmount || 0);
 
-const headerItems = [
-  { icon: Hash, label: "WO Number", value: poData.PurchaseCode },
-  { icon: Building2, label: "Vendor", value: poData.FirmName },
-  { icon: Calendar, label: "WO Date", value: poData.deliverydate },
-  { icon: Briefcase, label: "Department", value: poData.DepttName },
-  { icon: UserIcon, label: "Requested By", value: poData.FirmName },
-  {
-    icon: IndianRupee,
-    label: "WO Amount",
-    value: formatINR(grandTotal),
-    strong: true,
-  },
-  {
-  icon: Hash,
-  label: "Signal",
-  value: poData.PoSignal || "-",
-}
-];
+  const grandTotal = Number(woDetails?.TotalAmount || 0);
+
+  const headerItems = [
+    { icon: Hash, label: "WO Number", value: woDetails?.PurchaseCode },
+    { icon: Building2, label: "Vendor", value: woDetails?.FirmName },
+    { icon: Calendar, label: "WO Date", value: woDetails?.deliverydate },
+    { icon: Briefcase, label: "Department", value: woDetails?.DepttName },
+    { icon: UserIcon, label: "Requested By", value: woDetails?.FirmName },
+    {
+      icon: IndianRupee,
+      label: "WO Amount",
+      value: formatINR(grandTotal),
+      strong: true,
+    },
+    {
+      icon: Hash,
+      label: "Signal",
+      value: woDetails?.PoSignal || "-",
+    }
+  ];
 
   return (
     <div className="space-y-5 pb-24 md:pb-0 max-w-full overflow-x-hidden">
@@ -348,10 +422,10 @@ const headerItems = [
       <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Work Order</div>
        <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
-  {poData.PurchaseCode}
+  {woDetails?.PurchaseCode}
 </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-  {poData.FirmName}
+  {woDetails?.FirmName}
 </p>
         <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 md:grid-cols-3">
           {headerItems.map((h) => (
@@ -371,7 +445,7 @@ const headerItems = [
           {/* Section A: Summary */}
           <Section title="Work Order Summary">
             <p className="text-sm text-muted-foreground">
-  {poData.ItemDesc}
+  {woDetails?.ItemDesc}
 </p>
             <div className="mt-4 overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-sm">
@@ -551,18 +625,32 @@ const headerItems = [
             Back
           </button>
           <button
-            disabled={false}
+            disabled={isRejecting || isApproving}
             onClick={() => setConfirm("reject")}
-            className="h-11 flex-1 rounded-md border border-destructive/30 bg-destructive/10 px-4 text-sm font-semibold text-destructive hover:bg-destructive/20 disabled:opacity-50 md:flex-none md:px-6"
+            className="h-11 flex-1 rounded-md border border-destructive/30 bg-destructive/10 px-4 text-sm font-semibold text-destructive hover:bg-destructive/20 disabled:opacity-50 disabled:cursor-not-allowed md:flex-none md:px-6"
           >
-            Reject
+            {isRejecting ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Rejecting...
+              </span>
+            ) : (
+              "Reject"
+            )}
           </button>
           <button
-            disabled={false}
+            disabled={isApproving || isRejecting}
             onClick={handleApprove}
-            className="h-11 flex-1 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:flex-none md:px-6"
+            className="h-11 flex-1 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed md:flex-none md:px-6"
           >
-            Approve
+            {isApproving ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Approving...
+              </span>
+            ) : (
+              "Approve"
+            )}
           </button>
         </div>
       </div>
@@ -585,9 +673,17 @@ const headerItems = [
               <button onClick={() => setConfirm(null)} className="h-10 flex-1 rounded-md border border-input bg-surface text-sm font-medium hover:bg-secondary">Cancel</button>
               <button
                 onClick={handleConfirm}
-                className="h-10 flex-1 rounded-md text-sm font-semibold text-primary-foreground bg-destructive hover:bg-destructive/90"
+                disabled={isRejecting}
+                className="h-10 flex-1 rounded-md text-sm font-semibold text-primary-foreground bg-destructive hover:bg-destructive/90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Confirm Reject
+                {isRejecting ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Rejecting...
+                  </span>
+                ) : (
+                  "Confirm Reject"
+                )}
               </button>
             </div>
           </div>

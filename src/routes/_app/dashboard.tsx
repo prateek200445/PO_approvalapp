@@ -5,6 +5,8 @@ import { ClipboardList, CheckCircle2, XCircle, FileStack, ArrowRight, Clock } fr
 import { formatINR } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth-context";
+import { useQuery } from "@tanstack/react-query";
+import { SkeletonStats, SkeletonPendingList } from "@/components/SkeletonLoader";
 
 export const Route = createFileRoute("/_app/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — PO Approval Portal" }] }),
@@ -13,67 +15,72 @@ export const Route = createFileRoute("/_app/dashboard")({
 
 function Dashboard() {
   const { user } = useAuth();
+  const [recent] = useState<any[]>([]);
 
-  const [stats, setStats] = useState({
-  pending: 0,
-  approved: 0,
-  rejected: 0,
-});
+  // Fetch dashboard stats with React Query
+  const { data: statsData, isLoading: statsLoading, isFetching: statsFetching } = useQuery({
+    queryKey: ['dashboard-stats', user?.username],
+    queryFn: async () => {
+      if (!user?.username) throw new Error('No username');
+      const response = await fetch(getApiUrl(`/api/Dashboard/stats/${user.username}`));
+      if (!response.ok) throw new Error('Failed to fetch stats');
+      const data = await response.json();
+      return data;
+    },
+    staleTime: 0, // Always refetch to ensure fresh counts after approvals
+    refetchOnMount: 'always', // Always refetch when dashboard loads
+    enabled: !!user?.username && typeof window !== 'undefined', // Only fetch on client
+  });
 
-  const [pending, setPending] = useState<any[]>([]);
-  const [recent, setRecent] = useState<any[]>([]);
+  // Transform stats data - only use data when it's actually available
+  const stats = statsData ? {
+    pending: statsData?.pending ?? statsData?.Pending ?? 0,
+    approved: statsData?.approved ?? statsData?.Approved ?? 0,
+    rejected: statsData?.rejected ?? statsData?.Rejected ?? 0,
+  } : null;
 
-  useEffect(() => {
-    if (!user?.username) return;
-    fetch(getApiUrl(`/api/Dashboard/stats/${user.username}`))
-      .then((response) => response.json())
-      .then((data) => {
-        setStats({
-          pending: data.pending ?? data.Pending ?? 0,
-          approved: data.approved ?? data.Approved ?? 0,
-          rejected: data.rejected ?? data.Rejected ?? 0,
-        });
-      })
-      .catch((error) => {
-        console.error(error);
-      });
+  // Fetch pending POs with React Query
+  const { data: pendingData, isLoading: pendingLoading } = useQuery({
+    queryKey: ['pending-list-dashboard', user?.username],
+    queryFn: async () => {
+      if (!user?.username) throw new Error('No username');
+      const response = await fetch(getApiUrl(`/api/PO/pending/${user.username}`));
+      if (!response.ok) throw new Error('Failed to fetch pending');
+      const data = await response.json();
+      return data;
+    },
+    staleTime: 0, // Always refetch to ensure fresh data
+    refetchOnMount: 'always', // Always refetch when dashboard loads
+    enabled: !!user?.username && typeof window !== 'undefined', // Only fetch on client
+  });
 
-    fetch(getApiUrl(`/api/PO/pending/${user.username}`))
-      .then((response) => response.json())
-      .then((data) => {
-        setPending(data.slice(0, 5));
-      })
-      .catch((error) => {
-        console.error(error);
-      });
-
-    setRecent([]);
-  }, [user?.username]);
+  // Get top 5 pending
+  const pending = Array.isArray(pendingData) ? pendingData.slice(0, 5) : [];
 
 
 
  const cards = [
   {
     label: "Pending",
-    value: stats.pending,
+    value: stats?.pending ?? 0,
     icon: Clock,
     tone: "bg-warning/10 text-warning border-warning/20",
   },
   {
     label: "Approved",
-    value: stats.approved,
+    value: stats?.approved ?? 0,
     icon: CheckCircle2,
     tone: "bg-success/10 text-success border-success/20",
   },
   {
     label: "Rejected",
-    value: stats.rejected,
+    value: stats?.rejected ?? 0,
     icon: XCircle,
     tone: "bg-destructive/10 text-destructive border-destructive/20",
   },
   {
     label: "Total",
-    value: stats.pending + stats.approved + stats.rejected,
+    value: stats ? (stats.pending + stats.approved + stats.rejected) : 0,
     icon: FileStack,
     tone: "bg-primary/10 text-primary border-primary/20",
   },
@@ -89,15 +96,19 @@ function Dashboard() {
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
-        {cards.map((c) => (
-          <div key={c.label} className="rounded-xl border border-border bg-card p-4 shadow-sm">
-            <div className={`mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg border ${c.tone}`}>
-              <c.icon className="h-4.5 w-4.5" />
+        {(statsLoading || !stats) ? (
+          <SkeletonStats />
+        ) : (
+          cards.map((c) => (
+            <div key={c.label} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+              <div className={`mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg border ${c.tone}`}>
+                <c.icon className="h-4.5 w-4.5" />
+              </div>
+              <div className="text-2xl font-semibold tabular-nums">{c.value}</div>
+              <div className="text-xs text-muted-foreground">{c.label}</div>
             </div>
-            <div className="text-2xl font-semibold tabular-nums">{c.value}</div>
-            <div className="text-xs text-muted-foreground">{c.label}</div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       {/* Quick actions */}
@@ -119,20 +130,30 @@ function Dashboard() {
   <h2 className="text-sm font-semibold">Recent Activity</h2>
 </header> 
           <ul className="divide-y divide-border">
-            {pending.map((p) => (
-              <li key={p.PoNo}>
-                <Link to="/po/$poNo" params={{ poNo: p.PoNo }} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-secondary/40">
-                  <div className="min-w-0">
-                    <div className="truncate font-medium text-sm">{p.PoNo}</div>
-                    <div className="truncate text-xs text-muted-foreground">{p.FirmName}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-semibold tabular-nums">{formatINR(p.Total || 0)}</div>
-                    <StatusBadge status={p.Status} className="mt-1" />
-                  </div>
-                </Link>
+            {pendingLoading ? (
+              <li className="px-4 py-3">
+                <SkeletonPendingList />
               </li>
-            ))}
+            ) : pending.length === 0 ? (
+              <li className="px-4 py-3">
+                <div className="text-sm text-muted-foreground">No pending items</div>
+              </li>
+            ) : (
+              pending.map((p) => (
+                <li key={p.PoNo}>
+                  <Link to="/po/$poNo" params={{ poNo: p.PoNo }} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-secondary/40">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-sm">{p.PoNo}</div>
+                      <div className="truncate text-xs text-muted-foreground">{p.FirmName}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-semibold tabular-nums">{formatINR(p.Total || 0)}</div>
+                      <StatusBadge status={p.Status} className="mt-1" />
+                    </div>
+                  </Link>
+                </li>
+              ))
+            )}
           </ul>
         </section>
 

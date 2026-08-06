@@ -5,6 +5,9 @@ import { Search, ArrowUpDown, Filter } from "lucide-react";
 import { formatINR, type POStatus } from "@/lib/mock-data";
 import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useQuery } from "@tanstack/react-query";
+import { useDebounce } from "@/hooks/useDebounce";
+import { SkeletonPendingList } from "@/components/SkeletonLoader";
 
 export const Route = createFileRoute("/_app/pending")({
   head: () => ({ meta: [{ title: "Pending POs — Approval Portal" }] }),
@@ -14,29 +17,38 @@ export const Route = createFileRoute("/_app/pending")({
 function PendingList() {
   const { user } = useAuth();
 
-  const [pendingPOs, setPendingPOs] = useState<any[]>([]);
   const [q, setQ] = useState("");
   const [amount, setAmount] = useState("");
   const [filterType, setFilterType] = useState("gte");
   const [status, setStatus] = useState<"All" | POStatus>("Pending");
   const [sortDesc, setSortDesc] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
-  useEffect(() => {
-    if (!user?.username) return;
+  // Debounce amount input to reduce API calls
+  const debouncedAmount = useDebounce(amount, 500);
 
-    fetch(
-      getApiUrl(
-        `/api/PO/pending/${user.username}?amount=${amount}&filterType=${filterType}`
-      )
-    )
-      .then((res) => res.json())
-      .then((data) => {
-        setPendingPOs(data);
-      })
-      .catch((err) => {
-        console.error("Pending API Error:", err);
-      });
-  }, [user?.username, amount, filterType]);
+  // Fetch pending POs with React Query
+  const { data: pendingPOsData, isLoading } = useQuery({
+    queryKey: ['pending-list', user?.username, debouncedAmount, filterType],
+    queryFn: async () => {
+      if (!user?.username) throw new Error('No username');
+      const response = await fetch(
+        getApiUrl(
+          `/api/PO/pending/${user.username}?amount=${debouncedAmount}&filterType=${filterType}`
+        )
+      );
+      if (!response.ok) throw new Error('Failed to fetch pending');
+      const data = await response.json();
+      return data;
+    },
+    staleTime: 0, // Always refetch to ensure fresh data after approvals
+    refetchOnMount: 'always', // Always refetch when component mounts
+    enabled: !!user?.username && typeof window !== 'undefined', // Only fetch on client
+  });
+
+  // Ensure we have an array
+  const pendingPOs = Array.isArray(pendingPOsData) ? pendingPOsData : [];
  
 
 
@@ -71,6 +83,17 @@ function PendingList() {
       : new Date(a.PODate).getTime() - new Date(b.PODate).getTime()
   );
 
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [q, amount, status, filterType, sortDesc]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedData = filtered.slice(startIndex, endIndex);
+
  
 
   return (
@@ -78,7 +101,7 @@ function PendingList() {
       <div className="flex items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Purchase Orders</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{filtered.length} result{filtered.length !== 1 ? "s" : ""}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{filtered.length} result{filtered.length !== 1 ? "s" : ""} {totalPages > 1 && `(Page ${currentPage} of ${totalPages})`}</p>
         </div>
       </div>
 
@@ -135,63 +158,159 @@ function PendingList() {
 
       {/* Mobile cards */}
       <div className="grid gap-3 md:hidden">
-        {filtered.map((p) => (
-          <Link
-            key={p.PoNo}
-            to="/po/$poNo"
-            params={{ poNo: p.PoNo }}
-            className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-semibold">{p.PoNo}</div>
-                <div className="mt-0.5 truncate text-sm text-muted-foreground">{p.ApprovalName}</div>
+        {isLoading ? (
+          <SkeletonPendingList />
+        ) : filtered.length === 0 ? (
+          <EmptyState />
+        ) : (
+          paginatedData.map((p) => (
+            <Link
+              key={p.PoNo}
+              to="/po/$poNo"
+              params={{ poNo: p.PoNo }}
+              className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-semibold">{p.PoNo}</div>
+                  <div className="mt-0.5 truncate text-sm text-muted-foreground">{p.ApprovalName}</div>
+                </div>
+                <StatusBadge status={p.Status} />
               </div>
-              <StatusBadge status={p.Status} />
-            </div>
-            <div className="mt-3 flex items-end justify-between">
-              <div className="text-xs text-muted-foreground">{p.PODate}</div>
-              <div className="text-base font-semibold tabular-nums">
-  {formatINR(p.Total || 0)}
-</div>
-            </div>
-          </Link>
-        ))}
-        {filtered.length === 0 && <EmptyState />}
+              <div className="mt-3 flex items-end justify-between">
+                <div className="text-xs text-muted-foreground">{p.PODate}</div>
+                <div className="text-base font-semibold tabular-nums">
+    {formatINR(p.Total || 0)}
+  </div>
+              </div>
+            </Link>
+          ))
+        )}
       </div>
 
       {/* Desktop table */}
       <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
-        <table className="w-full text-sm">
-          <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
-            <tr>
-              <th className="px-4 py-3 font-medium">PO Number</th>
-              <th className="px-4 py-3 font-medium">Vendor</th>
-              <th className="px-4 py-3 font-medium">Date</th>
-              <th className="px-4 py-3 text-right font-medium">Amount</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {filtered.map((p) => (
-              <tr key={p.PoNo} className="hover:bg-secondary/40">
-                <td className="px-4 py-3 font-medium">
-                  <Link to="/po/$poNo" params={{ poNo: p.PoNo }} className="hover:text-primary hover:underline">
-                    {p.PoNo}
-                  </Link>
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{p.ApprovalName}</td>
-                <td className="px-4 py-3 text-muted-foreground">{p.PODate}</td>
-               <td className="px-4 py-3 text-right font-semibold tabular-nums">
-  {formatINR(p.Total || 0)}
-</td>
+        {isLoading ? (
+          <div className="p-6">
+            <SkeletonPendingList />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-6">
+            <EmptyState />
+          </div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 font-medium">PO Number</th>
+                <th className="px-4 py-3 font-medium">Vendor</th>
+                <th className="px-4 py-3 font-medium">Date</th>
+                <th className="px-4 py-3 text-right font-medium">Amount</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {paginatedData.map((p) => (
+                <tr key={p.PoNo} className="hover:bg-secondary/40">
+                  <td className="px-4 py-3 font-medium">
+                    <Link to="/po/$poNo" params={{ poNo: p.PoNo }} className="hover:text-primary hover:underline">
+                      {p.PoNo}
+                    </Link>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">{p.ApprovalName}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{p.PODate}</td>
+                 <td className="px-4 py-3 text-right font-semibold tabular-nums">
+    {formatINR(p.Total || 0)}
+  </td>
                 <td className="px-4 py-3"><StatusBadge status={p.Status} /></td>
               </tr>
             ))}
-          </tbody>
-        </table>
-        {filtered.length === 0 && <EmptyState />}
+            </tbody>
+          </table>
+        )}
       </div>
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between border-t border-border bg-card px-4 py-3 sm:px-6 rounded-b-xl">
+          <div className="flex flex-1 justify-between sm:hidden">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="relative inline-flex items-center rounded-md border border-input bg-surface px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="relative ml-3 inline-flex items-center rounded-md border border-input bg-surface px-4 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Next
+            </button>
+          </div>
+          <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm text-muted-foreground">
+                Showing <span className="font-medium">{startIndex + 1}</span> to <span className="font-medium">{Math.min(endIndex, filtered.length)}</span> of{" "}
+                <span className="font-medium">{filtered.length}</span> results
+              </p>
+            </div>
+            <div>
+              <nav className="isolate inline-flex -space-x-px rounded-md shadow-sm" aria-label="Pagination">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="relative inline-flex items-center rounded-l-md border border-input bg-surface px-2 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="sr-only">Previous</span>
+                  <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clipRule="evenodd" />
+                  </svg>
+                </button>
+                
+                {/* Page numbers */}
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  let pageNum;
+                  if (totalPages <= 5) {
+                    pageNum = i + 1;
+                  } else if (currentPage <= 3) {
+                    pageNum = i + 1;
+                  } else if (currentPage >= totalPages - 2) {
+                    pageNum = totalPages - 4 + i;
+                  } else {
+                    pageNum = currentPage - 2 + i;
+                  }
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`relative inline-flex items-center border border-input px-4 py-2 text-sm font-medium ${
+                        currentPage === pageNum
+                          ? "z-10 bg-primary text-primary-foreground"
+                          : "bg-surface hover:bg-secondary"
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="relative inline-flex items-center rounded-r-md border border-input bg-surface px-2 py-2 text-sm font-medium hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <span className="sr-only">Next</span>
+                  <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </nav>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

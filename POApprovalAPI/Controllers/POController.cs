@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
 using POApprovalAPI.Services;
+using POApprovalAPI.Models;
 using System.Text.Json;
 namespace POApprovalAPI.Controllers;
 
@@ -180,67 +181,78 @@ public async Task<IActionResult> Approve(
 {
     using var connection = _database.CreateConnection();
    
-string remarks = "";
+    string remarks = "";
 
-if (data is JsonElement json &&
-    json.TryGetProperty("remarks", out JsonElement remarksElement))
-{
-    remarks = remarksElement.GetString() ?? "";
-}
+    if (data is JsonElement json &&
+        json.TryGetProperty("remarks", out JsonElement remarksElement))
+    {
+        remarks = remarksElement.GetString() ?? "";
+    }
 
     string table = "ApprovePO";
 
-var po = await connection.QueryFirstOrDefaultAsync(
-    @"SELECT PoNo, ApprovalName
-      FROM ApprovePO
-      WHERE TransId = @transId",
-    new { transId });
-
-if (po == null)
-{
-    po = await connection.QueryFirstOrDefaultAsync(
+    // OPTIMIZED: First query to determine which table (ApprovePO or ApprovePOHOD)
+    var po = await connection.QueryFirstOrDefaultAsync(
         @"SELECT PoNo, ApprovalName
-          FROM ApprovePOHOD
+          FROM ApprovePO
           WHERE TransId = @transId",
         new { transId });
 
-    if (po != null)
-        table = "ApprovePOHOD";
-}
+    if (po == null)
+    {
+        po = await connection.QueryFirstOrDefaultAsync(
+            @"SELECT PoNo, ApprovalName
+              FROM ApprovePOHOD
+              WHERE TransId = @transId",
+            new { transId });
 
-if (po == null)
-    return NotFound();
-    var email = await connection.QueryFirstOrDefaultAsync<string>(
-    @"SELECT lr.email
-      FROM PurchasePayment pp
-      INNER JOIN loginentry..loginrights lr
-          ON lr.NAME = pp.LOGINNAME
-      WHERE pp.PurchaseCode = @PoNo",
-    new { PoNo = po.PoNo }); 
+        if (po != null)
+            table = "ApprovePOHOD";
+    }
 
-    // Get authority of current approver
-    var authority = await connection.QueryFirstOrDefaultAsync<int>(
-        @"SELECT authority
-          FROM poallocation
-          WHERE username = @ApprovalName",
-        new { ApprovalName = po.ApprovalName });
+    if (po == null)
+        return NotFound();
+
+    // OPTIMIZED: Single query instead of 2 separate queries (N+1 fix)
+    var approvalData = await connection.QueryFirstOrDefaultAsync<ApprovalData>(
+        @"SELECT 
+            pp.PurchaseCode AS PoNo,
+            pp.LOGINNAME AS ApprovalName,
+            lr.email AS Email,
+            ISNULL(pa.authority, 0) AS Authority
+          FROM PurchasePayment pp
+          LEFT JOIN loginentry..loginrights lr ON lr.NAME = pp.LOGINNAME
+          LEFT JOIN poallocation pa ON pa.username = pp.LOGINNAME
+          WHERE pp.PurchaseCode = @PoNo",
+        new { PoNo = po.PoNo });
+
+    if (approvalData == null)
+    {
+        // Fallback if PurchasePayment doesn't have the entry
+        approvalData = new ApprovalData
+        {
+            PoNo = po.PoNo,
+            ApprovalName = po.ApprovalName,
+            Email = "",
+            Authority = 0
+        };
+    }
 
     // Final Authority (authority = 1)
-    if (authority == 1)
+    if (approvalData.Authority == 1)
     {
-     
         // Update all OTHER pending approvers
-       await connection.ExecuteAsync(
-    $@"UPDATE {table}
-       SET Status = @Status
-       WHERE PoNo = @PoNo
-         AND ApprovalName <> @ApprovalName
-         AND Status = 'Pending'",
+        await connection.ExecuteAsync(
+            $@"UPDATE {table}
+               SET Status = @Status
+               WHERE PoNo = @PoNo
+                 AND ApprovalName <> @ApprovalName
+                 AND Status = 'Pending'",
             new
             {
-                PoNo = po.PoNo,
-                ApprovalName = po.ApprovalName,
-                Status = $"Approved by {po.ApprovalName}"
+                PoNo = approvalData.PoNo,
+                ApprovalName = approvalData.ApprovalName,
+                Status = $"Approved by {approvalData.ApprovalName}"
             });
 
         // Update final approver's own row
@@ -252,8 +264,8 @@ if (po == null)
                 AND ApprovalName = @ApprovalName",
             new
             {
-                PoNo = po.PoNo,
-                ApprovalName = po.ApprovalName
+                PoNo = approvalData.PoNo,
+                ApprovalName = approvalData.ApprovalName
             });
 
         // Update PoSignal to '*' in PurchasePayment for final approval
@@ -261,41 +273,39 @@ if (po == null)
             @"UPDATE PurchasePayment
               SET PoSignal = '*'
               WHERE PurchaseCode = @PoNo",
-            new { PoNo = po.PoNo });
+            new { PoNo = approvalData.PoNo });
 
-if (!string.IsNullOrWhiteSpace(email))
-{
-    await _emailService.SendMail(
-        email,
-        $"PO {po.PoNo} Approved",
-        $"Dear Sir,\n\n" +
-        $"PO Number: {po.PoNo}\n" +
-        $"Approved By: {po.ApprovalName}\n" +
-        $"Remarks: {remarks}\n\n" +
-        $"Regards,\n" +
-        $"{po.ApprovalName}"
-    );
-}
+        if (!string.IsNullOrWhiteSpace(approvalData.Email))
+        {
+            await _emailService.SendMail(
+                approvalData.Email,
+                $"PO {approvalData.PoNo} Approved",
+                $"Dear Sir,\n\n" +
+                $"PO Number: {approvalData.PoNo}\n" +
+                $"Approved By: {approvalData.ApprovalName}\n" +
+                $"Remarks: {remarks}\n\n" +
+                $"Regards,\n" +
+                $"{approvalData.ApprovalName}"
+            );
+        }
+        
         return Ok(new { success = true });
     }
 
     // Non-final authority
-   await connection.ExecuteAsync(
-    $@"UPDATE {table}
-       SET Status = 'Approved',
-           ApprovalDate = GETDATE()
-       WHERE TransId = @transId",
-    new
-    {
-        transId
-    });
+    await connection.ExecuteAsync(
+        $@"UPDATE {table}
+           SET Status = 'Approved',
+               ApprovalDate = GETDATE()
+           WHERE TransId = @transId",
+        new { transId });
 
     // Update PoSignal to '#' in PurchasePayment for intermediate approval
-   await connection.ExecuteAsync(
-    @"UPDATE PurchasePayment
-      SET PoSignal = '#'
-      WHERE PurchaseCode = @PoNo",
-    new { PoNo = po.PoNo });
+    await connection.ExecuteAsync(
+        @"UPDATE PurchasePayment
+          SET PoSignal = '#'
+          WHERE PurchaseCode = @PoNo",
+        new { PoNo = approvalData.PoNo });
 
     return Ok(new { success = true });
 }

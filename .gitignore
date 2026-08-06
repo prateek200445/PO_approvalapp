@@ -41,11 +41,16 @@ obj/
 **/obj/
 **/appsettings.Development.json
 **/Publish/
+**/launchSettings.json
 
 .vercel/
 
 # Environment files
 .env
 .env.*
+
+# .NET Configuration files with secrets (never commit)
+**/appsettings.Production.json
+**/appsettings.Local.json
 
 

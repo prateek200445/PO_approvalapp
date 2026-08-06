@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
 using POApprovalAPI.Services;
+using POApprovalAPI.Models;
 using System.Text.Json;
 namespace POApprovalAPI.Controllers;
 
@@ -152,45 +153,45 @@ if (data is JsonElement json &&
 {
     remarks = remarksElement.GetString() ?? "";
 }
-    var wo = await connection.QueryFirstOrDefaultAsync(
-    @"SELECT PoNo, ApprovalName
-      FROM ApproveWorkOrder
-      WHERE TransId = @transId",
-    new { transId });
 
-if (wo == null)
-    return NotFound();
+    // OPTIMIZED: Single query instead of 2 separate queries (N+1 fix)
+    var approvalData = await connection.QueryFirstOrDefaultAsync<ApprovalData>(
+        @"SELECT 
+            wo.PoNo,
+            wo.ApprovalName,
+            lr.email AS Email,
+            0 AS Authority
+          FROM ApproveWorkOrder wo
+          LEFT JOIN PurchasePayment pp ON pp.PurchaseCode = wo.PoNo
+          LEFT JOIN loginentry..loginrights lr ON lr.NAME = pp.LOGINNAME
+          WHERE wo.TransId = @transId",
+        new { transId });
 
-   var email = await connection.QueryFirstOrDefaultAsync<string>(
-    @"SELECT lr.email
-      FROM PurchasePayment pp
-      INNER JOIN loginentry..loginrights lr
-          ON lr.NAME = pp.LOGINNAME
-      WHERE pp.PurchaseCode = @PoNo",
-    new { PoNo = wo.PoNo }); 
+    if (approvalData == null)
+        return NotFound();
 
-   await connection.ExecuteAsync(
-    @"UPDATE ApproveWorkOrder
-      SET Status = 'Rejected',
-          ApprovalDate = GETDATE()
-      WHERE TransId = @transId",
-    new { transId });
+    await connection.ExecuteAsync(
+        @"UPDATE ApproveWorkOrder
+          SET Status = 'Rejected',
+              ApprovalDate = GETDATE()
+          WHERE TransId = @transId",
+        new { transId });
 
-if (!string.IsNullOrWhiteSpace(email))
-{
-    await _emailService.SendMail(
-        email,
-        $"Work Order {wo.PoNo} Rejected",
-        $"Dear Sir,\n\n" +
-        $"Work Order: {wo.PoNo}\n" +
-        $"Rejected By: {wo.ApprovalName}\n" +
-        $"Remarks: {remarks}\n\n" +
-        $"Regards,\n" +
-        $"{wo.ApprovalName}"
-    );
-}
+    if (!string.IsNullOrWhiteSpace(approvalData.Email))
+    {
+        await _emailService.SendMail(
+            approvalData.Email,
+            $"Work Order {approvalData.PoNo} Rejected",
+            $"Dear Sir,\n\n" +
+            $"Work Order: {approvalData.PoNo}\n" +
+            $"Rejected By: {approvalData.ApprovalName}\n" +
+            $"Remarks: {remarks}\n\n" +
+            $"Regards,\n" +
+            $"{approvalData.ApprovalName}"
+        );
+    }
 
-return Ok(new { success = true });
+    return Ok(new { success = true });
 }
 [HttpPost("approve/{transId}")]
 public async Task<IActionResult> Approve(
@@ -199,7 +200,7 @@ public async Task<IActionResult> Approve(
 {
     using var connection = _database.CreateConnection();
 
-  string remarks = "";
+    string remarks = "";
 
 if (data is JsonElement json &&
     json.TryGetProperty("remarks", out JsonElement remarksElement))
@@ -207,53 +208,38 @@ if (data is JsonElement json &&
     remarks = remarksElement.GetString() ?? "";
 }
 
-    var wo = await connection.QueryFirstOrDefaultAsync(
-        @"SELECT PoNo, ApprovalName
-          FROM ApproveWorkOrder
-          WHERE TransId = @transId",
+    // OPTIMIZED: Single query instead of 3 separate queries (N+1 fix)
+    var approvalData = await connection.QueryFirstOrDefaultAsync<ApprovalData>(
+        @"SELECT 
+            wo.PoNo,
+            wo.ApprovalName,
+            lr.email AS Email,
+            ISNULL(pa.authority, 0) AS Authority
+          FROM ApproveWorkOrder wo
+          LEFT JOIN PurchasePayment pp ON pp.PurchaseCode = wo.PoNo
+          LEFT JOIN loginentry..loginrights lr ON lr.NAME = pp.LOGINNAME
+          LEFT JOIN poallocation pa ON pa.username = wo.ApprovalName
+          WHERE wo.TransId = @transId",
         new { transId });
 
-    if (wo == null)
+    if (approvalData == null)
         return NotFound();
 
-    var email = await connection.QueryFirstOrDefaultAsync<string>(
-    @"SELECT lr.email
-      FROM PurchasePayment pp
-      INNER JOIN loginentry..loginrights lr
-          ON lr.NAME = pp.LOGINNAME
-      WHERE pp.PurchaseCode = @PoNo",
-    new { PoNo = wo.PoNo });
-
-    // Get authority of current approver
-    var authority = await connection.QueryFirstOrDefaultAsync<int>(
-        @"SELECT authority
-          FROM poallocation
-          WHERE username = @ApprovalName",
-        new { ApprovalName = wo.ApprovalName });
-     
-      Console.WriteLine("=================================");
-Console.WriteLine($"PONO = {wo.PoNo}");
-Console.WriteLine($"USER = {wo.ApprovalName}");
-Console.WriteLine($"AUTHORITY = {authority}");
-Console.WriteLine("=================================");  
-
     // Final Authority (authority = 1)
-    if (authority == 1)
+    if (approvalData.Authority == 1)
     {
-      Console.WriteLine("FINAL AUTHORITY BLOCK EXECUTED");   
-    await connection.ExecuteAsync(
-    @"UPDATE ApproveWorkOrder
-      SET Status = @Status
-      WHERE PoNo = @PoNo
-        AND ApprovalName <> @ApprovalName
-        AND Status = 'Pending'",
-    new
-    {
-        PoNo = wo.PoNo,
-        ApprovalName = wo.ApprovalName,
-        Status = $"Approved by {wo.ApprovalName}"
-    });
-           
+        await connection.ExecuteAsync(
+            @"UPDATE ApproveWorkOrder
+              SET Status = @Status
+              WHERE PoNo = @PoNo
+                AND ApprovalName <> @ApprovalName
+                AND Status = 'Pending'",
+            new
+            {
+                PoNo = approvalData.PoNo,
+                ApprovalName = approvalData.ApprovalName,
+                Status = $"Approved by {approvalData.ApprovalName}"
+            });
 
         await connection.ExecuteAsync(
             @"UPDATE ApproveWorkOrder
@@ -263,32 +249,31 @@ Console.WriteLine("=================================");
                 AND ApprovalName = @ApprovalName",
             new
             {
-                PoNo = wo.PoNo,
-                ApprovalName = wo.ApprovalName
+                PoNo = approvalData.PoNo,
+                ApprovalName = approvalData.ApprovalName
             });
 
         // Final approval signal
         await connection.ExecuteAsync(
-    @"UPDATE PurchasePayment
-      SET PoSignal = '*'
-      WHERE PurchaseCode = @PoNo",
-    new { PoNo = wo.PoNo });
+            @"UPDATE PurchasePayment
+              SET PoSignal = '*'
+              WHERE PurchaseCode = @PoNo",
+            new { PoNo = approvalData.PoNo });
 
-    if (!string.IsNullOrEmpty(email))
-{
-    Console.WriteLine("EMAIL BLOCK EXECUTED");
-Console.WriteLine($"Sending email to: {email}");
-  await _emailService.SendMail(
-    email,
-    $"Work Order {wo.PoNo} Approved",
-    $"Dear Sir,\n\n" +
-    $"Work Order: {wo.PoNo}\n" +
-    $"Approved By: {wo.ApprovalName}\n" +
-    $"Remarks: {remarks}\n\n" +
-    $"Regards,\n" +
-    $"{wo.ApprovalName}"
-);
-}
+        if (!string.IsNullOrEmpty(approvalData.Email))
+        {
+            await _emailService.SendMail(
+                approvalData.Email,
+                $"Work Order {approvalData.PoNo} Approved",
+                $"Dear Sir,\n\n" +
+                $"Work Order: {approvalData.PoNo}\n" +
+                $"Approved By: {approvalData.ApprovalName}\n" +
+                $"Remarks: {remarks}\n\n" +
+                $"Regards,\n" +
+                $"{approvalData.ApprovalName}"
+            );
+        }
+        
         return Ok(new { success = true });
     }
 
@@ -300,11 +285,12 @@ Console.WriteLine($"Sending email to: {email}");
           WHERE TransId = @transId",
         new { transId });
 
-   await connection.ExecuteAsync(
-    @"UPDATE PurchasePayment
-      SET PoSignal = '#'
-      WHERE PurchaseCode = @PoNo",
-    new { PoNo = wo.PoNo });
+    await connection.ExecuteAsync(
+        @"UPDATE PurchasePayment
+          SET PoSignal = '#'
+          WHERE PurchaseCode = @PoNo",
+        new { PoNo = approvalData.PoNo });
+
     return Ok(new { success = true });
 }
 }
