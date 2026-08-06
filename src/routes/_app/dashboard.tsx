@@ -123,7 +123,7 @@ function Dashboard() {
        
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid gap-5">
         {/* Recent pending POs */}
         <section className="rounded-xl border border-border bg-card">
          <header className="border-b border-border px-4 py-3">
@@ -154,36 +154,6 @@ function Dashboard() {
                 </li>
               ))
             )}
-          </ul>
-        </section>
-
-        {/* Recent activity */}
-        <section className="rounded-xl border border-border bg-card">
-          <header className="flex items-center justify-between border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold">Recent Activity</h2>
-           
-          </header>
-          <ul className="divide-y divide-border">
-            {recent.length === 0 ? (
-  <div className="p-4 text-sm text-muted-foreground">
-    No recent activity
-  </div>
-) : (
-  recent.map((h) => (
-              <li key={h.id} className="flex items-start gap-3 px-4 py-3">
-                <div className={`mt-0.5 h-2 w-2 flex-shrink-0 rounded-full ${h.status === "Approved" ? "bg-success" : h.status === "Rejected" ? "bg-destructive" : "bg-warning"}`} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="truncate text-sm font-medium">{h.user} <span className="text-muted-foreground">· {h.role}</span></div>
-                    <div className="text-xs text-muted-foreground">{h.date}</div>
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {h.action} <span className="font-medium text-foreground">{h.poNumber}</span>
-                  </div>
-                </div>
-              </li>
-            ))
-)}
           </ul>
         </section>
       </div>

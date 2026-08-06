@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { getApiUrl } from "@/lib/api-config";
 import {  useState, useEffect } from "react";
-import { Search, ArrowUpDown, Filter } from "lucide-react";
+import { Search, ArrowUpDown, Filter, X } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 
@@ -16,7 +16,8 @@ function PendingList() {
 
   const [pendingPOs, setPendingPOs] = useState<any[]>([]);
   const [amount, setAmount] = useState("");
-const [filterType, setFilterType] = useState("gte");
+  const [filterType, setFilterType] = useState("gte");
+  const [showFilterSheet, setShowFilterSheet] = useState(false);
   useEffect(() => {
     if (!user?.username) return;
 
@@ -80,15 +81,15 @@ const [filterType, setFilterType] = useState("gte");
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+      {/* Filters - Desktop Only */}
+      <div className="hidden md:flex md:flex-col md:gap-3">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search PO number or vendor…"
+            placeholder="Search Indent number…"
             className="h-10 w-full rounded-md border border-input bg-surface pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
           />
         </div>
@@ -111,6 +112,60 @@ const [filterType, setFilterType] = useState("gte");
             className="inline-flex h-10 items-center gap-1.5 rounded-md border border-input bg-surface px-3 text-sm font-medium hover:bg-secondary"
           >
             <ArrowUpDown className="h-4 w-4" />
+            {sortDesc ? "Newest" : "Oldest"}
+          </button>
+        </div>
+      </div>
+
+      {/* Filters - Mobile Only */}
+      <div className="space-y-2 md:hidden">
+        {/* Search Bar */}
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search Indent…"
+            className="h-10 w-full rounded-md border border-input bg-surface pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+          />
+        </div>
+
+        {/* Active Filters + Filter Button Row */}
+        <div className="flex items-center gap-2">
+          {/* Active Filter Chips */}
+          <div className="flex flex-wrap gap-1 flex-1">
+            {status !== "All" && (
+              <button
+                onClick={() => setStatus("All")}
+                className="inline-flex items-center gap-1 rounded-full bg-primary/20 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/30 transition"
+              >
+                {status}
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Filter Button */}
+          <button
+            onClick={() => setShowFilterSheet(true)}
+            className="inline-flex h-10 items-center gap-2 rounded-md border border-input bg-surface px-3 text-sm font-medium hover:bg-secondary whitespace-nowrap"
+          >
+            <Filter className="h-4 w-4" />
+            <span className="text-xs">Filters</span>
+            {status !== "All" && (
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
+                1
+              </span>
+            )}
+          </button>
+
+          {/* Sort Button */}
+          <button
+            onClick={() => setSortDesc((v) => !v)}
+            className="inline-flex h-10 items-center gap-1.5 rounded-md border border-input bg-surface px-2 text-xs font-medium hover:bg-secondary whitespace-nowrap"
+          >
+            <ArrowUpDown className="h-3.5 w-3.5" />
             {sortDesc ? "Newest" : "Oldest"}
           </button>
         </div>
@@ -187,6 +242,90 @@ params={{ indentNo: p.IndentNo }}
         </table>
         {filtered.length === 0 && <EmptyState />}
       </div>
+
+      {/* Mobile Bottom Sheet Filter */}
+      {showFilterSheet && (
+        <div className="fixed inset-0 z-40 md:hidden">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setShowFilterSheet(false)}
+          />
+
+          {/* Bottom Sheet */}
+          <div className="absolute bottom-0 left-0 right-0 z-50 rounded-t-2xl border-t border-border bg-surface p-4 pb-6 shadow-xl">
+            {/* Handle */}
+            <div className="mb-4 flex justify-center">
+              <div className="h-1 w-10 rounded-full bg-muted" />
+            </div>
+
+            {/* Title */}
+            <h2 className="mb-4 text-lg font-semibold">Filters</h2>
+
+            {/* Status Filter */}
+            <div className="mb-6 space-y-2">
+              <label className="text-sm font-medium">Status</label>
+              <div className="space-y-2">
+                {["All", "Pending", "Approved", "Rejected"].map((s) => (
+                  <label key={s} className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="status"
+                      value={s}
+                      checked={status === s}
+                      onChange={(e) => setStatus(e.target.value)}
+                      className="h-4 w-4"
+                    />
+                    <span className="text-sm">{s}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Sort Filter */}
+            <div className="mb-6 space-y-2">
+              <label className="text-sm font-medium">Sort</label>
+              <div className="space-y-2">
+                {[
+                  { value: true, label: "Newest" },
+                  { value: false, label: "Oldest" },
+                ].map((option) => (
+                  <label key={String(option.value)} className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="sort"
+                      checked={sortDesc === option.value}
+                      onChange={() => setSortDesc(option.value)}
+                      className="h-4 w-4"
+                    />
+                    <span className="text-sm">{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setQ("");
+                  setStatus("Pending");
+                  setSortDesc(true);
+                }}
+                className="flex-1 h-10 rounded-md border border-input bg-background text-sm font-medium hover:bg-secondary"
+              >
+                Reset
+              </button>
+              <button
+                onClick={() => setShowFilterSheet(false)}
+                className="flex-1 h-10 rounded-md bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
