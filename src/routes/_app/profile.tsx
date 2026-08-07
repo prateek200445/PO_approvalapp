@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { KeyRound, LogOut, Building2, Server } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
@@ -15,6 +15,13 @@ function Profile() {
   const navigate = useNavigate();
   const [showPwd, setShowPwd] = useState(false);
   const [showServerSettings, setShowServerSettings] = useState(false);
+
+  // Scroll to top on component mount
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, []);
 
   const initials = (user?.name ?? "U").split(" ").map((s) => s[0]).slice(0, 2).join("");
 

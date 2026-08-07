@@ -26,6 +26,13 @@ function PendingList() {
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const itemsPerPage = 20;
 
+  // Scroll to top on component mount
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, []);
+
   // Debounce the amount input (500ms delay)
   const debouncedAmount = useDebounce(amount, 500);
 

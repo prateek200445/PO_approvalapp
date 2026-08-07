@@ -18,6 +18,14 @@ function PendingList() {
   const [amount, setAmount] = useState("");
   const [filterType, setFilterType] = useState("gte");
   const [showFilterSheet, setShowFilterSheet] = useState(false);
+  
+  // Scroll to top on component mount
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, []);
+  
   useEffect(() => {
     if (!user?.username) return;
 
