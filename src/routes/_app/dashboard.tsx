@@ -17,6 +17,11 @@ function Dashboard() {
   const { user } = useAuth();
   const [recent] = useState<any[]>([]);
 
+  // Ensure scroll to top on component mount
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   // Fetch dashboard stats with React Query
   const { data: statsData, isLoading: statsLoading, isFetching: statsFetching } = useQuery({
     queryKey: ['dashboard-stats', user?.username],

@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils";
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const path = useRouterState({ select: (s) => s.location.pathname });
+  const router = useRouterState();
+  const path = router.location.pathname;
   const [dark, setDark] = useState(false);
   const prevPathRef = useRef<string>("");
 
@@ -19,25 +20,26 @@ export function AppShell() {
     }
   }, []);
 
-  // Scroll to top when path actually changes
+  // Scroll to top on every navigation including first load
   useEffect(() => {
-    if (path !== prevPathRef.current) {
-      prevPathRef.current = path;
+    const scrollToTop = () => {
+      window.scrollTo({ top: 0, behavior: 'instant' });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
       
-      // Small delay to ensure DOM is ready
-      const timer = setTimeout(() => {
-        window.scrollTo(0, 0);
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
-        
-        const mainContent = document.getElementById('main-content');
-        if (mainContent) {
-          mainContent.scrollTop = 0;
-        }
-      }, 0);
-      
-      return () => clearTimeout(timer);
-    }
+      const mainContent = document.getElementById('main-content');
+      if (mainContent) {
+        mainContent.scrollTop = 0;
+      }
+    };
+
+    // Scroll immediately
+    scrollToTop();
+    
+    // Also scroll after a brief delay to catch late-rendering content
+    const timer = setTimeout(scrollToTop, 100);
+    
+    return () => clearTimeout(timer);
   }, [path]);
 
   function toggleTheme() {
@@ -67,7 +69,11 @@ export function AppShell() {
       <header className="sticky top-0 z-30 border-b border-border bg-surface/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 md:px-6">
           <Link to="/dashboard" className="flex items-center gap-2.5">
-            <img src="/hcp_logo.jpeg" alt="HCP Logo" className="h-9 w-9 rounded-lg" />
+            <img 
+              src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"} 
+              alt="HCP Logo" 
+              className={dark ? "h-11 w-11 rounded-lg" : "h-9 w-9 rounded-lg"}
+            />
             <div className="leading-tight">
               <div className="text-sm font-semibold">HCP</div>
               <div className="text-[11px] text-muted-foreground">PO Approval Portal</div>

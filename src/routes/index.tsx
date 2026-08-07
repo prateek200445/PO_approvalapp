@@ -24,10 +24,18 @@ function Login() {
   const [loading, setLoading] = useState(false);
   const [showServerSettings, setShowServerSettings] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [dark, setDark] = useState(false);
 
   useEffect(() => {
     if (ready && user) navigate({ to: "/dashboard" });
   }, [ready, user, navigate]);
+
+  useEffect(() => {
+    const stored = localStorage.getItem("po-theme");
+    if (stored === "dark" || (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+      setDark(true);
+    }
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -56,7 +64,11 @@ try {
           backgroundImage: "radial-gradient(circle at 20% 30%, rgba(255,255,255,.4) 0, transparent 40%), radial-gradient(circle at 80% 70%, rgba(255,255,255,.25) 0, transparent 40%)"
         }} />
         <div className="relative flex items-center gap-3">
-          <img src="/hcp_logo.jpeg" alt="HCP Logo" className="h-11 w-11 rounded-lg" />
+          <img 
+            src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"} 
+            alt="HCP Logo" 
+            className={dark ? "h-13 w-13 rounded-lg" : "h-11 w-11 rounded-lg"}
+          />
           <div>
             <div className="text-lg font-semibold">HCP Plastene Bulkpack Ltd.</div>
             <div className="text-xs opacity-80">Enterprise Approval Suite</div>
@@ -88,7 +100,11 @@ try {
 
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <img src="/hcp_logo.jpeg" alt="HCP Logo" className="h-10 w-10 rounded-lg" />
+            <img 
+              src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"} 
+              alt="HCP Logo" 
+              className={dark ? "h-12 w-12 rounded-lg" : "h-10 w-10 rounded-lg"}
+            />
             <div>
               <div className="text-sm font-semibold">HCP Plastene Bulkpack Ltd.</div>
               <div className="text-[11px] text-muted-foreground">PO Approval Portal</div>
