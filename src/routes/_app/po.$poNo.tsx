@@ -3,7 +3,7 @@ import { getApiUrl } from "@/lib/api-config";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
 import { ArrowLeft, FileText, Download, CheckCircle2, XCircle, Building2, Calendar, User as UserIcon, Hash, IndianRupee, Briefcase, ExternalLink, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader2 } from "lucide-react";
-import { formatINR, type ApprovalStep } from "@/lib/mock-data";
+import { currencyLabel, formatMoney, formatMoneyAmount, type ApprovalStep } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -249,42 +249,26 @@ function PODetails() {
       
       toast.success("PO approved successfully");
 
-      // CRITICAL: Invalidate ALL related caches with proper patterns
-      await Promise.all([
-        queryClient.invalidateQueries({ 
-          queryKey: ['pending-list'],
-          refetchType: 'all' 
-        }),
-        queryClient.invalidateQueries({ 
-          queryKey: ['dashboard-stats'],
-          refetchType: 'all'
-        }),
-        queryClient.invalidateQueries({ 
-          queryKey: ['pending-list-dashboard'],
-          refetchType: 'all'
-        }),
-      ]);
-
-      // Fetch fresh pending list after cache invalidation
-      const pending = await fetch(
-        getApiUrl(`/api/PO/pending/${user?.username}`)
-      ).then(r => r.json());
-
-      // Navigate to next PO or back to list
-      if (Array.isArray(pending) && pending.length > 0) {
-        // Find next PO (exclude current one)
-        const nextPO = pending.find(p => p.PoNo !== poNo);
-        if (nextPO) {
-          navigate({
-            to: "/po/$poNo",
-            params: { poNo: nextPO.PoNo },
-          });
-        } else {
-          // No more pending POs
-          navigate({ to: "/pending" });
+      // Navigate immediately using cached list; refresh caches in background
+      const cachedLists = queryClient.getQueriesData({ queryKey: ["pending-list"] });
+      let nextPoNo: string | null = null;
+      for (const [, data] of cachedLists) {
+        if (Array.isArray(data)) {
+          const next = data.find((p: any) => p.PoNo !== poNo);
+          if (next?.PoNo) {
+            nextPoNo = next.PoNo;
+            break;
+          }
         }
+      }
+
+      void queryClient.invalidateQueries({ queryKey: ["pending-list"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+
+      if (nextPoNo) {
+        navigate({ to: "/po/$poNo", params: { poNo: nextPoNo } });
       } else {
-        // No pending POs left
         navigate({ to: "/pending" });
       }
     } catch (err) {
@@ -332,44 +316,27 @@ function PODetails() {
 
       toast.success("PO rejected successfully");
       
-      // CRITICAL: Invalidate ALL related caches with proper patterns
-      await Promise.all([
-        queryClient.invalidateQueries({ 
-          queryKey: ['pending-list'],
-          refetchType: 'all' 
-        }),
-        queryClient.invalidateQueries({ 
-          queryKey: ['dashboard-stats'],
-          refetchType: 'all'
-        }),
-        queryClient.invalidateQueries({ 
-          queryKey: ['pending-list-dashboard'],
-          refetchType: 'all'
-        }),
-      ]);
-
       setConfirm(null);
 
-      // Fetch fresh pending list after cache invalidation
-      const pending = await fetch(
-        getApiUrl(`/api/PO/pending/${user?.username}`)
-      ).then(r => r.json());
-
-      // Navigate to next PO or back to list
-      if (Array.isArray(pending) && pending.length > 0) {
-        // Find next PO (exclude current one)
-        const nextPO = pending.find(p => p.PoNo !== poNo);
-        if (nextPO) {
-          navigate({
-            to: "/po/$poNo",
-            params: { poNo: nextPO.PoNo },
-          });
-        } else {
-          // No more pending POs
-          navigate({ to: "/pending" });
+      const cachedLists = queryClient.getQueriesData({ queryKey: ["pending-list"] });
+      let nextPoNo: string | null = null;
+      for (const [, data] of cachedLists) {
+        if (Array.isArray(data)) {
+          const next = data.find((p: any) => p.PoNo !== poNo);
+          if (next?.PoNo) {
+            nextPoNo = next.PoNo;
+            break;
+          }
         }
+      }
+
+      void queryClient.invalidateQueries({ queryKey: ["pending-list"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+
+      if (nextPoNo) {
+        navigate({ to: "/po/$poNo", params: { poNo: nextPoNo } });
       } else {
-        // No pending POs left
         navigate({ to: "/pending" });
       }
     } catch (err) {
@@ -381,6 +348,7 @@ function PODetails() {
   }
 
   const grandTotal = Number(poDetails?.TotalAmount || 0);
+  const currency = poDetails?.Currency;
 
   const headerItems = [
     { icon: Hash, label: "PO Number", value: poDetails.PurchaseCode },
@@ -391,7 +359,7 @@ function PODetails() {
     {
       icon: IndianRupee,
       label: "PO Amount",
-      value: formatINR(grandTotal),
+      value: formatMoney(grandTotal, currency),
       strong: true,
     },
   ];
@@ -440,8 +408,8 @@ function PODetails() {
                   <tr>
                     <th className="px-3 py-2 font-medium">Item</th>
                     <th className="px-3 py-2 text-right font-medium">Qty</th>
-                    <th className="px-3 py-2 text-right font-medium">Rate</th>
-                    <th className="px-3 py-2 text-right font-medium">Amount</th>
+                    <th className="px-3 py-2 text-right font-medium">Rate({currencyLabel(currency)})</th>
+                    <th className="px-3 py-2 text-right font-medium">Amount({currencyLabel(currency)})</th>
                   </tr>
                 </thead>
                <tbody className="divide-y divide-border">
@@ -450,10 +418,10 @@ function PODetails() {
       <td className="px-3 py-2">{item.ItemDesc}</td>
       <td className="px-3 py-2 text-right">{item.Qty}</td>
       <td className="px-3 py-2 text-right">
-        {formatINR(item.Rate)}
+        {formatMoneyAmount(item.Rate)}
       </td>
       <td className="px-3 py-2 text-right">
-        {formatINR(item.Total)}
+        {formatMoneyAmount(item.Total)}
       </td>
     </tr>
   ))}
@@ -462,7 +430,7 @@ function PODetails() {
                   <tr>
                     <td colSpan={3} className="px-3 py-2 text-right text-xs font-medium uppercase text-muted-foreground">Total</td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">
-  {formatINR(grandTotal)}
+  {formatMoneyAmount(grandTotal)}
 </td>
                   </tr>
                 </tfoot>

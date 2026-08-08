@@ -20,6 +20,10 @@ public class PurchaseOrderPdfModel
 
     public string ContactName { get; set; } = "";
     public string ContactNo { get; set; } = "";
+    /// <summary>Store contact email shown in term 3 (from loginrights).</summary>
+    public string StoreEmail { get; set; } = "";
+    /// <summary>Currency code from Vw_PurchaseOrder (e.g. Rs, USD).</summary>
+    public string Currency { get; set; } = "";
 
     public DateTime? PoDate { get; set; }
     public DateTime? DeliveryDate { get; set; }

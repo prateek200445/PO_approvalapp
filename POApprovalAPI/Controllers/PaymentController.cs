@@ -73,6 +73,31 @@ public async Task<IActionResult> Approve([FromBody] PaymentApprovalRequest reque
     return BadRequest(ex.ToString());
 }
 }
+
+[HttpPost("approve-bulk")]
+public async Task<IActionResult> ApproveBulk([FromBody] PaymentBulkApproveRequest request)
+{
+    if (request == null)
+        return BadRequest(new { message = "Request body is required" });
+
+    if (string.IsNullOrWhiteSpace(request.UserName))
+        return BadRequest(new { message = "UserName is required" });
+
+    if (request.PaymentNos == null || request.PaymentNos.Count == 0)
+        return BadRequest(new { message = "At least one PaymentNo is required" });
+
+    if (request.PaymentNos.Count > PaymentService.MaxBulkSize)
+    {
+        return BadRequest(new
+        {
+            message = $"Maximum {PaymentService.MaxBulkSize} payments allowed per bulk approve"
+        });
+    }
+
+    var result = await _paymentService.ApproveBulkAsync(request);
+    return Ok(result);
+}
+
 [HttpPost("reject")]
 public async Task<IActionResult> Reject([FromBody] PaymentApprovalRequest request)
 {

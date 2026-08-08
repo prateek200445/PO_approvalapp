@@ -13,7 +13,7 @@ public class EmailService
     }
 
     /// <summary>
-    /// Queues email send in the background so approve/reject APIs are not blocked by SMTP.
+    /// Queues email in the background so approve/reject is not blocked by SMTP.
     /// </summary>
     public Task SendMail(string to, string subject, string body)
     {
@@ -38,7 +38,6 @@ public class EmailService
                 return;
             }
 
-            // Password not configured — fail fast instead of hanging on SMTP auth
             if (string.IsNullOrWhiteSpace(password))
             {
                 Console.WriteLine("EMAIL SKIPPED: EmailSettings:Password is not configured");
@@ -60,7 +59,7 @@ public class EmailService
             {
                 Port = port,
                 EnableSsl = true,
-                Timeout = 8000, // don't hang approve flows
+                Timeout = 8000,
                 Credentials = new NetworkCredential(username, password)
             };
 

@@ -3,7 +3,7 @@ import { getApiUrl } from "@/lib/api-config";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
 import { ArrowLeft, FileText, Download, CheckCircle2, XCircle, Building2, Calendar, User as UserIcon, Hash, IndianRupee, Briefcase, ExternalLink, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader2 } from "lucide-react";
-import { formatINR, type ApprovalStep } from "@/lib/mock-data";
+import { currencyLabel, formatMoney, formatMoneyAmount, type ApprovalStep } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -268,42 +268,25 @@ if (!po || po.length === 0) {
 
     toast.success("Work Order approved successfully");
 
-    // CRITICAL: Invalidate ALL related caches with proper patterns
-    await Promise.all([
-      queryClient.invalidateQueries({ 
-        queryKey: ['workorder-list'],
-        refetchType: 'all' 
-      }),
-      queryClient.invalidateQueries({ 
-        queryKey: ['dashboard-stats'],
-        refetchType: 'all'
-      }),
-      queryClient.invalidateQueries({ 
-        queryKey: ['pending-list-dashboard'],
-        refetchType: 'all'
-      }),
-    ]);
-
-    // Fetch fresh pending work orders after cache invalidation
-    const pending = await fetch(
-      getApiUrl(`/api/WorkOrder/pending/${user?.username}`)
-    ).then(r => r.json());
-
-    // Navigate to next WO or back to list
-    if (Array.isArray(pending) && pending.length > 0) {
-      // Find next WO (exclude current one)
-      const nextWO = pending.find(w => w.PoNo !== poNo);
-      if (nextWO) {
-        navigate({
-          to: "/workorder/$poNo",
-          params: { poNo: nextWO.PoNo }
-        });
-      } else {
-        // No more pending WOs
-        navigate({ to: "/workorders" });
+    const cachedLists = queryClient.getQueriesData({ queryKey: ["workorder-list"] });
+    let nextWoNo: string | null = null;
+    for (const [, data] of cachedLists) {
+      if (Array.isArray(data)) {
+        const next = data.find((w: any) => w.PoNo !== poNo);
+        if (next?.PoNo) {
+          nextWoNo = next.PoNo;
+          break;
+        }
       }
+    }
+
+    void queryClient.invalidateQueries({ queryKey: ["workorder-list"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+    void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+
+    if (nextWoNo) {
+      navigate({ to: "/workorder/$poNo", params: { poNo: nextWoNo } });
     } else {
-      // No pending WOs left
       navigate({ to: "/workorders" });
     }
 
@@ -351,44 +334,27 @@ if (!po || po.length === 0) {
 
       toast.success("Work Order rejected successfully");
       
-      // CRITICAL: Invalidate ALL related caches with proper patterns
-      await Promise.all([
-        queryClient.invalidateQueries({ 
-          queryKey: ['workorder-list'],
-          refetchType: 'all' 
-        }),
-        queryClient.invalidateQueries({ 
-          queryKey: ['dashboard-stats'],
-          refetchType: 'all'
-        }),
-        queryClient.invalidateQueries({ 
-          queryKey: ['pending-list-dashboard'],
-          refetchType: 'all'
-        }),
-      ]);
-
       setConfirm(null);
 
-      // Fetch fresh pending work orders after cache invalidation
-      const pending = await fetch(
-        getApiUrl(`/api/WorkOrder/pending/${user?.username}`)
-      ).then(r => r.json());
-
-      // Navigate to next WO or back to list
-      if (Array.isArray(pending) && pending.length > 0) {
-        // Find next WO (exclude current one)
-        const nextWO = pending.find(w => w.PoNo !== poNo);
-        if (nextWO) {
-          navigate({
-            to: "/workorder/$poNo",
-            params: { poNo: nextWO.PoNo },
-          });
-        } else {
-          // No more pending WOs
-          navigate({ to: "/workorders" });
+      const cachedLists = queryClient.getQueriesData({ queryKey: ["workorder-list"] });
+      let nextWoNo: string | null = null;
+      for (const [, data] of cachedLists) {
+        if (Array.isArray(data)) {
+          const next = data.find((w: any) => w.PoNo !== poNo);
+          if (next?.PoNo) {
+            nextWoNo = next.PoNo;
+            break;
+          }
         }
+      }
+
+      void queryClient.invalidateQueries({ queryKey: ["workorder-list"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+
+      if (nextWoNo) {
+        navigate({ to: "/workorder/$poNo", params: { poNo: nextWoNo } });
       } else {
-        // No pending WOs left
         navigate({ to: "/workorders" });
       }
     } catch (err) {
@@ -400,6 +366,7 @@ if (!po || po.length === 0) {
   }
 
   const grandTotal = Number(woDetails?.TotalAmount || 0);
+  const currency = woDetails?.Currency;
 
   const headerItems = [
     { icon: Hash, label: "WO Number", value: woDetails?.PurchaseCode },
@@ -410,7 +377,7 @@ if (!po || po.length === 0) {
     {
       icon: IndianRupee,
       label: "WO Amount",
-      value: formatINR(grandTotal),
+      value: formatMoney(grandTotal, currency),
       strong: true,
     },
     {
@@ -464,8 +431,8 @@ if (!po || po.length === 0) {
                   <tr>
                     <th className="px-3 py-2 font-medium">Item</th>
                     <th className="px-3 py-2 text-right font-medium">Qty</th>
-                    <th className="px-3 py-2 text-right font-medium">Rate</th>
-                    <th className="px-3 py-2 text-right font-medium">Amount</th>
+                    <th className="px-3 py-2 text-right font-medium">Rate({currencyLabel(currency)})</th>
+                    <th className="px-3 py-2 text-right font-medium">Amount({currencyLabel(currency)})</th>
                   </tr>
                 </thead>
                <tbody className="divide-y divide-border">
@@ -474,10 +441,10 @@ if (!po || po.length === 0) {
       <td className="px-3 py-2">{item.ItemDesc}</td>
       <td className="px-3 py-2 text-right">{item.Qty}</td>
       <td className="px-3 py-2 text-right">
-        {formatINR(item.Rate)}
+        {formatMoneyAmount(item.Rate)}
       </td>
       <td className="px-3 py-2 text-right">
-        {formatINR(item.Total)}
+        {formatMoneyAmount(item.Total)}
       </td>
     </tr>
   ))}
@@ -486,7 +453,7 @@ if (!po || po.length === 0) {
                   <tr>
                     <td colSpan={3} className="px-3 py-2 text-right text-xs font-medium uppercase text-muted-foreground">Total</td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">
-  {formatINR(grandTotal)}
+  {formatMoneyAmount(grandTotal)}
 </td>
                   </tr>
                 </tfoot>

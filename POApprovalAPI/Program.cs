@@ -38,6 +38,8 @@ builder.Services.AddScoped<ManagerService>();
 builder.Services.AddScoped<IWhatsAppService, WhatsAppService>();
 builder.Services.AddScoped<DailyReportProcessorService>();
 builder.Services.AddScoped<EmailService>();
+builder.Services.AddScoped<PoApprovalService>();
+builder.Services.AddScoped<WorkOrderApprovalService>();
 
 builder.Services.AddCors(options =>
 {

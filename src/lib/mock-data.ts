@@ -138,3 +138,26 @@ export function summary() {
 export function formatINR(n: number) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
 }
+
+export function currencyLabel(currency?: string | null) {
+  return (currency ?? "").trim() || "Rs";
+}
+
+/** Round only when more than 2 decimal places; number only (no currency). */
+export function formatMoneyAmount(n: number | null | undefined) {
+  const value = Number(n);
+  if (!Number.isFinite(value)) return "";
+
+  const rounded = Math.round((value + Number.EPSILON) * 100) / 100;
+  return new Intl.NumberFormat("en-IN", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(rounded);
+}
+
+/** Amount with currency in brackets, e.g. "1,174.25 (Rs)" — matches PDF Rate(Rs) style. */
+export function formatMoney(n: number | null | undefined, currency?: string | null) {
+  const amount = formatMoneyAmount(n);
+  if (!amount) return "";
+  return `${amount} (${currencyLabel(currency)})`;
+}

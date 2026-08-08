@@ -349,6 +349,100 @@ return true;
         transaction.Rollback();
         throw;
     }
-}  
+}
+
+public const int MaxBulkSize = 50;
+private const int BulkParallelism = 4;
+
+public async Task<PaymentBulkApproveResponse> ApproveBulkAsync(PaymentBulkApproveRequest request)
+{
+    var response = new PaymentBulkApproveResponse();
+
+    if (request?.PaymentNos == null || request.PaymentNos.Count == 0)
+        return response;
+
+    if (string.IsNullOrWhiteSpace(request.UserName))
+    {
+        response.Total = request.PaymentNos.Count;
+        response.Failed.Add(new PaymentApproveItemResult
+        {
+            PaymentNo = null,
+            Success = false,
+            Reason = "UserName is required for bulk approve"
+        });
+        return response;
+    }
+
+    var distinctNos = request.PaymentNos
+        .Where(n => !string.IsNullOrWhiteSpace(n))
+        .Select(n => n.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    response.Total = distinctNos.Count;
+
+    if (distinctNos.Count > MaxBulkSize)
+    {
+        response.Failed.Add(new PaymentApproveItemResult
+        {
+            PaymentNo = null,
+            Success = false,
+            Reason = $"Too many items. Maximum is {MaxBulkSize} per request."
+        });
+        return response;
+    }
+
+    var succeeded = new System.Collections.Concurrent.ConcurrentBag<PaymentApproveItemResult>();
+    var failed = new System.Collections.Concurrent.ConcurrentBag<PaymentApproveItemResult>();
+    var userName = request.UserName.Trim();
+    var comment = request.Comment ?? "";
+
+    await Parallel.ForEachAsync(
+        distinctNos,
+        new ParallelOptions { MaxDegreeOfParallelism = BulkParallelism },
+        async (paymentNo, _) =>
+        {
+            try
+            {
+                var ok = await ApprovePayment(new PaymentApprovalRequest
+                {
+                    PaymentNo = paymentNo,
+                    UserName = userName,
+                    Comment = comment
+                });
+
+                if (ok)
+                {
+                    succeeded.Add(new PaymentApproveItemResult
+                    {
+                        PaymentNo = paymentNo,
+                        Success = true
+                    });
+                }
+                else
+                {
+                    failed.Add(new PaymentApproveItemResult
+                    {
+                        PaymentNo = paymentNo,
+                        Success = false,
+                        Reason = "Not pending or not assigned to this user"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                failed.Add(new PaymentApproveItemResult
+                {
+                    PaymentNo = paymentNo,
+                    Success = false,
+                    Reason = ex.Message
+                });
+            }
+        });
+
+    response.Succeeded = succeeded.OrderBy(x => x.PaymentNo).ToList();
+    response.Failed = failed.OrderBy(x => x.PaymentNo).ToList();
+    return response;
+}
 }
 

@@ -69,7 +69,8 @@ public class PurchaseOrderDocument : IDocument
                     c.Item().PaddingTop(2).AlignCenter().Text(text =>
                     {
                         text.Span("Corporate Office: ").SemiBold();
-                        text.Span(CleanMultiline(_model.HoAddress));
+                        text.Span(
+                            "H. B.Jirawala House,13, Navbharat Society, Opp . Panchsheel Bus Stop, Usmanpura, Ahmedabad,Gujarat,India-380013");
                     });
                     c.Item().AlignCenter()
                         .Text("Phone No. (079) 27550764 / 27561000  Fax No. 27551764")
@@ -203,16 +204,16 @@ public class PurchaseOrderDocument : IDocument
                         text.Span($"    {_model.DeliveryTerms}");
                     });
 
-                    // Schedule left, delivery date right-aligned on same row
+                    // Schedule + delivery date on same row (date nearer center of terms column)
                     c.Item().Row(r =>
                     {
-                        r.RelativeItem().Text(text =>
+                        r.RelativeItem(2).Text(text =>
                         {
                             text.Span("Delivery Date On or Before").SemiBold();
                             if (!string.IsNullOrWhiteSpace(_model.DeliverySchedule))
                                 text.Span($"    {_model.DeliverySchedule}");
                         });
-                        r.ConstantItem(70).AlignRight()
+                        r.RelativeItem(1).AlignCenter()
                             .Text(FormatDeliveryDateShort(_model.DeliveryDate));
                     });
 
@@ -226,12 +227,7 @@ public class PurchaseOrderDocument : IDocument
                         text.Span("Mode of Transport").SemiBold();
                         text.Span($"    {_model.ModeOfTransport}");
                     });
-                    c.Item().Text(text =>
-                    {
-                        text.Span("Note:").SemiBold();
-                        if (!string.IsNullOrWhiteSpace(_model.Note))
-                            text.Span($"    {_model.Note}");
-                    });
+                    // PO note is shown below TDS (matches ERP print), not here
                 });
 
                 row.RelativeItem(1.4f).BorderLeft(0.5f).Padding(3).Column(c =>
@@ -243,19 +239,31 @@ public class PurchaseOrderDocument : IDocument
                 });
             });
 
-            if (_model.TdsAmount > 0)
+            // ERP print: bordered block with TDS, then Note, then E & O.E
+            col.Item().Border(0.6f).Padding(4).Column(block =>
             {
-                col.Item().Text(
-                        $"As Total Purchase Amount is exceeded from 50 lacs in current financial yr. TDS will be deducted as 0.1% : {FormatMoney(_model.TdsAmount)}")
-                    .FontColor(AccentRed)
-                    .SemiBold()
-                    .FontSize(7.5f);
-            }
+                if (_model.TdsAmount > 0)
+                {
+                    block.Item()
+                        .Text(
+                            $"As Total Purchase Amount is exceeded from 50 lacs in current financial yr. TDS will be deducted as 0.1% : {FormatMoney(_model.TdsAmount)}")
+                        .FontColor(AccentRed)
+                        .SemiBold()
+                        .FontSize(7.5f);
+                }
 
-            if (!string.IsNullOrWhiteSpace(_model.SpecialNote))
-                col.Item().Text(_model.SpecialNote);
+                var noteText = FirstNonEmptyNote(_model.SpecialNote, _model.Note);
+                if (!string.IsNullOrWhiteSpace(noteText))
+                {
+                    block.Item().PaddingTop(_model.TdsAmount > 0 ? 4 : 0).Text(text =>
+                    {
+                        text.Span("Note : ").Bold();
+                        text.Span(noteText);
+                    });
+                }
 
-            col.Item().Text("E & O.E");
+                block.Item().PaddingTop(4).Text("E & O.E");
+            });
 
             // Left: static terms 1-8 | Right: approval + signature block (right-aligned as a unit)
             col.Item().Row(row =>
@@ -263,7 +271,7 @@ public class PurchaseOrderDocument : IDocument
                 row.RelativeItem(2.35f).Column(tc =>
                 {
                     tc.Spacing(1.5f);
-                    foreach (var (line, emphasize) in GetStaticTerms(_model.VendorName))
+                    foreach (var (line, emphasize) in GetStaticTerms(_model.VendorName, _model.StoreEmail))
                     {
                         var item = tc.Item().Text(line).FontSize(6.5f);
                         if (emphasize)
@@ -316,9 +324,9 @@ public class PurchaseOrderDocument : IDocument
                 HeaderCell(header, "HSNCODE");
                 HeaderCell(header, "Unit");
                 HeaderCell(header, "Qty");
-                HeaderCell(header, "Rate(Rs)");
+                HeaderCell(header, $"Rate({CurrencyLabel()})");
                 HeaderCell(header, "Discount");
-                HeaderCell(header, "Amount(Rs)");
+                HeaderCell(header, $"Amount({CurrencyLabel()})");
                 HeaderCell(header, "GST Per");
                 HeaderCell(header, "CGST Amount");
                 HeaderCell(header, "SGST Amount");
@@ -412,19 +420,36 @@ public class PurchaseOrderDocument : IDocument
             cell.Text(text).FontSize(6.3f);
     }
 
-    private static IEnumerable<(string Line, bool Emphasize)> GetStaticTerms(string vendorName)
+    private static IEnumerable<(string Line, bool Emphasize)> GetStaticTerms(string vendorName, string storeEmail)
     {
         var vendor = string.IsNullOrWhiteSpace(vendorName) ? "the vendor" : vendorName;
+        var email = string.IsNullOrWhiteSpace(storeEmail)
+            ? "gppstore@champalalgroup.com"
+            : storeEmail.Trim();
 
         yield return ("1. Please mention the P.O. No. in your Invoice and send Invoice Two copy along with the materials.", false);
         yield return ("2. Acceptance : If the ordered Materials is not as per the technical specification / drawings, then we reserve our right to reject the materials and return the same on your cost & expenses.", false);
-        yield return ("3. Email address : gppstore@champalalgroup.com () ()", false);
+        yield return ($"3. Email address : {email} () ()", false);
         yield return ("4. Please send E-way bill copy along with material, dispatch from out of Gujarat", false);
         yield return ("5. Please ensure to mention PONo, GST No. and HSN Code in Invoice, otherwise we will deduc 10% of Bill Amount", false);
         yield return ("6. Qty. of supply must be as per Purchase Order, No excess material will be accepted.", true);
         yield return ($"7. You M/s {vendor} will not give any commission, brokerage, valuable thing, pecuniary advantage or any undue advantage or benefits by any way directly or indirectly to our any employee or any other person belongs to employee. If such type of activity found, your outstanding payment will be forfeited and you will be declared blacklisted.", true);
         yield return ("If our any employee makes any type of undue demands in cash or kind for any reason, you can inform us on mail id grievances@champalalgroup.com immediately.", true);
         yield return ("8. All disputes are subject To Ahmedabad Jurisdiction.", true);
+    }
+
+    private string CurrencyLabel()
+        => string.IsNullOrWhiteSpace(_model.Currency) ? "Rs" : _model.Currency.Trim();
+
+    private static string FirstNonEmptyNote(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+        }
+
+        return "";
     }
 
     private static string FormatMoney(decimal value)

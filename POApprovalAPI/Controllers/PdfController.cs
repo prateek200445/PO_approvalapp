@@ -122,7 +122,8 @@ public class PdfController : ControllerBase
                     ApprovalDate,
                     Cr_FullName,
                     TotalAmount,
-                    TDSAmt
+                    TDSAmt,
+                    Currency
                   FROM Vw_PurchaseOrder
                   WHERE PurchaseCode = @poNo",
                 new { poNo },
@@ -156,6 +157,16 @@ public class PdfController : ControllerBase
 
         var companyName = Convert.ToString(header.CompanyName) ?? "";
 
+        // Store email for PDF term 3: PO creator's email from PurchasePayment.LoginName
+        var storeEmail = await connection.QueryFirstOrDefaultAsync<string>(
+            new CommandDefinition(
+                @"SELECT TOP 1 l.email
+                  FROM PurchasePayment P
+                  INNER JOIN loginentry..loginrights l ON P.LoginName = l.name
+                  WHERE P.PurchaseCode = @poNo",
+                new { poNo },
+                commandTimeout: 30)) ?? "";
+
         var model = new PurchaseOrderPdfModel
         {
             DocumentTitle = documentTitle,
@@ -173,6 +184,8 @@ public class PdfController : ControllerBase
             VendorGst = Convert.ToString(header.VendorGST) ?? "",
             ContactName = (Convert.ToString(header.ContactName) ?? "").Trim(),
             ContactNo = FirstNonEmpty(header.ContactNo, header.TelNo1),
+            StoreEmail = storeEmail.Trim(),
+            Currency = (Convert.ToString(header.Currency) ?? "").Trim(),
             PoDate = header.sysdate as DateTime?,
             DeliveryDate = header.deliverydate as DateTime?,
             IndentDate = header.IndentDate as DateTime?,

@@ -1,13 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { getApiUrl } from "@/lib/api-config";
-import { useState, useEffect } from "react";
-import { Search, ArrowUpDown, Filter, X } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { Search, ArrowUpDown, Filter, X, CheckSquare, Loader2 } from "lucide-react";
 import { formatINR, type POStatus } from "@/lib/mock-data";
 import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/StatusBadge";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebounce } from "@/hooks/useDebounce";
 import { SkeletonPendingList } from "@/components/SkeletonLoader";
+import { toast } from "sonner";
+
+const MAX_BULK = 50;
 
 export const Route = createFileRoute("/_app/pending")({
   head: () => ({ meta: [{ title: "Pending POs — Approval Portal" }] }),
@@ -16,6 +19,7 @@ export const Route = createFileRoute("/_app/pending")({
 
 function PendingList() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
 
   const [q, setQ] = useState("");
   const [amount, setAmount] = useState("");
@@ -26,40 +30,38 @@ function PendingList() {
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const itemsPerPage = 20;
 
-  // Scroll to top on component mount
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+  const [bulkRemarks, setBulkRemarks] = useState("");
+  const [isBulkApproving, setIsBulkApproving] = useState(false);
+
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    window.scrollTo({ top: 0, behavior: "instant" });
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;
   }, []);
 
-  // Debounce amount input to reduce API calls
   const debouncedAmount = useDebounce(amount, 500);
 
-  // Fetch pending POs with React Query
-  const { data: pendingPOsData, isLoading } = useQuery({
-    queryKey: ['pending-list', user?.username, debouncedAmount, filterType],
+  const { data: pendingPOsData, isLoading, refetch } = useQuery({
+    queryKey: ["pending-list", user?.username, debouncedAmount, filterType],
     queryFn: async () => {
-      if (!user?.username) throw new Error('No username');
+      if (!user?.username) throw new Error("No username");
       const response = await fetch(
         getApiUrl(
           `/api/PO/pending/${user.username}?amount=${debouncedAmount}&filterType=${filterType}`
         )
       );
-      if (!response.ok) throw new Error('Failed to fetch pending');
-      const data = await response.json();
-      return data;
+      if (!response.ok) throw new Error("Failed to fetch pending");
+      return response.json();
     },
-    staleTime: 0, // Always refetch to ensure fresh data after approvals
-    refetchOnMount: 'always', // Always refetch when component mounts
-    enabled: !!user?.username && typeof window !== 'undefined', // Only fetch on client
+    staleTime: 0,
+    refetchOnMount: "always",
+    enabled: !!user?.username && typeof window !== "undefined",
   });
 
-  // Ensure we have an array
   const pendingPOs = Array.isArray(pendingPOsData) ? pendingPOsData : [];
- 
-
-
 
   const filtered = pendingPOs
     .filter((p) => {
@@ -70,47 +72,165 @@ function PendingList() {
         p.ApprovalName?.toLowerCase().includes(search) ||
         p.Status?.toLowerCase().includes(search) ||
         String(p.Total || "").includes(search);
-    const matchesStatus =
-      status === "All" || p.Status === status;
+      const matchesStatus = status === "All" || p.Status === status;
 
-    const poAmount = Number(p.Total || 0);
-    const enteredAmount = Number(amount || 0);
+      const poAmount = Number(p.Total || 0);
+      const enteredAmount = Number(amount || 0);
 
-    const matchesAmount =
-      amount === ""
-        ? true
-        : filterType === "gte"
-        ? poAmount >= enteredAmount
-        : poAmount <= enteredAmount;
+      const matchesAmount =
+        amount === ""
+          ? true
+          : filterType === "gte"
+            ? poAmount >= enteredAmount
+            : poAmount <= enteredAmount;
 
-    return matchesSearch && matchesStatus && matchesAmount;
-  })
-  .sort((a, b) =>
-    sortDesc
-      ? new Date(b.PODate).getTime() - new Date(a.PODate).getTime()
-      : new Date(a.PODate).getTime() - new Date(b.PODate).getTime()
-  );
+      return matchesSearch && matchesStatus && matchesAmount;
+    })
+    .sort((a, b) =>
+      sortDesc
+        ? new Date(b.PODate).getTime() - new Date(a.PODate).getTime()
+        : new Date(a.PODate).getTime() - new Date(b.PODate).getTime()
+    );
 
-  // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [q, amount, status, filterType, sortDesc]);
 
-  // Calculate pagination
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const paginatedData = filtered.slice(startIndex, endIndex);
 
- 
+  const pageSelectableIds = useMemo(
+    () =>
+      paginatedData
+        .filter((p) => p.Status === "Pending" && (p.TransId ?? p.Transid))
+        .map((p) => Number(p.TransId ?? p.Transid)),
+    [paginatedData]
+  );
+
+  const allPageSelected =
+    pageSelectableIds.length > 0 &&
+    pageSelectableIds.every((id) => selected.has(id));
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelected(new Set());
+    setShowBulkConfirm(false);
+    setBulkRemarks("");
+  }
+
+  function toggleSelectMode() {
+    if (selectMode) {
+      exitSelectMode();
+    } else {
+      setSelectMode(true);
+      setSelected(new Set());
+    }
+  }
+
+  function toggleOne(transId: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(transId)) next.delete(transId);
+      else {
+        if (next.size >= MAX_BULK) {
+          toast.error(`You can select at most ${MAX_BULK} POs at once`);
+          return prev;
+        }
+        next.add(transId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAllPage() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allPageSelected) {
+        pageSelectableIds.forEach((id) => next.delete(id));
+      } else {
+        for (const id of pageSelectableIds) {
+          if (next.size >= MAX_BULK) {
+            toast.error(`You can select at most ${MAX_BULK} POs at once`);
+            break;
+          }
+          next.add(id);
+        }
+      }
+      return next;
+    });
+  }
+
+  async function runBulkApprove() {
+    if (!user?.username || selected.size === 0 || isBulkApproving) return;
+
+    setIsBulkApproving(true);
+    try {
+      const response = await fetch(getApiUrl("/api/PO/approve-bulk"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transIds: Array.from(selected),
+          remarks: bulkRemarks,
+          userName: user.username,
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(errText || "Bulk approve failed");
+      }
+
+      const result = await response.json();
+      const okCount = Array.isArray(result.succeeded) ? result.succeeded.length : 0;
+      const failCount = Array.isArray(result.failed) ? result.failed.length : 0;
+
+      if (okCount > 0 && failCount === 0) {
+        toast.success(`Approved ${okCount} PO${okCount === 1 ? "" : "s"}`);
+      } else if (okCount > 0 && failCount > 0) {
+        toast.warning(`Approved ${okCount}, failed ${failCount}`);
+        const reasons = (result.failed as { poNo?: string; reason?: string }[])
+          .slice(0, 3)
+          .map((f) => `${f.poNo ?? "PO"}: ${f.reason ?? "failed"}`)
+          .join(" · ");
+        if (reasons) toast.message(reasons);
+      } else {
+        toast.error(failCount > 0 ? `All ${failCount} failed` : "Nothing was approved");
+      }
+
+      exitSelectMode();
+      void queryClient.invalidateQueries({ queryKey: ["pending-list"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+      void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+      await refetch();
+    } catch (err) {
+      console.error(err);
+      toast.error("Bulk approve failed");
+    } finally {
+      setIsBulkApproving(false);
+    }
+  }
 
   return (
-    <div className="space-y-5">
+    <div className={`space-y-5 ${selectMode && selected.size > 0 ? "pb-24" : ""}`}>
       <div className="flex items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Purchase Orders</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{filtered.length} result{filtered.length !== 1 ? "s" : ""} {totalPages > 1 && `(Page ${currentPage} of ${totalPages})`}</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {filtered.length} result{filtered.length !== 1 ? "s" : ""}{" "}
+            {totalPages > 1 && `(Page ${currentPage} of ${totalPages})`}
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={toggleSelectMode}
+          disabled={isLoading || filtered.length === 0}
+          className="inline-flex h-10 items-center gap-2 rounded-md border border-input bg-surface px-3 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+        >
+          <CheckSquare className="h-4 w-4" />
+          {selectMode ? "Cancel select" : "Select"}
+        </button>
       </div>
 
       {/* Filters - Desktop Only */}
@@ -167,7 +287,6 @@ function PendingList() {
 
       {/* Filters - Mobile Only */}
       <div className="space-y-2 md:hidden">
-        {/* Search Bar */}
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -179,9 +298,7 @@ function PendingList() {
           />
         </div>
 
-        {/* Active Filters + Filter Button Row */}
         <div className="flex items-center gap-2">
-          {/* Active Filter Chips */}
           <div className="flex flex-wrap gap-1 flex-1">
             {status !== "All" && (
               <button
@@ -203,7 +320,6 @@ function PendingList() {
             )}
           </div>
 
-          {/* Filter Button */}
           <button
             onClick={() => setShowFilterSheet(true)}
             className="inline-flex h-10 items-center gap-2 rounded-md border border-input bg-surface px-3 text-sm font-medium hover:bg-secondary whitespace-nowrap"
@@ -217,7 +333,6 @@ function PendingList() {
             )}
           </button>
 
-          {/* Sort Button */}
           <button
             onClick={() => setSortDesc((v) => !v)}
             className="inline-flex h-10 items-center gap-1.5 rounded-md border border-input bg-surface px-2 text-xs font-medium hover:bg-secondary whitespace-nowrap"
@@ -235,28 +350,77 @@ function PendingList() {
         ) : filtered.length === 0 ? (
           <EmptyState />
         ) : (
-          paginatedData.map((p) => (
-            <Link
-              key={p.PoNo}
-              to="/po/$poNo"
-              params={{ poNo: p.PoNo }}
-              className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-semibold">{p.PoNo}</div>
-                  <div className="mt-0.5 truncate text-sm text-muted-foreground">{p.ApprovalName}</div>
+          paginatedData.map((p) => {
+            const transId = Number(p.TransId ?? p.Transid);
+            const canSelect = selectMode && p.Status === "Pending" && !!transId;
+            const isChecked = canSelect && selected.has(transId);
+
+            if (selectMode) {
+              return (
+                <button
+                  key={`${p.PoNo}-${transId}`}
+                  type="button"
+                  disabled={!canSelect}
+                  onClick={() => canSelect && toggleOne(transId)}
+                  className={`block w-full text-left rounded-xl border bg-card p-4 shadow-sm ${
+                    isChecked ? "border-primary ring-1 ring-primary/30" : "border-border"
+                  } ${!canSelect ? "opacity-50" : ""}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={!!isChecked}
+                      readOnly
+                      className="mt-1 h-4 w-4"
+                      tabIndex={-1}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-semibold">{p.PoNo}</div>
+                          <div className="mt-0.5 truncate text-sm text-muted-foreground">
+                            {p.ApprovalName}
+                          </div>
+                        </div>
+                        <StatusBadge status={p.Status} />
+                      </div>
+                      <div className="mt-3 flex items-end justify-between">
+                        <div className="text-xs text-muted-foreground">{p.PODate}</div>
+                        <div className="text-base font-semibold tabular-nums">
+                          {formatINR(p.Total || 0)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              );
+            }
+
+            return (
+              <Link
+                key={p.PoNo}
+                to="/po/$poNo"
+                params={{ poNo: p.PoNo }}
+                className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-semibold">{p.PoNo}</div>
+                    <div className="mt-0.5 truncate text-sm text-muted-foreground">
+                      {p.ApprovalName}
+                    </div>
+                  </div>
+                  <StatusBadge status={p.Status} />
                 </div>
-                <StatusBadge status={p.Status} />
-              </div>
-              <div className="mt-3 flex items-end justify-between">
-                <div className="text-xs text-muted-foreground">{p.PODate}</div>
-                <div className="text-base font-semibold tabular-nums">
-    {formatINR(p.Total || 0)}
-  </div>
-              </div>
-            </Link>
-          ))
+                <div className="mt-3 flex items-end justify-between">
+                  <div className="text-xs text-muted-foreground">{p.PODate}</div>
+                  <div className="text-base font-semibold tabular-nums">
+                    {formatINR(p.Total || 0)}
+                  </div>
+                </div>
+              </Link>
+            );
+          })
         )}
       </div>
 
@@ -274,6 +438,16 @@ function PendingList() {
           <table className="w-full text-sm">
             <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
+                {selectMode && (
+                  <th className="px-4 py-3 font-medium w-10">
+                    <input
+                      type="checkbox"
+                      checked={allPageSelected}
+                      onChange={toggleSelectAllPage}
+                      aria-label="Select all on page"
+                    />
+                  </th>
+                )}
                 <th className="px-4 py-3 font-medium">PO Number</th>
                 <th className="px-4 py-3 font-medium">Vendor</th>
                 <th className="px-4 py-3 font-medium">Date</th>
@@ -282,21 +456,51 @@ function PendingList() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {paginatedData.map((p) => (
-                <tr key={p.PoNo} className="hover:bg-secondary/40">
-                  <td className="px-4 py-3 font-medium">
-                    <Link to="/po/$poNo" params={{ poNo: p.PoNo }} className="hover:text-primary hover:underline">
-                      {p.PoNo}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">{p.ApprovalName}</td>
-                  <td className="px-4 py-3 text-muted-foreground">{p.PODate}</td>
-                 <td className="px-4 py-3 text-right font-semibold tabular-nums">
-    {formatINR(p.Total || 0)}
-  </td>
-                <td className="px-4 py-3"><StatusBadge status={p.Status} /></td>
-              </tr>
-            ))}
+              {paginatedData.map((p) => {
+                const transId = Number(p.TransId ?? p.Transid);
+                const canSelect = selectMode && p.Status === "Pending" && !!transId;
+                const isChecked = canSelect && selected.has(transId);
+
+                return (
+                  <tr
+                    key={`${p.PoNo}-${transId}`}
+                    className={`hover:bg-secondary/40 ${isChecked ? "bg-primary/5" : ""}`}
+                  >
+                    {selectMode && (
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          disabled={!canSelect}
+                          checked={!!isChecked}
+                          onChange={() => canSelect && toggleOne(transId)}
+                          aria-label={`Select ${p.PoNo}`}
+                        />
+                      </td>
+                    )}
+                    <td className="px-4 py-3 font-medium">
+                      {selectMode ? (
+                        <span>{p.PoNo}</span>
+                      ) : (
+                        <Link
+                          to="/po/$poNo"
+                          params={{ poNo: p.PoNo }}
+                          className="hover:text-primary hover:underline"
+                        >
+                          {p.PoNo}
+                        </Link>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground">{p.FirmName || p.ApprovalName}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{p.PODate}</td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                      {formatINR(p.Total || 0)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={p.Status} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -324,7 +528,8 @@ function PendingList() {
           <div className="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
             <div>
               <p className="text-sm text-muted-foreground">
-                Showing <span className="font-medium">{startIndex + 1}</span> to <span className="font-medium">{Math.min(endIndex, filtered.length)}</span> of{" "}
+                Showing <span className="font-medium">{startIndex + 1}</span> to{" "}
+                <span className="font-medium">{Math.min(endIndex, filtered.length)}</span> of{" "}
                 <span className="font-medium">{filtered.length}</span> results
               </p>
             </div>
@@ -337,11 +542,14 @@ function PendingList() {
                 >
                   <span className="sr-only">Previous</span>
                   <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fillRule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clipRule="evenodd" />
+                    <path
+                      fillRule="evenodd"
+                      d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z"
+                      clipRule="evenodd"
+                    />
                   </svg>
                 </button>
-                
-                {/* Page numbers */}
+
                 {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                   let pageNum;
                   if (totalPages <= 5) {
@@ -375,7 +583,11 @@ function PendingList() {
                 >
                   <span className="sr-only">Next</span>
                   <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                    <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+                    <path
+                      fillRule="evenodd"
+                      d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z"
+                      clipRule="evenodd"
+                    />
                   </svg>
                 </button>
               </nav>
@@ -384,114 +596,191 @@ function PendingList() {
         </div>
       )}
 
-    {/* Mobile Bottom Sheet Filter */}
-    {showFilterSheet && (
-      <div className="fixed inset-0 z-40 md:hidden">
-        {/* Backdrop */}
-        <div
-          className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-          onClick={() => setShowFilterSheet(false)}
-        />
-
-        {/* Bottom Sheet */}
-        <div className="absolute bottom-0 left-0 right-0 z-50 animate-in slide-in-from-bottom-5 rounded-t-2xl border-t border-border bg-surface p-4 pb-6 shadow-xl">
-          {/* Handle */}
-          <div className="mb-4 flex justify-center">
-            <div className="h-1 w-10 rounded-full bg-muted" />
-          </div>
-
-          {/* Title */}
-          <h2 className="mb-4 text-lg font-semibold">Filters</h2>
-
-          {/* Status Filter */}
-          <div className="mb-5 space-y-2">
-            <label className="text-sm font-medium">Status</label>
-            <div className="space-y-2">
-              {["All", "Pending", "Approved", "Rejected"].map((s) => (
-                <label key={s} className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="status"
-                    value={s}
-                    checked={status === s}
-                    onChange={(e) => setStatus(e.target.value as POStatus | "All")}
-                    className="h-4 w-4"
-                  />
-                  <span className="text-sm">{s}</span>
-                </label>
-              ))}
+      {/* Bulk action bar */}
+      {selectMode && selected.size > 0 && (
+        <div className="fixed inset-x-0 bottom-16 z-20 border-t border-border bg-surface/95 p-3 backdrop-blur md:bottom-0">
+          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-medium">
+              {selected.size} selected
+              <span className="ml-2 text-xs text-muted-foreground">(max {MAX_BULK})</span>
             </div>
-          </div>
-
-          {/* Amount Filter */}
-          <div className="mb-5 space-y-2">
-            <label className="text-sm font-medium">Amount</label>
             <div className="flex gap-2">
-              <input
-                type="number"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="Enter amount"
-                className="flex-1 h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-              />
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-                className="h-10 w-16 rounded-md border border-input bg-background px-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                disabled={isBulkApproving}
+                className="h-10 rounded-md border border-input bg-surface px-4 text-sm font-medium hover:bg-secondary disabled:opacity-50"
               >
-                <option value="gte">≥</option>
-                <option value="lte">≤</option>
-              </select>
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowBulkConfirm(true)}
+                disabled={isBulkApproving}
+                className="h-10 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                Approve selected
+              </button>
             </div>
-          </div>
-
-          {/* Sort Filter */}
-          <div className="mb-6 space-y-2">
-            <label className="text-sm font-medium">Sort</label>
-            <div className="space-y-2">
-              {[
-                { value: true, label: "Newest" },
-                { value: false, label: "Oldest" },
-              ].map((option) => (
-                <label key={String(option.value)} className="flex items-center gap-3 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="sort"
-                    checked={sortDesc === option.value}
-                    onChange={() => setSortDesc(option.value)}
-                    className="h-4 w-4"
-                  />
-                  <span className="text-sm">{option.label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                setQ("");
-                setAmount("");
-                setFilterType("gte");
-                setStatus("All");
-                setSortDesc(true);
-                setCurrentPage(1);
-              }}
-              className="flex-1 h-10 rounded-md border border-input bg-background text-sm font-medium hover:bg-secondary"
-            >
-              Reset
-            </button>
-            <button
-              onClick={() => setShowFilterSheet(false)}
-              className="flex-1 h-10 rounded-md bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            >
-              Apply
-            </button>
           </div>
         </div>
-      </div>
-    )}
+      )}
+
+      {/* Bulk confirm modal */}
+      {showBulkConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => !isBulkApproving && setShowBulkConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-xl bg-card p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold">Approve {selected.size} PO{selected.size === 1 ? "" : "s"}?</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Each PO is approved with the same rules as single approve. Already-processed rows will be
+              reported as failed without stopping the rest.
+            </p>
+            <textarea
+              value={bulkRemarks}
+              onChange={(e) => setBulkRemarks(e.target.value)}
+              rows={3}
+              placeholder="Optional remarks for all…"
+              disabled={isBulkApproving}
+              className="mt-3 w-full resize-none rounded-md border border-input bg-surface p-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+            />
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowBulkConfirm(false)}
+                disabled={isBulkApproving}
+                className="h-10 flex-1 rounded-md border border-input bg-surface text-sm font-medium hover:bg-secondary disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={runBulkApprove}
+                disabled={isBulkApproving}
+                className="h-10 flex-1 rounded-md bg-primary text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {isBulkApproving ? (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Approving…
+                  </span>
+                ) : (
+                  "Confirm"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Bottom Sheet Filter */}
+      {showFilterSheet && (
+        <div className="fixed inset-0 z-40 md:hidden">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setShowFilterSheet(false)}
+          />
+
+          <div className="absolute bottom-0 left-0 right-0 z-50 animate-in slide-in-from-bottom-5 rounded-t-2xl border-t border-border bg-surface p-4 pb-6 shadow-xl">
+            <div className="mb-4 flex justify-center">
+              <div className="h-1 w-10 rounded-full bg-muted" />
+            </div>
+
+            <h2 className="mb-4 text-lg font-semibold">Filters</h2>
+
+            <div className="mb-5 space-y-2">
+              <label className="text-sm font-medium">Status</label>
+              <div className="space-y-2">
+                {["All", "Pending", "Approved", "Rejected"].map((s) => (
+                  <label key={s} className="flex items-center gap-3 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="status"
+                      value={s}
+                      checked={status === s}
+                      onChange={(e) => setStatus(e.target.value as POStatus | "All")}
+                      className="h-4 w-4"
+                    />
+                    <span className="text-sm">{s}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="mb-5 space-y-2">
+              <label className="text-sm font-medium">Amount</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  placeholder="Enter amount"
+                  className="flex-1 h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+                />
+                <select
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value)}
+                  className="h-10 w-16 rounded-md border border-input bg-background px-2 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+                >
+                  <option value="gte">≥</option>
+                  <option value="lte">≤</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="mb-6 space-y-2">
+              <label className="text-sm font-medium">Sort</label>
+              <div className="space-y-2">
+                {[
+                  { value: true, label: "Newest" },
+                  { value: false, label: "Oldest" },
+                ].map((option) => (
+                  <label
+                    key={String(option.value)}
+                    className="flex items-center gap-3 cursor-pointer"
+                  >
+                    <input
+                      type="radio"
+                      name="sort"
+                      checked={sortDesc === option.value}
+                      onChange={() => setSortDesc(option.value)}
+                      className="h-4 w-4"
+                    />
+                    <span className="text-sm">{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setQ("");
+                  setAmount("");
+                  setFilterType("gte");
+                  setStatus("All");
+                  setSortDesc(true);
+                  setCurrentPage(1);
+                }}
+                className="flex-1 h-10 rounded-md border border-input bg-background text-sm font-medium hover:bg-secondary"
+              >
+                Reset
+              </button>
+              <button
+                onClick={() => setShowFilterSheet(false)}
+                className="flex-1 h-10 rounded-md bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

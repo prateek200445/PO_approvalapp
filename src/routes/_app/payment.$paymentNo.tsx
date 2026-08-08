@@ -112,42 +112,25 @@ if (!payment) {
 
     toast.success("Payment approved successfully");
 
-    // CRITICAL: Invalidate ALL related caches with proper patterns
-    await Promise.all([
-      queryClient.invalidateQueries({ 
-        queryKey: ['payment-list'],
-        refetchType: 'all' 
-      }),
-      queryClient.invalidateQueries({ 
-        queryKey: ['dashboard-stats'],
-        refetchType: 'all'
-      }),
-      queryClient.invalidateQueries({ 
-        queryKey: ['pending-list-dashboard'],
-        refetchType: 'all'
-      }),
-    ]);
-
-    // Fetch fresh pending payments after cache invalidation
-    const pending = await fetch(
-      getApiUrl(`/api/Payment/pending/${user?.username}`)
-    ).then(r => r.json());
-
-    // Navigate to next payment or back to list
-    if (Array.isArray(pending) && pending.length > 0) {
-      // Find next payment (exclude current one)
-      const nextPayment = pending.find(p => p.paymentNo !== paymentNo);
-      if (nextPayment) {
-        navigate({
-          to: "/payment/$paymentNo",
-          params: { paymentNo: nextPayment.paymentNo }
-        });
-      } else {
-        // No more pending payments
-        navigate({ to: "/payments" });
+    const cachedLists = queryClient.getQueriesData({ queryKey: ["payment-list"] });
+    let nextPaymentNo: string | null = null;
+    for (const [, data] of cachedLists) {
+      if (Array.isArray(data)) {
+        const next = data.find((p: any) => (p.paymentNo ?? p.PaymentNo) !== paymentNo);
+        if (next) {
+          nextPaymentNo = next.paymentNo ?? next.PaymentNo ?? null;
+          break;
+        }
       }
+    }
+
+    void queryClient.invalidateQueries({ queryKey: ["payment-list"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+    void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+
+    if (nextPaymentNo) {
+      navigate({ to: "/payment/$paymentNo", params: { paymentNo: nextPaymentNo } });
     } else {
-      // No pending payments left
       navigate({ to: "/payments" });
     }
   } catch (err) {
@@ -191,44 +174,27 @@ if (!payment) {
 
     toast.success("Payment rejected successfully");
 
-    // CRITICAL: Invalidate ALL related caches with proper patterns
-    await Promise.all([
-      queryClient.invalidateQueries({ 
-        queryKey: ['payment-list'],
-        refetchType: 'all' 
-      }),
-      queryClient.invalidateQueries({ 
-        queryKey: ['dashboard-stats'],
-        refetchType: 'all'
-      }),
-      queryClient.invalidateQueries({ 
-        queryKey: ['pending-list-dashboard'],
-        refetchType: 'all'
-      }),
-    ]);
-
     setConfirm(null);
 
-    // Fetch fresh pending payments after cache invalidation
-    const pending = await fetch(
-      getApiUrl(`/api/Payment/pending/${user?.username}`)
-    ).then(r => r.json());
-
-    // Navigate to next payment or back to list
-    if (Array.isArray(pending) && pending.length > 0) {
-      // Find next payment (exclude current one)
-      const nextPayment = pending.find(p => p.paymentNo !== paymentNo);
-      if (nextPayment) {
-        navigate({
-          to: "/payment/$paymentNo",
-          params: { paymentNo: nextPayment.paymentNo },
-        });
-      } else {
-        // No more pending payments
-        navigate({ to: "/payments" });
+    const cachedLists = queryClient.getQueriesData({ queryKey: ["payment-list"] });
+    let nextPaymentNo: string | null = null;
+    for (const [, data] of cachedLists) {
+      if (Array.isArray(data)) {
+        const next = data.find((p: any) => (p.paymentNo ?? p.PaymentNo) !== paymentNo);
+        if (next) {
+          nextPaymentNo = next.paymentNo ?? next.PaymentNo ?? null;
+          break;
+        }
       }
+    }
+
+    void queryClient.invalidateQueries({ queryKey: ["payment-list"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
+    void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+
+    if (nextPaymentNo) {
+      navigate({ to: "/payment/$paymentNo", params: { paymentNo: nextPaymentNo } });
     } else {
-      // No pending payments left
       navigate({ to: "/payments" });
     }
   } catch (err) {

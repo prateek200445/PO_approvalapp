@@ -3,28 +3,32 @@ using Microsoft.AspNetCore.Mvc;
 using POApprovalAPI.Services;
 using POApprovalAPI.Models;
 using System.Text.Json;
+
 namespace POApprovalAPI.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
 public class WorkOrderController : ControllerBase
 {
-   private readonly DatabaseService _database;
-private readonly EmailService _emailService;
+    private readonly DatabaseService _database;
+    private readonly EmailService _emailService;
+    private readonly WorkOrderApprovalService _woApproval;
 
-public WorkOrderController(
-    DatabaseService database,
-    EmailService emailService)
-{
-    _database = database;
-    _emailService = emailService;
-}
+    public WorkOrderController(
+        DatabaseService database,
+        EmailService emailService,
+        WorkOrderApprovalService woApproval)
+    {
+        _database = database;
+        _emailService = emailService;
+        _woApproval = woApproval;
+    }
 
     [HttpGet("pending/{username}")]
-public async Task<IActionResult> GetPending(
-    string username,
-    [FromQuery] decimal? amount,
-    [FromQuery] string? filterType)
+    public async Task<IActionResult> GetPending(
+        string username,
+        [FromQuery] decimal? amount,
+        [FromQuery] string? filterType)
     {
         using var connection = _database.CreateConnection();
 
@@ -63,22 +67,23 @@ public async Task<IActionResult> GetPending(
     )
 )
               ORDER BY a.PODate DESC",
-           new
-{
-    username,
-    amount,
-    filterType
-});
+            new
+            {
+                username,
+                amount,
+                filterType
+            });
 
         return Ok(data);
     }
-    [HttpGet("workflow")]
-public async Task<IActionResult> GetWorkflow([FromQuery] string poNo)
-{
-    using var connection = _database.CreateConnection();
 
-    var data = await connection.QueryAsync(
-        @"SELECT
+    [HttpGet("workflow")]
+    public async Task<IActionResult> GetWorkflow([FromQuery] string poNo)
+    {
+        using var connection = _database.CreateConnection();
+
+        var data = await connection.QueryAsync(
+            @"SELECT
             ApprovalName,
             Status,
             ApprovalDate,
@@ -86,17 +91,18 @@ public async Task<IActionResult> GetWorkflow([FromQuery] string poNo)
           FROM ApproveWorkOrder
           WHERE PoNo = @poNo
           ORDER BY TransId",
-        new { poNo });
+            new { poNo });
 
-    return Ok(data);
-}
-[HttpGet("details")]
-public async Task<IActionResult> GetDetails([FromQuery] string poNo)
-{
-    using var connection = _database.CreateConnection();
+        return Ok(data);
+    }
 
-    var data = await connection.QueryAsync(
-        @"SELECT TOP 1
+    [HttpGet("details")]
+    public async Task<IActionResult> GetDetails([FromQuery] string poNo)
+    {
+        using var connection = _database.CreateConnection();
+
+        var data = await connection.QueryAsync(
+            @"SELECT TOP 1
             PurchaseCode,
             FirmName,
             ItemDesc,
@@ -116,47 +122,49 @@ public async Task<IActionResult> GetDetails([FromQuery] string poNo)
             SGSTPer,
             SGSTAmount,
             IGSTPer,
-            IGSTAmount
+            IGSTAmount,
+            Currency
           FROM Vw_PurchaseOrder
           WHERE PurchaseCode = @poNo",
-        new { poNo });
+            new { poNo });
 
-    return Ok(data);
-}
-[HttpGet("approval")]
-public async Task<IActionResult> GetApproval(
-    [FromQuery] string poNo,
-    [FromQuery] string username)
-{
-    using var connection = _database.CreateConnection();
+        return Ok(data);
+    }
 
-    var data = await connection.QueryFirstOrDefaultAsync(
-        @"SELECT TOP 1 *
+    [HttpGet("approval")]
+    public async Task<IActionResult> GetApproval(
+        [FromQuery] string poNo,
+        [FromQuery] string username)
+    {
+        using var connection = _database.CreateConnection();
+
+        var data = await connection.QueryFirstOrDefaultAsync(
+            @"SELECT TOP 1 *
           FROM ApproveWorkOrder
           WHERE PoNo = @poNo
             AND ApprovalName = @username",
-        new { poNo, username });
+            new { poNo, username });
 
-    return Ok(data);
-}
-[HttpPost("reject/{transId}")]
-public async Task<IActionResult> Reject(
-    int transId,
-    [FromBody] dynamic data)
-{
-    using var connection = _database.CreateConnection();
+        return Ok(data);
+    }
 
-    string remarks = "";
+    [HttpPost("reject/{transId}")]
+    public async Task<IActionResult> Reject(
+        int transId,
+        [FromBody] dynamic data)
+    {
+        using var connection = _database.CreateConnection();
 
-if (data is JsonElement json &&
-    json.TryGetProperty("remarks", out JsonElement remarksElement))
-{
-    remarks = remarksElement.GetString() ?? "";
-}
+        string remarks = "";
 
-    // OPTIMIZED: Single query instead of 2 separate queries (N+1 fix)
-    var approvalData = await connection.QueryFirstOrDefaultAsync<ApprovalData>(
-        @"SELECT 
+        if (data is JsonElement json &&
+            json.TryGetProperty("remarks", out JsonElement remarksElement))
+        {
+            remarks = remarksElement.GetString() ?? "";
+        }
+
+        var approvalData = await connection.QueryFirstOrDefaultAsync<ApprovalData>(
+            @"SELECT 
             wo.PoNo,
             wo.ApprovalName,
             lr.email AS Email,
@@ -165,132 +173,83 @@ if (data is JsonElement json &&
           LEFT JOIN PurchasePayment pp ON pp.PurchaseCode = wo.PoNo
           LEFT JOIN loginentry..loginrights lr ON lr.NAME = pp.LOGINNAME
           WHERE wo.TransId = @transId",
-        new { transId });
+            new { transId });
 
-    if (approvalData == null)
-        return NotFound();
+        if (approvalData == null)
+            return NotFound();
 
-    await connection.ExecuteAsync(
-        @"UPDATE ApproveWorkOrder
+        await connection.ExecuteAsync(
+            @"UPDATE ApproveWorkOrder
           SET Status = 'Rejected',
               ApprovalDate = GETDATE()
           WHERE TransId = @transId",
-        new { transId });
+            new { transId });
 
-    if (!string.IsNullOrWhiteSpace(approvalData.Email))
-    {
-        await _emailService.SendMail(
-            approvalData.Email,
-            $"Work Order {approvalData.PoNo} Rejected",
-            $"Dear Sir,\n\n" +
-            $"Work Order: {approvalData.PoNo}\n" +
-            $"Rejected By: {approvalData.ApprovalName}\n" +
-            $"Remarks: {remarks}\n\n" +
-            $"Regards,\n" +
-            $"{approvalData.ApprovalName}"
-        );
-    }
-
-    return Ok(new { success = true });
-}
-[HttpPost("approve/{transId}")]
-public async Task<IActionResult> Approve(
-    int transId,
-    [FromBody] dynamic data)
-{
-    using var connection = _database.CreateConnection();
-
-    string remarks = "";
-
-if (data is JsonElement json &&
-    json.TryGetProperty("remarks", out JsonElement remarksElement))
-{
-    remarks = remarksElement.GetString() ?? "";
-}
-
-    // OPTIMIZED: Single query instead of 3 separate queries (N+1 fix)
-    var approvalData = await connection.QueryFirstOrDefaultAsync<ApprovalData>(
-        @"SELECT 
-            wo.PoNo,
-            wo.ApprovalName,
-            lr.email AS Email,
-            ISNULL(pa.authority, 0) AS Authority
-          FROM ApproveWorkOrder wo
-          LEFT JOIN PurchasePayment pp ON pp.PurchaseCode = wo.PoNo
-          LEFT JOIN loginentry..loginrights lr ON lr.NAME = pp.LOGINNAME
-          LEFT JOIN poallocation pa ON pa.username = wo.ApprovalName
-          WHERE wo.TransId = @transId",
-        new { transId });
-
-    if (approvalData == null)
-        return NotFound();
-
-    // Final Authority (authority = 1)
-    if (approvalData.Authority == 1)
-    {
-        await connection.ExecuteAsync(
-            @"UPDATE ApproveWorkOrder
-              SET Status = @Status
-              WHERE PoNo = @PoNo
-                AND ApprovalName <> @ApprovalName
-                AND Status = 'Pending'",
-            new
-            {
-                PoNo = approvalData.PoNo,
-                ApprovalName = approvalData.ApprovalName,
-                Status = $"Approved by {approvalData.ApprovalName}"
-            });
-
-        await connection.ExecuteAsync(
-            @"UPDATE ApproveWorkOrder
-              SET Status = 'Approved',
-                  ApprovalDate = GETDATE()
-              WHERE PoNo = @PoNo
-                AND ApprovalName = @ApprovalName",
-            new
-            {
-                PoNo = approvalData.PoNo,
-                ApprovalName = approvalData.ApprovalName
-            });
-
-        // Final approval signal
-        await connection.ExecuteAsync(
-            @"UPDATE PurchasePayment
-              SET PoSignal = '*'
-              WHERE PurchaseCode = @PoNo",
-            new { PoNo = approvalData.PoNo });
-
-        if (!string.IsNullOrEmpty(approvalData.Email))
+        if (!string.IsNullOrWhiteSpace(approvalData.Email))
         {
             await _emailService.SendMail(
                 approvalData.Email,
-                $"Work Order {approvalData.PoNo} Approved",
+                $"Work Order {approvalData.PoNo} Rejected",
                 $"Dear Sir,\n\n" +
                 $"Work Order: {approvalData.PoNo}\n" +
-                $"Approved By: {approvalData.ApprovalName}\n" +
+                $"Rejected By: {approvalData.ApprovalName}\n" +
                 $"Remarks: {remarks}\n\n" +
                 $"Regards,\n" +
                 $"{approvalData.ApprovalName}"
             );
         }
-        
+
         return Ok(new { success = true });
     }
 
-    // Intermediate authority
-    await connection.ExecuteAsync(
-        @"UPDATE ApproveWorkOrder
-          SET Status = 'Approved',
-              ApprovalDate = GETDATE()
-          WHERE TransId = @transId",
-        new { transId });
+    [HttpPost("approve/{transId}")]
+    public async Task<IActionResult> Approve(
+        int transId,
+        [FromBody] dynamic data)
+    {
+        string remarks = "";
 
-    await connection.ExecuteAsync(
-        @"UPDATE PurchasePayment
-          SET PoSignal = '#'
-          WHERE PurchaseCode = @PoNo",
-        new { PoNo = approvalData.PoNo });
+        if (data is JsonElement json &&
+            json.TryGetProperty("remarks", out JsonElement remarksElement))
+        {
+            remarks = remarksElement.GetString() ?? "";
+        }
 
-    return Ok(new { success = true });
-}
+        var result = await _woApproval.ApproveOneAsync(transId, remarks);
+
+        if (!result.Success &&
+            string.Equals(result.Reason, "Work order approval row not found", StringComparison.OrdinalIgnoreCase))
+        {
+            return NotFound(result);
+        }
+
+        if (!result.Success)
+            return BadRequest(result);
+
+        return Ok(new { success = true, poNo = result.PoNo });
+    }
+
+    [HttpPost("approve-bulk")]
+    public async Task<IActionResult> ApproveBulk([FromBody] PoBulkApproveRequest request)
+    {
+        if (request == null)
+            return BadRequest(new { message = "Request body is required" });
+
+        if (string.IsNullOrWhiteSpace(request.UserName))
+            return BadRequest(new { message = "UserName is required" });
+
+        if (request.TransIds == null || request.TransIds.Count == 0)
+            return BadRequest(new { message = "At least one TransId is required" });
+
+        if (request.TransIds.Count > WorkOrderApprovalService.MaxBulkSize)
+        {
+            return BadRequest(new
+            {
+                message = $"Maximum {WorkOrderApprovalService.MaxBulkSize} work orders allowed per bulk approve"
+            });
+        }
+
+        var result = await _woApproval.ApproveBulkAsync(request);
+        return Ok(result);
+    }
 }
