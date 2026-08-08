@@ -11,6 +11,12 @@ namespace POApprovalAPI.Controllers;
 [Route("api/[controller]")]
 public class PdfController : ControllerBase
 {
+    private static readonly Dictionary<string, string> FormerlyKnownAsByCompany =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["HCP Plastene Bulkpack Ltd"] = "Gopala Polyplast Limited",
+        };
+
     private readonly DatabaseService _database;
 
     public PdfController(DatabaseService database)
@@ -36,151 +42,241 @@ public class PdfController : ControllerBase
         {
             using var connection = _database.CreateConnection();
 
-            // Header Information
+            // Header/address fields from the view (TOP 1 — avoid ORDER BY RowNum, which times out)
             var header = await connection.QueryFirstOrDefaultAsync(
-                @"SELECT TOP 1 *
-                  FROM PurchasePayment
-                  WHERE PurchaseCode = @poNo",
-                new { poNo });
+                new CommandDefinition(
+                    @"SELECT TOP 1
+                        PurchaseCode,
+                        CompanyName,
+                        FirmName,
+                        GST,
+                        VendorGST,
+                        CompanyGST,
+                        Address,
+                        Expr1,
+                        HOAddress,
+                        DispatchAdd,
+                        ContactName,
+                        ContactNo,
+                        TelNo1,
+                        Delivery,
+                        DeliverySch,
+                        Payment,
+                        Mode,
+                        PONote,
+                        SpecialNote,
+                        SpecialNote1,
+                        PurchaseRefNo,
+                        RefNo,
+                        DepttName,
+                        sysdate,
+                        deliverydate,
+                        IndentDate,
+                        ApprovalDate,
+                        Cr_FullName,
+                        TotalAmount,
+                        TDSAmt
+                      FROM Vw_PurchaseOrder
+                      WHERE PurchaseCode = @poNo",
+                    new { poNo },
+                    commandTimeout: 60));
 
             if (header == null)
                 return NotFound($"PO not found: {poNo}");
 
-            // All Line Items
+            // Line items from FinalQuotation (indexed / fast)
+            var items = (await connection.QueryAsync(
+                new CommandDefinition(
+                    @"SELECT
+                        ItemCode,
+                        ItemDesc,
+                        Unit,
+                        Qty,
+                        Rate,
+                        Discount,
+                        Total,
+                        HSNCODE,
+                        CGSTPer,
+                        CGSTAmount,
+                        SGSTPer,
+                        SGSTAmount,
+                        IGSTPer,
+                        IGSTAmount
+                      FROM FinalQuotation
+                      WHERE PurchaseCode = @poNo
+                      ORDER BY ItemCode",
+                    new { poNo },
+                    commandTimeout: 60))).ToList();
+
+            var companyName = Convert.ToString(header.CompanyName) ?? "";
+
+            var model = new PurchaseOrderPdfModel
+            {
+                PoNo = Convert.ToString(header.PurchaseCode) ?? "",
+                CompanyName = companyName,
+                FormerlyKnownAs = FormerlyKnownAsByCompany.TryGetValue(companyName, out string? aka) ? aka ?? "" : "",
+                VendorName = Convert.ToString(header.FirmName) ?? "",
+                HoAddress = Convert.ToString(header.HOAddress) ?? "",
+                CompanyAddress = Convert.ToString(header.Address) ?? "",
+                VendorAddress = Convert.ToString(header.Expr1) ?? "",
+                PostalAddress = !string.IsNullOrWhiteSpace(Convert.ToString(header.DispatchAdd))
+                    ? Convert.ToString(header.DispatchAdd)!
+                    : Convert.ToString(header.Address) ?? "",
+                CompanyGst = FirstNonEmpty(header.CompanyGST, header.GST),
+                VendorGst = Convert.ToString(header.VendorGST) ?? "",
+                ContactName = (Convert.ToString(header.ContactName) ?? "").Trim(),
+                ContactNo = FirstNonEmpty(header.ContactNo, header.TelNo1),
+                PoDate = header.sysdate as DateTime?,
+                DeliveryDate = header.deliverydate as DateTime?,
+                IndentDate = header.IndentDate as DateTime?,
+                ApprovalDate = header.ApprovalDate as DateTime?,
+                CreatedBy = Convert.ToString(header.Cr_FullName) ?? "",
+                DepttName = Convert.ToString(header.DepttName) ?? "",
+                IndentNo = Convert.ToString(header.RefNo) ?? "",
+                PurchaseRefNo = Convert.ToString(header.PurchaseRefNo) ?? "",
+                DeliveryTerms = (Convert.ToString(header.Delivery) ?? "").Trim(),
+                DeliverySchedule = (Convert.ToString(header.DeliverySch) ?? "").Trim(),
+                PaymentTerms = Convert.ToString(header.Payment) ?? "",
+                ModeOfTransport = Convert.ToString(header.Mode) ?? "",
+                Note = (Convert.ToString(header.PONote) ?? "").Trim(),
+                SpecialNote = FirstNonEmpty(header.SpecialNote1, header.SpecialNote),
+                TotalAmount = ToDecimal(header.TotalAmount),
+                TdsAmount = ToDecimal(header.TDSAmt),
+            };
+
+            var sn = 1;
+            foreach (var item in items)
+            {
+                var cgstPer = ToDecimal(item.CGSTPer);
+                var sgstPer = ToDecimal(item.SGSTPer);
+                var igstPer = ToDecimal(item.IGSTPer);
+                var gstPer = igstPer > 0 ? igstPer : cgstPer + sgstPer;
+
+                model.Items.Add(new PurchaseOrderItem
+                {
+                    SerialNo = sn++,
+                    ItemCode = Convert.ToString(item.ItemCode) ?? "",
+                    ItemDesc = Convert.ToString(item.ItemDesc) ?? "",
+                    Unit = Convert.ToString(item.Unit) ?? "",
+                    HsnCode = Convert.ToString(item.HSNCODE) ?? "",
+                    Qty = ToDecimal(item.Qty),
+                    Rate = ToDecimal(item.Rate),
+                    Discount = ToDecimal(item.Discount),
+                    Amount = ToDecimal(item.Total),
+                    GstPer = gstPer,
+                    CGSTAmount = ToDecimal(item.CGSTAmount),
+                    SGSTAmount = ToDecimal(item.SGSTAmount),
+                    IGSTAmount = ToDecimal(item.IGSTAmount),
+                });
+            }
+
+            model.SubTotal = model.Items.Sum(i => i.Amount);
+            model.CGSTAmount = model.Items.Sum(i => i.CGSTAmount);
+            model.SGSTAmount = model.Items.Sum(i => i.SGSTAmount);
+            model.IGSTAmount = model.Items.Sum(i => i.IGSTAmount);
+
+            if (model.TotalAmount == 0)
+                model.TotalAmount = model.SubTotal + model.CGSTAmount + model.SGSTAmount + model.IGSTAmount;
+
+            var document = new PurchaseOrderDocument(model);
+            var pdfBytes = document.GeneratePdf();
+
+            Response.Headers["Content-Disposition"] = "inline";
+            return File(pdfBytes, "application/pdf");
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new
+            {
+                Success = false,
+                Error = ex.ToString()
+            });
+        }
+    }
+
+    [HttpGet("workorder")]
+    public async Task<IActionResult> GetWorkOrderPdf([FromQuery] string poNo)
+    {
+        try
+        {
+            using var connection = _database.CreateConnection();
+
             var items = await connection.QueryAsync(
                 @"SELECT
                     PurchaseCode,
+                    CompanyName,
                     FirmName,
                     ItemDesc,
                     Unit,
                     Qty,
                     Rate,
+                    Discount,
                     Total,
-                    Discount
-                  FROM FinalQuotation
+                    Note,
+                    TotalAmount
+                  FROM Vw_PurchaseOrder
                   WHERE PurchaseCode = @poNo",
                 new { poNo });
 
-            // GST Summary
-            var gst = await connection.QueryFirstOrDefaultAsync(
-    @"SELECT
-        SUM(ISNULL(CGSTAmount,0)) AS CGSTAmount,
-        SUM(ISNULL(SGSTAmount,0)) AS SGSTAmount,
-        SUM(ISNULL(IGSTAmount,0)) AS IGSTAmount
-      FROM Vw_PurchaseOrder
-      WHERE PurchaseCode = @poNo",
-    new { poNo });
+            var first = items.FirstOrDefault();
 
-   var model = new PurchaseOrderPdfModel
-{
-    PoNo = header.PurchaseCode ?? "",
-    CompanyName = header.CompanyName ?? "",
-    VendorName = items.FirstOrDefault()?.FirmName ?? "",
-    DeliveryTerms = header.Delivery ?? "",
-    PaymentTerms = header.Payment ?? "",
-    DispatchAddress = header.DispatchAdd ?? "",
-    Note = header.PONote ?? "",
-    TotalAmount = Convert.ToDecimal(header.TotalAmount),
+            if (first == null)
+                return NotFound($"Work Order not found: {poNo}");
 
-    CGSTAmount = Convert.ToDecimal(gst?.CGSTAmount ?? 0),
-    SGSTAmount = Convert.ToDecimal(gst?.SGSTAmount ?? 0),
-    IGSTAmount = Convert.ToDecimal(gst?.IGSTAmount ?? 0)
-};
+            var model = new PurchaseOrderPdfModel
+            {
+                PoNo = first.PurchaseCode ?? "",
+                CompanyName = first.CompanyName ?? "",
+                VendorName = first.FirmName ?? "",
+                Note = first.Note ?? "",
+                TotalAmount = Convert.ToDecimal(first.TotalAmount ?? 0)
+            };
 
-foreach (var item in items)
-{
-    model.Items.Add(new PurchaseOrderItem
-    {
-        ItemDesc = item.ItemDesc ?? "",
-        Unit = item.Unit ?? "",
-        Qty = Convert.ToDecimal(item.Qty),
-        Rate = Convert.ToDecimal(item.Rate),
-        Discount = Convert.ToDecimal(item.Discount ?? 0),
-        Amount = Convert.ToDecimal(item.Total)
-    });
-}       
+            foreach (var item in items)
+            {
+                model.Items.Add(new PurchaseOrderItem
+                {
+                    ItemDesc = item.ItemDesc ?? "",
+                    Unit = item.Unit ?? "",
+                    Qty = Convert.ToDecimal(item.Qty ?? 0),
+                    Rate = Convert.ToDecimal(item.Rate ?? 0),
+                    Discount = Convert.ToDecimal(item.Discount ?? 0),
+                    Amount = Convert.ToDecimal(item.Total ?? 0)
+                });
+            }
 
-var document = new PurchaseOrderDocument(model);
+            var document = new WorkOrderDocument(model);
 
-var pdfBytes = document.GeneratePdf();
+            var pdfBytes = document.GeneratePdf();
 
-Response.Headers["Content-Disposition"] = "inline";
-return File(pdfBytes, "application/pdf");
+            Response.Headers["Content-Disposition"] = "inline";
+            return File(pdfBytes, "application/pdf");
         }
         catch (Exception ex)
-{
-    return BadRequest(new
-    {
-        Success = false,
-        Error = ex.ToString()
-    });
-}
-    }
-   [HttpGet("workorder")]
-public async Task<IActionResult> GetWorkOrderPdf([FromQuery] string poNo)
-{
-    try
-    {
-        using var connection = _database.CreateConnection();
-
-       var items = await connection.QueryAsync(
-    @"SELECT
-        PurchaseCode,
-        CompanyName,
-        FirmName,
-        ItemDesc,
-        Unit,
-        Qty,
-        Rate,
-        Discount,
-        Total,
-        Note,
-        TotalAmount
-      FROM Vw_PurchaseOrder
-      WHERE PurchaseCode = @poNo",
-    new { poNo });
-
-        var first = items.FirstOrDefault();
-
-        if (first == null)
-            return NotFound($"Work Order not found: {poNo}");
-
-        var model = new PurchaseOrderPdfModel
         {
-            PoNo = first.PurchaseCode ?? "",
-            CompanyName = first.CompanyName ?? "",
-            VendorName = first.FirmName ?? "",
-            Note = first.Note ?? "",
-            TotalAmount = Convert.ToDecimal(first.TotalAmount ?? 0)
-        };
-
-        foreach (var item in items)
-        {
-            model.Items.Add(new PurchaseOrderItem
+            return BadRequest(new
             {
-                ItemDesc = item.ItemDesc ?? "",
-                Unit = item.Unit ?? "",
-                Qty = Convert.ToDecimal(item.Qty ?? 0),
-                Rate = Convert.ToDecimal(item.Rate ?? 0),
-                Discount = Convert.ToDecimal(item.Discount ?? 0),
-                Amount = Convert.ToDecimal(item.Total ?? 0)
+                Success = false,
+                Error = ex.ToString()
             });
         }
-
-        var document = new WorkOrderDocument(model);
-
-        var pdfBytes = document.GeneratePdf();
-
-        Response.Headers["Content-Disposition"] = "inline";
-        return File(pdfBytes, "application/pdf");
     }
-    catch (Exception ex)
+
+    private static decimal ToDecimal(object? value)
     {
-        return BadRequest(new
-        {
-            Success = false,
-            Error = ex.ToString()
-        });
+        if (value == null || value is DBNull) return 0m;
+        return Convert.ToDecimal(value);
     }
-} 
+
+    private static string FirstNonEmpty(params object?[] values)
+    {
+        foreach (var value in values)
+        {
+            var text = Convert.ToString(value)?.Trim();
+            if (!string.IsNullOrWhiteSpace(text))
+                return text;
+        }
+
+        return "";
+    }
 }

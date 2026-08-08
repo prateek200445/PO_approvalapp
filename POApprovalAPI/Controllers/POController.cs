@@ -213,22 +213,22 @@ public async Task<IActionResult> Approve(
     if (po == null)
         return NotFound();
 
-    // OPTIMIZED: Single query instead of 2 separate queries (N+1 fix)
+    // Authority must come from the approving user (ApprovalName), not PurchasePayment.LOGINNAME (creator).
+    // Email still comes from the PO creator so they get the final-approval notification.
     var approvalData = await connection.QueryFirstOrDefaultAsync<ApprovalData>(
         @"SELECT 
-            pp.PurchaseCode AS PoNo,
-            pp.LOGINNAME AS ApprovalName,
+            CAST(@PoNo AS varchar(50)) AS PoNo,
+            CAST(@ApprovalName AS varchar(100)) AS ApprovalName,
             lr.email AS Email,
             ISNULL(pa.authority, 0) AS Authority
-          FROM PurchasePayment pp
-          LEFT JOIN loginentry..loginrights lr ON lr.NAME = pp.LOGINNAME
-          LEFT JOIN poallocation pa ON pa.username = pp.LOGINNAME
-          WHERE pp.PurchaseCode = @PoNo",
-        new { PoNo = po.PoNo });
+          FROM (SELECT 1 AS n) dummy
+          LEFT JOIN poallocation pa ON pa.username = @ApprovalName
+          LEFT JOIN PurchasePayment pp ON pp.PurchaseCode = @PoNo
+          LEFT JOIN loginentry..loginrights lr ON lr.NAME = pp.LOGINNAME",
+        new { PoNo = (string)po.PoNo, ApprovalName = (string)po.ApprovalName });
 
     if (approvalData == null)
     {
-        // Fallback if PurchasePayment doesn't have the entry
         approvalData = new ApprovalData
         {
             PoNo = po.PoNo,
