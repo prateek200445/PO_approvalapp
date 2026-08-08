@@ -214,7 +214,7 @@ function PendingList() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className={`space-y-5 ${selectMode && selected.size > 0 ? "pb-24 md:pb-0" : ""}`}>
       <div className="flex items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Work Orders</h1>
@@ -229,7 +229,7 @@ function PendingList() {
               type="button"
               onClick={() => setShowBulkConfirm(true)}
               disabled={isBulkApproving}
-              className="inline-flex h-10 items-center rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              className="hidden h-10 items-center rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:inline-flex"
             >
               Approve selected ({selected.size})
             </button>
@@ -604,6 +604,26 @@ function PendingList() {
                 </button>
               </nav>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile bulk approve bar (above bottom nav) */}
+      {selectMode && selected.size > 0 && (
+        <div className="fixed inset-x-0 bottom-16 z-20 border-t border-border bg-surface/95 p-3 backdrop-blur md:hidden">
+          <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1 text-sm font-medium">
+              {selected.size} selected
+              <span className="ml-1.5 text-xs text-muted-foreground">(max {MAX_BULK})</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowBulkConfirm(true)}
+              disabled={isBulkApproving}
+              className="h-11 shrink-0 rounded-md bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              Approve
+            </button>
           </div>
         </div>
       )}
