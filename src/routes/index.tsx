@@ -8,8 +8,8 @@ import { ServerSettingsModal } from "@/components/ServerSettingsModal";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Sign in — PO Approval Portal" },
-      { name: "description", content: "Sign in to the HCP Plastene Bulkpack Ltd. Purchase Order Approval Portal." },
+      { title: "Sign in — Approvals Portal" },
+      { name: "description", content: "Sign in to the HCP Plastene Bulkpack Ltd. Approvals Portal." },
     ],
   }),
   component: Login,
@@ -75,7 +75,7 @@ try {
           </div>
         </div>
         <div className="relative space-y-5">
-          <h1 className="text-4xl font-semibold leading-tight">Purchase Order Approval Portal</h1>
+          <h1 className="text-4xl font-semibold leading-tight">Approvals Portal</h1>
           <p className="max-w-md text-base opacity-85">
             Review, approve and audit purchase orders from the plant floor or on the move. Built for managers, HODs, Finance and Directors.
           </p>
@@ -107,7 +107,7 @@ try {
             />
             <div>
               <div className="text-sm font-semibold">HCP Plastene Bulkpack Ltd.</div>
-              <div className="text-[11px] text-muted-foreground">PO Approval Portal</div>
+              <div className="text-[11px] text-muted-foreground">Approvals Portal</div>
             </div>
           </div>
 
