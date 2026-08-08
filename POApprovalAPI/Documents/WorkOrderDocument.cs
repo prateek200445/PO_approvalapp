@@ -4,88 +4,26 @@ using QuestPDF.Infrastructure;
 
 namespace POApprovalAPI.Documents;
 
+/// <summary>
+/// Work Order PDF uses the same layout as Purchase Order; title comes from the model.
+/// Kept for compatibility — prefer PurchaseOrderDocument with DocumentTitle = "Work Order".
+/// </summary>
 public class WorkOrderDocument : IDocument
 {
-   private readonly PurchaseOrderPdfModel _model;
+    private readonly PurchaseOrderDocument _inner;
 
-public WorkOrderDocument(PurchaseOrderPdfModel model)
-{
-    _model = model;
-}
-
-    public DocumentMetadata GetMetadata()
-        => DocumentMetadata.Default;
-
-    public void Compose(IDocumentContainer container)
+    public WorkOrderDocument(PurchaseOrderPdfModel model)
     {
-        container.Page(page =>
+        if (string.IsNullOrWhiteSpace(model.DocumentTitle) ||
+            model.DocumentTitle.Equals("Purchase Order", StringComparison.OrdinalIgnoreCase))
         {
-            page.Margin(20);
+            model.DocumentTitle = "Work Order";
+        }
 
-         page.Header()
-    .Text($"WORK ORDER - {_model.PoNo}")
-    .Bold()
-    .FontSize(18);
-
-            page.Content()
-                .Column(column =>
-                {
-                    column.Spacing(10);
-
-                    column.Item().Text($"Company : {_model.CompanyName}");
-                    column.Item().Text($"Vendor : {_model.VendorName}");
-
-                    column.Item().Table(table =>
-                    {
-                        table.ColumnsDefinition(columns =>
-                        {
-                            columns.RelativeColumn(3.5f); // Item description
-                            columns.RelativeColumn(0.8f); // Unit
-                            columns.RelativeColumn(1.2f); // Qty
-                            columns.RelativeColumn(1.2f); // Rate
-                            columns.RelativeColumn(1.0f); // Discount
-                            columns.RelativeColumn(1.8f); // Amount
-                        });
-
-                        table.Header(header =>
-                        {
-                            header.Cell().Text("Item");
-                            header.Cell().Text("Unit");
-                            header.Cell().Text("Qty");
-                            header.Cell().Text("Rate");
-                            header.Cell().Text("Discount");
-                            header.Cell().Text("Amount");
-                        });
-
-                        foreach (var item in _model.Items)
-                        {
-                            table.Cell().Text(item.ItemDesc);
-                            table.Cell().Text(item.Unit);
-                            table.Cell().Text(item.Qty.ToString("N2"));
-                            table.Cell().Text(item.Rate.ToString("N2"));
-                            table.Cell().Text(item.Discount.ToString("N2"));
-                            table.Cell().Text(item.Amount.ToString("N2"));
-                        }
-                    });
-
-                    column.Item().Text($"CGST : {_model.CGSTAmount:N2}");
-                    column.Item().Text($"SGST : {_model.SGSTAmount:N2}");
-                    column.Item().Text($"IGST : {_model.IGSTAmount:N2}");
-
-                    column.Item()
-                        .Text($"Total Amount : {_model.TotalAmount:N2}")
-                        .Bold();
-
-                    column.Item()
-                        .Text("Terms & Conditions")
-                        .Bold();
-
-                    column.Item().Text(_model.Note);
-                });
-
-            page.Footer()
-                .AlignCenter()
-                .Text("Auto Generated Work Order");
-        });
+        _inner = new PurchaseOrderDocument(model);
     }
+
+    public DocumentMetadata GetMetadata() => _inner.GetMetadata();
+
+    public void Compose(IDocumentContainer container) => _inner.Compose(container);
 }

@@ -89,7 +89,9 @@ public class PurchaseOrderDocument : IDocument
                 });
             });
 
-            col.Item().PaddingTop(4).AlignCenter().Text("Purchase Order").Bold().FontSize(13);
+            col.Item().PaddingTop(4).AlignCenter()
+                .Text(string.IsNullOrWhiteSpace(_model.DocumentTitle) ? "Purchase Order" : _model.DocumentTitle)
+                .Bold().FontSize(13);
             col.Item().AlignCenter().Text("Pur/04 R-0").FontSize(7);
 
             // Reference layout:

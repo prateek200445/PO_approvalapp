@@ -11,7 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as WorkorderPoNoRouteImport } from './routes/workorder.$poNo'
 import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AppPendingRouteImport } from './routes/_app/pending'
@@ -19,6 +18,7 @@ import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
+import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
 import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
 import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
 import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
@@ -30,11 +30,6 @@ const AppRoute = AppRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const WorkorderPoNoRoute = WorkorderPoNoRouteImport.update({
-  id: '/workorder/$poNo',
-  path: '/workorder/$poNo',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppWorkordersRoute = AppWorkordersRouteImport.update({
@@ -72,6 +67,11 @@ const AppDashboardRoute = AppDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppWorkorderPoNoRoute = AppWorkorderPoNoRouteImport.update({
+  id: '/workorder/$poNo',
+  path: '/workorder/$poNo',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppPoPoNoRoute = AppPoPoNoRouteImport.update({
   id: '/po/$poNo',
   path: '/po/$poNo',
@@ -97,10 +97,10 @@ export interface FileRoutesByFullPath {
   '/pending': typeof AppPendingRoute
   '/profile': typeof AppProfileRoute
   '/workorders': typeof AppWorkordersRoute
-  '/workorder/$poNo': typeof WorkorderPoNoRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
+  '/workorder/$poNo': typeof AppWorkorderPoNoRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -111,10 +111,10 @@ export interface FileRoutesByTo {
   '/pending': typeof AppPendingRoute
   '/profile': typeof AppProfileRoute
   '/workorders': typeof AppWorkordersRoute
-  '/workorder/$poNo': typeof WorkorderPoNoRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
+  '/workorder/$poNo': typeof AppWorkorderPoNoRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -127,10 +127,10 @@ export interface FileRoutesById {
   '/_app/pending': typeof AppPendingRoute
   '/_app/profile': typeof AppProfileRoute
   '/_app/workorders': typeof AppWorkordersRoute
-  '/workorder/$poNo': typeof WorkorderPoNoRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/_app/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/_app/po/$poNo': typeof AppPoPoNoRoute
+  '/_app/workorder/$poNo': typeof AppWorkorderPoNoRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -143,10 +143,10 @@ export interface FileRouteTypes {
     | '/pending'
     | '/profile'
     | '/workorders'
-    | '/workorder/$poNo'
     | '/indent/$indentNo'
     | '/payment/$paymentNo'
     | '/po/$poNo'
+    | '/workorder/$poNo'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -157,10 +157,10 @@ export interface FileRouteTypes {
     | '/pending'
     | '/profile'
     | '/workorders'
-    | '/workorder/$poNo'
     | '/indent/$indentNo'
     | '/payment/$paymentNo'
     | '/po/$poNo'
+    | '/workorder/$poNo'
   id:
     | '__root__'
     | '/'
@@ -172,16 +172,15 @@ export interface FileRouteTypes {
     | '/_app/pending'
     | '/_app/profile'
     | '/_app/workorders'
-    | '/workorder/$poNo'
     | '/_app/indent/$indentNo'
     | '/_app/payment/$paymentNo'
     | '/_app/po/$poNo'
+    | '/_app/workorder/$poNo'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
-  WorkorderPoNoRoute: typeof WorkorderPoNoRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -198,13 +197,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/workorder/$poNo': {
-      id: '/workorder/$poNo'
-      path: '/workorder/$poNo'
-      fullPath: '/workorder/$poNo'
-      preLoaderRoute: typeof WorkorderPoNoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/workorders': {
@@ -256,6 +248,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/workorder/$poNo': {
+      id: '/_app/workorder/$poNo'
+      path: '/workorder/$poNo'
+      fullPath: '/workorder/$poNo'
+      preLoaderRoute: typeof AppWorkorderPoNoRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/po/$poNo': {
       id: '/_app/po/$poNo'
       path: '/po/$poNo'
@@ -291,6 +290,7 @@ interface AppRouteChildren {
   AppIndentIndentNoRoute: typeof AppIndentIndentNoRoute
   AppPaymentPaymentNoRoute: typeof AppPaymentPaymentNoRoute
   AppPoPoNoRoute: typeof AppPoPoNoRoute
+  AppWorkorderPoNoRoute: typeof AppWorkorderPoNoRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -304,6 +304,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIndentIndentNoRoute: AppIndentIndentNoRoute,
   AppPaymentPaymentNoRoute: AppPaymentPaymentNoRoute,
   AppPoPoNoRoute: AppPoPoNoRoute,
+  AppWorkorderPoNoRoute: AppWorkorderPoNoRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
@@ -311,7 +312,6 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
-  WorkorderPoNoRoute: WorkorderPoNoRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

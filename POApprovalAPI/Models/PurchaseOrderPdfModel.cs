@@ -2,6 +2,9 @@ namespace POApprovalAPI.Models;
 
 public class PurchaseOrderPdfModel
 {
+    /// <summary>Document title shown in header (e.g. "Purchase Order" or "Work Order").</summary>
+    public string DocumentTitle { get; set; } = "Purchase Order";
+
     public string PoNo { get; set; } = "";
     public string CompanyName { get; set; } = "";
     public string FormerlyKnownAs { get; set; } = "";

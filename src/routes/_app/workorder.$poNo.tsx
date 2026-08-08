@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SkeletonCard, SkeletonSection, SkeletonTable, SkeletonWorkflow } from "@/components/SkeletonLoader";
 
-export const Route = createFileRoute("/workorder/$poNo")({
+export const Route = createFileRoute("/_app/workorder/$poNo")({
  head: ({ params }) => ({
   meta: [{ title: `${params.poNo} — Work Order Details` }]
 }),
@@ -37,7 +37,7 @@ function WorkOrderDetails() {
     if (typeof window !== "undefined" && window.innerWidth < 768) {
       return 0.5;
     }
-    return 1.1;
+    return 0.85;
   });
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState<string | null>(null);
@@ -142,37 +142,48 @@ function WorkOrderDetails() {
   // Automatically adjust scale to fit container width on load
   useEffect(() => {
     if (!pdfDoc || !containerRef.current) return;
-    
+
     const adjustScale = async () => {
       try {
         const page = await pdfDoc.getPage(1);
-const viewport = page.getViewport({ scale: 1.0 });
+        const viewport = page.getViewport({ scale: 1.0 });
+        const container = containerRef.current;
+        if (!container) return;
 
-const container = containerRef.current;
-if (!container) return;
+        const containerWidth = container.clientWidth;
+        if (containerWidth < 50) return;
 
-const containerWidth = container.clientWidth;
-        
-        // Subtract padding/border spacing
         const paddedWidth = containerWidth - 24;
         let optimalScale = Number((paddedWidth / viewport.width).toFixed(2));
-        
+
         if (window.innerWidth < 768) {
-          optimalScale = 0.5;
+          optimalScale = Math.min(optimalScale, 0.55);
+        } else {
+          // Landscape A4 is wide — keep within the card, never blow past 100%
+          optimalScale = Math.min(optimalScale, 1.0);
         }
-        
-        // Ensure scale is within acceptable bounds (0.5 to 2.0)
-        setScale(Math.max(0.5, Math.min(optimalScale, 2.0)));
+
+        setScale(Math.max(0.4, Math.min(optimalScale, 1.0)));
       } catch (err) {
         console.error("Error adjusting scale:", err);
       }
     };
-    
+
     const timeoutId = setTimeout(() => {
-      adjustScale();
+      void adjustScale();
     }, 100);
-    
-    return () => clearTimeout(timeoutId);
+
+    const ro = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => {
+          void adjustScale();
+        })
+      : null;
+    if (ro && containerRef.current) ro.observe(containerRef.current);
+
+    return () => {
+      clearTimeout(timeoutId);
+      ro?.disconnect();
+    };
   }, [pdfDoc]);
 
 
@@ -188,11 +199,11 @@ const containerWidth = container.clientWidth;
   };
 
   const handleZoomIn = () => {
-    setScale((prev) => Math.min(prev + 0.2, 2.2));
+    setScale((prev) => Math.min(prev + 0.1, 1.5));
   };
 
   const handleZoomOut = () => {
-    setScale((prev) => Math.max(prev - 0.2, 0.5));
+    setScale((prev) => Math.max(prev - 0.1, 0.4));
   };
   if (loading) {
     return (
@@ -410,7 +421,7 @@ if (!po || po.length === 0) {
   ];
 
   return (
-    <div className="space-y-5 pb-24 md:pb-0 max-w-full overflow-x-hidden">
+    <div className="space-y-5 pb-24 md:pb-0 max-w-full overflow-x-hidden min-w-0">
       <div className="flex items-center justify-between">
         <button onClick={() => navigate({ to: "/workorders" })} className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Back
@@ -496,7 +507,7 @@ if (!po || po.length === 0) {
                 <h3 className="text-base font-semibold text-destructive mb-1">Failed to load PDF</h3>
                 <p className="text-xs text-muted-foreground max-w-sm mb-4">{pdfError}</p>
                 <a
-                  href={getApiUrl(`/api/pdf/workorder/workorder?poNo=${encodeURIComponent(poNo)}`)}
+                  href={getApiUrl(`/api/pdf/workorder?poNo=${encodeURIComponent(poNo)}`)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition shadow-sm"
@@ -532,7 +543,7 @@ if (!po || po.length === 0) {
                   <div className="flex items-center gap-1.5">
                     <button
                       onClick={handleZoomOut}
-                      disabled={scale <= 0.5}
+                      disabled={scale <= 0.4}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input bg-background text-foreground hover:bg-accent disabled:opacity-50 transition"
                       title="Zoom Out"
                     >
@@ -543,14 +554,14 @@ if (!po || po.length === 0) {
                     </span>
                     <button
                       onClick={handleZoomIn}
-                      disabled={scale >= 2.0}
+                      disabled={scale >= 1.5}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input bg-background text-foreground hover:bg-accent disabled:opacity-50 transition"
                       title="Zoom In"
                     >
                       <ZoomIn className="h-4 w-4" />
                     </button>
                     <a
-                      href={getApiUrl(`/api/pdf/workorder/workorderComponent(poNo)}`)}
+                      href={getApiUrl(`/api/pdf/workorder?poNo=${encodeURIComponent(poNo)}`)}
                       download={`${poNo}.pdf`}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input bg-background text-foreground hover:bg-accent transition"
                       title="Download PDF"
@@ -561,7 +572,7 @@ if (!po || po.length === 0) {
                 </div>
 
                 {/* PDF Render Canvas */}
-                <div ref={containerRef} className="w-full overflow-auto bg-muted/20 border border-border rounded-xl p-2 min-h-[400px] max-h-[600px] shadow-inner">
+                <div ref={containerRef} className="w-full max-w-full min-w-0 overflow-x-auto overflow-y-auto bg-muted/20 border border-border rounded-xl p-2 min-h-[400px] max-h-[600px] shadow-inner">
                   <PdfCanvasViewer pdfDoc={pdfDoc} pageNum={pageNum} scale={scale} />
                 </div>
               </div>
