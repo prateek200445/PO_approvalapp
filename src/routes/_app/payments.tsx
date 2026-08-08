@@ -213,7 +213,7 @@ function PendingList() {
   }
 
   return (
-    <div className={`space-y-5 ${selectMode && selected.size > 0 ? "pb-24" : ""}`}>
+    <div className="space-y-5">
       <div className="flex items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
@@ -224,15 +224,27 @@ function PendingList() {
             {totalPages > 1 && `(Page ${currentPage} of ${totalPages})`}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={toggleSelectMode}
-          disabled={isLoading || filtered.length === 0}
-          className="inline-flex h-10 items-center gap-2 rounded-md border border-input bg-surface px-3 text-sm font-medium hover:bg-secondary disabled:opacity-50"
-        >
-          <CheckSquare className="h-4 w-4" />
-          {selectMode ? "Cancel select" : "Select"}
-        </button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {selectMode && selected.size > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowBulkConfirm(true)}
+              disabled={isBulkApproving}
+              className="inline-flex h-10 items-center rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              Approve selected ({selected.size})
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={toggleSelectMode}
+            disabled={isLoading || filtered.length === 0}
+            className="inline-flex h-10 items-center gap-2 rounded-md border border-input bg-surface px-3 text-sm font-medium hover:bg-secondary disabled:opacity-50"
+          >
+            <CheckSquare className="h-4 w-4" />
+            {selectMode ? "Cancel select" : "Select"}
+          </button>
+        </div>
       </div>
 
       {/* Filters - Desktop Only */}
@@ -590,36 +602,6 @@ function PendingList() {
                   </svg>
                 </button>
               </nav>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bulk action bar */}
-      {selectMode && selected.size > 0 && (
-        <div className="fixed inset-x-0 bottom-16 z-20 border-t border-border bg-surface/95 p-3 backdrop-blur md:bottom-0">
-          <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-2">
-            <div className="text-sm font-medium">
-              {selected.size} selected
-              <span className="ml-2 text-xs text-muted-foreground">(max {MAX_BULK})</span>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setSelected(new Set())}
-                disabled={isBulkApproving}
-                className="h-10 rounded-md border border-input bg-surface px-4 text-sm font-medium hover:bg-secondary disabled:opacity-50"
-              >
-                Clear
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowBulkConfirm(true)}
-                disabled={isBulkApproving}
-                className="h-10 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              >
-                Approve selected
-              </button>
             </div>
           </div>
         </div>
