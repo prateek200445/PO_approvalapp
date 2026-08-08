@@ -76,7 +76,7 @@ export function AppShell() {
             />
             <div className="leading-tight">
               <div className="text-sm font-semibold">HCP</div>
-              <div className="text-[11px] text-muted-foreground">PO Approval Portal</div>
+              <div className="text-[11px] text-muted-foreground">Approvals Portal</div>
             </div>
           </Link>
 
