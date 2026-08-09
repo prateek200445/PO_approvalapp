@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { KeyRound, LogOut, Building2, Server } from "lucide-react";
+import { KeyRound, LogOut, Building2, Server, ArrowLeftRight } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { ServerSettingsModal } from "@/components/ServerSettingsModal";
@@ -47,6 +47,24 @@ function Profile() {
           <Row icon={Building2} label="Department" value={user?.department ?? "—"} />
        
         </dl>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-6 shadow-sm md:hidden">
+        <h2 className="text-sm font-semibold">Tools</h2>
+        <div className="mt-4 space-y-2">
+          <button
+            onClick={() => navigate({ to: "/reconciliation" })}
+            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary cursor-pointer"
+          >
+            <div className="flex items-center gap-3">
+              <ArrowLeftRight className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <span className="text-sm font-medium">Ledger Reconciliation</span>
+                <p className="text-xs text-muted-foreground">Compare two Excel ledgers</p>
+              </div>
+            </div>
+          </button>
+        </div>
       </div>
 
       <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
