@@ -8,9 +8,12 @@ namespace POApprovalAPI.Services;
 
 public class ExcelLedgerService
 {
-    private static readonly string[] CompanyAliases = ["company", "company name", "firm", "firm name", "entity"];
-    private static readonly string[] DateAliases = ["date", "txn date", "transaction date", "vch date", "voucher date", "doc date"];
-    private static readonly string[] ParticularsAliases = ["particulars", "narration", "description", "remarks", "account", "ledger"];
+    private static readonly string[] CompanyAliases = ["companyname", "company name", "company", "firm", "firm name", "entity"];
+    private static readonly string[] DateAliases = ["voucher date", "voucherdate", "vch date", "txn date", "transaction date", "doc date", "date"];
+    private static readonly string[] BillNoAliases = ["bill no", "bill no.", "bill number", "billno"];
+    private static readonly string[] BillDateAliases = ["bill date", "billdate"];
+    private static readonly string[] AmountAliases = ["amount"];
+    private static readonly string[] ParticularsAliases = ["ledger name", "ledgername", "particulars", "narration", "description", "remarks", "account", "ledger"];
     private static readonly string[] VoucherNoAliases = ["voucher no", "voucher no.", "vch no", "vch no.", "voucher number", "doc no", "doc no."];
     private static readonly string[] VoucherRefAliases = ["voucher ref", "vch ref", "ref", "reference", "bank ref", "utr", "cheque no", "chq no"];
     private static readonly string[] DebitAliases =
@@ -136,8 +139,8 @@ public class ExcelLedgerService
         var headers = new[]
         {
             "Status", "Message", "Difference",
-            $"{nameA} Date", $"{nameA} Voucher", $"{nameA} Ref", $"{nameA} Particulars", $"{nameA} Debit", $"{nameA} Credit",
-            $"{nameB} Date", $"{nameB} Voucher", $"{nameB} Ref", $"{nameB} Particulars", $"{nameB} Debit", $"{nameB} Credit"
+            $"{nameA} Voucher Date", $"{nameA} Bill No", $"{nameA} Bill Date", $"{nameA} Voucher No", $"{nameA} Ledger", $"{nameA} Amount", $"{nameA} Side",
+            $"{nameB} Voucher Date", $"{nameB} Bill No", $"{nameB} Bill Date", $"{nameB} Voucher No", $"{nameB} Ledger", $"{nameB} Amount", $"{nameB} Side"
         };
         for (var c = 0; c < headers.Length; c++)
             detail.Cell(1, c + 1).Value = headers[c];
@@ -162,7 +165,7 @@ public class ExcelLedgerService
             detail.Cell(row, 2).Value = r.Message;
             if (r.Difference.HasValue) detail.Cell(row, 3).Value = r.Difference.Value;
             WriteEntry(detail, row, 4, r.EntryA);
-            WriteEntry(detail, row, 10, r.EntryB);
+            WriteEntry(detail, row, 11, r.EntryB);
             ApplyStatusCellTone(detail.Cell(row, 1), r.Status);
         }
 
@@ -171,9 +174,8 @@ public class ExcelLedgerService
         tableRange.SetAutoFilter();
         detail.SheetView.FreezeRows(1);
         detail.Columns().AdjustToContents();
-        // Cap very wide particulars columns for readability
-        detail.Column(7).Width = Math.Min(detail.Column(7).Width, 40);
-        detail.Column(13).Width = Math.Min(detail.Column(13).Width, 40);
+        detail.Column(8).Width = Math.Min(detail.Column(8).Width, 40);
+        detail.Column(15).Width = Math.Min(detail.Column(15).Width, 40);
 
         using var ms = new MemoryStream();
         workbook.SaveAs(ms);
@@ -230,11 +232,12 @@ public class ExcelLedgerService
     {
         if (entry == null) return;
         sheet.Cell(row, startCol).Value = entry.Date?.ToString("dd-MM-yyyy") ?? "";
-        sheet.Cell(row, startCol + 1).Value = entry.VoucherNo;
-        sheet.Cell(row, startCol + 2).Value = entry.VoucherRef;
-        sheet.Cell(row, startCol + 3).Value = entry.Particulars;
-        sheet.Cell(row, startCol + 4).Value = entry.Debit;
-        sheet.Cell(row, startCol + 5).Value = entry.Credit;
+        sheet.Cell(row, startCol + 1).Value = entry.BillNo;
+        sheet.Cell(row, startCol + 2).Value = entry.BillDate?.ToString("dd-MM-yyyy") ?? "";
+        sheet.Cell(row, startCol + 3).Value = entry.VoucherNo;
+        sheet.Cell(row, startCol + 4).Value = entry.Particulars;
+        sheet.Cell(row, startCol + 5).Value = entry.SignedAmount;
+        sheet.Cell(row, startCol + 6).Value = entry.Side;
     }
 
     public List<LedgerEntryDto> ParseLedger(Stream stream, string company, LedgerColumnMapping mapping)
@@ -245,16 +248,23 @@ public class ExcelLedgerService
         var headers = ReadHeaders(sheet, headerRow);
         var colIndex = BuildColumnIndex(headers);
 
-        RequireMapped(mapping.Date, "Date");
-        RequireMapped(mapping.Debit, "Debit");
-        RequireMapped(mapping.Credit, "Credit");
+        RequireMapped(mapping.Date, "Voucher Date");
+        var hasSignedAmount = !string.IsNullOrWhiteSpace(mapping.Amount);
+        if (!hasSignedAmount)
+        {
+            RequireMapped(mapping.Debit, "Debit");
+            RequireMapped(mapping.Credit, "Credit");
+        }
 
         var dateCol = ResolveColumn(colIndex, mapping.Date!);
-        var debitCol = ResolveColumn(colIndex, mapping.Debit!);
-        var creditCol = ResolveColumn(colIndex, mapping.Credit!);
+        var amountCol = hasSignedAmount ? ResolveColumn(colIndex, mapping.Amount!) : -1;
+        var debitCol = !hasSignedAmount ? ResolveColumn(colIndex, mapping.Debit!) : -1;
+        var creditCol = !hasSignedAmount ? ResolveColumn(colIndex, mapping.Credit!) : -1;
         var particularsCol = string.IsNullOrWhiteSpace(mapping.Particulars) ? -1 : ResolveColumn(colIndex, mapping.Particulars);
         var voucherCol = string.IsNullOrWhiteSpace(mapping.VoucherNo) ? -1 : ResolveColumn(colIndex, mapping.VoucherNo);
         var refCol = string.IsNullOrWhiteSpace(mapping.VoucherRef) ? -1 : ResolveColumn(colIndex, mapping.VoucherRef);
+        var billNoCol = string.IsNullOrWhiteSpace(mapping.BillNo) ? -1 : ResolveColumn(colIndex, mapping.BillNo);
+        var billDateCol = string.IsNullOrWhiteSpace(mapping.BillDate) ? -1 : ResolveColumn(colIndex, mapping.BillDate);
         var companyCol = string.IsNullOrWhiteSpace(mapping.Company) ? -1 : ResolveColumn(colIndex, mapping.Company);
 
         var entries = new List<LedgerEntryDto>();
@@ -265,13 +275,28 @@ public class ExcelLedgerService
             var row = sheet.Row(r);
             if (IsEmptyRow(row, headers.Count)) continue;
 
-            var date = ParseDate(row.Cell(dateCol));
-            var debit = ParseAmount(row.Cell(debitCol));
-            var credit = ParseAmount(row.Cell(creditCol));
-            if (debit == 0 && credit == 0 && date == null) continue;
+            var voucherDate = ParseDate(row.Cell(dateCol));
+            decimal signedAmount;
+            decimal debit;
+            decimal credit;
+
+            if (hasSignedAmount)
+            {
+                signedAmount = ParseSignedAmount(row.Cell(amountCol));
+                debit = signedAmount < 0 ? Math.Abs(signedAmount) : 0m;
+                credit = signedAmount > 0 ? signedAmount : 0m;
+            }
+            else
+            {
+                debit = ParseAbsoluteAmount(row.Cell(debitCol));
+                credit = ParseAbsoluteAmount(row.Cell(creditCol));
+                // Legacy: debit stored as negative, credit as positive
+                signedAmount = credit > 0 ? credit : debit > 0 ? -debit : 0m;
+            }
+
+            if (signedAmount == 0 && voucherDate == null) continue;
 
             var particulars = particularsCol > 0 ? NormalizeText(row.Cell(particularsCol).GetString()) : "";
-            // Skip opening/closing balance style rows
             if (IsBalanceRow(particulars)) continue;
 
             var companyName = companyCol > 0
@@ -284,10 +309,13 @@ public class ExcelLedgerService
             {
                 RowIndex = r,
                 Company = companyName,
-                Date = date,
+                Date = voucherDate,
+                BillDate = billDateCol > 0 ? ParseDate(row.Cell(billDateCol)) : null,
                 Particulars = particulars,
                 VoucherNo = voucherCol > 0 ? NormalizeText(row.Cell(voucherCol).GetFormattedString()) : "",
                 VoucherRef = refCol > 0 ? NormalizeText(row.Cell(refCol).GetFormattedString()) : "",
+                BillNo = billNoCol > 0 ? NormalizeText(row.Cell(billNoCol).GetFormattedString()) : "",
+                SignedAmount = signedAmount,
                 Debit = debit,
                 Credit = credit
             });
@@ -316,104 +344,159 @@ public class ExcelLedgerService
     private ComparisonResultDto Reconcile(List<LedgerEntryDto> entriesA, List<LedgerEntryDto> entriesB, LedgerMatchOptions options)
     {
         var results = new List<ComparisonPairDto>();
+        var usedA = new HashSet<int>();
         var usedB = new HashSet<int>();
-        var duplicateKeysA = FindDuplicateKeys(entriesA);
-        var duplicateKeysB = FindDuplicateKeys(entriesB);
 
-        // Index B by amount bucket for fast candidate lookup
-        var indexB = new Dictionary<string, List<LedgerEntryDto>>();
-        foreach (var b in entriesB)
+        var groupsA = BuildBillGroups(entriesA);
+        var groupsB = BuildBillGroups(entriesB);
+        var usedBillKeysB = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Bill groups: many↔many / many↔one by exact BillNo + BillDate, compare summed amounts
+        foreach (var ga in groupsA.Values)
         {
-            foreach (var key in BuildLookupKeys(b, options))
+            if (groupsB.TryGetValue(ga.Key, out var gb))
             {
-                if (!indexB.TryGetValue(key, out var list))
-                {
-                    list = new List<LedgerEntryDto>();
-                    indexB[key] = list;
-                }
-                list.Add(b);
-            }
-        }
-
-        foreach (var a in entriesA)
-        {
-            var candidates = new List<LedgerEntryDto>();
-            foreach (var key in BuildLookupKeys(a, options))
-            {
-                if (indexB.TryGetValue(key, out var list))
-                    candidates.AddRange(list);
-            }
-
-            candidates = candidates
-                .Where(b => !usedB.Contains(b.RowIndex))
-                .DistinctBy(b => b.RowIndex)
-                .ToList();
-
-            if (candidates.Count == 0)
-            {
-                // Try date-flexible / amount-only potential matches
-                var potential = FindPotential(a, entriesB, usedB, options);
-                if (potential != null)
-                {
-                    usedB.Add(potential.RowIndex);
-                    // Identity hits (ref/vno) get full classify; loose near-amount stays PotentialMatch.
-                    var fallbackStatus = HasSharedIdentity(a, potential, options)
-                        ? ClassifyPair(a, potential, options)
-                        : Math.Abs(a.Amount - potential.Amount) > options.AmountTolerance
-                            ? "AmountMismatch"
-                            : "PotentialMatch";
-
-                    results.Add(new ComparisonPairDto
-                    {
-                        Id = Guid.NewGuid().ToString("N"),
-                        Status = fallbackStatus,
-                        Message = StatusMessage(fallbackStatus, a, potential, options),
-                        Difference = fallbackStatus == "AmountMismatch" ? Math.Abs(a.Amount - potential.Amount) : null,
-                        EntryA = a,
-                        EntryB = potential
-                    });
-                }
-                else
-                {
-                    results.Add(new ComparisonPairDto
-                    {
-                        Id = Guid.NewGuid().ToString("N"),
-                        Status = "MissingInB",
-                        Message = "No corresponding transaction found in File B",
-                        EntryA = a
-                    });
-                }
+                usedBillKeysB.Add(ga.Key);
+                MarkUsed(usedA, ga.Entries);
+                MarkUsed(usedB, gb.Entries);
+                results.Add(BuildBillGroupPair(ga, gb, options));
                 continue;
             }
 
-            var best = RankCandidates(a, candidates, options).First();
-            usedB.Add(best.RowIndex);
+            var sameBillNo = groupsB
+                .Where(kv => !usedBillKeysB.Contains(kv.Key))
+                .Where(kv => string.Equals(kv.Value.BillNoKey, ga.BillNoKey, StringComparison.OrdinalIgnoreCase))
+                .Select(kv => kv.Value)
+                .ToList();
 
-            var isDuplicate = duplicateKeysA.Contains(DuplicateKey(a)) || duplicateKeysB.Contains(DuplicateKey(best));
-            var pairStatus = ClassifyPair(a, best, options);
-            // Shared voucher ref / voucher no uniquely identifies the pair — keep Matched.
-            if (isDuplicate && pairStatus == "Matched" && !HasSharedIdentity(a, best, options))
-                pairStatus = "Duplicate";
+            if (sameBillNo.Count > 0)
+            {
+                var best = sameBillNo
+                    .OrderBy(g => Math.Abs(Math.Abs(ga.SignedTotal) - Math.Abs(g.SignedTotal)))
+                    .First();
+                usedBillKeysB.Add(best.Key);
+                MarkUsed(usedA, ga.Entries);
+                MarkUsed(usedB, best.Entries);
+                results.Add(new ComparisonPairDto
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Status = "AmountMismatch",
+                    MatchKind = "bill-group",
+                    Message =
+                        $"Same Bill No but Bill Date must match exactly (A: {FormatDate(ga.BillDate)}, B: {FormatDate(best.BillDate)})",
+                    Difference = Math.Abs(Math.Abs(ga.SignedTotal) - Math.Abs(best.SignedTotal)),
+                    EntryA = ga.ToSummary(),
+                    EntryB = best.ToSummary(),
+                    EntriesA = ga.Entries.ToList(),
+                    EntriesB = best.Entries.ToList(),
+                });
+                continue;
+            }
+
+            MarkUsed(usedA, ga.Entries);
+            // One-sided bill that nets to ~0 is settled internally — omit from results
+            if (IsZeroNetBill(ga, options))
+                continue;
 
             results.Add(new ComparisonPairDto
             {
                 Id = Guid.NewGuid().ToString("N"),
-                Status = pairStatus,
-                Message = StatusMessage(pairStatus, a, best, options),
-                Difference = pairStatus == "AmountMismatch" ? Math.Abs(a.Amount - best.Amount) : null,
-                EntryA = a,
-                EntryB = best
+                Status = "MissingInB",
+                MatchKind = "bill-group",
+                Message = "No bill group with the same Bill No + Bill Date found in File B",
+                EntryA = ga.ToSummary(),
+                EntriesA = ga.Entries.ToList(),
             });
         }
 
-        foreach (var b in entriesB.Where(x => !usedB.Contains(x.RowIndex)))
+        foreach (var gb in groupsB.Where(kv => !usedBillKeysB.Contains(kv.Key)))
+        {
+            MarkUsed(usedB, gb.Value.Entries);
+            if (IsZeroNetBill(gb.Value, options))
+                continue;
+
+            results.Add(new ComparisonPairDto
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Status = "MissingInA",
+                MatchKind = "bill-group",
+                Message = "No bill group with the same Bill No + Bill Date found in File A",
+                EntryB = gb.Value.ToSummary(),
+                EntriesB = gb.Value.Entries.ToList(),
+            });
+        }
+
+        // Row-level voucher-date fallback for rows without Bill No
+        var remainingA = entriesA.Where(e => !usedA.Contains(e.RowIndex)).ToList();
+        var remainingB = entriesB.Where(e => !usedB.Contains(e.RowIndex)).ToList();
+
+        foreach (var a in remainingA)
+        {
+            var voucherMatches = remainingB
+                .Where(b => !usedB.Contains(b.RowIndex))
+                .Where(b => CanUseVoucherDateFallback(a, b))
+                .Where(b => DatesMatch(a.Date, b.Date, options.DateToleranceDays))
+                .Where(b => OppositeSignedAmounts(a, b, options.AmountTolerance))
+                .ToList();
+
+            if (voucherMatches.Count > 0)
+            {
+                var best = RankByOppositeAmount(a, voucherMatches).First();
+                usedB.Add(best.RowIndex);
+                results.Add(BuildRowPair(a, best, options, matched: true));
+                continue;
+            }
+
+            var sameVoucherDate = remainingB
+                .Where(b => !usedB.Contains(b.RowIndex))
+                .Where(b => CanUseVoucherDateFallback(a, b))
+                .Where(b => DatesMatch(a.Date, b.Date, options.DateToleranceDays))
+                .Where(b => AbsAmountsClose(a, b, Math.Max(options.AmountTolerance, 0.01m)))
+                .ToList();
+
+            if (sameVoucherDate.Count > 0)
+            {
+                var best = RankByOppositeAmount(a, sameVoucherDate).First();
+                usedB.Add(best.RowIndex);
+                var reason = SameSign(a, best)
+                    ? "same voucher date but amounts are not opposite signs"
+                    : $"same voucher date but amounts differ by {AmountGap(a, best):N2}";
+                results.Add(new ComparisonPairDto
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Status = "AmountMismatch",
+                    MatchKind = "row",
+                    Message = reason,
+                    Difference = AmountGap(a, best),
+                    EntryA = a,
+                    EntryB = best,
+                    EntriesA = [a],
+                    EntriesB = [best],
+                });
+                continue;
+            }
+
+            results.Add(new ComparisonPairDto
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Status = "MissingInB",
+                MatchKind = "row",
+                Message = "No corresponding transaction found in File B",
+                EntryA = a,
+                EntriesA = [a],
+            });
+        }
+
+        foreach (var b in remainingB.Where(x => !usedB.Contains(x.RowIndex)))
         {
             results.Add(new ComparisonPairDto
             {
                 Id = Guid.NewGuid().ToString("N"),
                 Status = "MissingInA",
+                MatchKind = "row",
                 Message = "No corresponding transaction found in File A",
-                EntryB = b
+                EntryB = b,
+                EntriesB = [b],
             });
         }
 
@@ -427,173 +510,214 @@ public class ExcelLedgerService
                 AmountMismatch = results.Count(r => r.Status == "AmountMismatch"),
                 MissingInA = results.Count(r => r.Status == "MissingInA"),
                 MissingInB = results.Count(r => r.Status == "MissingInB"),
-                Duplicates = results.Count(r => r.Status == "Duplicate"),
-                PotentialMatches = results.Count(r => r.Status == "PotentialMatch"),
+                Duplicates = 0,
+                PotentialMatches = 0,
             },
             Results = results
         };
     }
 
-    private static string ClassifyPair(LedgerEntryDto a, LedgerEntryDto b, LedgerMatchOptions options)
+    private static Dictionary<string, BillGroup> BuildBillGroups(List<LedgerEntryDto> entries)
     {
-        var oppositeOk =
-            (a.Debit > 0 && b.Credit > 0) ||
-            (a.Credit > 0 && b.Debit > 0);
-
-        var amountDiff = Math.Abs(a.Amount - b.Amount);
-        if (amountDiff > options.AmountTolerance)
-            return "AmountMismatch";
-
-        if (!oppositeOk)
-            return "PotentialMatch";
-
-        // Strong match when opposite sides + amount reconcile
-        return "Matched";
-    }
-
-    private static string StatusMessage(string status, LedgerEntryDto a, LedgerEntryDto b, LedgerMatchOptions? options = null) => status switch
-    {
-        "Matched" when HasSharedIdentity(a, b, options ?? new LedgerMatchOptions())
-            => $"{a.Side} {a.Amount:N2} reconciles with {b.Side} {b.Amount:N2} (shared voucher identity)",
-        "Matched" => $"{a.Side} {a.Amount:N2} reconciles with {b.Side} {b.Amount:N2}",
-        "AmountMismatch" when SameVoucherRef(a, b)
-            => $"Same voucher ref but amounts differ by {Math.Abs(a.Amount - b.Amount):N2}",
-        "AmountMismatch" when SameVoucherNo(a, b)
-            => $"Same voucher no but amounts differ by {Math.Abs(a.Amount - b.Amount):N2}",
-        "AmountMismatch" => $"Amounts differ by {Math.Abs(a.Amount - b.Amount):N2}",
-        "Duplicate" => "Matched, but duplicate date/amount keys exist and no shared voucher ref/no",
-        "PotentialMatch" => "Candidate found but debit/credit sides are not opposite",
-        _ => status
-    };
-
-    private static IEnumerable<LedgerEntryDto> RankCandidates(LedgerEntryDto a, List<LedgerEntryDto> candidates, LedgerMatchOptions options)
-    {
-        // Prefer shared voucher ref / voucher no before generic date+amount ties.
-        return candidates
-            .OrderByDescending(b => HasSharedIdentity(a, b, options))
-            .ThenByDescending(b => Score(a, b, options))
-            .ThenBy(b => Math.Abs(a.Amount - b.Amount))
-            .ThenBy(b => DateDiff(a.Date, b.Date));
-    }
-
-    private static int Score(LedgerEntryDto a, LedgerEntryDto b, LedgerMatchOptions options)
-    {
-        var score = 0;
-        var opposite =
-            (a.Debit > 0 && b.Credit > 0) ||
-            (a.Credit > 0 && b.Debit > 0);
-        if (opposite) score += 50;
-        if (Math.Abs(a.Amount - b.Amount) <= options.AmountTolerance) score += 40;
-        if (a.Date.HasValue && b.Date.HasValue && a.Date.Value.Date == b.Date.Value.Date) score += 20;
-
-        // Strong identity keys
-        if (options.PreferVoucherRef && SameVoucherRef(a, b))
-            score += 100;
-        if (options.MatchOnVoucherNo && SameVoucherNo(a, b))
-            score += 80;
-
-        if (!string.IsNullOrWhiteSpace(a.Particulars) && !string.IsNullOrWhiteSpace(b.Particulars))
+        var map = new Dictionary<string, BillGroup>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in entries.Where(HasBillNo))
         {
-            var ta = NormalizeKey(a.Particulars);
-            var tb = NormalizeKey(b.Particulars);
-            if (ta.Contains(tb) || tb.Contains(ta)) score += 10;
-        }
-        return score;
-    }
-
-    private static LedgerEntryDto? FindPotential(
-        LedgerEntryDto a,
-        List<LedgerEntryDto> entriesB,
-        HashSet<int> usedB,
-        LedgerMatchOptions options)
-    {
-        var pool = entriesB.Where(b => !usedB.Contains(b.RowIndex)).ToList();
-        if (pool.Count == 0) return null;
-
-        // Prefer exact voucher identity even when amount/date buckets missed.
-        if (options.PreferVoucherRef && !string.IsNullOrWhiteSpace(a.VoucherRef))
-        {
-            var refHit = pool
-                .Where(b => SameVoucherRef(a, b))
-                .OrderByDescending(b => Score(a, b, options))
-                .FirstOrDefault();
-            if (refHit != null) return refHit;
-        }
-
-        if (options.MatchOnVoucherNo && !string.IsNullOrWhiteSpace(a.VoucherNo))
-        {
-            var vnoHit = pool
-                .Where(b => SameVoucherNo(a, b))
-                .OrderByDescending(b => Score(a, b, options))
-                .FirstOrDefault();
-            if (vnoHit != null) return vnoHit;
-        }
-
-        // Same amount, date within wider window
-        var amountHits = pool
-            .Where(b => Math.Abs(a.Amount - b.Amount) <= Math.Max(options.AmountTolerance, 0.01m))
-            .Where(b => !a.Date.HasValue || !b.Date.HasValue || DateDiff(a.Date, b.Date) <= Math.Max(options.DateToleranceDays, 3))
-            .OrderByDescending(b => Score(a, b, options))
-            .ToList();
-
-        return amountHits.FirstOrDefault();
-    }
-
-    private static IEnumerable<string> BuildLookupKeys(LedgerEntryDto entry, LedgerMatchOptions options)
-    {
-        // Strongest identity keys first conceptually (dictionary merge order does not matter).
-        if (options.PreferVoucherRef && !string.IsNullOrWhiteSpace(entry.VoucherRef))
-            yield return $"ref|{NormalizeKey(entry.VoucherRef)}";
-
-        if (options.MatchOnVoucherNo && !string.IsNullOrWhiteSpace(entry.VoucherNo))
-            yield return $"vno|{NormalizeKey(entry.VoucherNo)}";
-
-        var amountKey = entry.Amount.ToString("0.00", CultureInfo.InvariantCulture);
-        if (!options.MatchOnAmount)
-            amountKey = "*";
-
-        if (options.MatchOnDate && entry.Date.HasValue)
-        {
-            for (var d = -options.DateToleranceDays; d <= options.DateToleranceDays; d++)
+            if (!e.BillDate.HasValue) continue;
+            var key = BillGroupKey(e.BillNo, e.BillDate);
+            if (!map.TryGetValue(key, out var group))
             {
-                var date = entry.Date.Value.Date.AddDays(d).ToString("yyyy-MM-dd");
-                yield return $"{date}|{amountKey}";
+                group = new BillGroup
+                {
+                    Key = key,
+                    BillNo = e.BillNo.Trim(),
+                    BillNoKey = NormalizeKey(e.BillNo),
+                    BillDate = e.BillDate,
+                };
+                map[key] = group;
             }
+            group.Entries.Add(e);
         }
-        else
+        return map;
+    }
+
+    private static string BillGroupKey(string billNo, DateTime? billDate) =>
+        $"{NormalizeKey(billNo)}|{(billDate?.ToString("yyyy-MM-dd") ?? "nodate")}";
+
+    private static void MarkUsed(HashSet<int> used, IEnumerable<LedgerEntryDto> entries)
+    {
+        foreach (var e in entries)
+            used.Add(e.RowIndex);
+    }
+
+    private static ComparisonPairDto BuildBillGroupPair(BillGroup a, BillGroup b, LedgerMatchOptions options)
+    {
+        var tolerance = BillAmountTolerance(options);
+        var summaryA = a.ToSummary();
+        var summaryB = b.ToSummary();
+        var gap = Math.Abs(Math.Abs(a.SignedTotal) - Math.Abs(b.SignedTotal));
+        var lines = $"{a.Entries.Count} ↔ {b.Entries.Count} lines";
+
+        // Both sides net to ~0 under the same Bill No + Bill Date → matched (settled bills)
+        if (IsZeroNetBill(a, options) && IsZeroNetBill(b, options))
         {
-            yield return $"*|{amountKey}";
+            return new ComparisonPairDto
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Status = "Matched",
+                MatchKind = "bill-group",
+                Message = $"Bill totals both net to 0 and reconcile ({lines})",
+                EntryA = summaryA,
+                EntryB = summaryB,
+                EntriesA = a.Entries.ToList(),
+                EntriesB = b.Entries.ToList(),
+            };
+        }
+
+        var opposite = OppositeSignedAmounts(summaryA, summaryB, tolerance);
+        if (opposite)
+        {
+            return new ComparisonPairDto
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Status = "Matched",
+                MatchKind = "bill-group",
+                Message =
+                    $"Bill total {summaryA.Side} {summaryA.Amount:N2} reconciles with {summaryB.Side} {summaryB.Amount:N2} ({lines})",
+                EntryA = summaryA,
+                EntryB = summaryB,
+                EntriesA = a.Entries.ToList(),
+                EntriesB = b.Entries.ToList(),
+            };
+        }
+
+        return new ComparisonPairDto
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Status = "AmountMismatch",
+            MatchKind = "bill-group",
+            Message = $"Same Bill No + Bill Date but bill totals do not reconcile ({lines}, diff {gap:N2})",
+            Difference = gap,
+            EntryA = summaryA,
+            EntryB = summaryB,
+            EntriesA = a.Entries.ToList(),
+            EntriesB = b.Entries.ToList(),
+        };
+    }
+
+    private static decimal BillAmountTolerance(LedgerMatchOptions options) =>
+        Math.Max(options.AmountTolerance, 1m);
+
+    private static bool IsZeroNetBill(BillGroup group, LedgerMatchOptions options) =>
+        Math.Abs(group.SignedTotal) <= BillAmountTolerance(options);
+
+    private static ComparisonPairDto BuildRowPair(LedgerEntryDto a, LedgerEntryDto b, LedgerMatchOptions options, bool matched)
+    {
+        if (matched && OppositeSignedAmounts(a, b, options.AmountTolerance))
+        {
+            return new ComparisonPairDto
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Status = "Matched",
+                MatchKind = "row",
+                Message = $"{a.Side} {a.Amount:N2} reconciles with {b.Side} {b.Amount:N2} via Voucher Date",
+                EntryA = a,
+                EntryB = b,
+                EntriesA = [a],
+                EntriesB = [b],
+            };
+        }
+
+        return new ComparisonPairDto
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Status = "AmountMismatch",
+            MatchKind = "row",
+            Message = $"Same Voucher Date but amounts do not reconcile (diff {AmountGap(a, b):N2})",
+            Difference = AmountGap(a, b),
+            EntryA = a,
+            EntryB = b,
+            EntriesA = [a],
+            EntriesB = [b],
+        };
+    }
+
+    private sealed class BillGroup
+    {
+        public string Key { get; set; } = "";
+        public string BillNo { get; set; } = "";
+        public string BillNoKey { get; set; } = "";
+        public DateTime? BillDate { get; set; }
+        public List<LedgerEntryDto> Entries { get; } = new();
+        public decimal SignedTotal => Entries.Sum(e => e.SignedAmount);
+
+        public LedgerEntryDto ToSummary()
+        {
+            var total = SignedTotal;
+            var first = Entries[0];
+            return new LedgerEntryDto
+            {
+                RowIndex = first.RowIndex,
+                Company = first.Company,
+                BillNo = BillNo,
+                BillDate = BillDate,
+                Date = Entries.Select(e => e.Date).Where(d => d.HasValue).OrderBy(d => d).FirstOrDefault(),
+                Particulars = Entries.Count == 1
+                    ? first.Particulars
+                    : $"Bill total ({Entries.Count} lines)",
+                VoucherNo = Entries.Count == 1 ? first.VoucherNo : "",
+                VoucherRef = "",
+                SignedAmount = total,
+                Debit = total < 0 ? Math.Abs(total) : 0m,
+                Credit = total > 0 ? total : 0m,
+            };
         }
     }
 
-    private static bool HasSharedIdentity(LedgerEntryDto a, LedgerEntryDto b, LedgerMatchOptions options)
+    private static IEnumerable<LedgerEntryDto> RankByOppositeAmount(LedgerEntryDto a, List<LedgerEntryDto> candidates) =>
+        candidates
+            .OrderByDescending(b => OppositeSignedAmounts(a, b, 0.01m))
+            .ThenBy(b => AmountGap(a, b))
+            .ThenBy(b => DateDiff(a.BillDate ?? a.Date, b.BillDate ?? b.Date));
+
+    private static bool HasBillNo(LedgerEntryDto e) => !string.IsNullOrWhiteSpace(e.BillNo);
+
+    /// <summary>
+    /// Voucher-date fallback is allowed only when Bill No is missing on at least one side.
+    /// Two rows that both have (different) Bill Nos must never match via voucher date.
+    /// </summary>
+    private static bool CanUseVoucherDateFallback(LedgerEntryDto a, LedgerEntryDto b) =>
+        !HasBillNo(a) || !HasBillNo(b);
+
+    private static bool SameBillNo(LedgerEntryDto a, LedgerEntryDto b) =>
+        HasBillNo(a) && HasBillNo(b) &&
+        string.Equals(NormalizeKey(a.BillNo), NormalizeKey(b.BillNo), StringComparison.OrdinalIgnoreCase);
+
+    private static bool ExactDateMatch(DateTime? a, DateTime? b) =>
+        a.HasValue && b.HasValue && a.Value.Date == b.Value.Date;
+
+    private static bool DatesMatch(DateTime? a, DateTime? b, int toleranceDays)
     {
-        if (options.PreferVoucherRef && SameVoucherRef(a, b)) return true;
-        if (options.MatchOnVoucherNo && SameVoucherNo(a, b)) return true;
-        return false;
+        if (!a.HasValue || !b.HasValue) return false;
+        return DateDiff(a, b) <= Math.Max(0, toleranceDays);
     }
 
-    private static bool SameVoucherRef(LedgerEntryDto a, LedgerEntryDto b) =>
-        !string.IsNullOrWhiteSpace(a.VoucherRef) &&
-        !string.IsNullOrWhiteSpace(b.VoucherRef) &&
-        string.Equals(NormalizeKey(a.VoucherRef), NormalizeKey(b.VoucherRef), StringComparison.OrdinalIgnoreCase);
+    private static string FormatDate(DateTime? d) =>
+        d?.ToString("dd-MM-yyyy") ?? "—";
 
-    private static bool SameVoucherNo(LedgerEntryDto a, LedgerEntryDto b) =>
-        !string.IsNullOrWhiteSpace(a.VoucherNo) &&
-        !string.IsNullOrWhiteSpace(b.VoucherNo) &&
-        string.Equals(NormalizeKey(a.VoucherNo), NormalizeKey(b.VoucherNo), StringComparison.OrdinalIgnoreCase);
+    private static bool OppositeSignedAmounts(LedgerEntryDto a, LedgerEntryDto b, decimal tolerance) =>
+        a.SignedAmount != 0 &&
+        b.SignedAmount != 0 &&
+        Math.Sign(a.SignedAmount) != Math.Sign(b.SignedAmount) &&
+        Math.Abs(Math.Abs(a.SignedAmount) - Math.Abs(b.SignedAmount)) <= tolerance;
 
-    private static HashSet<string> FindDuplicateKeys(List<LedgerEntryDto> entries)
-    {
-        return entries
-            .GroupBy(DuplicateKey)
-            .Where(g => g.Count() > 1 && g.Key != "|0.00")
-            .Select(g => g.Key)
-            .ToHashSet();
-    }
+    private static bool AbsAmountsClose(LedgerEntryDto a, LedgerEntryDto b, decimal tolerance) =>
+        Math.Abs(a.Amount - b.Amount) <= tolerance;
 
-    private static string DuplicateKey(LedgerEntryDto e) =>
-        $"{e.Date?.ToString("yyyy-MM-dd") ?? ""}|{e.Amount.ToString("0.00", CultureInfo.InvariantCulture)}|{e.Side}";
+    private static bool SameSign(LedgerEntryDto a, LedgerEntryDto b) =>
+        a.SignedAmount != 0 && b.SignedAmount != 0 && Math.Sign(a.SignedAmount) == Math.Sign(b.SignedAmount);
+
+    private static decimal AmountGap(LedgerEntryDto a, LedgerEntryDto b) =>
+        Math.Abs(Math.Abs(a.SignedAmount) - Math.Abs(b.SignedAmount));
 
     private static int DateDiff(DateTime? a, DateTime? b)
     {
@@ -625,9 +749,13 @@ public class ExcelLedgerService
             foreach (var v in values)
             {
                 var n = NormalizeKey(v);
-                if (DateAliases.Any(a => n.Contains(a))) score += 3;
-                if (DebitAliases.Any(a => n == a || n.Contains(a))) score += 3;
-                if (CreditAliases.Any(a => n == a || n.Contains(a))) score += 3;
+                if (DateAliases.Any(a => n == a || n.Contains(a))) score += 3;
+                if (BillNoAliases.Any(a => n == a || n.Contains(a))) score += 4;
+                if (BillDateAliases.Any(a => n == a || n.Contains(a))) score += 3;
+                if (AmountAliases.Any(a => n == a)) score += 4;
+                if (CompanyAliases.Any(a => n == a || n.Contains(a))) score += 3;
+                if (DebitAliases.Any(a => n == a || n.Contains(a))) score += 2;
+                if (CreditAliases.Any(a => n == a || n.Contains(a))) score += 2;
                 if (ParticularsAliases.Any(a => n.Contains(a))) score += 2;
                 if (VoucherNoAliases.Any(a => n.Contains(a))) score += 2;
             }
@@ -664,16 +792,23 @@ public class ExcelLedgerService
 
     private static LedgerColumnMapping SuggestMapping(List<string> headers)
     {
+        var amount = FindBestHeader(headers, AmountAliases);
+        var billDate = FindBestHeader(headers, BillDateAliases);
+        var voucherDate = FindBestHeader(
+            headers.Where(h => !string.Equals(h, billDate, StringComparison.OrdinalIgnoreCase)).ToList(),
+            DateAliases);
         return new LedgerColumnMapping
         {
             Company = FindBestHeader(headers, CompanyAliases),
-            Date = FindBestHeader(headers, DateAliases),
+            Date = voucherDate,
             Particulars = FindBestHeader(headers, ParticularsAliases),
             VoucherNo = FindBestHeader(headers, VoucherNoAliases),
             VoucherRef = FindBestHeader(headers, VoucherRefAliases),
-            // Always prefer Debit/Credit (INR); never auto-pick FC amount columns.
-            Debit = FindBestAmountHeader(headers, DebitAliases),
-            Credit = FindBestAmountHeader(headers, CreditAliases),
+            BillNo = FindBestHeader(headers, BillNoAliases),
+            BillDate = billDate,
+            Amount = amount,
+            Debit = amount == null ? FindBestAmountHeader(headers, DebitAliases) : null,
+            Credit = amount == null ? FindBestAmountHeader(headers, CreditAliases) : null,
         };
     }
 
@@ -823,7 +958,7 @@ public class ExcelLedgerService
         return null;
     }
 
-    private static decimal ParseAmount(IXLCell cell)
+    private static decimal ParseSignedAmount(IXLCell cell)
     {
         if (cell.TryGetValue(out double dbl)) return Math.Round((decimal)dbl, 2);
         if (cell.TryGetValue(out decimal dec)) return Math.Round(dec, 2);
@@ -831,6 +966,7 @@ public class ExcelLedgerService
         var raw = NormalizeText(cell.GetFormattedString());
         if (string.IsNullOrWhiteSpace(raw) || raw == "-" || raw == "—") return 0m;
 
+        var negative = raw.StartsWith("(") && raw.EndsWith(")");
         raw = raw.Replace("₹", "", StringComparison.Ordinal)
                  .Replace("$", "", StringComparison.Ordinal)
                  .Replace("Rs.", "", StringComparison.OrdinalIgnoreCase)
@@ -838,14 +974,23 @@ public class ExcelLedgerService
                  .Replace("INR", "", StringComparison.OrdinalIgnoreCase)
                  .Trim();
 
-        // Handle (1,234.00) as negative / just strip
         raw = raw.Trim('(', ')');
         raw = raw.Replace(",", "");
+        if (raw.StartsWith("-"))
+        {
+            negative = true;
+            raw = raw[1..].Trim();
+        }
 
         if (decimal.TryParse(raw, NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
-            return Math.Round(Math.Abs(value), 2);
+        {
+            var rounded = Math.Round(Math.Abs(value), 2);
+            return negative ? -rounded : rounded;
+        }
         return 0m;
     }
+
+    private static decimal ParseAbsoluteAmount(IXLCell cell) => Math.Abs(ParseSignedAmount(cell));
 
     private static string NormalizeText(string? value)
     {

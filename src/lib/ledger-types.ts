@@ -6,17 +6,16 @@ export type LedgerColumnMapping = {
   particulars?: string | null;
   voucherNo?: string | null;
   voucherRef?: string | null;
+  billNo?: string | null;
+  billDate?: string | null;
+  amount?: string | null;
   debit?: string | null;
   credit?: string | null;
 };
 
 export type LedgerMatchOptions = {
-  matchOnDate: boolean;
   dateToleranceDays: number;
-  matchOnAmount: boolean;
   amountTolerance: number;
-  preferVoucherRef: boolean;
-  matchOnVoucherNo: boolean;
 };
 
 export type ExcelPreview = {
@@ -34,9 +33,12 @@ export type LedgerEntry = {
   rowIndex: number;
   company: string;
   date?: string | null;
+  billDate?: string | null;
   particulars: string;
   voucherNo: string;
   voucherRef: string;
+  billNo: string;
+  signedAmount: number;
   debit: number;
   credit: number;
   amount: number;
@@ -56,8 +58,11 @@ export type ComparisonPair = {
   status: ComparisonStatus;
   message: string;
   difference?: number | null;
+  matchKind?: "bill-group" | "row" | string;
   entryA?: LedgerEntry | null;
   entryB?: LedgerEntry | null;
+  entriesA?: LedgerEntry[];
+  entriesB?: LedgerEntry[];
 };
 
 export type ComparisonSummary = {
@@ -79,12 +84,8 @@ export type ComparisonResult = {
 };
 
 export const defaultMatchOptions: LedgerMatchOptions = {
-  matchOnDate: true,
   dateToleranceDays: 0,
-  matchOnAmount: true,
   amountTolerance: 0,
-  preferVoucherRef: true,
-  matchOnVoucherNo: false,
 };
 
 export const statusLabel: Record<ComparisonStatus, string> = {

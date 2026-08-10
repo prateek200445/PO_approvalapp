@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  ChevronUp,
   X,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector } from "recharts";
@@ -56,12 +57,18 @@ const emptyMapping = (): LedgerColumnMapping => ({
   particulars: null,
   voucherNo: null,
   voucherRef: null,
+  billNo: null,
+  billDate: null,
+  amount: null,
   debit: null,
   credit: null,
   sheetName: null,
 });
 
-const RESULTS_PAGE_SIZE = 50;
+const RESULTS_PAGE_SIZE = 15;
+
+type SortKey = "status" | "date" | "sideA" | "amountA" | "sideB" | "amountB" | "diff";
+type SortDir = "asc" | "desc";
 
 const PIE_COLORS = {
   Matched: "#16a34a",
@@ -89,10 +96,12 @@ function ReconciliationPage() {
   const [comparing, setComparing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<ComparisonResult | null>(null);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("issues");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("Matched");
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<ComparisonPair | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   async function previewFile(side: "A" | "B", file: File) {
     const setSide = side === "A" ? setSideA : setSideB;
@@ -152,6 +161,9 @@ function ReconciliationPage() {
           particulars: keepOrSuggest(prev.mapping.particulars, preview.headers, preview.suggestedMapping.particulars),
           voucherNo: keepOrSuggest(prev.mapping.voucherNo, preview.headers, preview.suggestedMapping.voucherNo),
           voucherRef: keepOrSuggest(prev.mapping.voucherRef, preview.headers, preview.suggestedMapping.voucherRef),
+          billNo: keepOrSuggest(prev.mapping.billNo, preview.headers, preview.suggestedMapping.billNo),
+          billDate: keepOrSuggest(prev.mapping.billDate, preview.headers, preview.suggestedMapping.billDate),
+          amount: keepOrSuggest(prev.mapping.amount, preview.headers, preview.suggestedMapping.amount),
           debit: keepOrSuggest(prev.mapping.debit, preview.headers, preview.suggestedMapping.debit),
           credit: keepOrSuggest(prev.mapping.credit, preview.headers, preview.suggestedMapping.credit),
         },
@@ -169,9 +181,10 @@ function ReconciliationPage() {
       ["File B", sideB],
     ] as const) {
       if (!side.file || !side.preview) return `Upload ${label} first.`;
-      if (!side.mapping.date) return `${label}: Date column is required.`;
-      if (!side.mapping.debit) return `${label}: Debit column is required.`;
-      if (!side.mapping.credit) return `${label}: Credit column is required.`;
+      if (!side.mapping.date) return `${label}: Voucher Date column is required.`;
+      if (!side.mapping.amount && (!side.mapping.debit || !side.mapping.credit)) {
+        return `${label}: Amount column (or Debit + Credit) is required.`;
+      }
     }
     return null;
   }
@@ -190,9 +203,20 @@ function ReconciliationPage() {
       if (!res.ok) throw new Error(data.message || "Comparison failed");
       setResult(normalizeResult(data));
       setStep(3);
-      setStatusFilter("issues");
+      setStatusFilter("Matched");
       setSelected(null);
       setCurrentPage(1);
+      requestAnimationFrame(() => {
+        const scrollTop = () => {
+          window.scrollTo({ top: 0, behavior: "instant" });
+          document.documentElement.scrollTop = 0;
+          document.body.scrollTop = 0;
+          const mainContent = document.getElementById("main-content");
+          if (mainContent) mainContent.scrollTop = 0;
+        };
+        scrollTop();
+        setTimeout(scrollTop, 50);
+      });
       toast.success("Comparison complete");
     } catch (err: any) {
       toast.error(err.message || "Comparison failed");
@@ -254,14 +278,23 @@ function ReconciliationPage() {
         return false;
       }
       if (!query) return true;
+      const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
+      const queryNorm = norm(query);
+      const entryBits = (e?: LedgerEntry | null) =>
+        e ? [e.particulars, e.voucherNo, e.billNo, e.voucherRef] : [];
+      const billNos = [
+        r.entryA?.billNo,
+        r.entryB?.billNo,
+        ...(r.entriesA ?? []).map((e) => e.billNo),
+        ...(r.entriesB ?? []).map((e) => e.billNo),
+      ].filter(Boolean) as string[];
+      if (billNos.some((b) => norm(b).includes(queryNorm))) return true;
       const hay = [
         r.message,
-        r.entryA?.particulars,
-        r.entryA?.voucherNo,
-        r.entryA?.voucherRef,
-        r.entryB?.particulars,
-        r.entryB?.voucherNo,
-        r.entryB?.voucherRef,
+        ...entryBits(r.entryA),
+        ...entryBits(r.entryB),
+        ...(r.entriesA ?? []).flatMap((e) => entryBits(e)),
+        ...(r.entriesB ?? []).flatMap((e) => entryBits(e)),
       ]
         .filter(Boolean)
         .join(" ")
@@ -269,6 +302,73 @@ function ReconciliationPage() {
       return hay.includes(query);
     });
   }, [result, statusFilter, q]);
+
+  const sorted = useMemo(() => {
+    if (!sortKey) return filtered;
+    const dir = sortDir === "asc" ? 1 : -1;
+    const statusRank: Record<string, number> = {
+      Matched: 0,
+      AmountMismatch: 1,
+      MissingInA: 2,
+      MissingInB: 3,
+      Duplicate: 4,
+      PotentialMatch: 5,
+    };
+    const dateValue = (r: ComparisonPair) => {
+      const raw = r.entryA?.billDate || r.entryA?.date || r.entryB?.billDate || r.entryB?.date;
+      if (!raw) return 0;
+      const t = new Date(raw).getTime();
+      return Number.isNaN(t) ? 0 : t;
+    };
+    const amount = (e?: LedgerEntry | null) => e?.signedAmount ?? e?.amount ?? null;
+    const text = (v: string) => v.trim().toLowerCase();
+
+    return [...filtered].sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "status":
+          cmp = (statusRank[a.status] ?? 99) - (statusRank[b.status] ?? 99);
+          break;
+        case "date":
+          cmp = dateValue(a) - dateValue(b);
+          break;
+        case "sideA":
+          cmp = text(pairSideLabel(a, "A")).localeCompare(text(pairSideLabel(b, "A")));
+          break;
+        case "sideB":
+          cmp = text(pairSideLabel(a, "B")).localeCompare(text(pairSideLabel(b, "B")));
+          break;
+        case "amountA": {
+          const av = amount(a.entryA);
+          const bv = amount(b.entryA);
+          if (av == null && bv == null) cmp = 0;
+          else if (av == null) cmp = 1;
+          else if (bv == null) cmp = -1;
+          else cmp = av - bv;
+          break;
+        }
+        case "amountB": {
+          const av = amount(a.entryB);
+          const bv = amount(b.entryB);
+          if (av == null && bv == null) cmp = 0;
+          else if (av == null) cmp = 1;
+          else if (bv == null) cmp = -1;
+          else cmp = av - bv;
+          break;
+        }
+        case "diff": {
+          const av = a.difference ?? null;
+          const bv = b.difference ?? null;
+          if (av == null && bv == null) cmp = 0;
+          else if (av == null) cmp = 1;
+          else if (bv == null) cmp = -1;
+          else cmp = av - bv;
+          break;
+        }
+      }
+      return cmp * dir;
+    });
+  }, [filtered, sortKey, sortDir]);
 
   const pieData = useMemo(() => {
     if (!result) return [];
@@ -302,7 +402,7 @@ function ReconciliationPage() {
   );
 
   function applyPieFilter(next: StatusFilter) {
-    setStatusFilter((prev) => (prev === next ? "issues" : next));
+    setStatusFilter((prev) => (prev === next ? "Matched" : next));
   }
 
   function isPieSliceActive(filter: StatusFilter) {
@@ -316,11 +416,31 @@ function ReconciliationPage() {
   const companyNameB = result?.companyNameB?.trim() || "Company B";
   const pieHighlightActive = statusFilter !== "issues" && statusFilter !== "all";
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / RESULTS_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(sorted.length / RESULTS_PAGE_SIZE));
   const pageRows = useMemo(() => {
     const start = (currentPage - 1) * RESULTS_PAGE_SIZE;
-    return filtered.slice(start, start + RESULTS_PAGE_SIZE);
-  }, [filtered, currentPage]);
+    return sorted.slice(start, start + RESULTS_PAGE_SIZE);
+  }, [sorted, currentPage]);
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+    setCurrentPage(1);
+  }
+
+  const hasActiveFilters = q.trim() !== "" || statusFilter !== "Matched" || sortKey != null;
+
+  function clearFilters() {
+    setQ("");
+    setStatusFilter("Matched");
+    setSortKey(null);
+    setSortDir("asc");
+    setCurrentPage(1);
+  }
 
   useEffect(() => {
     setCurrentPage(1);
@@ -336,7 +456,7 @@ function ReconciliationPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Ledger Reconciliation</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Compare two company ledgers and reconcile debit ↔ credit transactions.
+            Compare two company ledgers. Match Bill No + Bill Date first, then Voucher Date; amounts must be opposite signs.
           </p>
         </div>
         {step === 3 && result && (
@@ -403,45 +523,9 @@ function ReconciliationPage() {
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
             <h2 className="text-sm font-semibold">Match rules</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              Default: voucher ref (when present) + date/amount, then reconcile opposite sides (A Debit ↔ B Credit).
+              1) Group by exact Bill No + Bill Date and compare bill totals (many lines can sum to one). Opposite signs required. 2) Rows without Bill No fall back to Voucher Date. Different Bill Nos never match.
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={options.matchOnDate}
-                  onChange={(e) => setOptions((o) => ({ ...o, matchOnDate: e.target.checked }))}
-                  className="rounded border-input"
-                />
-                Match on date
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={options.matchOnAmount}
-                  onChange={(e) => setOptions((o) => ({ ...o, matchOnAmount: e.target.checked }))}
-                  className="rounded border-input"
-                />
-                Match on amount
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={options.preferVoucherRef}
-                  onChange={(e) => setOptions((o) => ({ ...o, preferVoucherRef: e.target.checked }))}
-                  className="rounded border-input"
-                />
-                Match on voucher / bank ref
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={options.matchOnVoucherNo}
-                  onChange={(e) => setOptions((o) => ({ ...o, matchOnVoucherNo: e.target.checked }))}
-                  className="rounded border-input"
-                />
-                Also match on voucher no
-              </label>
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-muted-foreground">Date tolerance (days)</span>
                 <input
@@ -643,7 +727,7 @@ function ReconciliationPage() {
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search particulars, voucher no, or voucher ref…"
+                placeholder="Search bill no, particulars, voucher no…"
                 className="h-10 w-full rounded-md border border-input bg-surface pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
               />
             </div>
@@ -666,11 +750,20 @@ function ReconciliationPage() {
               </select>
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             </div>
+            <button
+              type="button"
+              onClick={clearFilters}
+              disabled={!hasActiveFilters}
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-md border border-input bg-surface px-3 text-sm font-medium hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <X className="h-3.5 w-3.5" />
+              Clear filters
+            </button>
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Showing {filtered.length === 0 ? 0 : (currentPage - 1) * RESULTS_PAGE_SIZE + 1}
-            –{Math.min(currentPage * RESULTS_PAGE_SIZE, filtered.length)} of {filtered.length.toLocaleString("en-IN")}
+            Showing {sorted.length === 0 ? 0 : (currentPage - 1) * RESULTS_PAGE_SIZE + 1}
+            –{Math.min(currentPage * RESULTS_PAGE_SIZE, sorted.length)} of {sorted.length.toLocaleString("en-IN")}
             {totalPages > 1 ? ` · Page ${currentPage} of ${totalPages}` : ""}
           </p>
 
@@ -693,13 +786,20 @@ function ReconciliationPage() {
                       )}
                     </div>
                     <div className="mt-2 text-sm font-medium leading-snug">
-                      {row.entryA?.particulars || row.entryB?.particulars || row.message}
+                      {pairListTitle(row)}
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {formatDate(row.entryA?.date || row.entryB?.date)}
-                      {(row.entryA?.voucherNo || row.entryB?.voucherNo) && (
-                        <> · Vch {row.entryA?.voucherNo || "—"} / {row.entryB?.voucherNo || "—"}</>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                      {row.matchKind === "bill-group" && (
+                        <span className="rounded-md bg-secondary/70 px-1.5 py-0.5 font-medium text-foreground/80">
+                          {lineCountLabel(row)} lines
+                        </span>
                       )}
+                      <span>
+                        {formatDate(row.entryA?.billDate || row.entryA?.date || row.entryB?.billDate || row.entryB?.date)}
+                        {row.matchKind !== "bill-group" && (row.entryA?.billNo || row.entryB?.billNo)
+                          ? ` · ${row.entryA?.billNo || row.entryB?.billNo}`
+                          : ""}
+                      </span>
                     </div>
                   </button>
                 ))
@@ -719,13 +819,13 @@ function ReconciliationPage() {
                 </colgroup>
                 <thead className="bg-secondary/50 text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
-                    <th className="px-5 py-2.5 text-center font-medium">Status</th>
-                    <th className="px-5 py-2.5 text-center font-medium">Date</th>
-                    <th className="px-5 py-2.5 text-center font-medium">{companyNameA}</th>
-                    <th className="px-5 py-2.5 text-center font-medium">Amount</th>
-                    <th className="px-5 py-2.5 text-center font-medium">{companyNameB}</th>
-                    <th className="px-5 py-2.5 text-center font-medium">Amount</th>
-                    <th className="px-5 py-2.5 text-center font-medium">Diff</th>
+                    <SortableTh label="Status" column="status" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh label="Date" column="date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh label={companyNameA} column="sideA" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh label="Amount" column="amountA" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh label={companyNameB} column="sideB" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh label="Amount" column="amountB" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh label="Diff" column="diff" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -748,15 +848,29 @@ function ReconciliationPage() {
                           </div>
                         </td>
                         <td className="px-5 py-2.5 text-center whitespace-nowrap">
-                          {formatDate(row.entryA?.date || row.entryB?.date)}
+                          {formatDate(row.entryA?.billDate || row.entryA?.date || row.entryB?.billDate || row.entryB?.date)}
                         </td>
-                        <td className="px-5 py-2.5 text-center break-words">{row.entryA?.particulars || "—"}</td>
+                        <td className="px-5 py-2.5 text-center break-words">
+                          <div className="leading-snug">{pairSideLabel(row, "A")}</div>
+                          {row.matchKind === "bill-group" && (row.entriesA?.length ?? 0) > 1 && (
+                            <div className="mt-0.5 text-[11px] text-muted-foreground">
+                              {row.entriesA!.length} lines
+                            </div>
+                          )}
+                        </td>
                         <td className="px-5 py-2.5">
                           <div className="flex justify-center">
                             <AmountSideCell entry={row.entryA} />
                           </div>
                         </td>
-                        <td className="px-5 py-2.5 text-center break-words">{row.entryB?.particulars || "—"}</td>
+                        <td className="px-5 py-2.5 text-center break-words">
+                          <div className="leading-snug">{pairSideLabel(row, "B")}</div>
+                          {row.matchKind === "bill-group" && (row.entriesB?.length ?? 0) > 1 && (
+                            <div className="mt-0.5 text-[11px] text-muted-foreground">
+                              {row.entriesB!.length} lines
+                            </div>
+                          )}
+                        </td>
                         <td className="px-5 py-2.5">
                           <div className="flex justify-center">
                             <AmountSideCell entry={row.entryB} />
@@ -847,6 +961,50 @@ function ReconciliationPage() {
         />
       )}
     </div>
+  );
+}
+
+function SortableTh({
+  label,
+  column,
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  label: string;
+  column: SortKey;
+  sortKey: SortKey | null;
+  sortDir: SortDir;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = sortKey === column;
+  return (
+    <th className="px-5 py-2.5 text-center font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={cn(
+          "inline-flex max-w-full items-center justify-center gap-1 rounded-md px-1 py-0.5 transition hover:text-foreground",
+          active ? "text-foreground" : "text-muted-foreground",
+        )}
+      >
+        <span className="truncate">{label}</span>
+        <span className="inline-flex shrink-0 flex-col leading-none" aria-hidden>
+          <ChevronUp
+            className={cn(
+              "h-3 w-3 -mb-0.5",
+              active && sortDir === "asc" ? "text-foreground" : "text-muted-foreground/40",
+            )}
+          />
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 -mt-0.5",
+              active && sortDir === "desc" ? "text-foreground" : "text-muted-foreground/40",
+            )}
+          />
+        </span>
+      </button>
+    </th>
   );
 }
 
@@ -949,20 +1107,26 @@ function MappingCard({
   if (!side.preview) return null;
   const headers = side.preview.headers;
   const fields: { key: keyof LedgerColumnMapping; label: string; required?: boolean; amount?: boolean }[] = [
-    { key: "company", label: "Company" },
-    { key: "date", label: "Date", required: true },
-    { key: "debit", label: "Debit (INR)", required: true, amount: true },
-    { key: "credit", label: "Credit (INR)", required: true, amount: true },
-    { key: "particulars", label: "Particulars" },
+    { key: "company", label: "Company Name" },
+    { key: "date", label: "Voucher Date", required: true },
+    { key: "amount", label: "Amount (signed)", required: true, amount: true },
+    { key: "billNo", label: "Bill No" },
+    { key: "billDate", label: "Bill Date" },
+    { key: "particulars", label: "Ledger Name / Particulars" },
     { key: "voucherNo", label: "Voucher No" },
-    { key: "voucherRef", label: "Voucher / Bank Ref" },
+    { key: "debit", label: "Debit (legacy)", amount: true },
+    { key: "credit", label: "Credit (legacy)", amount: true },
   ];
 
   function optionsFor(field: (typeof fields)[number]) {
+    if (field.key === "amount") {
+      // Prefer plain Amount; still hide obvious FC amount columns.
+      const nonFc = headers.filter((h) => !isFcAmountHeader(h));
+      return nonFc.length > 0 ? nonFc : headers;
+    }
     if (!field.amount) return headers;
     const inr = headers.filter(isInrAmountHeader);
     const nonFc = headers.filter((h) => !isFcAmountHeader(h));
-    // Prefer INR columns; if none labeled INR, hide FC amount columns.
     if (inr.length > 0) return inr;
     if (nonFc.length > 0) return nonFc;
     return headers;
@@ -1025,7 +1189,7 @@ function MappingCard({
         ))}
       </div>
       <p className="mt-3 text-[11px] text-muted-foreground">
-        Amounts always use Debit/Credit (INR). Foreign-currency columns are ignored.
+        Prefer signed Amount (− debit / + credit). Legacy Debit/Credit columns are optional when Amount is mapped.
       </p>
     </div>
   );
@@ -1447,47 +1611,79 @@ function DetailSheet({
   companyNameB: string;
   onClose: () => void;
 }) {
-  const fields: { label: string; a: string; b: string }[] = [
-    {
-      label: "Date",
-      a: formatDate(pair.entryA?.date),
-      b: formatDate(pair.entryB?.date),
-    },
-    {
-      label: "Voucher No",
-      a: pair.entryA?.voucherNo || "—",
-      b: pair.entryB?.voucherNo || "—",
-    },
-    {
-      label: "Voucher Ref",
-      a: pair.entryA?.voucherRef || "—",
-      b: pair.entryB?.voucherRef || "—",
-    },
-    {
-      label: "Particulars",
-      a: pair.entryA?.particulars || "—",
-      b: pair.entryB?.particulars || "—",
-    },
-    {
-      label: "Debit",
-      a: pair.entryA ? formatNum(pair.entryA.debit) : "—",
-      b: pair.entryB ? formatNum(pair.entryB.debit) : "—",
-    },
-    {
-      label: "Credit",
-      a: pair.entryA ? formatNum(pair.entryA.credit) : "—",
-      b: pair.entryB ? formatNum(pair.entryB.credit) : "—",
-    },
-    {
-      label: "Side / Amount",
-      a: pair.entryA ? `${pair.entryA.side} ${formatNum(pair.entryA.amount)}` : "—",
-      b: pair.entryB ? `${pair.entryB.side} ${formatNum(pair.entryB.amount)}` : "—",
-    },
-  ];
+  const isBillGroup = pair.matchKind === "bill-group";
+  const entriesA = pair.entriesA?.length ? pair.entriesA : pair.entryA ? [pair.entryA] : [];
+  const entriesB = pair.entriesB?.length ? pair.entriesB : pair.entryB ? [pair.entryB] : [];
+
+  const fields: { label: string; a: string; b: string }[] = isBillGroup
+    ? [
+        {
+          label: "Bill No",
+          a: pair.entryA?.billNo || "—",
+          b: pair.entryB?.billNo || "—",
+        },
+        {
+          label: "Bill Date",
+          a: formatDate(pair.entryA?.billDate),
+          b: formatDate(pair.entryB?.billDate),
+        },
+        {
+          label: "Lines",
+          a: entriesA.length ? String(entriesA.length) : "—",
+          b: entriesB.length ? String(entriesB.length) : "—",
+        },
+        {
+          label: "Bill total",
+          a: pair.entryA ? formatSigned(pair.entryA.signedAmount ?? pair.entryA.amount, pair.entryA.side) : "—",
+          b: pair.entryB ? formatSigned(pair.entryB.signedAmount ?? pair.entryB.amount, pair.entryB.side) : "—",
+        },
+        {
+          label: "Side",
+          a: pair.entryA?.side || "—",
+          b: pair.entryB?.side || "—",
+        },
+      ]
+    : [
+        {
+          label: "Bill No",
+          a: pair.entryA?.billNo || "—",
+          b: pair.entryB?.billNo || "—",
+        },
+        {
+          label: "Bill Date",
+          a: formatDate(pair.entryA?.billDate),
+          b: formatDate(pair.entryB?.billDate),
+        },
+        {
+          label: "Voucher Date",
+          a: formatDate(pair.entryA?.date),
+          b: formatDate(pair.entryB?.date),
+        },
+        {
+          label: "Voucher No",
+          a: pair.entryA?.voucherNo || "—",
+          b: pair.entryB?.voucherNo || "—",
+        },
+        {
+          label: "Ledger",
+          a: pair.entryA?.particulars || "—",
+          b: pair.entryB?.particulars || "—",
+        },
+        {
+          label: "Amount",
+          a: pair.entryA ? formatSigned(pair.entryA.signedAmount ?? pair.entryA.amount, pair.entryA.side) : "—",
+          b: pair.entryB ? formatSigned(pair.entryB.signedAmount ?? pair.entryB.amount, pair.entryB.side) : "—",
+        },
+        {
+          label: "Side",
+          a: pair.entryA?.side || "—",
+          b: pair.entryB?.side || "—",
+        },
+      ];
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 backdrop-blur-[2px] sm:items-center sm:p-6"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-3 sm:items-center sm:p-6"
       onClick={onClose}
     >
       <div
@@ -1501,13 +1697,18 @@ function DetailSheet({
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <ResultBadge status={pair.status} companyNameA={companyNameA} companyNameB={companyNameB} />
+              {isBillGroup && (
+                <span className="rounded-md bg-secondary/70 px-2 py-0.5 text-[11px] font-medium text-foreground/80">
+                  Bill · {lineCountLabel(pair)} lines
+                </span>
+              )}
               {pair.difference != null && (
-                <span className="rounded-full border border-warning/30 bg-warning/10 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-warning">
+                <span className="rounded-md border border-warning/30 bg-warning/10 px-2 py-0.5 text-xs font-semibold tabular-nums text-warning">
                   Diff ₹{formatNum(pair.difference)}
                 </span>
               )}
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">{pair.message}</p>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{pair.message}</p>
           </div>
           <button
             type="button"
@@ -1519,9 +1720,8 @@ function DetailSheet({
           </button>
         </div>
 
-        <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-          {/* Desktop: full side-by-side comparison table */}
-          <div className="hidden overflow-hidden rounded-xl border border-border md:block">
+        <div className="overflow-y-auto px-4 py-4 sm:px-6 sm:py-5 space-y-4">
+          <div className="overflow-hidden rounded-xl border border-border">
             <table className="w-full text-sm">
               <thead className="bg-secondary/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
@@ -1547,14 +1747,20 @@ function DetailSheet({
             </table>
           </div>
 
-          {/* Mobile: stacked cards */}
-          <div className="grid gap-3 md:hidden">
-            <EntryBlock title={companyNameA} entry={pair.entryA} />
-            <EntryBlock title={companyNameB} entry={pair.entryB} />
-          </div>
+          {(isBillGroup || entriesA.length > 1 || entriesB.length > 1) && (
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Line breakdown
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <LineList title={companyNameA} entries={entriesA} />
+                <LineList title={companyNameB} entries={entriesB} />
+              </div>
+            </div>
+          )}
 
           {pair.difference != null && (
-            <div className="mt-4 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
+            <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
               <div className="text-xs font-semibold uppercase tracking-wide text-warning">Amount difference</div>
               <div className="mt-1 text-lg font-bold tabular-nums text-foreground">
                 ₹{formatNum(pair.difference)}
@@ -1567,37 +1773,69 @@ function DetailSheet({
   );
 }
 
-function EntryBlock({ title, entry }: { title: string; entry: ComparisonPair["entryA"] }) {
-  if (!entry) {
+function LineList({ title, entries }: { title: string; entries: LedgerEntry[] }) {
+  if (entries.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground">
+      <div className="rounded-xl border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
         <div className="font-semibold text-foreground">{title}</div>
-        <p className="mt-2">No corresponding record</p>
+        <p className="mt-2">No lines</p>
       </div>
     );
   }
+
   return (
-    <div className="rounded-lg border border-border bg-surface p-3 text-sm">
-      <div className="font-semibold">{title}</div>
-      <dl className="mt-2 space-y-1.5">
-        <Row label="Date" value={formatDate(entry.date)} />
-        <Row label="Voucher" value={entry.voucherNo || "—"} />
-        <Row label="Ref" value={entry.voucherRef || "—"} />
-        <Row label="Particulars" value={entry.particulars || "—"} />
-        <Row label="Debit" value={formatNum(entry.debit)} />
-        <Row label="Credit" value={formatNum(entry.credit)} />
-      </dl>
+    <div className="rounded-xl border border-border bg-surface/30 p-3">
+      <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
+        <div className="text-sm font-semibold">{title}</div>
+        <div className="text-[11px] tabular-nums text-muted-foreground">
+          {entries.length} line{entries.length === 1 ? "" : "s"}
+        </div>
+      </div>
+      <ul className="mt-2 divide-y divide-border/60">
+        {entries.map((e, idx) => (
+          <li key={`${e.rowIndex}-${idx}`} className="flex items-start justify-between gap-3 py-2.5 text-sm">
+            <div className="min-w-0">
+              <div className="truncate font-medium">{e.particulars || "—"}</div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                {formatDate(e.date)}
+                {e.voucherNo ? ` · ${e.voucherNo}` : ""}
+              </div>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{e.side}</div>
+              <div className="tabular-nums font-semibold">
+                {formatSigned(e.signedAmount ?? e.amount, e.side)}
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start justify-between gap-3">
-      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="text-right font-medium">{value}</dd>
-    </div>
-  );
+function pairListTitle(row: ComparisonPair) {
+  if (row.matchKind === "bill-group") {
+    return row.entryA?.billNo || row.entryB?.billNo || "Bill group";
+  }
+  return row.entryA?.particulars || row.entryB?.particulars || row.message;
+}
+
+function pairSideLabel(row: ComparisonPair, side: "A" | "B") {
+  const entry = side === "A" ? row.entryA : row.entryB;
+  if (!entry) return "—";
+  if (row.matchKind === "bill-group") {
+    const count = side === "A" ? row.entriesA?.length ?? 0 : row.entriesB?.length ?? 0;
+    if (count > 1) return "Bill total";
+    return entry.particulars || entry.billNo || "—";
+  }
+  return entry.particulars || "—";
+}
+
+function lineCountLabel(row: ComparisonPair) {
+  const a = row.entriesA?.length || (row.entryA ? 1 : 0);
+  const b = row.entriesB?.length || (row.entryB ? 1 : 0);
+  return `${a} ↔ ${b}`;
 }
 
 function EmptyState() {
@@ -1610,6 +1848,14 @@ function EmptyState() {
 
 function formatNum(n: number) {
   return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatSigned(n: number, side?: string) {
+  const abs = Math.abs(n);
+  const formatted = formatNum(abs);
+  if (n < 0 || side === "Debit") return `−${formatted}`;
+  if (n > 0 || side === "Credit") return `+${formatted}`;
+  return formatNum(n);
 }
 
 function formatDate(value?: string | null) {
@@ -1663,6 +1909,9 @@ function normalizePreview(data: any): ExcelPreview {
       particulars: suggested.particulars ?? suggested.Particulars ?? null,
       voucherNo: suggested.voucherNo ?? suggested.VoucherNo ?? null,
       voucherRef: suggested.voucherRef ?? suggested.VoucherRef ?? null,
+      billNo: suggested.billNo ?? suggested.BillNo ?? null,
+      billDate: suggested.billDate ?? suggested.BillDate ?? null,
+      amount: suggested.amount ?? suggested.Amount ?? null,
       debit: suggested.debit ?? suggested.Debit ?? null,
       credit: suggested.credit ?? suggested.Credit ?? null,
     },
@@ -1678,8 +1927,11 @@ function normalizeResult(data: any): ComparisonResult {
     status: r.status ?? r.Status,
     message: r.message ?? r.Message ?? "",
     difference: r.difference ?? r.Difference ?? null,
+    matchKind: r.matchKind ?? r.MatchKind ?? "row",
     entryA: normalizeEntry(r.entryA ?? r.EntryA),
     entryB: normalizeEntry(r.entryB ?? r.EntryB),
+    entriesA: ((r.entriesA ?? r.EntriesA ?? []) as any[]).map(normalizeEntry).filter(Boolean) as LedgerEntry[],
+    entriesB: ((r.entriesB ?? r.EntriesB ?? []) as any[]).map(normalizeEntry).filter(Boolean) as LedgerEntry[],
   }));
   return {
     companyNameA: data.companyNameA ?? data.CompanyNameA ?? "Company A",
@@ -1700,16 +1952,31 @@ function normalizeResult(data: any): ComparisonResult {
 
 function normalizeEntry(e: any) {
   if (!e) return null;
+  const signed =
+    e.signedAmount ?? e.SignedAmount ?? null;
+  const debit = e.debit ?? e.Debit ?? 0;
+  const credit = e.credit ?? e.Credit ?? 0;
+  const inferredSigned =
+    signed != null
+      ? Number(signed)
+      : credit > 0
+        ? Number(credit)
+        : debit > 0
+          ? -Number(debit)
+          : 0;
   return {
     rowIndex: e.rowIndex ?? e.RowIndex ?? 0,
     company: e.company ?? e.Company ?? "",
     date: e.date ?? e.Date ?? null,
+    billDate: e.billDate ?? e.BillDate ?? null,
     particulars: e.particulars ?? e.Particulars ?? "",
     voucherNo: e.voucherNo ?? e.VoucherNo ?? "",
     voucherRef: e.voucherRef ?? e.VoucherRef ?? "",
-    debit: e.debit ?? e.Debit ?? 0,
-    credit: e.credit ?? e.Credit ?? 0,
-    amount: e.amount ?? e.Amount ?? 0,
-    side: e.side ?? e.Side ?? "",
+    billNo: e.billNo ?? e.BillNo ?? "",
+    signedAmount: inferredSigned,
+    debit,
+    credit,
+    amount: e.amount ?? e.Amount ?? Math.abs(inferredSigned),
+    side: e.side ?? e.Side ?? (inferredSigned < 0 ? "Debit" : inferredSigned > 0 ? "Credit" : ""),
   };
 }
