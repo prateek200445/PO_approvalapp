@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
@@ -454,6 +454,12 @@ function ReconciliationPage() {
     <div className="space-y-5 pb-24 md:pb-0">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
+          <Link
+            to="/ledgers"
+            className="mb-2 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+          >
+            ← Ledgers
+          </Link>
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Ledger Reconciliation</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Compare two company ledgers. Match Bill No + Bill Date first, then Voucher Date; amounts must be opposite signs.

@@ -45,6 +45,7 @@ builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<PoApprovalService>();
 builder.Services.AddScoped<WorkOrderApprovalService>();
 builder.Services.AddScoped<ExcelLedgerService>();
+builder.Services.AddScoped<LedgerSummaryService>();
 
 builder.Services.AddCors(options =>
 {

@@ -1,5 +1,5 @@
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, ClipboardList, User, Moon, Sun, LogOut, FileText, CreditCard, ArrowLeftRight } from "lucide-react";
+import { LayoutDashboard, ClipboardList, User, Moon, Sun, LogOut, FileText, CreditCard, BookOpen } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -45,22 +45,33 @@ export function AppShell() {
   }
 
   const desktopNav = [
-    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
-    { to: "/pending", icon: ClipboardList, label: "Purchase Orders" },
-    { to: "/workorders", icon: FileText, label: "Work Orders" },
-    { to: "/payments", icon: CreditCard, label: "Payment Approval" },
-    { to: "/indents", icon: FileText, label: "Indent Approval" },
-    { to: "/reconciliation", icon: ArrowLeftRight, label: "Reconciliation" },
-    { to: "/profile", icon: User, label: "Profile" },
+    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", match: (p: string) => p.startsWith("/dashboard") },
+    { to: "/pending", icon: ClipboardList, label: "Purchase Orders", match: (p: string) => p.startsWith("/pending") || p.startsWith("/po/") },
+    { to: "/workorders", icon: FileText, label: "Work Orders", match: (p: string) => p.startsWith("/workorder") },
+    { to: "/payments", icon: CreditCard, label: "Payment Approval", match: (p: string) => p.startsWith("/payment") },
+    { to: "/indents", icon: FileText, label: "Indent Approval", match: (p: string) => p.startsWith("/indent") },
+    {
+      to: "/ledgers",
+      icon: BookOpen,
+      label: "Ledgers",
+      match: (p: string) => p.startsWith("/ledgers") || p.startsWith("/ledger-summary") || p.startsWith("/reconciliation"),
+    },
+    { to: "/profile", icon: User, label: "Profile", match: (p: string) => p.startsWith("/profile") },
   ];
 
   const mobileNav = [
-    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", shortLabel: "Dashboard" },
-    { to: "/pending", icon: ClipboardList, label: "Purchase Orders", shortLabel: "POs" },
-    { to: "/workorders", icon: FileText, label: "Work Orders", shortLabel: "Work Orders" },
-    { to: "/payments", icon: CreditCard, label: "Payment Approval", shortLabel: "Payments" },
-    { to: "/indents", icon: FileText, label: "Indent Approval", shortLabel: "Indents" },
-    { to: "/profile", icon: User, label: "Profile", shortLabel: "Profile" },
+    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", shortLabel: "Dashboard", match: (p: string) => p.startsWith("/dashboard") },
+    { to: "/pending", icon: ClipboardList, label: "Purchase Orders", shortLabel: "POs", match: (p: string) => p.startsWith("/pending") || p.startsWith("/po/") },
+    { to: "/workorders", icon: FileText, label: "Work Orders", shortLabel: "WOs", match: (p: string) => p.startsWith("/workorder") },
+    { to: "/payments", icon: CreditCard, label: "Payment Approval", shortLabel: "Payments", match: (p: string) => p.startsWith("/payment") },
+    {
+      to: "/ledgers",
+      icon: BookOpen,
+      label: "Ledgers",
+      shortLabel: "Ledgers",
+      match: (p: string) => p.startsWith("/ledgers") || p.startsWith("/ledger-summary") || p.startsWith("/reconciliation"),
+    },
+    { to: "/profile", icon: User, label: "Profile", shortLabel: "Profile", match: (p: string) => p.startsWith("/profile") },
   ];
 
   return (
@@ -81,7 +92,7 @@ export function AppShell() {
 
           <nav className="hidden items-center gap-1 lg:flex">
             {desktopNav.map((n) => {
-              const active = path.startsWith(n.to);
+              const active = n.match(path);
               return (
                 <Link
                   key={n.to}
@@ -102,7 +113,7 @@ export function AppShell() {
 
           <nav className="hidden items-center gap-1 md:flex lg:hidden">
             {desktopNav.map((n) => {
-              const active = path.startsWith(n.to);
+              const active = n.match(path);
               return (
                 <Link
                   key={n.to}
@@ -153,7 +164,7 @@ export function AppShell() {
 
       <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-6 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
         {mobileNav.map((n) => {
-          const active = path.startsWith(n.to);
+          const active = n.match(path);
           return (
             <Link
               key={n.to}
