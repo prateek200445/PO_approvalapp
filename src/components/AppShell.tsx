@@ -64,13 +64,7 @@ export function AppShell() {
     { to: "/pending", icon: ClipboardList, label: "Purchase Orders", shortLabel: "POs", match: (p: string) => p.startsWith("/pending") || p.startsWith("/po/") },
     { to: "/workorders", icon: FileText, label: "Work Orders", shortLabel: "WOs", match: (p: string) => p.startsWith("/workorder") },
     { to: "/payments", icon: CreditCard, label: "Payment Approval", shortLabel: "Payments", match: (p: string) => p.startsWith("/payment") },
-    {
-      to: "/ledgers",
-      icon: BookOpen,
-      label: "Ledgers",
-      shortLabel: "Ledgers",
-      match: (p: string) => p.startsWith("/ledgers") || p.startsWith("/ledger-summary") || p.startsWith("/reconciliation"),
-    },
+    { to: "/indents", icon: FileText, label: "Indent Approval", shortLabel: "Indents", match: (p: string) => p.startsWith("/indent") },
     { to: "/profile", icon: User, label: "Profile", shortLabel: "Profile", match: (p: string) => p.startsWith("/profile") },
   ];
 
