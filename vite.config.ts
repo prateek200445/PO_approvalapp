@@ -23,9 +23,12 @@ export default defineConfig({
     server: {
       proxy: {
         "/api": {
-         target: process.env.VITE_API_URL || "http://localhost:5115",
+          target: process.env.VITE_API_URL || "http://localhost:5115",
           changeOrigin: true,
           secure: false,
+          // Stock Analysis SP can take several minutes
+          timeout: 600_000,
+          proxyTimeout: 600_000,
         },
       },
     },

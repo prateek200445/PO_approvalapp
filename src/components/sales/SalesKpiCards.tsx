@@ -1,0 +1,140 @@
+import type { SalesDashboardSummary } from "@/lib/sales-dashboard-types";
+import {
+  formatChangePercent,
+  formatSalesCurrency,
+  formatSalesQuantity,
+  formatSalesRate,
+} from "@/lib/sales-dashboard-api";
+import {
+  BarChart3,
+  ShoppingCart,
+  FileText,
+  Percent,
+  Download,
+  TrendingUp,
+  type LucideIcon,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface SalesKpiCardsProps {
+  summary: SalesDashboardSummary;
+  unavailableFields?: string[];
+}
+
+type KpiConfig = {
+  id: string;
+  label: string;
+  displayValue: string;
+  changePercent: number;
+  showChange: boolean;
+  unavailable?: boolean;
+  icon: LucideIcon;
+  tone: string;
+};
+
+export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCardsProps) {
+  const noChange = unavailableFields.includes("changePercents");
+  const noGross = unavailableFields.includes("grossProfit");
+
+  const cards: KpiConfig[] = [
+    {
+      id: "totalSales",
+      label: "Total Sales",
+      displayValue: formatSalesCurrency(summary.totalSales),
+      changePercent: summary.totalSalesChangePercent,
+      showChange: !noChange,
+      icon: BarChart3,
+      tone: "bg-primary/10 text-primary border-primary/20",
+    },
+    {
+      id: "totalQuantity",
+      label: "Total Quantity",
+      displayValue: formatSalesQuantity(summary.totalQuantity),
+      changePercent: summary.totalQuantityChangePercent,
+      showChange: !noChange,
+      icon: ShoppingCart,
+      tone: "bg-success/10 text-success border-success/20",
+    },
+    {
+      id: "averageRate",
+      label: "Average Rate",
+      displayValue: unavailableFields.includes("averageRate")
+        ? "—"
+        : formatSalesRate(summary.averageRate),
+      changePercent: summary.averageRateChangePercent,
+      showChange: !noChange && !unavailableFields.includes("averageRate"),
+      unavailable: unavailableFields.includes("averageRate"),
+      icon: FileText,
+      tone: "bg-warning/10 text-warning border-warning/20",
+    },
+    {
+      id: "gstAmount",
+      label: "GST Amount",
+      displayValue: unavailableFields.includes("gstAmount")
+        ? "—"
+        : formatSalesCurrency(summary.gstAmount),
+      changePercent: summary.gstAmountChangePercent,
+      showChange: !noChange && !unavailableFields.includes("gstAmount"),
+      unavailable: unavailableFields.includes("gstAmount"),
+      icon: Percent,
+      tone: "bg-accent text-accent-foreground border-border",
+    },
+    {
+      id: "totalPurchase",
+      label: "Total Purchase",
+      displayValue: unavailableFields.includes("totalPurchase")
+        ? "—"
+        : formatSalesCurrency(summary.totalPurchase),
+      changePercent: summary.totalPurchaseChangePercent,
+      showChange: !noChange && !unavailableFields.includes("totalPurchase"),
+      unavailable: unavailableFields.includes("totalPurchase"),
+      icon: Download,
+      tone: "bg-secondary text-secondary-foreground border-border",
+    },
+    {
+      id: "grossProfit",
+      label: "Gross Profit",
+      displayValue: noGross ? "—" : formatSalesCurrency(summary.grossProfit),
+      changePercent: summary.grossProfitChangePercent,
+      showChange: !noChange && !noGross,
+      unavailable: noGross,
+      icon: TrendingUp,
+      tone: "bg-success/10 text-success border-success/20",
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6 md:gap-4">
+      {cards.map((card) => (
+        <div key={card.id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div
+            className={cn(
+              "mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg border",
+              card.tone,
+            )}
+          >
+            <card.icon className="h-4 w-4" aria-hidden />
+          </div>
+          <div className="text-xs text-muted-foreground">{card.label}</div>
+          <div className="mt-1 text-lg font-semibold tabular-nums leading-tight md:text-xl break-words">
+            {card.displayValue}
+          </div>
+          {card.unavailable ? (
+            <div className="mt-2 text-xs text-muted-foreground">Coming soon</div>
+          ) : card.showChange ? (
+            <div
+              className={cn(
+                "mt-2 text-xs font-medium tabular-nums",
+                card.changePercent >= 0 ? "text-success" : "text-destructive",
+              )}
+            >
+              {formatChangePercent(card.changePercent)} vs last period
+            </div>
+          ) : (
+            <div className="mt-2 text-xs text-muted-foreground">Period comparison pending</div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
+import { Route as AppSalesDashboardRouteImport } from './routes/_app/sales-dashboard'
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AppPendingRouteImport } from './routes/_app/pending'
 import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
@@ -35,6 +36,11 @@ const IndexRoute = IndexRouteImport.update({
 const AppWorkordersRoute = AppWorkordersRouteImport.update({
   id: '/workorders',
   path: '/workorders',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSalesDashboardRoute = AppSalesDashboardRouteImport.update({
+  id: '/sales-dashboard',
+  path: '/sales-dashboard',
   getParentRoute: () => AppRoute,
 } as any)
 const AppProfileRoute = AppProfileRouteImport.update({
@@ -96,6 +102,7 @@ export interface FileRoutesByFullPath {
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
   '/profile': typeof AppProfileRoute
+  '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
@@ -110,6 +117,7 @@ export interface FileRoutesByTo {
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
   '/profile': typeof AppProfileRoute
+  '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
@@ -126,6 +134,7 @@ export interface FileRoutesById {
   '/_app/payments': typeof AppPaymentsRoute
   '/_app/pending': typeof AppPendingRoute
   '/_app/profile': typeof AppProfileRoute
+  '/_app/sales-dashboard': typeof AppSalesDashboardRoute
   '/_app/workorders': typeof AppWorkordersRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/_app/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
@@ -142,6 +151,7 @@ export interface FileRouteTypes {
     | '/payments'
     | '/pending'
     | '/profile'
+    | '/sales-dashboard'
     | '/workorders'
     | '/indent/$indentNo'
     | '/payment/$paymentNo'
@@ -156,6 +166,7 @@ export interface FileRouteTypes {
     | '/payments'
     | '/pending'
     | '/profile'
+    | '/sales-dashboard'
     | '/workorders'
     | '/indent/$indentNo'
     | '/payment/$paymentNo'
@@ -171,6 +182,7 @@ export interface FileRouteTypes {
     | '/_app/payments'
     | '/_app/pending'
     | '/_app/profile'
+    | '/_app/sales-dashboard'
     | '/_app/workorders'
     | '/_app/indent/$indentNo'
     | '/_app/payment/$paymentNo'
@@ -204,6 +216,13 @@ declare module '@tanstack/react-router' {
       path: '/workorders'
       fullPath: '/workorders'
       preLoaderRoute: typeof AppWorkordersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/sales-dashboard': {
+      id: '/_app/sales-dashboard'
+      path: '/sales-dashboard'
+      fullPath: '/sales-dashboard'
+      preLoaderRoute: typeof AppSalesDashboardRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/profile': {
@@ -286,6 +305,7 @@ interface AppRouteChildren {
   AppPaymentsRoute: typeof AppPaymentsRoute
   AppPendingRoute: typeof AppPendingRoute
   AppProfileRoute: typeof AppProfileRoute
+  AppSalesDashboardRoute: typeof AppSalesDashboardRoute
   AppWorkordersRoute: typeof AppWorkordersRoute
   AppIndentIndentNoRoute: typeof AppIndentIndentNoRoute
   AppPaymentPaymentNoRoute: typeof AppPaymentPaymentNoRoute
@@ -300,6 +320,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPaymentsRoute: AppPaymentsRoute,
   AppPendingRoute: AppPendingRoute,
   AppProfileRoute: AppProfileRoute,
+  AppSalesDashboardRoute: AppSalesDashboardRoute,
   AppWorkordersRoute: AppWorkordersRoute,
   AppIndentIndentNoRoute: AppIndentIndentNoRoute,
   AppPaymentPaymentNoRoute: AppPaymentPaymentNoRoute,

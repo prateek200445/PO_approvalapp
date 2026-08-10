@@ -40,6 +40,8 @@ builder.Services.AddScoped<DailyReportProcessorService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<PoApprovalService>();
 builder.Services.AddScoped<WorkOrderApprovalService>();
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<SalesDashboardService>();
 
 builder.Services.AddCors(options =>
 {

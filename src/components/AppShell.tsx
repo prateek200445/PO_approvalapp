@@ -1,5 +1,5 @@
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, ClipboardList, User, Factory, Moon, Sun, LogOut, FileText, CreditCard  } from "lucide-react";
+import { LayoutDashboard, ClipboardList, User, Moon, Sun, LogOut, FileText, CreditCard, BarChart3 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState, useRef } from "react";
 import { cn } from "@/lib/utils";
@@ -51,6 +51,8 @@ export function AppShell() {
 
   const nav = [
   { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", shortLabel: "Dashboard" },
+
+  { to: "/sales-dashboard", icon: BarChart3, label: "Sales Dashboard", shortLabel: "Sales" },
 
   { to: "/pending", icon: ClipboardList, label: "Purchase Orders", shortLabel: "POs" },
 
@@ -131,7 +133,8 @@ export function AppShell() {
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-6 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
+      {/* grid-cols-7 required: nav has 7 items; grid-cols-6 would wrap the last item onto a second row */}
+      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-7 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
         {nav.map((n) => {
           const active = path.startsWith(n.to);
           return (
