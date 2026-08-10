@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
+import { Route as AppSalesDashboardRouteImport } from './routes/_app/sales-dashboard'
 import { Route as AppReconciliationRouteImport } from './routes/_app/reconciliation'
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AppPendingRouteImport } from './routes/_app/pending'
@@ -38,6 +39,11 @@ const IndexRoute = IndexRouteImport.update({
 const AppWorkordersRoute = AppWorkordersRouteImport.update({
   id: '/workorders',
   path: '/workorders',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSalesDashboardRoute = AppSalesDashboardRouteImport.update({
+  id: '/sales-dashboard',
+  path: '/sales-dashboard',
   getParentRoute: () => AppRoute,
 } as any)
 const AppReconciliationRoute = AppReconciliationRouteImport.update({
@@ -117,6 +123,7 @@ export interface FileRoutesByFullPath {
   '/pending': typeof AppPendingRoute
   '/profile': typeof AppProfileRoute
   '/reconciliation': typeof AppReconciliationRoute
+  '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
@@ -134,6 +141,7 @@ export interface FileRoutesByTo {
   '/pending': typeof AppPendingRoute
   '/profile': typeof AppProfileRoute
   '/reconciliation': typeof AppReconciliationRoute
+  '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
@@ -153,6 +161,7 @@ export interface FileRoutesById {
   '/_app/pending': typeof AppPendingRoute
   '/_app/profile': typeof AppProfileRoute
   '/_app/reconciliation': typeof AppReconciliationRoute
+  '/_app/sales-dashboard': typeof AppSalesDashboardRoute
   '/_app/workorders': typeof AppWorkordersRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/_app/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
@@ -172,6 +181,7 @@ export interface FileRouteTypes {
     | '/pending'
     | '/profile'
     | '/reconciliation'
+    | '/sales-dashboard'
     | '/workorders'
     | '/indent/$indentNo'
     | '/payment/$paymentNo'
@@ -189,6 +199,7 @@ export interface FileRouteTypes {
     | '/pending'
     | '/profile'
     | '/reconciliation'
+    | '/sales-dashboard'
     | '/workorders'
     | '/indent/$indentNo'
     | '/payment/$paymentNo'
@@ -207,6 +218,7 @@ export interface FileRouteTypes {
     | '/_app/pending'
     | '/_app/profile'
     | '/_app/reconciliation'
+    | '/_app/sales-dashboard'
     | '/_app/workorders'
     | '/_app/indent/$indentNo'
     | '/_app/payment/$paymentNo'
@@ -240,6 +252,13 @@ declare module '@tanstack/react-router' {
       path: '/workorders'
       fullPath: '/workorders'
       preLoaderRoute: typeof AppWorkordersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/sales-dashboard': {
+      id: '/_app/sales-dashboard'
+      path: '/sales-dashboard'
+      fullPath: '/sales-dashboard'
+      preLoaderRoute: typeof AppSalesDashboardRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/reconciliation': {
@@ -346,6 +365,7 @@ interface AppRouteChildren {
   AppPendingRoute: typeof AppPendingRoute
   AppProfileRoute: typeof AppProfileRoute
   AppReconciliationRoute: typeof AppReconciliationRoute
+  AppSalesDashboardRoute: typeof AppSalesDashboardRoute
   AppWorkordersRoute: typeof AppWorkordersRoute
   AppIndentIndentNoRoute: typeof AppIndentIndentNoRoute
   AppPaymentPaymentNoRoute: typeof AppPaymentPaymentNoRoute
@@ -363,6 +383,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPendingRoute: AppPendingRoute,
   AppProfileRoute: AppProfileRoute,
   AppReconciliationRoute: AppReconciliationRoute,
+  AppSalesDashboardRoute: AppSalesDashboardRoute,
   AppWorkordersRoute: AppWorkordersRoute,
   AppIndentIndentNoRoute: AppIndentIndentNoRoute,
   AppPaymentPaymentNoRoute: AppPaymentPaymentNoRoute,

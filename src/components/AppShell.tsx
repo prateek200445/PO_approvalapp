@@ -1,5 +1,16 @@
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, ClipboardList, User, Moon, Sun, LogOut, FileText, CreditCard, BookOpen } from "lucide-react";
+import {
+  LayoutDashboard,
+  ClipboardList,
+  User,
+  Moon,
+  Sun,
+  LogOut,
+  FileText,
+  CreditCard,
+  BookOpen,
+  BarChart3,
+} from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -46,6 +57,12 @@ export function AppShell() {
 
   const desktopNav = [
     { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", match: (p: string) => p.startsWith("/dashboard") },
+    {
+      to: "/sales-dashboard",
+      icon: BarChart3,
+      label: "Sales Dashboard",
+      match: (p: string) => p.startsWith("/sales-dashboard"),
+    },
     { to: "/pending", icon: ClipboardList, label: "Purchase Orders", match: (p: string) => p.startsWith("/pending") || p.startsWith("/po/") },
     { to: "/workorders", icon: FileText, label: "Work Orders", match: (p: string) => p.startsWith("/workorder") },
     { to: "/payments", icon: CreditCard, label: "Payment Approval", match: (p: string) => p.startsWith("/payment") },
@@ -59,6 +76,7 @@ export function AppShell() {
     { to: "/profile", icon: User, label: "Profile", match: (p: string) => p.startsWith("/profile") },
   ];
 
+  // Keep mobile to primary flows; Sales is on desktop (with Ledgers)
   const mobileNav = [
     { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", shortLabel: "Dashboard", match: (p: string) => p.startsWith("/dashboard") },
     { to: "/pending", icon: ClipboardList, label: "Purchase Orders", shortLabel: "POs", match: (p: string) => p.startsWith("/pending") || p.startsWith("/po/") },
