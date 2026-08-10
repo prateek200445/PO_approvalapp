@@ -35,11 +35,12 @@ export function SalesSummaryTables({
   bySubGroup,
 }: SalesSummaryTablesProps) {
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
       <section className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-        <header className="border-b border-border px-4 py-3">
+        <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Top 5 Products by Sales</h2>
         </header>
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -68,6 +69,7 @@ export function SalesSummaryTables({
             )}
           </TableBody>
         </Table>
+        </div>
         <footer className="border-t border-border px-4 py-2.5">
           <button type="button" className="text-xs font-medium text-primary hover:underline">
             View All Products
@@ -76,9 +78,10 @@ export function SalesSummaryTables({
       </section>
 
       <section className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-        <header className="border-b border-border px-4 py-3">
+        <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales by Customer (Top 5)</h2>
         </header>
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -103,6 +106,7 @@ export function SalesSummaryTables({
             )}
           </TableBody>
         </Table>
+        </div>
         <footer className="border-t border-border px-4 py-2.5">
           <button type="button" className="text-xs font-medium text-primary hover:underline">
             View All Customers
@@ -111,9 +115,10 @@ export function SalesSummaryTables({
       </section>
 
       <section className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-        <header className="border-b border-border px-4 py-3">
+        <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales by Sub Group</h2>
         </header>
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -128,11 +133,13 @@ export function SalesSummaryTables({
             ) : (
               bySubGroup.map((s) => (
                 <TableRow key={s.subGroupName}>
-                  <TableCell className="font-medium">{s.subGroupName}</TableCell>
-                  <TableCell className="text-right tabular-nums text-xs sm:text-sm">
+                  <TableCell className="max-w-[140px] truncate font-medium sm:max-w-none">
+                    {s.subGroupName}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-xs sm:text-sm whitespace-nowrap">
                     {formatSalesQuantity(s.quantity)}
                   </TableCell>
-                  <TableCell className="text-right tabular-nums text-xs sm:text-sm">
+                  <TableCell className="text-right tabular-nums text-xs sm:text-sm whitespace-nowrap">
                     {formatSalesCurrency(s.salesAmount)}
                   </TableCell>
                 </TableRow>
@@ -140,6 +147,7 @@ export function SalesSummaryTables({
             )}
           </TableBody>
         </Table>
+        </div>
         <footer className="border-t border-border px-4 py-2.5">
           <button type="button" className="text-xs font-medium text-primary hover:underline">
             View All Sub Groups

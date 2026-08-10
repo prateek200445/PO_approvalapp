@@ -76,13 +76,20 @@ export function AppShell() {
     { to: "/profile", icon: User, label: "Profile", match: (p: string) => p.startsWith("/profile") },
   ];
 
-  // Keep mobile to primary flows; Sales is on desktop (with Ledgers)
+  // Mobile bottom nav includes Sales; 7 items → grid-cols-7
   const mobileNav = [
-    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", shortLabel: "Dashboard", match: (p: string) => p.startsWith("/dashboard") },
+    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", shortLabel: "Home", match: (p: string) => p.startsWith("/dashboard") },
+    {
+      to: "/sales-dashboard",
+      icon: BarChart3,
+      label: "Sales Dashboard",
+      shortLabel: "Sales",
+      match: (p: string) => p.startsWith("/sales-dashboard"),
+    },
     { to: "/pending", icon: ClipboardList, label: "Purchase Orders", shortLabel: "POs", match: (p: string) => p.startsWith("/pending") || p.startsWith("/po/") },
     { to: "/workorders", icon: FileText, label: "Work Orders", shortLabel: "WOs", match: (p: string) => p.startsWith("/workorder") },
-    { to: "/payments", icon: CreditCard, label: "Payment Approval", shortLabel: "Payments", match: (p: string) => p.startsWith("/payment") },
-    { to: "/indents", icon: FileText, label: "Indent Approval", shortLabel: "Indents", match: (p: string) => p.startsWith("/indent") },
+    { to: "/payments", icon: CreditCard, label: "Payment Approval", shortLabel: "Pay", match: (p: string) => p.startsWith("/payment") },
+    { to: "/indents", icon: FileText, label: "Indent Approval", shortLabel: "Indent", match: (p: string) => p.startsWith("/indent") },
     { to: "/profile", icon: User, label: "Profile", shortLabel: "Profile", match: (p: string) => p.startsWith("/profile") },
   ];
 
@@ -174,7 +181,7 @@ export function AppShell() {
         <Outlet />
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-6 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-7 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
         {mobileNav.map((n) => {
           const active = n.match(path);
           return (
@@ -182,12 +189,12 @@ export function AppShell() {
               key={n.to}
               to={n.to}
               className={cn(
-                "flex flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium tracking-tight transition-colors",
+                "flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-2 text-[9px] font-medium tracking-tight transition-colors sm:text-[10px]",
                 active ? "text-primary" : "text-muted-foreground",
               )}
             >
-              <n.icon className={cn("h-5 w-5", active && "stroke-[2.5]")} />
-              <span className="w-full truncate px-0.5 text-center">{n.shortLabel}</span>
+              <n.icon className={cn("h-5 w-5 shrink-0", active && "stroke-[2.5]")} />
+              <span className="w-full truncate text-center leading-tight">{n.shortLabel}</span>
             </Link>
           );
         })}

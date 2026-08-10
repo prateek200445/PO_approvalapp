@@ -124,11 +124,17 @@ function SalesDashboardPage() {
   }, [companyList]);
 
   return (
-    <div className="space-y-5 md:space-y-6">
+    <div className="space-y-4 pb-2 sm:space-y-5 md:space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Sales Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Live KPIs, Sales by Group & Sub Group from `SP_Sales_EBIDTA`. Other sections coming soon.
+        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
+          Sales Dashboard
+        </h1>
+        <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
+          <span className="sm:hidden">Live sales KPIs & group charts from ERP.</span>
+          <span className="hidden sm:inline">
+            Live KPIs, Sales by Group & Sub Group from `SP_Sales_EBIDTA`. Other sections coming
+            soon.
+          </span>
         </p>
       </div>
 
