@@ -221,11 +221,16 @@ public async Task<bool> ApprovePayment(PaymentApprovalRequest request)
 }
 
     await connection.ExecuteAsync(
-        @"UPDATE BillPaymentHODApproval
-          SET Status = @Status
-          WHERE PaymentNo = @PaymentNo
-            AND ApprovalName <> @UserName
-            AND Status = 'Pending'",
+        @"UPDATE t
+          SET Status = @Status,
+              ApprovalDate = a.ApprovalDate
+          FROM BillPaymentHODApproval t
+          INNER JOIN BillPaymentHODApproval a
+            ON a.PaymentNo = t.PaymentNo
+           AND a.ApprovalName = @UserName
+          WHERE t.PaymentNo = @PaymentNo
+            AND t.ApprovalName <> @UserName
+            AND t.Status = 'Pending'",
         new
         {
             request.PaymentNo,

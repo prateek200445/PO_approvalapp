@@ -95,11 +95,16 @@ public class WorkOrderApprovalService
                     return Fail(transId, poNo, "Update did not affect any rows (may already be processed)");
 
                 await connection.ExecuteAsync(
-                    @"UPDATE ApproveWorkOrder
-                      SET Status = @OtherStatus
-                      WHERE PoNo = @PoNo
-                        AND ApprovalName <> @ApprovalName
-                        AND Status = 'Pending'",
+                    @"UPDATE t
+                      SET Status = @OtherStatus,
+                          ApprovalDate = a.ApprovalDate
+                      FROM ApproveWorkOrder t
+                      INNER JOIN ApproveWorkOrder a
+                        ON a.PoNo = t.PoNo
+                       AND a.ApprovalName = @ApprovalName
+                      WHERE t.PoNo = @PoNo
+                        AND t.ApprovalName <> @ApprovalName
+                        AND t.Status = 'Pending'",
                     new
                     {
                         PoNo = approvalData.PoNo,

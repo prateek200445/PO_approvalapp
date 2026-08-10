@@ -422,10 +422,40 @@ if (!po || po.length === 0) {
         <div className="space-y-5 lg:col-span-2 min-w-0 w-full">
           {/* Section A: Summary */}
           <Section title="Work Order Summary">
-            <p className="text-sm text-muted-foreground">
-  {woDetails?.ItemDesc}
-</p>
-            <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+            <p className="hidden text-sm text-muted-foreground md:block">
+              {woDetails?.ItemDesc}
+            </p>
+
+            {/* Mobile: stacked item rows */}
+            <div className="mt-4 overflow-hidden rounded-lg border border-border md:hidden">
+              <ul className="divide-y divide-border">
+                {po.map((item: any, index: number) => (
+                  <li key={index} className="space-y-1.5 px-3 py-3">
+                    <div className="text-sm font-medium leading-snug">{item.ItemDesc}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Qty {item.Qty}
+                      <span className="mx-1.5 text-border">·</span>
+                      Rate {formatMoneyAmount(item.Rate)} {currencyLabel(currency)}
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3 pt-0.5">
+                      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Amount</span>
+                      <span className="text-sm font-semibold tabular-nums">
+                        {formatMoneyAmount(item.Total)}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <div className="flex items-baseline justify-between gap-3 border-t border-border bg-secondary/30 px-3 py-2.5">
+                <span className="text-xs font-medium uppercase text-muted-foreground">Total</span>
+                <span className="text-sm font-semibold tabular-nums">
+                  {formatMoneyAmount(grandTotal)}
+                </span>
+              </div>
+            </div>
+
+            {/* Desktop: table */}
+            <div className="mt-4 hidden overflow-x-auto rounded-lg border border-border md:block">
               <table className="w-full text-sm">
                 <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
@@ -435,26 +465,26 @@ if (!po || po.length === 0) {
                     <th className="px-3 py-2 text-right font-medium">Amount({currencyLabel(currency)})</th>
                   </tr>
                 </thead>
-               <tbody className="divide-y divide-border">
-  {po.map((item: any, index: number) => (
-    <tr key={index}>
-      <td className="px-3 py-2">{item.ItemDesc}</td>
-      <td className="px-3 py-2 text-right">{item.Qty}</td>
-      <td className="px-3 py-2 text-right">
-        {formatMoneyAmount(item.Rate)}
-      </td>
-      <td className="px-3 py-2 text-right">
-        {formatMoneyAmount(item.Total)}
-      </td>
-    </tr>
-  ))}
-</tbody>
+                <tbody className="divide-y divide-border">
+                  {po.map((item: any, index: number) => (
+                    <tr key={index}>
+                      <td className="px-3 py-2">{item.ItemDesc}</td>
+                      <td className="px-3 py-2 text-right">{item.Qty}</td>
+                      <td className="px-3 py-2 text-right">
+                        {formatMoneyAmount(item.Rate)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {formatMoneyAmount(item.Total)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
                 <tfoot className="bg-secondary/30">
                   <tr>
                     <td colSpan={3} className="px-3 py-2 text-right text-xs font-medium uppercase text-muted-foreground">Total</td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">
-  {formatMoneyAmount(grandTotal)}
-</td>
+                      {formatMoneyAmount(grandTotal)}
+                    </td>
                   </tr>
                 </tfoot>
               </table>

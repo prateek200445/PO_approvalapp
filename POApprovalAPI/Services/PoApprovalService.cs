@@ -113,13 +113,18 @@ public class PoApprovalService
                 if (selfRows <= 0)
                     return Fail(transId, poNo, "Update did not affect any rows (may already be processed)");
 
-                // Close other pending approvers on this PO
+                // Close other pending approvers; stamp same ApprovalDate as authority-1 approver
                 await connection.ExecuteAsync(
-                    $@"UPDATE {table}
-                       SET Status = @OtherStatus
-                       WHERE PoNo = @PoNo
-                         AND ApprovalName <> @ApprovalName
-                         AND Status = 'Pending'",
+                    $@"UPDATE t
+                       SET Status = @OtherStatus,
+                           ApprovalDate = a.ApprovalDate
+                       FROM {table} t
+                       INNER JOIN {table} a
+                         ON a.PoNo = t.PoNo
+                        AND a.ApprovalName = @ApprovalName
+                       WHERE t.PoNo = @PoNo
+                         AND t.ApprovalName <> @ApprovalName
+                         AND t.Status = 'Pending'",
                     new
                     {
                         PoNo = approvalData.PoNo,

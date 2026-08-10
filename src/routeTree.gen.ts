@@ -13,9 +13,12 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
 import { Route as AppSalesDashboardRouteImport } from './routes/_app/sales-dashboard'
+import { Route as AppReconciliationRouteImport } from './routes/_app/reconciliation'
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AppPendingRouteImport } from './routes/_app/pending'
 import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
+import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
+import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
@@ -43,6 +46,11 @@ const AppSalesDashboardRoute = AppSalesDashboardRouteImport.update({
   path: '/sales-dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppReconciliationRoute = AppReconciliationRouteImport.update({
+  id: '/reconciliation',
+  path: '/reconciliation',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppProfileRoute = AppProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -56,6 +64,16 @@ const AppPendingRoute = AppPendingRouteImport.update({
 const AppPaymentsRoute = AppPaymentsRouteImport.update({
   id: '/payments',
   path: '/payments',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLedgersRoute = AppLedgersRouteImport.update({
+  id: '/ledgers',
+  path: '/ledgers',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLedgerSummaryRoute = AppLedgerSummaryRouteImport.update({
+  id: '/ledger-summary',
+  path: '/ledger-summary',
   getParentRoute: () => AppRoute,
 } as any)
 const AppIndentsRoute = AppIndentsRouteImport.update({
@@ -99,9 +117,12 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof AppDashboardRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
+  '/ledger-summary': typeof AppLedgerSummaryRoute
+  '/ledgers': typeof AppLedgersRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
   '/profile': typeof AppProfileRoute
+  '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
@@ -114,9 +135,12 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AppDashboardRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
+  '/ledger-summary': typeof AppLedgerSummaryRoute
+  '/ledgers': typeof AppLedgersRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
   '/profile': typeof AppProfileRoute
+  '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
@@ -131,9 +155,12 @@ export interface FileRoutesById {
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/history': typeof AppHistoryRoute
   '/_app/indents': typeof AppIndentsRoute
+  '/_app/ledger-summary': typeof AppLedgerSummaryRoute
+  '/_app/ledgers': typeof AppLedgersRoute
   '/_app/payments': typeof AppPaymentsRoute
   '/_app/pending': typeof AppPendingRoute
   '/_app/profile': typeof AppProfileRoute
+  '/_app/reconciliation': typeof AppReconciliationRoute
   '/_app/sales-dashboard': typeof AppSalesDashboardRoute
   '/_app/workorders': typeof AppWorkordersRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
@@ -148,9 +175,12 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/history'
     | '/indents'
+    | '/ledger-summary'
+    | '/ledgers'
     | '/payments'
     | '/pending'
     | '/profile'
+    | '/reconciliation'
     | '/sales-dashboard'
     | '/workorders'
     | '/indent/$indentNo'
@@ -163,9 +193,12 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/history'
     | '/indents'
+    | '/ledger-summary'
+    | '/ledgers'
     | '/payments'
     | '/pending'
     | '/profile'
+    | '/reconciliation'
     | '/sales-dashboard'
     | '/workorders'
     | '/indent/$indentNo'
@@ -179,9 +212,12 @@ export interface FileRouteTypes {
     | '/_app/dashboard'
     | '/_app/history'
     | '/_app/indents'
+    | '/_app/ledger-summary'
+    | '/_app/ledgers'
     | '/_app/payments'
     | '/_app/pending'
     | '/_app/profile'
+    | '/_app/reconciliation'
     | '/_app/sales-dashboard'
     | '/_app/workorders'
     | '/_app/indent/$indentNo'
@@ -225,6 +261,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSalesDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/reconciliation': {
+      id: '/_app/reconciliation'
+      path: '/reconciliation'
+      fullPath: '/reconciliation'
+      preLoaderRoute: typeof AppReconciliationRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/profile': {
       id: '/_app/profile'
       path: '/profile'
@@ -244,6 +287,20 @@ declare module '@tanstack/react-router' {
       path: '/payments'
       fullPath: '/payments'
       preLoaderRoute: typeof AppPaymentsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/ledgers': {
+      id: '/_app/ledgers'
+      path: '/ledgers'
+      fullPath: '/ledgers'
+      preLoaderRoute: typeof AppLedgersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/ledger-summary': {
+      id: '/_app/ledger-summary'
+      path: '/ledger-summary'
+      fullPath: '/ledger-summary'
+      preLoaderRoute: typeof AppLedgerSummaryRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/indents': {
@@ -302,9 +359,12 @@ interface AppRouteChildren {
   AppDashboardRoute: typeof AppDashboardRoute
   AppHistoryRoute: typeof AppHistoryRoute
   AppIndentsRoute: typeof AppIndentsRoute
+  AppLedgerSummaryRoute: typeof AppLedgerSummaryRoute
+  AppLedgersRoute: typeof AppLedgersRoute
   AppPaymentsRoute: typeof AppPaymentsRoute
   AppPendingRoute: typeof AppPendingRoute
   AppProfileRoute: typeof AppProfileRoute
+  AppReconciliationRoute: typeof AppReconciliationRoute
   AppSalesDashboardRoute: typeof AppSalesDashboardRoute
   AppWorkordersRoute: typeof AppWorkordersRoute
   AppIndentIndentNoRoute: typeof AppIndentIndentNoRoute
@@ -317,9 +377,12 @@ const AppRouteChildren: AppRouteChildren = {
   AppDashboardRoute: AppDashboardRoute,
   AppHistoryRoute: AppHistoryRoute,
   AppIndentsRoute: AppIndentsRoute,
+  AppLedgerSummaryRoute: AppLedgerSummaryRoute,
+  AppLedgersRoute: AppLedgersRoute,
   AppPaymentsRoute: AppPaymentsRoute,
   AppPendingRoute: AppPendingRoute,
   AppProfileRoute: AppProfileRoute,
+  AppReconciliationRoute: AppReconciliationRoute,
   AppSalesDashboardRoute: AppSalesDashboardRoute,
   AppWorkordersRoute: AppWorkordersRoute,
   AppIndentIndentNoRoute: AppIndentIndentNoRoute,
