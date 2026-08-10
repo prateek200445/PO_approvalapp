@@ -26,6 +26,10 @@ builder.Configuration["ConnectionStrings:LoginEntryConnection"] = loginConnectio
 QuestPDF.Settings.License = LicenseType.Community;
 
 builder.Services.AddControllers();
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = 60_000_000;
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -40,6 +44,7 @@ builder.Services.AddScoped<DailyReportProcessorService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<PoApprovalService>();
 builder.Services.AddScoped<WorkOrderApprovalService>();
+builder.Services.AddScoped<ExcelLedgerService>();
 
 builder.Services.AddCors(options =>
 {
