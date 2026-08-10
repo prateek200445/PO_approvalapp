@@ -58,30 +58,30 @@ export function SalesCharts({ byGroup, bySubGroup }: SalesChartsProps) {
   }));
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
       <section className="rounded-xl border border-dashed border-border bg-card/50 shadow-sm lg:col-span-1">
-        <header className="border-b border-border px-4 py-3">
+        <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales Trend (₹)</h2>
         </header>
-        <div className="flex aspect-[16/10] items-center justify-center px-4 text-center text-sm text-muted-foreground">
+        <div className="flex min-h-[140px] items-center justify-center px-4 py-8 text-center text-xs text-muted-foreground sm:min-h-0 sm:aspect-[16/10] sm:py-0 sm:text-sm">
           Coming soon — no date series in SP_Sales_EBIDTA
         </div>
       </section>
 
       <section className="rounded-xl border border-border bg-card shadow-sm">
-        <header className="border-b border-border px-4 py-3">
+        <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales by Group</h2>
         </header>
         <div className="p-3 sm:p-4">
           {byGroup.length === 0 ? (
-            <div className="flex aspect-square max-h-[240px] items-center justify-center text-sm text-muted-foreground">
+            <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground sm:aspect-square sm:max-h-[240px] sm:h-auto">
               No group data
             </div>
           ) : (
             <>
               <ChartContainer
                 config={groupConfig}
-                className="mx-auto aspect-square max-h-[240px] w-full"
+                className="mx-auto aspect-square max-h-[200px] w-full sm:max-h-[240px]"
               >
                 <PieChart>
                   <ChartTooltip
@@ -89,9 +89,9 @@ export function SalesCharts({ byGroup, bySubGroup }: SalesChartsProps) {
                       <ChartTooltipContent
                         hideLabel
                         formatter={(value, name, item) => (
-                          <div className="flex w-full items-center justify-between gap-4">
-                            <span className="text-muted-foreground">{String(name)}</span>
-                            <span className="font-medium tabular-nums">
+                          <div className="flex w-full max-w-[220px] items-center justify-between gap-3">
+                            <span className="truncate text-muted-foreground">{String(name)}</span>
+                            <span className="shrink-0 font-medium tabular-nums">
                               {formatCrores(Number(value))}
                               {item?.payload?.percentage != null
                                 ? ` (${item.payload.percentage}%)`
@@ -106,8 +106,8 @@ export function SalesCharts({ byGroup, bySubGroup }: SalesChartsProps) {
                     data={pieData}
                     dataKey="value"
                     nameKey="name"
-                    innerRadius={55}
-                    outerRadius={85}
+                    innerRadius={45}
+                    outerRadius={72}
                     strokeWidth={2}
                   >
                     {pieData.map((entry) => (
@@ -116,7 +116,7 @@ export function SalesCharts({ byGroup, bySubGroup }: SalesChartsProps) {
                   </Pie>
                 </PieChart>
               </ChartContainer>
-              <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+              <ul className="mt-2 grid grid-cols-1 gap-x-3 gap-y-1.5 text-xs sm:grid-cols-2">
                 {byGroup.map((g, i) => (
                   <li key={g.groupName} className="flex min-w-0 items-center gap-1.5">
                     <span
@@ -133,33 +133,42 @@ export function SalesCharts({ byGroup, bySubGroup }: SalesChartsProps) {
         </div>
       </section>
 
-      <section className="rounded-xl border border-border bg-card shadow-sm">
-        <header className="border-b border-border px-4 py-3">
+      <section className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+        <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales by Sub Group (₹)</h2>
         </header>
-        <div className="p-3 sm:p-4">
+        <div className="p-2 sm:p-4 overflow-x-auto">
           {bySubGroup.length === 0 ? (
-            <div className="flex aspect-[16/10] items-center justify-center text-sm text-muted-foreground">
+            <div className="flex h-[180px] items-center justify-center text-sm text-muted-foreground sm:aspect-[16/10] sm:h-auto">
               No sub-group data
             </div>
           ) : (
-            <ChartContainer config={subGroupConfig} className="aspect-[16/10] w-full">
-              <BarChart data={bySubGroup} margin={{ left: 0, right: 8, top: 8, bottom: 0 }}>
+            <ChartContainer
+              config={subGroupConfig}
+              className="min-w-[280px] aspect-[16/11] w-full sm:min-w-0 sm:aspect-[16/10]"
+            >
+              <BarChart
+                data={bySubGroup}
+                margin={{ left: 0, right: 4, top: 8, bottom: 28 }}
+              >
                 <CartesianGrid vertical={false} strokeDasharray="3 3" />
                 <XAxis
                   dataKey="subGroupName"
                   tickLine={false}
                   axisLine={false}
-                  tickMargin={8}
-                  fontSize={10}
+                  tickMargin={6}
+                  fontSize={9}
                   interval={0}
-                  tickFormatter={(v) => String(v).slice(0, 12)}
+                  angle={-28}
+                  textAnchor="end"
+                  height={48}
+                  tickFormatter={(v) => String(v).slice(0, 10)}
                 />
                 <YAxis
                   tickLine={false}
                   axisLine={false}
-                  width={42}
-                  fontSize={11}
+                  width={36}
+                  fontSize={10}
                   tickFormatter={(v) => `${(Number(v) / 1e7).toFixed(1)}Cr`}
                 />
                 <ChartTooltip

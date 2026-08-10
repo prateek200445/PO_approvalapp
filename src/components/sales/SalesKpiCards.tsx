@@ -104,34 +104,41 @@ export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCards
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6 md:gap-4">
+    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 xl:grid-cols-6 md:gap-4">
       {cards.map((card) => (
-        <div key={card.id} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+        <div
+          key={card.id}
+          className="rounded-xl border border-border bg-card p-3 shadow-sm sm:p-4"
+        >
           <div
             className={cn(
-              "mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg border",
+              "mb-2 inline-flex h-8 w-8 items-center justify-center rounded-lg border sm:mb-3 sm:h-9 sm:w-9",
               card.tone,
             )}
           >
-            <card.icon className="h-4 w-4" aria-hidden />
+            <card.icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
           </div>
-          <div className="text-xs text-muted-foreground">{card.label}</div>
-          <div className="mt-1 text-lg font-semibold tabular-nums leading-tight md:text-xl break-words">
+          <div className="text-[11px] text-muted-foreground sm:text-xs">{card.label}</div>
+          <div className="mt-1 text-base font-semibold tabular-nums leading-tight break-words sm:text-lg md:text-xl">
             {card.displayValue}
           </div>
           {card.unavailable ? (
-            <div className="mt-2 text-xs text-muted-foreground">Coming soon</div>
+            <div className="mt-1.5 text-[11px] text-muted-foreground sm:mt-2 sm:text-xs">
+              Coming soon
+            </div>
           ) : card.showChange ? (
             <div
               className={cn(
-                "mt-2 text-xs font-medium tabular-nums",
+                "mt-1.5 text-[11px] font-medium tabular-nums sm:mt-2 sm:text-xs",
                 card.changePercent >= 0 ? "text-success" : "text-destructive",
               )}
             >
               {formatChangePercent(card.changePercent)} vs last period
             </div>
           ) : (
-            <div className="mt-2 text-xs text-muted-foreground">Period comparison pending</div>
+            <div className="mt-1.5 text-[11px] text-muted-foreground sm:mt-2 sm:text-xs">
+              Period comparison pending
+            </div>
           )}
         </div>
       ))}
