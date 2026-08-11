@@ -67,6 +67,8 @@ public class ChatOrchestratorService
             - Vendor master: prefer Vendor (FirmName, VendorCode, NewGSTNo, PANNo, Email, bank IFSC, PaymentTerms, ISMSME). Bank shortcut: vw_VendorListwithBankdtls. LedgerName mapping: vendordata. Join Vendor.FirmName/VendorCode to Vw_PurchaseOrder and Vw_Quotation. For pending balances use LedgerMaster. Vendor-item rates: prefer VendorRate (filter FirmName or ItemCode + TOP 50); Vw_VendorItem is slim but ~14M — same mandatory filters. For a specific quotation/PO use Vw_Quotation. Always TOP 50.
             - Gate pass: returnable RGP prefer Vw_ReturnGatePass (GatePassNo .../GP/..., CompName NOT CompanyName). Non-returnable NRGP prefer Vw_NonReturnGatePass (.../NGP/...). Inward against RGP: InwdReturnGatePass. Pending returns: vw_returngatepasspending WHERE PendingQty > 0. Always TOP 50.
             - Job work: formal orders prefer Vw_EditJOBWorkOrder (PurchaseCode JRO/JWO; sparse). Live qty at job work: VW_JobWork_EBD_DTL (filter companyname/ItemCode). Receipts: VW_RECJOBWORK_EBD_DTL (MRNo like JBIN-SE). Returnable job-work sends also Vw_ReturnGatePass Purpose LIKE '%Job Work%'. Do not join JOBWORKORDER to PurchasePayment. Always TOP 50.
+            - Sales invoices: prefer vw_Salesvoucher (InvNo, BuyerName, BillAMount, InvType, CompanyName). Lines: SalesVoucherItem on CompanyName+InvNo (ITEMCODE, ActualQty, Rate, Amount). List: vw_SalesInvList. Taxes: SalesVoucherTax. MIS qty: VW_SALES_EBD_DTL. Bracket [Company Address]/[Company GST] on vw_Salesvoucher. Sales credit notes: CreditNote. Always TOP 50.
+            - Despatch/packing: roll history vw_MISrolldespatch; FIBC bails FIBCDespatch; yarn MIS_YarnDespatch; small bag SmallBagBailForDespatch; rolls waiting vw_RollforDespatch. ALWAYS filter CompanyName/Companyname or InvNo/PartyName/date + TOP 50 (million-row tables). Prefer view over MISRollforDespatch table.
             - Prefer TOP 50 for detail lists. COUNT aggregates need no TOP.
             - Pending filters: status = 'Pending' or Status = 'Pending' (match column casing in schema).
             - Approved counts: status LIKE 'Approved%' when statuses vary.
@@ -123,6 +125,8 @@ public class ChatOrchestratorService
                 Reminder: vendor profile/GST/bank/MSME use Vendor or vw_VendorListwithBankdtls; balances use LedgerMaster; vendor rates use VendorRate/Vw_VendorItem with FirmName or ItemCode filter + TOP 50 (never unfiltered).
                 Reminder: gate pass uses CompName (not CompanyName); RGP=Vw_ReturnGatePass; NRGP=Vw_NonReturnGatePass; pending=vw_returngatepasspending PendingQty>0.
                 Reminder: job work live qty=VW_JobWork_EBD_DTL; receipts=VW_RECJOBWORK_EBD_DTL; formal orders=Vw_EditJOBWorkOrder (sparse); not PurchasePayment.
+                Reminder: sales invoices=vw_Salesvoucher + SalesVoucherItem (CompanyName+InvNo); BuyerName is customer; BillAMount spelling; bracket spaced GST address cols.
+                Reminder: despatch=vw_MISrolldespatch/FIBCDespatch/MIS_YarnDespatch/SmallBagBailForDespatch — must filter company or inv/party/date + TOP 50.
                 Return ONE corrected SELECT/WITH query only. No explanation.
                 """;
             sqlRaw = await _groq.CompleteAsync(sqlSystem, repairUser, ct);

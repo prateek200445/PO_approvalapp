@@ -1,6 +1,6 @@
 {
-  "version": "2.1.0",
-  "createdFor": "NL-to-SQL chatbot — prior domains + Gate Pass + Job Work",
+  "version": "2.3.0",
+  "createdFor": "NL-to-SQL chatbot — prior domains + Sales + Despatch",
   "database": {
     "server": "103.240.33.122,5115",
     "name": "MaterialProcessing",
@@ -34,7 +34,9 @@
     "GOVERNANCE (Vendor masters): Purchase vendor master is Vendor (~6.8k) — FirmName, VendorCode (Ven#####), NewGSTNo, PANNo, Email, ContactName, Address/City/State, BankAccountNo/BankName/IFSCCode, PaymentTerms, ModeofPayment, ISMSME/MSMENumber, TypeVendor (Local/Import), IsClosed. Bank-details shortcut view: vw_VendorListwithBankdtls. Alternate snapshot: vendordata (FirmName + LedgerName, fewer rows). Join Vendor.FirmName to Vw_PurchaseOrder.FirmName / Vw_Quotation.FirmName / DebitNote.PartyName (LTRIM/RTRIM; names may include GST suffixes). Vendor.VendorCode joins Vw_PurchaseOrder.VendorCode. For ledger balances prefer LedgerMaster (already allowlisted) via LedgerName/PANNo/NewGSTNo — Vendor is profile/bank/MSME, not full ledger statement. InternalVendor lists group companies treated as internal vendors. Always TOP 50.",
     "GOVERNANCE (Vendor rates): Historical/vendor-item rates use VendorRate (~921k; preferred detailed) and Vw_VendorItem (~14.5M; slim ItemCode/FirmName/Rate/NegoRate/itemdesc). ALWAYS filter by FirmName and/or ItemCode (or SubCode) and ALWAYS TOP 50 — never SELECT without a selective WHERE. Prefer VendorRate for Rate/NegoRate/PaymentTerm/Discount/taxes; Vw_VendorItem when only itemdesc + rate list needed. For rates on a specific quotation/PO prefer Vw_Quotation (PurchaseCode/FirmName). VendorRate.FirmName joins Vendor.FirmName; ItemCode joins ItemInfo.itemcode; SubCode often joins ItemInfo.code (indent line). Example: Bright Rubber has recent VendorRate rows; WIP00013 has multiple vendors on VendorRate.",
     "GOVERNANCE (Gate pass): Returnable gate pass (RGP) — prefer Vw_ReturnGatePass / ReturnGatePass (GatePassNo like CO/yy-yy/GP/n; CompName NOT CompanyName; ActualPartyName/PurposePartyName; ItemCode, Qty, Purpose). Non-returnable (NRGP) — prefer Vw_NonReturnGatePass / NonReturnGatePass (GatePassNo like CO/yy-yy/NGP/n; PartyName; CompName). Inward against returnable: InwdReturnGatePass (InwGatePassNo; GatePassNo links to ReturnGatePass when set). Pending returns: vw_returngatepasspending (ReturnQty, InwardQty, PendingQty — filter PendingQty > 0). Company column is CompName on all gate-pass objects. ItemCode joins ItemInfo.itemcode. Always TOP 50.",
-    "GOVERNANCE (Job work): Formal job-work orders are sparse (~7 headers / ~12 lines) — prefer Vw_EditJOBWorkOrder or Vw_JOBWORKORDER (PurchaseCode like PIL/JRO/... or PIL2/JWO/...; FirmName, ItemCode, JobWorkCharges, GatePassNo on edit view). Do NOT expect join to PurchasePayment/ApproveWorkOrder (0 matches live). Live MIS quantities: VW_JobWork_EBD_DTL (material at/sent job work by ItemCode, companyname) and VW_RECJOBWORK_EBD_DTL (received from job work with MRNo e.g. JBIN-SE). Prefer detail (_DTL) views over summary EBD. Returnable job-work movements also appear on Vw_ReturnGatePass WHERE Purpose LIKE '%Job Work%'. Skip empty Vw_StoreOutwardjobworkorder and tiny ApproveJOBWORKORDER. Always TOP 50; filter companyname/CompanyName and/or ItemCode on EBD views."
+    "GOVERNANCE (Job work): Formal job-work orders are sparse (~7 headers / ~12 lines) — prefer Vw_EditJOBWorkOrder or Vw_JOBWORKORDER (PurchaseCode like PIL/JRO/... or PIL2/JWO/...; FirmName, ItemCode, JobWorkCharges, GatePassNo on edit view). Do NOT expect join to PurchasePayment/ApproveWorkOrder (0 matches live). Live MIS quantities: VW_JobWork_EBD_DTL (material at/sent job work by ItemCode, companyname) and VW_RECJOBWORK_EBD_DTL (received from job work with MRNo e.g. JBIN-SE). Prefer detail (_DTL) views over summary EBD. Returnable job-work movements also appear on Vw_ReturnGatePass WHERE Purpose LIKE '%Job Work%'. Skip empty Vw_StoreOutwardjobworkorder and tiny ApproveJOBWORKORDER. Always TOP 50; filter companyname/CompanyName and/or ItemCode on EBD views.",
+    "GOVERNANCE (Sales): Sales invoices/vouchers — prefer vw_Salesvoucher (header: InvNo, InvDate, BuyerName, BillAMount, CompanyName, InvType, TypeofInvoice, currency) or SalesVoucher. Line items: SalesVoucherItem (join CompanyName+InvNo; ITEMCODE, ItemName, ActualQty, Rate, Amount, HSNCODE). Compact list: vw_SalesInvList (Invno, DespatchDate, BuyerName, OrgInvno). Tax lines: SalesVoucherTax (TaxledgerName, Amount; CreditNoteNumber links sales credit notes). MIS item sales: VW_SALES_EBD_DTL (itemcode, qTY, InvNo, companyname). BuyerName is the customer. InvType values include Sales, Export Sales, Commercial Export Sales, Sales InterUnit, Job Invoice, etc. Spaced columns on vw_Salesvoucher must be bracket-quoted e.g. [Company Address], [Company GST]. Sales credit notes remain CreditNote/vw_creditnote. Physical despatch/packing uses Despatch domain objects (not invoice headers alone). Always TOP 50.",
+    "GOVERNANCE (Despatch): Physical despatch/packing — ALWAYS filter CompanyName/Companyname and/or InvNo/Invno and/or PartyName/Partyname and/or date (sysdate/SysDate) and ALWAYS TOP 50 (tables are 200k–1.1M+). Roll despatch: prefer vw_MISrolldespatch (RollNO, Quality, NetWt, Companyname, Partyname, Invno, sysdate, PONO, PACKINGLISTNO on underlying MISRollforDespatch — prefer the view; do not also query MISRollforDespatch). FIBC bail despatch: FIBCDespatch (BailNo, Qty, Wt, InvNo, PACKINGLISTNO, PartyName, vVehicleNo). Yarn: MIS_YarnDespatch. Small bag bails: SmallBagBailForDespatch. Rolls waiting to despatch (no invoice yet): vw_RollforDespatch. Needle-loom rolls: MISNeedleRollforDespatch. Partyname/PartyName is customer/consignee. Link to sales invoice when InvNo matches vw_Salesvoucher.InvNo (formats vary — may need OrgInvno from vw_SalesInvList). Skip unused packing-list views that timeout."
   ],
   "objects": [
     {
@@ -2313,6 +2315,425 @@
       "embeddingText": "View VW_RECJOBWORK_EBD_DTL. Domain: Job work. Receipts from job work (~17k) — CompanyName, ITEMCODE, ITEMNAME, MRNo (JBIN-SE...), Qty, GroupName, sysdate. Filter CompanyName/ITEMCODE + TOP 50. Sent/at job work: VW_JobWork_EBD_DTL. Formal job-work orders: Vw_EditJOBWorkOrder. NOT pending WO approval (ApproveWorkOrder). Synonyms: job work receipt, received from job work, JBIN. Always TOP 50."
     },
     {
+      "id": "vw_Salesvoucher",
+      "objectName": "vw_Salesvoucher",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Sales",
+      "purpose": "Preferred sales invoice/voucher header (~104k). BuyerName is customer; BillAMount is invoice total. Join to SalesVoucherItem on CompanyName+InvNo.",
+      "primaryKeyHint": "CompanyName + InvNo (+ InvType/InvYear)",
+      "statusColumn": "ApprovalStatus",
+      "statusNotes": "Numeric ApprovalStatus when present.",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Selling company" },
+        { "name": "InvNo", "dataType": "varchar", "nullable": true, "meaning": "Invoice number (formats vary: numeric or OEL1/DE/074/26-27)" },
+        { "name": "InvDate", "dataType": "datetime", "nullable": true, "meaning": "Invoice date" },
+        { "name": "InvType", "dataType": "varchar", "nullable": true, "meaning": "Sales / Export Sales / Commercial Export Sales / Sales InterUnit / Job Invoice / Other Sales / etc." },
+        { "name": "TypeofInvoice", "dataType": "varchar", "nullable": true, "meaning": "Tax Invoice / Retail Invoice / Export Invoice / Delivery Challan" },
+        { "name": "BuyerName", "dataType": "varchar", "nullable": true, "meaning": "Customer / buyer" },
+        { "name": "BuyerOrderNo", "dataType": "varchar", "nullable": true, "meaning": "Buyer PO/order number" },
+        { "name": "BillAMount", "dataType": "float", "nullable": true, "meaning": "Invoice bill amount (spelling BillAMount)" },
+        { "name": "AccessableValue", "dataType": "float", "nullable": true, "meaning": "Assessable value" },
+        { "name": "salesLedger", "dataType": "varchar", "nullable": true, "meaning": "Sales ledger" },
+        { "name": "currency", "dataType": "varchar", "nullable": true, "meaning": "Currency" },
+        { "name": "ExchangeRate", "dataType": "float", "nullable": true, "meaning": "FX rate" },
+        { "name": "Destination", "dataType": "varchar", "nullable": true, "meaning": "Destination" },
+        { "name": "Termsofpayment", "dataType": "varchar", "nullable": true, "meaning": "Payment terms" },
+        { "name": "ModeTransport", "dataType": "varchar", "nullable": true, "meaning": "Transport mode" },
+        { "name": "ShippingBillNo", "dataType": "varchar", "nullable": true, "meaning": "Export shipping bill number" },
+        { "name": "Narration", "dataType": "varchar", "nullable": true, "meaning": "Narration" },
+        { "name": "LoginName", "dataType": "varchar", "nullable": true, "meaning": "Creator" },
+        { "name": "InvYear", "dataType": "varchar", "nullable": true, "meaning": "Invoice year / FY" },
+        { "name": "NewGSTNo", "dataType": "varchar", "nullable": true, "meaning": "Buyer GST on view" },
+        { "name": "CompanyGSTNo", "dataType": "varchar", "nullable": true, "meaning": "Company GSTIN" },
+        { "name": "Company Address", "dataType": "varchar", "nullable": true, "meaning": "MUST select as [Company Address]" },
+        { "name": "Company GST", "dataType": "varchar", "nullable": true, "meaning": "MUST select as [Company GST]" },
+        { "name": "DispatchAddress", "dataType": "varchar", "nullable": true, "meaning": "Dispatch address" },
+        { "name": "transId", "dataType": "int", "nullable": true, "meaning": "Unique row id" }
+      ],
+      "joins": [
+        { "to": "SalesVoucherItem", "on": "vw_Salesvoucher.CompanyName = SalesVoucherItem.CompanyName AND vw_Salesvoucher.InvNo = SalesVoucherItem.InvNo", "note": "Validated live" },
+        { "to": "SalesVoucherTax", "on": "vw_Salesvoucher.CompanyName = SalesVoucherTax.CompanyName AND vw_Salesvoucher.InvNo = SalesVoucherTax.InvNo" },
+        { "to": "CreditNote", "on": "related via invoice/ref; sales credit notes use CreditNote domain" }
+      ],
+      "synonyms": [
+        "sales invoice",
+        "sales voucher",
+        "tax invoice",
+        "buyer invoice",
+        "vw_Salesvoucher",
+        "invoice amount",
+        "export sales invoice"
+      ],
+      "exampleQuestions": [
+        "Show recent sales invoices for Plastene Polyfilms Limited",
+        "Invoice OEL1/DE/074/26-27 buyer and bill amount",
+        "Export sales invoices for Oswal Extrusion Limited"
+      ],
+      "embeddingText": "View vw_Salesvoucher. Domain: Sales. Preferred sales invoice header — CompanyName, InvNo, InvDate, BuyerName (customer), BillAMount, InvType (Sales/Export Sales/InterUnit/Job Invoice), TypeofInvoice, currency, Destination, ShippingBillNo. Bracket spaced columns [Company Address] [Company GST]. Join items via SalesVoucherItem on CompanyName+InvNo. Compact list: vw_SalesInvList. Credit notes: CreditNote. Synonyms: sales invoice, tax invoice, buyer bill, export sales. Always TOP 50."
+    },
+    {
+      "id": "SalesVoucherItem",
+      "objectName": "SalesVoucherItem",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Sales",
+      "purpose": "Sales invoice line items (~195k). Join to header on CompanyName + InvNo.",
+      "primaryKeyHint": "CompanyName + InvNo + SrNo",
+      "statusColumn": null,
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "InvNo", "dataType": "varchar", "nullable": true, "meaning": "Invoice number" },
+        { "name": "InvDate", "dataType": "datetime", "nullable": true, "meaning": "Invoice date" },
+        { "name": "ITEMCODE", "dataType": "varchar", "nullable": true, "meaning": "Item code (uppercase)" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item name / description" },
+        { "name": "Commodity", "dataType": "varchar", "nullable": true, "meaning": "Commodity" },
+        { "name": "ActualQty", "dataType": "float", "nullable": true, "meaning": "Quantity" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Unit rate" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Line amount" },
+        { "name": "Per", "dataType": "varchar", "nullable": true, "meaning": "Per / UOM basis" },
+        { "name": "Netwt", "dataType": "float", "nullable": true, "meaning": "Net weight" },
+        { "name": "HSNCODE", "dataType": "varchar", "nullable": true, "meaning": "HSN" },
+        { "name": "GroupName", "dataType": "varchar", "nullable": true, "meaning": "Item group" },
+        { "name": "CGSTPer", "dataType": "float", "nullable": true, "meaning": "CGST %" },
+        { "name": "CGSTAmount", "dataType": "float", "nullable": true, "meaning": "CGST amount" },
+        { "name": "SGSTPer", "dataType": "float", "nullable": true, "meaning": "SGST %" },
+        { "name": "SGSTAmount", "dataType": "float", "nullable": true, "meaning": "SGST amount" },
+        { "name": "IGSTPer", "dataType": "float", "nullable": true, "meaning": "IGST %" },
+        { "name": "IGSTAmount", "dataType": "float", "nullable": true, "meaning": "IGST amount" },
+        { "name": "InvType", "dataType": "varchar", "nullable": true, "meaning": "Invoice type" },
+        { "name": "SrNo", "dataType": "int", "nullable": true, "meaning": "Line serial" }
+      ],
+      "joins": [
+        { "to": "vw_Salesvoucher", "on": "SalesVoucherItem.CompanyName = vw_Salesvoucher.CompanyName AND SalesVoucherItem.InvNo = vw_Salesvoucher.InvNo" },
+        { "to": "ItemInfo", "on": "SalesVoucherItem.ITEMCODE = ItemInfo.itemcode" }
+      ],
+      "synonyms": [
+        "sales invoice items",
+        "invoice lines",
+        "SalesVoucherItem",
+        "what was sold on invoice"
+      ],
+      "exampleQuestions": [
+        "Show items on sales invoice 468 for Plastene Polyfilms Limited",
+        "Qty and rate for WIP00004 on a sales invoice"
+      ],
+      "embeddingText": "Table SalesVoucherItem. Domain: Sales. Invoice lines — CompanyName, InvNo, ITEMCODE, ItemName, ActualQty, Rate, Amount, HSNCODE, GST amounts. Join header vw_Salesvoucher on CompanyName+InvNo. Synonyms: sales invoice items, invoice lines. Always TOP 50."
+    },
+    {
+      "id": "vw_SalesInvList",
+      "objectName": "vw_SalesInvList",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Sales",
+      "purpose": "Compact sales invoice list (~99k) with DespatchDate and OrgInvno. Prefer for recent invoice lists; use vw_Salesvoucher for full header amounts.",
+      "primaryKeyHint": "companyname + Invno",
+      "statusColumn": null,
+      "columns": [
+        { "name": "companyname", "dataType": "varchar", "nullable": true, "meaning": "Company (lowercase)" },
+        { "name": "Invno", "dataType": "varchar", "nullable": true, "meaning": "Display invoice/despatch number e.g. PPL/D/474" },
+        { "name": "DespatchDate", "dataType": "datetime", "nullable": true, "meaning": "Despatch / list date" },
+        { "name": "BuyerName", "dataType": "varchar", "nullable": true, "meaning": "Buyer" },
+        { "name": "OrgInvno", "dataType": "varchar", "nullable": true, "meaning": "Original/org invoice number (often joins SalesVoucher.InvNo)" }
+      ],
+      "joins": [
+        { "to": "vw_Salesvoucher", "on": "vw_SalesInvList.companyname = vw_Salesvoucher.CompanyName AND (vw_SalesInvList.OrgInvno = vw_Salesvoucher.InvNo OR vw_SalesInvList.Invno = vw_Salesvoucher.InvNo)", "note": "Try OrgInvno first" }
+      ],
+      "synonyms": [
+        "sales invoice list",
+        "despatch invoice list",
+        "vw_SalesInvList",
+        "recent invoices"
+      ],
+      "exampleQuestions": [
+        "List recent despatch invoices for Oswal Extrusion Limited",
+        "Sales invoice list for Plastene Polyfilms Limited"
+      ],
+      "embeddingText": "View vw_SalesInvList. Domain: Sales. Compact invoice list — companyname, Invno (e.g. PPL/D/474), DespatchDate, BuyerName, OrgInvno. Prefer for recent lists; amounts on vw_Salesvoucher. Synonyms: invoice list, despatch invoices. Always TOP 50."
+    },
+    {
+      "id": "SalesVoucherTax",
+      "objectName": "SalesVoucherTax",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Sales",
+      "purpose": "Tax / ledger lines on sales vouchers (~211k). Also carries CreditNoteNumber when tax lines link to a credit note.",
+      "primaryKeyHint": "CompanyName + InvNo + SrNo / TransId",
+      "statusColumn": "ApprovalStatus",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "InvNo", "dataType": "varchar", "nullable": true, "meaning": "Invoice number" },
+        { "name": "TaxledgerName", "dataType": "varchar", "nullable": true, "meaning": "Tax/ledger name" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Tax rate" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Tax amount" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "Party on tax line" },
+        { "name": "CreditNoteNumber", "dataType": "varchar", "nullable": true, "meaning": "Linked credit note number when present" },
+        { "name": "TypeofInvoice", "dataType": "varchar", "nullable": true, "meaning": "Invoice type" },
+        { "name": "TypeTransaction", "dataType": "varchar", "nullable": true, "meaning": "Transaction type" },
+        { "name": "sysDate", "dataType": "datetime", "nullable": true, "meaning": "Date" },
+        { "name": "yr", "dataType": "varchar", "nullable": true, "meaning": "Year" }
+      ],
+      "joins": [
+        { "to": "vw_Salesvoucher", "on": "SalesVoucherTax.CompanyName = vw_Salesvoucher.CompanyName AND SalesVoucherTax.InvNo = vw_Salesvoucher.InvNo" },
+        { "to": "CreditNote", "on": "SalesVoucherTax.CreditNoteNumber = CreditNote.CreditNoteNumber" }
+      ],
+      "synonyms": [
+        "sales tax lines",
+        "invoice tax",
+        "SalesVoucherTax"
+      ],
+      "exampleQuestions": [
+        "Tax lines on a sales invoice",
+        "Sales voucher tax rows linked to a credit note"
+      ],
+      "embeddingText": "Table SalesVoucherTax. Domain: Sales. Tax lines on invoices — CompanyName, InvNo, TaxledgerName, Rate, Amount, PartyName, CreditNoteNumber. Join vw_Salesvoucher on CompanyName+InvNo. Synonyms: sales tax, invoice GST lines. Always TOP 50."
+    },
+    {
+      "id": "VW_SALES_EBD_DTL",
+      "objectName": "VW_SALES_EBD_DTL",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Sales",
+      "purpose": "MIS item-level sales/despatch quantities (~138k). Prefer for commodity/qty by InvNo; note itemcode may be blank on some rows. Prefer SalesVoucherItem for priced invoice lines.",
+      "primaryKeyHint": "InvNo + companyname + commodity",
+      "statusColumn": null,
+      "columns": [
+        { "name": "itemcode", "dataType": "varchar", "nullable": true, "meaning": "Item code (often blank)" },
+        { "name": "itemname", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "companyname", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Date" },
+        { "name": "Commodity", "dataType": "varchar", "nullable": true, "meaning": "Commodity description" },
+        { "name": "qTY", "dataType": "float", "nullable": true, "meaning": "Quantity (column qTY)" },
+        { "name": "MISCATEGORY", "dataType": "varchar", "nullable": true, "meaning": "MIS category" },
+        { "name": "MISGRUPITEM", "dataType": "varchar", "nullable": true, "meaning": "MIS group item" },
+        { "name": "InvNo", "dataType": "varchar", "nullable": true, "meaning": "Invoice number" }
+      ],
+      "joins": [
+        { "to": "vw_Salesvoucher", "on": "VW_SALES_EBD_DTL.InvNo = vw_Salesvoucher.InvNo AND VW_SALES_EBD_DTL.companyname = vw_Salesvoucher.CompanyName" },
+        { "to": "SalesVoucherItem", "on": "VW_SALES_EBD_DTL.InvNo = SalesVoucherItem.InvNo AND VW_SALES_EBD_DTL.companyname = SalesVoucherItem.CompanyName" }
+      ],
+      "synonyms": [
+        "sales EBD",
+        "sales quantity MIS",
+        "VW_SALES_EBD_DTL",
+        "despatch qty by invoice"
+      ],
+      "exampleQuestions": [
+        "Sales EBD quantities for Oswal Extrusion Limited",
+        "Commodity qty on sales InvNo for a company"
+      ],
+      "embeddingText": "View VW_SALES_EBD_DTL. Domain: Sales. MIS sales qty (~138k) — companyname, InvNo, Commodity, qTY, itemcode, itemname. Prefer SalesVoucherItem for priced lines. Physical rolls/FIBC despatch: vw_MISrolldespatch / FIBCDespatch. Synonyms: sales EBD, despatch qty. Always TOP 50. NOT purchase/MRN."
+    },
+    {
+      "id": "vw_MISrolldespatch",
+      "objectName": "vw_MISrolldespatch",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Despatch",
+      "purpose": "Preferred roll despatch history (~1.16M). MUST filter Companyname and/or Invno/Partyname/sysdate + TOP 50. Prefer this over raw MISRollforDespatch (same grain).",
+      "primaryKeyHint": "RollNO + Companyname + Invno",
+      "statusColumn": null,
+      "columns": [
+        { "name": "RollNO", "dataType": "varchar", "nullable": true, "meaning": "Roll number" },
+        { "name": "Quality", "dataType": "varchar", "nullable": true, "meaning": "Quality / grade" },
+        { "name": "Mesh", "dataType": "varchar", "nullable": true, "meaning": "Mesh" },
+        { "name": "NetWt", "dataType": "float", "nullable": true, "meaning": "Net weight" },
+        { "name": "GrossWT", "dataType": "float", "nullable": true, "meaning": "Gross weight" },
+        { "name": "Metre", "dataType": "float", "nullable": true, "meaning": "Metres" },
+        { "name": "Companyname", "dataType": "varchar", "nullable": true, "meaning": "Company (lowercase n)" },
+        { "name": "Partyname", "dataType": "varchar", "nullable": true, "meaning": "Customer / party" },
+        { "name": "Invno", "dataType": "varchar", "nullable": true, "meaning": "Invoice number (formats vary)" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Despatch date" },
+        { "name": "PONO", "dataType": "varchar", "nullable": true, "meaning": "PO / order ref" },
+        { "name": "Purpose", "dataType": "varchar", "nullable": true, "meaning": "Purpose" },
+        { "name": "Material", "dataType": "varchar", "nullable": true, "meaning": "Material" },
+        { "name": "Category", "dataType": "varchar", "nullable": true, "meaning": "Category" },
+        { "name": "UserName", "dataType": "varchar", "nullable": true, "meaning": "User" },
+        { "name": "Remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "type", "dataType": "varchar", "nullable": true, "meaning": "Type" },
+        { "name": "ActualGSM", "dataType": "float", "nullable": true, "meaning": "Actual GSM" },
+        { "name": "reqGsm", "dataType": "float", "nullable": true, "meaning": "Required GSM" },
+        { "name": "Sector", "dataType": "varchar", "nullable": true, "meaning": "Sector" },
+        { "name": "transid", "dataType": "int", "nullable": true, "meaning": "Row id" }
+      ],
+      "joins": [
+        { "to": "vw_Salesvoucher", "on": "vw_MISrolldespatch.Invno = vw_Salesvoucher.InvNo AND vw_MISrolldespatch.Companyname = vw_Salesvoucher.CompanyName", "note": "Inv formats vary" },
+        { "to": "vw_RollforDespatch", "on": "vw_MISrolldespatch.RollNO = vw_RollforDespatch.ROllNO" }
+      ],
+      "synonyms": [
+        "roll despatch",
+        "rolls despatched",
+        "MIS roll despatch",
+        "vw_MISrolldespatch",
+        "fabric roll shipment"
+      ],
+      "exampleQuestions": [
+        "Rolls despatched for Oswal Extrusion Limited on an invoice",
+        "Show roll despatch NetWt and Partyname for company X"
+      ],
+      "embeddingText": "View vw_MISrolldespatch. Domain: Despatch. Roll despatch (~1.16M) — RollNO, Quality, NetWt, Companyname, Partyname, Invno, sysdate, PONO. MUST filter company/inv/party/date + TOP 50. Prefer over MISRollforDespatch table. FIBC bails: FIBCDespatch. Yarn: MIS_YarnDespatch. Synonyms: roll despatch, rolls shipped. Always TOP 50."
+    },
+    {
+      "id": "FIBCDespatch",
+      "objectName": "FIBCDespatch",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Despatch",
+      "purpose": "FIBC / jumbo-bag bail despatch (~1.02M). MUST filter CompanyName and/or InvNo/PartyName/sysdate + TOP 50.",
+      "primaryKeyHint": "transid / BailNo + CompanyName",
+      "statusColumn": null,
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Despatching company" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Despatch date" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "Customer / party" },
+        { "name": "InvNo", "dataType": "varchar", "nullable": true, "meaning": "Invoice number" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Quantity (pcs/bags)" },
+        { "name": "Wt", "dataType": "float", "nullable": true, "meaning": "Weight" },
+        { "name": "BailNo", "dataType": "varchar", "nullable": true, "meaning": "Bail number" },
+        { "name": "PACKINGLISTNO", "dataType": "varchar", "nullable": true, "meaning": "Packing list number" },
+        { "name": "PONO", "dataType": "varchar", "nullable": true, "meaning": "PO number" },
+        { "name": "vVehicleNo", "dataType": "varchar", "nullable": true, "meaning": "Vehicle number" },
+        { "name": "ContainerNo", "dataType": "varchar", "nullable": true, "meaning": "Container number" },
+        { "name": "ReceivingCompany", "dataType": "varchar", "nullable": true, "meaning": "Receiving company if inter-unit" },
+        { "name": "Color", "dataType": "varchar", "nullable": true, "meaning": "Color" },
+        { "name": "Remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "LoginName", "dataType": "varchar", "nullable": true, "meaning": "User" },
+        { "name": "transid", "dataType": "int", "nullable": true, "meaning": "Row id" }
+      ],
+      "joins": [
+        { "to": "vw_Salesvoucher", "on": "FIBCDespatch.InvNo = vw_Salesvoucher.InvNo AND FIBCDespatch.CompanyName = vw_Salesvoucher.CompanyName" },
+        { "to": "vw_SalesInvList", "on": "FIBCDespatch.InvNo = vw_SalesInvList.OrgInvno OR FIBCDespatch.InvNo = vw_SalesInvList.Invno" }
+      ],
+      "synonyms": [
+        "FIBC despatch",
+        "jumbo bag despatch",
+        "bail despatch",
+        "packing list FIBC",
+        "FIBCDespatch"
+      ],
+      "exampleQuestions": [
+        "FIBC despatch packing list for Oswal Extrusion Limited",
+        "Bails despatched with vehicle number for an invoice"
+      ],
+      "embeddingText": "Table FIBCDespatch. Domain: Despatch. FIBC/jumbo bail despatch (~1M) — CompanyName, PartyName, InvNo, BailNo, Qty, Wt, PACKINGLISTNO, vVehicleNo, ContainerNo, sysdate. MUST filter + TOP 50. Roll fabric despatch: vw_MISrolldespatch. Synonyms: FIBC despatch, bail packing list, jumbo bag shipment. Always TOP 50."
+    },
+    {
+      "id": "MIS_YarnDespatch",
+      "objectName": "MIS_YarnDespatch",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Despatch",
+      "purpose": "Yarn despatch (~219k). Filter CompanyName/InvNo/PartyName/sysdate + TOP 50.",
+      "primaryKeyHint": "SrNo / BoxNo + InvNo",
+      "statusColumn": null,
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "InvNo", "dataType": "varchar", "nullable": true, "meaning": "Invoice" },
+        { "name": "Invdate", "dataType": "datetime", "nullable": true, "meaning": "Invoice date" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "Party" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Despatch date" },
+        { "name": "BoxNo", "dataType": "varchar", "nullable": true, "meaning": "Box number" },
+        { "name": "Netwt", "dataType": "float", "nullable": true, "meaning": "Net weight" },
+        { "name": "Grosswt", "dataType": "float", "nullable": true, "meaning": "Gross weight" },
+        { "name": "Deneir", "dataType": "varchar", "nullable": true, "meaning": "Denier" },
+        { "name": "NosOfBobbin", "dataType": "float", "nullable": true, "meaning": "Bobbin count" },
+        { "name": "PackingListNo", "dataType": "varchar", "nullable": true, "meaning": "Packing list e.g. PIL1/PKT/601" },
+        { "name": "Colors", "dataType": "varchar", "nullable": true, "meaning": "Color" },
+        { "name": "SrNo", "dataType": "int", "nullable": true, "meaning": "Serial" }
+      ],
+      "joins": [
+        { "to": "vw_Salesvoucher", "on": "MIS_YarnDespatch.InvNo = vw_Salesvoucher.InvNo AND MIS_YarnDespatch.CompanyName = vw_Salesvoucher.CompanyName" }
+      ],
+      "synonyms": [
+        "yarn despatch",
+        "bobbin despatch",
+        "MIS_YarnDespatch",
+        "yarn packing list"
+      ],
+      "exampleQuestions": [
+        "Yarn despatch packing list for Plastene India Limited",
+        "Bobbin net weight despatched on an invoice"
+      ],
+      "embeddingText": "Table MIS_YarnDespatch. Domain: Despatch. Yarn/bobbin despatch (~219k) — CompanyName, InvNo, PartyName, BoxNo, Netwt, PackingListNo, Deneir, sysdate. Filter + TOP 50. Synonyms: yarn despatch, bobbin packing list. Always TOP 50."
+    },
+    {
+      "id": "SmallBagBailForDespatch",
+      "objectName": "SmallBagBailForDespatch",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Despatch",
+      "purpose": "Small-bag bail despatch (~266k). Filter CompanyName/InvNo/PartyName/SysDate + TOP 50.",
+      "primaryKeyHint": "TransId / BailNo",
+      "statusColumn": null,
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "Party" },
+        { "name": "BailNo", "dataType": "varchar", "nullable": true, "meaning": "Bail number" },
+        { "name": "PCS", "dataType": "float", "nullable": true, "meaning": "Pieces" },
+        { "name": "Weight", "dataType": "float", "nullable": true, "meaning": "Weight" },
+        { "name": "InvNo", "dataType": "varchar", "nullable": true, "meaning": "Invoice / order ref" },
+        { "name": "PACKINGLISTNO", "dataType": "varchar", "nullable": true, "meaning": "Packing list e.g. OEL1/PKT/480" },
+        { "name": "SysDate", "dataType": "datetime", "nullable": true, "meaning": "Date" },
+        { "name": "BuyerOrdNo", "dataType": "varchar", "nullable": true, "meaning": "Buyer order" },
+        { "name": "MarketingOrdNo", "dataType": "varchar", "nullable": true, "meaning": "Marketing order" },
+        { "name": "ReceivingCompany", "dataType": "varchar", "nullable": true, "meaning": "Receiving company" },
+        { "name": "Remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "TransId", "dataType": "int", "nullable": true, "meaning": "Row id" }
+      ],
+      "joins": [
+        { "to": "FIBCDespatch", "on": "SmallBagBailForDespatch.PACKINGLISTNO = FIBCDespatch.PACKINGLISTNO" },
+        { "to": "vw_Salesvoucher", "on": "SmallBagBailForDespatch.CompanyName = vw_Salesvoucher.CompanyName" }
+      ],
+      "synonyms": [
+        "small bag despatch",
+        "small bag bail",
+        "SmallBagBailForDespatch",
+        "smallbag packing list"
+      ],
+      "exampleQuestions": [
+        "Small bag bails despatched for Oswal Extrusion Limited",
+        "Packing list OEL1/PKT/480 small bag PCS and weight"
+      ],
+      "embeddingText": "Table SmallBagBailForDespatch. Domain: Despatch. Small-bag bail despatch (~266k) — CompanyName, PartyName, BailNo, PCS, Weight, InvNo, PACKINGLISTNO, SysDate. Filter + TOP 50. FIBC jumbo: FIBCDespatch. Synonyms: small bag despatch, smallbag packing. Always TOP 50."
+    },
+    {
+      "id": "vw_RollforDespatch",
+      "objectName": "vw_RollforDespatch",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Despatch",
+      "purpose": "Rolls available / staged for despatch (~384k) — no Invno (not yet invoiced). Filter Companyname + TOP 50. For already-despatched rolls with invoice use vw_MISrolldespatch.",
+      "primaryKeyHint": "ROllNO + Companyname",
+      "statusColumn": null,
+      "columns": [
+        { "name": "ROllNO", "dataType": "varchar", "nullable": true, "meaning": "Roll number" },
+        { "name": "Quality", "dataType": "varchar", "nullable": true, "meaning": "Quality" },
+        { "name": "Mesh", "dataType": "varchar", "nullable": true, "meaning": "Mesh" },
+        { "name": "AvgGSM", "dataType": "float", "nullable": true, "meaning": "Average GSM" },
+        { "name": "NetWt", "dataType": "float", "nullable": true, "meaning": "Net weight" },
+        { "name": "GrossWt", "dataType": "float", "nullable": true, "meaning": "Gross weight" },
+        { "name": "Metre", "dataType": "float", "nullable": true, "meaning": "Metres" },
+        { "name": "Companyname", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "Sector", "dataType": "varchar", "nullable": true, "meaning": "Sector" },
+        { "name": "ActualGSM", "dataType": "float", "nullable": true, "meaning": "Actual GSM" },
+        { "name": "ActualGPM", "dataType": "float", "nullable": true, "meaning": "Actual GPM" }
+      ],
+      "joins": [
+        { "to": "vw_MISrolldespatch", "on": "vw_RollforDespatch.ROllNO = vw_MISrolldespatch.RollNO" }
+      ],
+      "synonyms": [
+        "rolls for despatch",
+        "roll ready to despatch",
+        "vw_RollforDespatch",
+        "pending roll despatch stock"
+      ],
+      "exampleQuestions": [
+        "Rolls available for despatch at Oswal Extrusion Limited",
+        "Roll stock waiting to be despatched"
+      ],
+      "embeddingText": "View vw_RollforDespatch. Domain: Despatch. Rolls staged/available for despatch (~384k) — ROllNO, Quality, NetWt, Companyname (no Invno). Filter Companyname + TOP 50. Already shipped rolls with invoice: vw_MISrolldespatch. Synonyms: rolls for despatch, ready to despatch. Always TOP 50."
+    },
+    {
       "id": "LoginRights",
       "objectName": "loginentry.dbo.LoginRights",
       "schema": "loginentry.dbo",
@@ -2475,6 +2896,14 @@
     {
       "fact": "Job work formal orders JOBWORKORDER/Vw_EditJOBWorkOrder ~7/12 rows (codes JRO/JWO); no join to PurchasePayment. Live MIS: VW_JobWork_EBD_DTL ~20k, VW_RECJOBWORK_EBD_DTL ~17k with MRNo JBIN-SE. ~76 returnable gate passes Purpose like Job Work. Skip empty Vw_StoreOutwardjobworkorder.",
       "verifiedOn": "live counts 2026-08-11"
+    },
+    {
+      "fact": "SalesVoucher/vw_Salesvoucher ~104k headers; SalesVoucherItem ~195k. Join CompanyName+InvNo. InvType includes Sales, Export Sales, Commercial Export Sales, Sales InterUnit, Job Invoice. Oswal ~4155 invoices. PPL InvNo 468 has WIP00004 etc. vw_SalesInvList ~99k with DespatchDate. Physical despatch in Despatch domain.",
+      "verifiedOn": "live counts/joins 2026-08-11"
+    },
+    {
+      "fact": "Despatch: vw_MISrolldespatch ~1.16M (prefer over MISRollforDespatch); FIBCDespatch ~1.02M; MIS_YarnDespatch ~219k; SmallBagBailForDespatch ~266k; vw_RollforDespatch ~384k (no Invno). Always filter company/inv/party/date + TOP 50. Oswal rolls on MIS view ~81k.",
+      "verifiedOn": "live counts 2026-08-11"
     }
   ],
   "embeddingNotes": {
@@ -2482,7 +2911,7 @@
     "recommendedBackend": "fastembed (ONNX) via build_embeddings.py; sentence-transformers fallback",
     "outputFile": "schema-embeddings.json",
     "textField": "embeddingText",
-    "chunkCount": 51,
+    "chunkCount": 61,
     "retrieveTopK": "3-8"
   }
 }

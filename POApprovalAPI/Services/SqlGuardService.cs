@@ -58,6 +58,21 @@ public partial class SqlGuardService
                     "SQL blocked: VendorRate/Vw_VendorItem must filter FirmName, ItemCode, or SubCode.");
         }
 
+        // Huge despatch objects require a selective filter
+        if (Regex.IsMatch(sql,
+                @"\bvw_MISrolldespatch\b|\bMISRollforDespatch\b|\bFIBCDespatch\b|\bMIS_YarnDespatch\b|\bSmallBagBailForDespatch\b|\bvw_RollforDespatch\b|\bvw_rollforDespatchLaminated\b",
+                RegexOptions.IgnoreCase))
+        {
+            if (!Regex.IsMatch(sql, @"\bWHERE\b", RegexOptions.IgnoreCase))
+                throw new InvalidOperationException(
+                    "SQL blocked: despatch queries require a WHERE filter (company, invoice, party, or date).");
+            if (!Regex.IsMatch(sql,
+                    @"\bCompanyName\b|\bCompanyname\b|\bInvNo\b|\bInvno\b|\bPartyName\b|\bPartyname\b|\bsysdate\b|\bSysDate\b|\bPACKINGLISTNO\b|\bPackingListNo\b",
+                    RegexOptions.IgnoreCase))
+                throw new InvalidOperationException(
+                    "SQL blocked: despatch queries must filter CompanyName/Companyname, InvNo, PartyName, date, or packing list.");
+        }
+
         return sql;
     }
 
