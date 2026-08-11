@@ -9,6 +9,7 @@ import { SalesSummaryTables } from "@/components/sales/SalesSummaryTables";
 import {
   DEFAULT_SALES_FILTERS,
   getSalesCompanies,
+  getSalesYearlyTrend,
   getTotalSales,
 } from "@/lib/sales-dashboard-api";
 import type {
@@ -81,6 +82,18 @@ function SalesDashboardPage() {
     retry: 1,
   });
 
+  const yearlyTrendQuery = useQuery({
+    queryKey: ["sales-yearly-trend", filters.company, filters.dateTo, refreshToken],
+    queryFn: () =>
+      getSalesYearlyTrend({
+        company: filters.company,
+        asOf: filters.dateTo,
+        years: 5,
+      }),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+
   // Prefer a real FactoryInfo company once the list loads
   useEffect(() => {
     if (!companyList?.length) return;
@@ -103,6 +116,7 @@ function SalesDashboardPage() {
   function handleRefresh() {
     setRefreshToken((n) => n + 1);
     void totalsQuery.refetch();
+    void yearlyTrendQuery.refetch();
   }
 
   const summary = useMemo<SalesDashboardSummary>(
@@ -141,7 +155,7 @@ function SalesDashboardPage() {
       <SalesFilters
         companies={companies}
         filters={filters}
-        isRefreshing={totalsQuery.isFetching}
+        isRefreshing={totalsQuery.isFetching || yearlyTrendQuery.isFetching}
         onChange={patchFilters}
         onRefresh={handleRefresh}
       />
@@ -150,7 +164,7 @@ function SalesDashboardPage() {
         <p className="text-xs text-muted-foreground">Loading companies from FactoryInfo…</p>
       )}
 
-      {totalsQuery.isFetching && (
+      {(totalsQuery.isFetching || yearlyTrendQuery.isFetching) && (
         <div
           className="flex items-center gap-2 text-xs text-muted-foreground"
           aria-live="polite"
@@ -165,10 +179,21 @@ function SalesDashboardPage() {
           {totalsQuery.error instanceof Error ? totalsQuery.error.message : ""}
         </p>
       )}
+      {yearlyTrendQuery.isError && (
+        <p className="text-xs text-destructive" role="alert">
+          Yearly sales trend failed.{" "}
+          {yearlyTrendQuery.error instanceof Error ? yearlyTrendQuery.error.message : ""}
+        </p>
+      )}
 
       <SalesKpiCards summary={summary} unavailableFields={PLACEHOLDER_FIELDS} />
 
-      <SalesCharts byGroup={byGroup} bySubGroup={bySubGroup} />
+      <SalesCharts
+        byGroup={byGroup}
+        bySubGroup={bySubGroup}
+        trend={yearlyTrendQuery.data ?? []}
+        trendLoading={yearlyTrendQuery.isFetching}
+      />
 
       <SalesSummaryTables topProducts={[]} topCustomers={[]} bySubGroup={bySubGroup} />
 

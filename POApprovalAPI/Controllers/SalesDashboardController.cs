@@ -68,6 +68,36 @@ public class SalesDashboardController : ControllerBase
     }
 
     /// <summary>
+    /// Year-by-year Total Sales (Indian FY Apr–Mar) from SP_Sales_EBIDTA grand-total Amount.
+    /// </summary>
+    [HttpGet("yearly-trend")]
+    public async Task<IActionResult> GetYearlyTrend(
+        [FromQuery] string company = "All Companies",
+        [FromQuery] DateTime? asOf = null,
+        [FromQuery] int years = 5)
+    {
+        try
+        {
+            var through = asOf ?? DateTime.Today;
+            var trend = await _salesDashboard.GetSalesYearlyTrendAsync(company, through, years);
+
+            return Ok(new
+            {
+                trend,
+                company,
+                asOf = through.ToString("yyyy-MM-dd"),
+                years,
+                source = "SP_Sales_EBIDTA",
+                note = "Each bar is Sales grand-total Amount for that FY (Apr–Mar); current FY capped at asOf.",
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Progressive sections: kpis | charts | tables | all.
     /// First section call loads ERP ledger into cache; later sections reuse it.
     /// </summary>
