@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { KeyRound, LogOut, Building2, Server, ArrowLeftRight, BookOpen } from "lucide-react";
+import { KeyRound, LogOut, Building2, Server, ArrowLeftRight, BookOpen, Phone, Mail } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { ServerSettingsModal } from "@/components/ServerSettingsModal";
@@ -47,6 +47,39 @@ function Profile() {
           <Row icon={Building2} label="Department" value={user?.department ?? "—"} />
        
         </dl>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+        <h2 className="text-sm font-semibold">Admin Contact</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          For queries or support, contact the admin using the details below.
+        </p>
+        <div className="mt-4 space-y-2">
+          <a
+            href="tel:+916357419694"
+            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary"
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <Phone className="h-5 w-5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <span className="text-sm font-medium">Phone</span>
+                <p className="text-xs text-muted-foreground sm:text-sm">+91 63574 19694</p>
+              </div>
+            </div>
+          </a>
+          <a
+            href="mailto:gdmit@hpbl.in"
+            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary"
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <Mail className="h-5 w-5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <span className="text-sm font-medium">Email</span>
+                <p className="truncate text-xs text-muted-foreground sm:text-sm">gdmit@hpbl.in</p>
+              </div>
+            </div>
+          </a>
+        </div>
       </div>
 
       <div className="rounded-xl border border-border bg-card p-6 shadow-sm md:hidden">
