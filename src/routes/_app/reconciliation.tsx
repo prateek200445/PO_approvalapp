@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   CheckCircle2,
   Download,
@@ -66,9 +67,20 @@ const emptyMapping = (): LedgerColumnMapping => ({
 });
 
 const RESULTS_PAGE_SIZE = 15;
+const HELP_TIP_STORAGE_KEY = "ledger-recon-help-tip-dismissed";
 
 type SortKey = "status" | "date" | "sideA" | "amountA" | "sideB" | "amountB" | "diff";
 type SortDir = "asc" | "desc";
+
+const STATUS_HELP: Record<ComparisonStatus, string> = {
+  Matched: "Bill numbers relate and amounts reconcile (opposite signs, same total).",
+  AmountMismatch: "Related bills confirmed as not reconciling — amount difference remains.",
+  MissingInA: "Found in ledger B, but no related bill number in ledger A.",
+  MissingInB: "Found in ledger A, but no related bill number in ledger B.",
+  Duplicate: "Duplicate rows detected within a ledger.",
+  PotentialMatch: "Related bill numbers found — review and manually match, mark mismatch, or send to missing.",
+  PendingRecord: "Leftover lines after a partial manual match — still need recording.",
+};
 
 const PIE_COLORS = {
   Matched: "#16a34a",
@@ -99,9 +111,34 @@ function ReconciliationPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("Matched");
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<ComparisonPair | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpFocusStatus, setHelpFocusStatus] = useState<ComparisonStatus | null>(null);
+  const [showHelpTip, setShowHelpTip] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  useEffect(() => {
+    try {
+      setShowHelpTip(localStorage.getItem(HELP_TIP_STORAGE_KEY) !== "1");
+    } catch {
+      setShowHelpTip(true);
+    }
+  }, []);
+
+  function openHelp(focusStatus?: ComparisonStatus) {
+    setHelpFocusStatus(focusStatus ?? null);
+    setHelpOpen(true);
+  }
+
+  function dismissHelpTip() {
+    setShowHelpTip(false);
+    try {
+      localStorage.setItem(HELP_TIP_STORAGE_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+  }
 
   async function previewFile(side: "A" | "B", file: File) {
     const setSide = side === "A" ? setSideA : setSideB;
@@ -526,6 +563,54 @@ function ReconciliationPage() {
     setSelected(null);
   }
 
+  function markAsMissing(pairId: string) {
+    setResult((prev) => {
+      if (!prev) return prev;
+      const source = prev.results.find((r) => r.id === pairId);
+      if (!source || source.status !== "PotentialMatch") return prev;
+
+      const rowsA = source.entriesA?.length ? source.entriesA : source.entryA ? [source.entryA] : [];
+      const rowsB = source.entriesB?.length ? source.entriesB : source.entryB ? [source.entryB] : [];
+      const companyA = source.entryA?.company ?? rowsA[0]?.company ?? prev.companyNameA;
+      const companyB = source.entryB?.company ?? rowsB[0]?.company ?? prev.companyNameB;
+      const stamp = Date.now();
+
+      const nextResults = prev.results.filter((r) => r.id !== pairId);
+
+      if (rowsA.length > 0) {
+        nextResults.push({
+          id: `${pairId}-missing-b-${stamp}`,
+          status: "MissingInB",
+          matchKind: source.matchKind ?? "bill-group",
+          message: "Manual: bill numbers judged unrelated — no match in File B",
+          difference: null,
+          entryA: summarizeEntries(rowsA, companyA),
+          entryB: null,
+          entriesA: rowsA,
+          entriesB: [],
+        });
+      }
+
+      if (rowsB.length > 0) {
+        nextResults.push({
+          id: `${pairId}-missing-a-${stamp}`,
+          status: "MissingInA",
+          matchKind: source.matchKind ?? "bill-group",
+          message: "Manual: bill numbers judged unrelated — no match in File A",
+          difference: null,
+          entryA: null,
+          entryB: summarizeEntries(rowsB, companyB),
+          entriesA: [],
+          entriesB: rowsB,
+        });
+      }
+
+      const nextSummary = buildSummaryFromResults(prev.summary.totalA, prev.summary.totalB, nextResults);
+      return { ...prev, results: nextResults, summary: nextSummary };
+    });
+    setSelected(null);
+  }
+
   useEffect(() => {
     setCurrentPage(1);
   }, [statusFilter, q]);
@@ -550,15 +635,25 @@ function ReconciliationPage() {
           </p>
         </div>
         {step === 3 && result && (
-          <button
-            type="button"
-            onClick={runExport}
-            disabled={exporting}
-            className="hidden h-10 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:inline-flex"
-          >
-            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            Export report
-          </button>
+          <div className="hidden items-center gap-2 md:flex">
+            <button
+              type="button"
+              onClick={() => openHelp()}
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-input bg-surface px-3 text-sm font-medium hover:bg-secondary"
+            >
+              <HelpCircle className="h-4 w-4" />
+              How matching works
+            </button>
+            <button
+              type="button"
+              onClick={runExport}
+              disabled={exporting}
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Export report
+            </button>
+          </div>
         )}
       </div>
 
@@ -613,7 +708,7 @@ function ReconciliationPage() {
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
             <h2 className="text-sm font-semibold">Match rules</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              1) Group by exact Bill No + Bill Date and compare bill totals (many lines can sum to one). Opposite signs required. 2) Rows without Bill No fall back to Voucher Date. Different Bill Nos never match.
+              1) Match by Bill No first (including swapped formats), then compare opposite-signed totals. Date differences alone do not block a match. 2) Rows without Bill No fall back to Voucher Date. Unrelated Bill Nos never pair.
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1 text-sm">
@@ -852,6 +947,32 @@ function ReconciliationPage() {
             </button>
           </div>
 
+          {showHelpTip && (
+            <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-sm">
+              <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <p className="text-foreground/90">
+                  Not sure about <b>Potential match</b>?{" "}
+                  <button
+                    type="button"
+                    onClick={() => openHelp("PotentialMatch")}
+                    className="font-semibold text-primary underline-offset-2 hover:underline"
+                  >
+                    See how matching works
+                  </button>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={dismissHelpTip}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+                aria-label="Dismiss tip"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
           <p className="text-xs text-muted-foreground">
             Showing {sorted.length === 0 ? 0 : (currentPage - 1) * RESULTS_PAGE_SIZE + 1}
             –{Math.min(currentPage * RESULTS_PAGE_SIZE, sorted.length)} of {sorted.length.toLocaleString("en-IN")}
@@ -871,7 +992,12 @@ function ReconciliationPage() {
                     className="w-full rounded-xl border border-border bg-card p-3 text-left shadow-sm"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <ResultBadge status={row.status} companyNameA={companyNameA} companyNameB={companyNameB} />
+                      <ResultBadge
+                        status={row.status}
+                        companyNameA={companyNameA}
+                        companyNameB={companyNameB}
+                        onLearnMore={() => openHelp(row.status)}
+                      />
                       {row.difference != null && (
                         <span className="text-sm font-semibold tabular-nums">₹{formatNum(row.difference)}</span>
                       )}
@@ -935,7 +1061,12 @@ function ReconciliationPage() {
                       >
                         <td className="px-5 py-2.5">
                           <div className="flex justify-center">
-                            <ResultBadge status={row.status} companyNameA={companyNameA} companyNameB={companyNameB} />
+                            <ResultBadge
+                        status={row.status}
+                        companyNameA={companyNameA}
+                        companyNameB={companyNameB}
+                        onLearnMore={() => openHelp(row.status)}
+                      />
                           </div>
                         </td>
                         <td className="px-5 py-2.5 text-center whitespace-nowrap">
@@ -1028,18 +1159,28 @@ function ReconciliationPage() {
         </div>
       )}
 
-      {/* Mobile sticky export */}
+      {/* Mobile sticky actions */}
       {step === 3 && result && (
         <div className="fixed inset-x-0 bottom-16 z-20 border-t border-border bg-surface/95 p-3 backdrop-blur md:hidden">
-          <button
-            type="button"
-            onClick={runExport}
-            disabled={exporting}
-            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50"
-          >
-            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            Export report
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => openHelp()}
+              className="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-md border border-input bg-surface text-sm font-medium"
+            >
+              <HelpCircle className="h-4 w-4" />
+              Help
+            </button>
+            <button
+              type="button"
+              onClick={runExport}
+              disabled={exporting}
+              className="inline-flex h-11 flex-[1.4] items-center justify-center gap-2 rounded-md bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-50"
+            >
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Export
+            </button>
+          </div>
         </div>
       )}
 
@@ -1050,7 +1191,21 @@ function ReconciliationPage() {
           companyNameB={companyNameB}
           onManualMatch={applyManualMatch}
           onMarkAmountMismatch={markAsAmountMismatch}
+          onMarkAsMissing={markAsMissing}
+          onOpenHelp={openHelp}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {helpOpen && (
+        <HelpDrawer
+          companyNameA={companyNameA}
+          companyNameB={companyNameB}
+          focusStatus={helpFocusStatus}
+          onClose={() => {
+            setHelpOpen(false);
+            setHelpFocusStatus(null);
+          }}
         />
       )}
     </div>
@@ -1646,10 +1801,12 @@ function ResultBadge({
   status,
   companyNameA = "A",
   companyNameB = "B",
+  onLearnMore,
 }: {
   status: ComparisonStatus;
   companyNameA?: string;
   companyNameB?: string;
+  onLearnMore?: () => void;
 }) {
   const map: Record<ComparisonStatus, string> = {
     Matched: "bg-success/15 text-success border-success/30",
@@ -1664,33 +1821,244 @@ function ResultBadge({
   const missingCompany =
     status === "MissingInA" ? companyNameA : status === "MissingInB" ? companyNameB : null;
   const useStackedMissing = Boolean(missingCompany && missingCompany.length > 14);
+  const tip = STATUS_HELP[status];
+  const label = formatStatusLabel(status, companyNameA, companyNameB);
+  const tipId = useId();
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
 
-  if (useStackedMissing) {
-    return (
-      <span
-        className={cn(
-          "inline-flex max-w-[9.5rem] flex-col items-center justify-center rounded-lg border px-2.5 py-1.5 text-center text-[10px] font-medium leading-snug",
-          map[status],
-        )}
-        title={formatStatusLabel(status, companyNameA, companyNameB)}
-      >
-        <span className="whitespace-nowrap">Missing in</span>
-        <span className="mt-0.5 line-clamp-2 w-full break-words">{missingCompany}</span>
-      </span>
-    );
-  }
+  useEffect(() => {
+    if (!open || !anchorRef.current) return;
 
-  return (
+    const place = () => {
+      const rect = anchorRef.current!.getBoundingClientRect();
+      const width = 224;
+      const approxHeight = 120;
+      let left = rect.right + 8;
+      let top = rect.top;
+      if (left + width > window.innerWidth - 8) {
+        left = Math.max(8, rect.left - width - 8);
+      }
+      if (top + approxHeight > window.innerHeight - 8) {
+        top = Math.max(8, window.innerHeight - approxHeight - 8);
+      }
+      setPos({ top, left });
+    };
+
+    place();
+    const onScroll = () => place();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (anchorRef.current?.contains(target)) return;
+      const tipEl = document.getElementById(tipId);
+      if (tipEl?.contains(target)) return;
+      setOpen(false);
+    };
+
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", place);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [open, tipId]);
+
+  const badge = useStackedMissing ? (
+    <span
+      className={cn(
+        "inline-flex max-w-[9.5rem] flex-col items-center justify-center rounded-lg border px-2.5 py-1.5 text-center text-[10px] font-medium leading-snug",
+        map[status],
+      )}
+    >
+      <span className="whitespace-nowrap">Missing in</span>
+      <span className="mt-0.5 line-clamp-2 w-full break-words">{missingCompany}</span>
+    </span>
+  ) : (
     <span
       className={cn(
         "inline-flex max-w-[10rem] items-center justify-center gap-1 rounded-full border px-2.5 py-1 text-center text-[11px] font-medium leading-tight",
         map[status],
       )}
-      title={formatStatusLabel(status, companyNameA, companyNameB)}
     >
       {status === "Duplicate" && <Copy className="h-3 w-3 shrink-0" />}
-      <span className="text-balance">{formatStatusLabel(status, companyNameA, companyNameB)}</span>
+      <span className="text-balance">{label}</span>
     </span>
+  );
+
+  return (
+    <>
+      <button
+        type="button"
+        ref={anchorRef}
+        className="inline-flex cursor-help rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        aria-expanded={open}
+        aria-label={`${label}. ${tip}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+      >
+        {badge}
+      </button>
+      {open &&
+        createPortal(
+          <div
+            id={tipId}
+            role="dialog"
+            style={{ top: pos.top, left: pos.left }}
+            className="fixed z-[80] w-56 rounded-lg border border-border bg-card p-2.5 text-left text-[11px] leading-snug text-foreground shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="font-semibold">{label}</div>
+            <p className="mt-1 text-muted-foreground">{tip}</p>
+            {onLearnMore && (
+              <button
+                type="button"
+                className="mt-2 font-semibold text-primary underline-offset-2 hover:underline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setOpen(false);
+                  onLearnMore();
+                }}
+              >
+                Learn more
+              </button>
+            )}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
+function HelpDrawer({
+  companyNameA,
+  companyNameB,
+  focusStatus,
+  onClose,
+}: {
+  companyNameA: string;
+  companyNameB: string;
+  focusStatus: ComparisonStatus | null;
+  onClose: () => void;
+}) {
+  const statusOrder: ComparisonStatus[] = [
+    "Matched",
+    "PotentialMatch",
+    "AmountMismatch",
+    "MissingInA",
+    "MissingInB",
+    "PendingRecord",
+    "Duplicate",
+  ];
+
+  useEffect(() => {
+    if (!focusStatus) return;
+    const el = document.getElementById(`help-status-${focusStatus}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [focusStatus]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
+      <div
+        className="flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-2xl sm:max-w-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Guide
+            </div>
+            <h2 className="mt-1 text-lg font-semibold tracking-tight">How matching works</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              A simple view of how {companyNameA} and {companyNameB} are compared.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted-foreground hover:bg-secondary hover:text-foreground"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-5">
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">1. What we match on</h3>
+            <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
+              <li>
+                <b className="text-foreground">Bill No first</b> — including swapped formats like{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">114/21-22</code> ↔{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">21-22/114</code>.
+              </li>
+              <li>Bill date is secondary. Same bill no + matching amounts count as matched even if dates differ.</li>
+              <li>If Bill No is missing, we fall back to voucher date (only then).</li>
+              <li>Amounts must be opposite signs and equal (within tolerance) to auto-match.</li>
+            </ul>
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">2. Status meanings</h3>
+            <div className="space-y-2">
+              {statusOrder.map((status) => (
+                <div
+                  key={status}
+                  id={`help-status-${status}`}
+                  className={cn(
+                    "rounded-xl border border-border px-3 py-2.5",
+                    focusStatus === status && "border-primary/40 bg-primary/5",
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <ResultBadge status={status} companyNameA={companyNameA} companyNameB={companyNameB} />
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">{STATUS_HELP[status]}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">3. What you can do</h3>
+            <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
+              <li>
+                Open a <b className="text-foreground">Potential match</b> row.
+              </li>
+              <li>Select the lines that should settle, then click <b className="text-foreground">Manually match selected</b>.</li>
+              <li>
+                If amounts don’t reconcile, click <b className="text-foreground">Mark as amount mismatch</b>.
+              </li>
+              <li>
+                If the bill numbers don’t belong together, click <b className="text-foreground">Send to missing</b> —
+                the pair splits into separate missing rows on each side.
+              </li>
+              <li>
+                Leftover lines after a partial match become <b className="text-foreground">Pending record</b>.
+              </li>
+            </ul>
+          </section>
+
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">4. Export</h3>
+            <p className="text-sm text-muted-foreground">
+              Export downloads an Excel report of <b className="text-foreground">what you currently see</b>,
+              including manual matches, amount-mismatch, and send-to-missing decisions.
+            </p>
+          </section>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1700,6 +2068,8 @@ function DetailSheet({
   companyNameB,
   onManualMatch,
   onMarkAmountMismatch,
+  onMarkAsMissing,
+  onOpenHelp,
   onClose,
 }: {
   pair: ComparisonPair;
@@ -1707,6 +2077,8 @@ function DetailSheet({
   companyNameB: string;
   onManualMatch: (pairId: string, selectedRowIndicesA: number[], selectedRowIndicesB: number[]) => void;
   onMarkAmountMismatch: (pairId: string) => void;
+  onMarkAsMissing: (pairId: string) => void;
+  onOpenHelp?: (status?: ComparisonStatus) => void;
   onClose: () => void;
 }) {
   const isBillGroup = pair.matchKind === "bill-group";
@@ -1808,7 +2180,12 @@ function DetailSheet({
               Comparison detail
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <ResultBadge status={pair.status} companyNameA={companyNameA} companyNameB={companyNameB} />
+              <ResultBadge
+                status={pair.status}
+                companyNameA={companyNameA}
+                companyNameB={companyNameB}
+                onLearnMore={onOpenHelp ? () => onOpenHelp(pair.status) : undefined}
+              />
               {isBillGroup && (
                 <span className="rounded-md bg-secondary/70 px-2 py-0.5 text-[11px] font-medium text-foreground/80">
                   Bill · {lineCountLabel(pair)} lines
@@ -1926,6 +2303,15 @@ function DetailSheet({
                 >
                   Mark as amount mismatch
                 </button>
+                {pair.status === "PotentialMatch" && (
+                  <button
+                    type="button"
+                    onClick={() => onMarkAsMissing(pair.id)}
+                    className="inline-flex h-9 items-center rounded-md border border-destructive/40 bg-destructive/10 px-3 text-sm font-semibold text-destructive hover:bg-destructive/20"
+                  >
+                    Send to missing
+                  </button>
+                )}
               </div>
             </div>
           )}
