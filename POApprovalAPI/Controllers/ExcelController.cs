@@ -82,36 +82,28 @@ public class ExcelController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Export the current comparison result (including any UI/manual edits) as Excel.
+    /// </summary>
     [HttpPost("export")]
-    [RequestSizeLimit(60_000_000)]
-    public async Task<IActionResult> Export(
-        IFormFile fileA,
-        IFormFile fileB,
-        [FromForm] string mappingA,
-        [FromForm] string mappingB,
-        [FromForm] string? options = null)
+    [RequestSizeLimit(30_000_000)]
+    public IActionResult Export([FromBody] ComparisonResultDto result)
     {
         try
         {
-            ValidateExcel(fileA);
-            ValidateExcel(fileB);
+            if (result == null || result.Results == null)
+                throw new InvalidOperationException("Comparison result is required.");
 
-            var mapA = DeserializeOrThrow<LedgerColumnMapping>(mappingA, "mappingA");
-            var mapB = DeserializeOrThrow<LedgerColumnMapping>(mappingB, "mappingB");
-            var matchOptions = string.IsNullOrWhiteSpace(options)
-                ? new LedgerMatchOptions()
-                : DeserializeOrThrow<LedgerMatchOptions>(options, "options");
+            // Keep summary in sync with whatever the client currently shows.
+            result.Summary ??= new ComparisonSummary();
+            result.Summary.Matched = result.Results.Count(r => r.Status == "Matched");
+            result.Summary.AmountMismatch = result.Results.Count(r => r.Status == "AmountMismatch");
+            result.Summary.MissingInA = result.Results.Count(r => r.Status == "MissingInA");
+            result.Summary.MissingInB = result.Results.Count(r => r.Status == "MissingInB");
+            result.Summary.Duplicates = result.Results.Count(r => r.Status == "Duplicate");
+            result.Summary.PotentialMatches = result.Results.Count(r => r.Status == "PotentialMatch");
+            result.Summary.PendingRecords = result.Results.Count(r => r.Status == "PendingRecord");
 
-            await using var streamA = fileA.OpenReadStream();
-            await using var streamB = fileB.OpenReadStream();
-            using var msA = new MemoryStream();
-            using var msB = new MemoryStream();
-            await streamA.CopyToAsync(msA);
-            await streamB.CopyToAsync(msB);
-            msA.Position = 0;
-            msB.Position = 0;
-
-            var result = _excel.Compare(msA, fileA.FileName, msB, fileB.FileName, mapA, mapB, matchOptions);
             var bytes = _excel.BuildExport(result);
             var fileName = $"ledger-reconciliation-{DateTime.Now:yyyyMMdd-HHmmss}.xlsx";
             return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);

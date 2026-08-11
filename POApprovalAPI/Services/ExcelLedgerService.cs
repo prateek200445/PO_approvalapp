@@ -120,6 +120,7 @@ public class ExcelLedgerService
             ($"Missing in {nameB}", result.Summary.MissingInB, "missing"),
             ("Duplicates", result.Summary.Duplicates, "other"),
             ("Potential Matches", result.Summary.PotentialMatches, "other"),
+            ("Pending Records", result.Summary.PendingRecords, "other"),
         };
         for (var i = 0; i < rows.Length; i++)
         {
@@ -212,6 +213,7 @@ public class ExcelLedgerService
             "MissingInA" or "MissingInB" => (XLColor.FromHtml("#FFC7CE"), XLColor.FromHtml("#9C0006")),
             "Duplicate" => (XLColor.FromHtml("#DDEBF7"), XLColor.FromHtml("#1F4E79")),
             "PotentialMatch" => (XLColor.FromHtml("#E2D5F1"), XLColor.FromHtml("#5B2C6F")),
+            "PendingRecord" => (XLColor.FromHtml("#FCE4D6"), XLColor.FromHtml("#833C0C")),
             _ => (XLColor.FromHtml("#E7E6E6"), XLColor.FromHtml("#333333")),
         };
         cell.Style.Fill.BackgroundColor = bg;
@@ -225,6 +227,7 @@ public class ExcelLedgerService
         "MissingInB" => $"Missing in {nameB}",
         "AmountMismatch" => "Amount Mismatch",
         "PotentialMatch" => "Potential Match",
+        "PendingRecord" => "Pending Record",
         _ => status
     };
 
@@ -494,6 +497,7 @@ public class ExcelLedgerService
                 MissingInB = results.Count(r => r.Status == "MissingInB"),
                 Duplicates = 0,
                 PotentialMatches = results.Count(r => r.Status == "PotentialMatch"),
+                PendingRecords = results.Count(r => r.Status == "PendingRecord"),
             },
             Results = results
         };

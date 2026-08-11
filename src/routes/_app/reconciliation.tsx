@@ -226,15 +226,17 @@ function ReconciliationPage() {
   }
 
   async function runExport() {
-    const error = validateMappings();
-    if (error) {
-      toast.error(error);
+    if (!result) {
+      toast.error("Run a comparison before exporting");
       return;
     }
     setExporting(true);
     try {
-      const form = buildCompareForm();
-      const res = await fetch(getApiUrl("/api/excel/export"), { method: "POST", body: form });
+      const res = await fetch(getApiUrl("/api/excel/export"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(result),
+      });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.message || "Export failed");

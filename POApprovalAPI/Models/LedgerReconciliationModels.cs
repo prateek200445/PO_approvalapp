@@ -71,6 +71,7 @@ public class ComparisonSummary
     public int MissingInB { get; set; }
     public int Duplicates { get; set; }
     public int PotentialMatches { get; set; }
+    public int PendingRecords { get; set; }
 }
 
 public class ComparisonPairDto
