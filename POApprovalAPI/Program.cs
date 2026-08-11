@@ -83,6 +83,11 @@ builder.Services.AddHostedService<BomCacheWarmupService>();
 builder.Services.AddHostedService<SalesDashboardCacheWarmupService>();
 builder.Services.AddHostedService<ExportBillOverdueCacheWarmupService>();
 
+builder.Services.AddSingleton<SchemaRetrievalService>();
+builder.Services.AddSingleton<SqlGuardService>();
+builder.Services.AddHttpClient<GroqChatService>();
+builder.Services.AddScoped<ChatOrchestratorService>();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -136,7 +141,14 @@ static void LoadDotEnvFile(string path)
             continue;
 
         var key = line[..separator].Trim();
-        var value = line[(separator + 1)..].Trim().Trim('"');
+        var value = line[(separator + 1)..].Trim();
+        if (value.Length >= 2 &&
+            ((value.StartsWith('"') && value.EndsWith('"')) ||
+             (value.StartsWith('\'') && value.EndsWith('\''))))
+        {
+            value = value[1..^1];
+        }
+
         if (string.IsNullOrEmpty(key))
             continue;
 

@@ -1,0 +1,1182 @@
+{
+  "version": "1.2.4",
+  "createdFor": "NL-to-SQL chatbot v1 (schema RAG) — PO/WO/Payment/Indent/Ledger + MRN/Store Inward",
+  "database": {
+    "server": "103.240.33.122,5115",
+    "name": "MaterialProcessing",
+    "dialect": "Microsoft SQL Server (T-SQL)",
+    "relatedDatabase": "loginentry (users/rights; cross-db as loginentry..loginrights — out of v1 allowlist unless needed for email/name lookup)"
+  },
+  "globalRules": [
+    "Chatbot may only generate SELECT queries.",
+    "Always use TOP or another row limit unless the question is a COUNT aggregate.",
+    "Prefer exact status filter status = 'Pending' for pending work.",
+    "Approved statuses are often 'Approved' OR values like 'Approved by <username>'. Prefer status LIKE 'Approved%' when counting approved.",
+    "Rejected may appear as 'Rejected', 'Rejected by <username>', or rarely 'reject'.",
+    "SQL Server identifiers are case-insensitive under typical CI collation; column casing below matches live sys.columns.",
+    "Do not use *_temp, *_TEST, *_Delete, *_afterMail, or other non-allowlisted objects.",
+    "Ledger transaction statements in the portal use stored procedure sp_ac_LedgerSummary_BankRecoDate (not a simple SELECT). Chatbot SELECT scope for Ledger domain is FactoryInfo / LedgerMaster / CommonLedgerMaster. Avoid heavy views like vw_LedgerSummary unless explicitly needed and TOP-limited.",
+    "FactoryInfo.Name joins to LedgerMaster.CompanyName. Factory groups use FactoryInfo.GroupName. Portal company id uses FactoryInfo.SrNo (aka srno).",
+    "COLUMN NAME TRAP: FactoryInfo PAN column is PermanentAccountNo (NOT PANNo). LedgerMaster/CommonLedgerMaster PAN column is PANNo. Never select PANNo from FactoryInfo. FactoryInfo GST preferred column is NewGSTNo (also has GST).",
+    "GOVERNANCE: Ledger/account groups are LedgerMaster.Under (use SELECT DISTINCT Under ...). Do NOT use LedgerGroupMaster — that table is empty/unused for user-facing group lists.",
+    "GOVERNANCE: LedgerOpeningBalance table is EMPTY (0 rows). For opening/pending balance questions use LedgerMaster.Openingbalance and LedgerMaster.PendingBalance. Never query LedgerOpeningBalance.",
+    "MRN / store inward: prefer Vw_StoreInwards or vw_MRNList for user questions. Header key SrNo joins StoreInwardsPayment.SrNo = StoreInwards.SrNo. MRN number is MRNo / MRno. BillPaymentEntry.MRNno joins StoreInwardsPayment.MRNo. Prefer TOP 50 — StoreInwards and WareHouseInwards are large. Skip *_old,*_GPL3,*_delete clones. Columns with spaces in vw_MRNToBillPayment (e.g. [Challan Date], [Basic Amount], [MRN User]) must be bracket-quoted.",
+    "GOVERNANCE (MRN): When user says 'for company X' / 'company X' / 'under X Limited' on material receipts, filter CompanyName = X. PartyName/SupplierName is the VENDOR/supplier only — use those when user says vendor, supplier, or party. Do not put the receiving company into PartyName.",
+    "COLUMN NAME TRAP (MRN): There is NO column named MRDate anywhere in MRN objects. Vw_StoreInwards / StoreInwardsPayment date columns are BillDate, GateInwardDate, SysDate, ChallanDate — never MRDate. vw_MRNList and BillPaymentEntry use MRNDate (spelled MRNDate, not MRDate). For 'recent' receipts ORDER BY BillDate or GateInwardDate DESC on Vw_StoreInwards.",
+    "GOVERNANCE (MRN names): Names like 'Plastene Polyfilms Ltd-Purchase' are PartyName (vendor), not CompanyName. Receiving companies look like 'Plastene Polyfilms Limited' / 'Plastene India Limited'. If the question asks for receipts 'for <name> with party and bill', treat <name> as PartyName when it is a vendor-style name (often ends with -Purchase).",
+    "GOVERNANCE (MRN payment): For 'payment against MRN / was payment raised / how much for material receipt X', prefer BillPaymentEntry WHERE MRNno = X (select PaymentNo, PaymentAmount, BillNo, UTRno, status, isPaid). vw_MRNToBillPayment is line-grain and often has NULL PaymentNo on unpaid lines — NEVER conclude 'no payment' from null rows alone. If using the view: WHERE MRno = X AND PaymentNo IS NOT NULL, SELECT DISTINCT PaymentNo, PaymentAmount.",
+    "GOVERNANCE (receipt by bill): For 'receipts linked to bill number X' / 'material receipt for bill X', filter Vw_StoreInwards.BillNo or StoreInwardsPayment.BillNo = X. Do NOT use BillPaymentEntry.BillNo for finding store receipts — that bill field is the payment-request bill and often does not match supplier bill numbers like PPL/D/540."
+  ],
+  "objects": [
+    {
+      "id": "ApprovePO",
+      "objectName": "ApprovePO",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "PO",
+      "purpose": "Standard (non-HOD) purchase order approval queue. One row per approver assignment on a PO. Used by the PO approval portal for pending/approved/rejected PO workflows.",
+      "primaryKeyHint": "TransId (identity-like unique row id). Business key is (PoNo, ApprovalName).",
+      "statusColumn": "status",
+      "statusNotes": "Exact pending value: 'Pending'. Approved rows are often 'Approved' or 'Approved by <user>'. Rejected: 'Rejected' or 'Rejected by <user>'. Rare legacy value '0' exists.",
+      "columns": [
+        { "name": "PoNo", "dataType": "varchar(50)", "nullable": true, "meaning": "Purchase order number; joins to PurchasePayment.PurchaseCode and Vw_PurchaseOrder.PurchaseCode" },
+        { "name": "ApprovalName", "dataType": "varchar(50)", "nullable": true, "meaning": "Approver username assigned to act on this PO" },
+        { "name": "status", "dataType": "varchar(50)", "nullable": true, "meaning": "Approval state: Pending / Approved* / Rejected*" },
+        { "name": "PODate", "dataType": "datetime", "nullable": true, "meaning": "PO date shown in pending lists" },
+        { "name": "ApprovalDate", "dataType": "datetime", "nullable": true, "meaning": "When this approver acted (null while Pending)" },
+        { "name": "TransId", "dataType": "int", "nullable": false, "meaning": "Unique transaction/row id for this approval assignment" }
+      ],
+      "joins": [
+        { "to": "PurchasePayment", "on": "ApprovePO.PoNo = PurchasePayment.PurchaseCode", "note": "Header amount, company, currency" },
+        { "to": "Vw_PurchaseOrder", "on": "ApprovePO.PoNo = Vw_PurchaseOrder.PurchaseCode", "note": "Vendor FirmName, line items; some old POs may not match" },
+        { "to": "POAllocation", "on": "ApprovePO.ApprovalName = POAllocation.username", "note": "Approver authority/limits" },
+        { "to": "ApprovePOHOD", "on": "ApprovePO.PoNo = ApprovePOHOD.PoNo", "note": "Same PO can also appear in HOD queue; portal unions both for pending" }
+      ],
+      "synonyms": [
+        "pending PO",
+        "purchase order approval",
+        "PO waiting for approval",
+        "ApprovePO",
+        "PO pending list",
+        "standard PO approver queue"
+      ],
+      "exampleQuestions": [
+        "How many POs are pending?",
+        "Show pending POs for approver jinal",
+        "Who approved PO X?"
+      ],
+      "embeddingText": "Table ApprovePO. Domain: Purchase order (PO) approval. Purpose: tracks each approver assignment on a purchase order for the standard (non-HOD) approval queue used by the PO approval portal. Columns: PoNo (PO number), ApprovalName (approver username), status (Pending, Approved, Approved by user, Rejected), PODate, ApprovalDate, TransId (unique row id). Joins: ApprovePO.PoNo = PurchasePayment.PurchaseCode = Vw_PurchaseOrder.PurchaseCode; ApprovalName = POAllocation.username. Synonyms: pending PO, purchase order approval, PO waiting, standard PO queue. Filter pending with status = 'Pending'. For approved counts use status LIKE 'Approved%'."
+    },
+    {
+      "id": "ApprovePOHOD",
+      "objectName": "ApprovePOHOD",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "PO",
+      "purpose": "HOD-level purchase order approval queue. Same shape as ApprovePO but for HOD authority path. Portal pending PO API unions ApprovePO and ApprovePOHOD.",
+      "primaryKeyHint": "transid. Business key (PoNo, ApprovalName).",
+      "statusColumn": "status",
+      "statusNotes": "Pending exact: 'Pending'. Also 'Approved', 'Rejected', rare 'reject'.",
+      "columns": [
+        { "name": "PoNo", "dataType": "varchar(50)", "nullable": true, "meaning": "Purchase order number" },
+        { "name": "ApprovalName", "dataType": "varchar(50)", "nullable": true, "meaning": "HOD approver username" },
+        { "name": "status", "dataType": "varchar(50)", "nullable": true, "meaning": "Pending / Approved / Rejected / reject" },
+        { "name": "PODate", "dataType": "datetime", "nullable": true, "meaning": "PO date" },
+        { "name": "ApprovalDate", "dataType": "datetime", "nullable": true, "meaning": "When HOD acted" },
+        { "name": "transid", "dataType": "int", "nullable": false, "meaning": "Unique row id" }
+      ],
+      "joins": [
+        { "to": "PurchasePayment", "on": "ApprovePOHOD.PoNo = PurchasePayment.PurchaseCode" },
+        { "to": "Vw_PurchaseOrder", "on": "ApprovePOHOD.PoNo = Vw_PurchaseOrder.PurchaseCode" },
+        { "to": "ApprovePO", "on": "ApprovePOHOD.PoNo = ApprovePO.PoNo", "note": "Related standard approvers on same PO" }
+      ],
+      "synonyms": [
+        "HOD PO approval",
+        "PO HOD pending",
+        "ApprovePOHOD",
+        "head of department purchase order approval"
+      ],
+      "exampleQuestions": [
+        "How many HOD PO approvals are pending?",
+        "Pending POs in HOD queue for user X"
+      ],
+      "embeddingText": "Table ApprovePOHOD. Domain: Purchase order HOD approval. Purpose: HOD authority purchase order approval assignments; portal unions this with ApprovePO for pending POs. Columns: PoNo, ApprovalName, status (Pending/Approved/Rejected), PODate, ApprovalDate, transid. Joins: PoNo = PurchasePayment.PurchaseCode = Vw_PurchaseOrder.PurchaseCode. Synonyms: HOD PO approval, head of department PO pending, ApprovePOHOD. Pending filter: status = 'Pending'."
+    },
+    {
+      "id": "ApproveWorkOrder",
+      "objectName": "ApproveWorkOrder",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "WO",
+      "purpose": "Work order approval queue. PoNo here is the work-order / purchase code identifier used like a PO number in the portal. Pending WO list joins PurchasePayment for TotalAmount.",
+      "primaryKeyHint": "Transid. Business key (PoNo, ApprovalName).",
+      "statusColumn": "status",
+      "statusNotes": "Pending exact: 'Pending'. Many 'Approved by <user>' variants plus 'Approved' and 'Rejected'.",
+      "columns": [
+        { "name": "PoNo", "dataType": "varchar(50)", "nullable": true, "meaning": "Work order number (joins to PurchasePayment.PurchaseCode)" },
+        { "name": "ApprovalName", "dataType": "varchar(50)", "nullable": true, "meaning": "Approver username" },
+        { "name": "status", "dataType": "varchar(50)", "nullable": true, "meaning": "Pending / Approved* / Rejected" },
+        { "name": "PODate", "dataType": "datetime", "nullable": true, "meaning": "Work order date" },
+        { "name": "ApprovalDate", "dataType": "datetime", "nullable": true, "meaning": "When approver acted" },
+        { "name": "Transid", "dataType": "int", "nullable": false, "meaning": "Unique row id" }
+      ],
+      "joins": [
+        { "to": "PurchasePayment", "on": "ApproveWorkOrder.PoNo = PurchasePayment.PurchaseCode", "note": "Amount/company; portal uses this for pending WO totals" },
+        { "to": "Vw_PurchaseOrder", "on": "ApproveWorkOrder.PoNo = Vw_PurchaseOrder.PurchaseCode", "note": "Line/vendor detail when available" },
+        { "to": "POAllocation", "on": "ApproveWorkOrder.ApprovalName = POAllocation.username" }
+      ],
+      "synonyms": [
+        "work order approval",
+        "pending work order",
+        "WO pending",
+        "ApproveWorkOrder",
+        "job work order approval"
+      ],
+      "exampleQuestions": [
+        "How many work orders are pending?",
+        "Show pending work orders for user X with amounts"
+      ],
+      "embeddingText": "Table ApproveWorkOrder. Domain: Work order (WO) approval. Purpose: approval assignments for work orders; PoNo is the work order code. Columns: PoNo, ApprovalName, status (Pending/Approved by user/Rejected), PODate, ApprovalDate, Transid. Joins: ApproveWorkOrder.PoNo = PurchasePayment.PurchaseCode for TotalAmount and CompanyName. Synonyms: pending work order, WO approval, job work order. Pending filter: status = 'Pending'."
+    },
+    {
+      "id": "ApproveIndent",
+      "objectName": "ApproveIndent",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Indent",
+      "purpose": "Indent (purchase requisition) approval queue. IndentNo is the parent indent; IndentSubCode is the line-level code. Portal groups pending by IndentNo; approve updates by IndentSubCode.",
+      "primaryKeyHint": "transId. Business key often (IndentSubCode, ApprovalName).",
+      "statusColumn": "Status",
+      "statusNotes": "Pending exact: 'Pending'. Also 'Approved', 'Approved by <user>', 'Rejected', rare 'reject'.",
+      "columns": [
+        { "name": "IndentNo", "dataType": "varchar(50)", "nullable": true, "meaning": "Parent indent number (e.g. PIL/22-23/RWM00019). Joins to Vw_StoreDeptt.Expr1" },
+        { "name": "IndentSubCode", "dataType": "varchar(50)", "nullable": true, "meaning": "Line/sub indent code (e.g. .../01). Joins to ItemInfo.code — NOT IndentNo" },
+        { "name": "ApprovalName", "dataType": "varchar(50)", "nullable": true, "meaning": "Approver username" },
+        { "name": "Status", "dataType": "varchar(50)", "nullable": true, "meaning": "Pending / Approved* / Rejected*" },
+        { "name": "IndentDate", "dataType": "datetime", "nullable": true, "meaning": "Indent date" },
+        { "name": "ApprovalDate", "dataType": "datetime", "nullable": true, "meaning": "When approver acted" },
+        { "name": "transId", "dataType": "int", "nullable": false, "meaning": "Unique row id" }
+      ],
+      "joins": [
+        { "to": "ItemInfo", "on": "ApproveIndent.IndentSubCode = ItemInfo.code", "note": "Validated: join on IndentSubCode, not IndentNo" },
+        { "to": "Vw_StoreDeptt", "on": "ApproveIndent.IndentNo = Vw_StoreDeptt.Expr1", "note": "Portal indent details use Expr1 = IndentNo; line code is Vw_StoreDeptt.code" }
+      ],
+      "synonyms": [
+        "indent approval",
+        "pending indent",
+        "purchase requisition approval",
+        "store indent pending",
+        "ApproveIndent"
+      ],
+      "exampleQuestions": [
+        "How many indents are pending?",
+        "Pending indents for user X",
+        "Approval workflow for indent Y"
+      ],
+      "embeddingText": "Table ApproveIndent. Domain: Indent / purchase requisition approval. Purpose: approver assignments on indents. Columns: IndentNo (parent indent), IndentSubCode (line code), ApprovalName, Status (Pending/Approved/Rejected), IndentDate, ApprovalDate, transId. Critical joins: IndentSubCode = ItemInfo.code; IndentNo = Vw_StoreDeptt.Expr1. Do not join ItemInfo.code to IndentNo. Synonyms: pending indent, purchase requisition, store indent approval. Pending filter: Status = 'Pending'."
+    },
+    {
+      "id": "PurchasePayment",
+      "objectName": "PurchasePayment",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "PO",
+      "purpose": "PO / work-order header commercial data: total amount, company, currency, delivery, payment terms, taxes. Not the bill-payment request table. Used as amount/company source for PO and WO pending lists.",
+      "primaryKeyHint": "PurchaseCode",
+      "statusColumn": null,
+      "statusNotes": "No approval status column; use Approve* tables for pending/approved.",
+      "columns": [
+        { "name": "PurchaseCode", "dataType": "varchar(50)", "nullable": false, "meaning": "PO or work-order number (header key)" },
+        { "name": "TotalAmount", "dataType": "float", "nullable": true, "meaning": "Header total amount used in pending filters" },
+        { "name": "CompanyName", "dataType": "varchar(500)", "nullable": true, "meaning": "Company / entity" },
+        { "name": "Currency", "dataType": "varchar(50)", "nullable": true, "meaning": "Currency code (e.g. Rs, USD)" },
+        { "name": "LoginName", "dataType": "varchar(50)", "nullable": true, "meaning": "Creator / buyer login" },
+        { "name": "TypeOfPO", "dataType": "varchar(50)", "nullable": true, "meaning": "PO type" },
+        { "name": "PurchaseType", "dataType": "varchar(50)", "nullable": true, "meaning": "Purchase type" },
+        { "name": "DepttName", "dataType": "varchar(100)", "nullable": true, "meaning": "Department" },
+        { "name": "Delivery", "dataType": "varchar(300)", "nullable": true, "meaning": "Delivery terms text" },
+        { "name": "DeliverySch", "dataType": "varchar(300)", "nullable": true, "meaning": "Delivery schedule text" },
+        { "name": "deliverydate", "dataType": "datetime", "nullable": true, "meaning": "Delivery date" },
+        { "name": "Payment", "dataType": "varchar(300)", "nullable": true, "meaning": "Payment terms text on PO (not bill payment)" },
+        { "name": "Mode", "dataType": "varchar(300)", "nullable": true, "meaning": "Mode of dispatch/payment text" },
+        { "name": "PoSignal", "dataType": "varchar(50)", "nullable": true, "meaning": "PO signal / status flag used in ERP" },
+        { "name": "ApprovalRemarks", "dataType": "varchar(1000)", "nullable": true, "meaning": "Remarks related to approval" },
+        { "name": "TDSAmt", "dataType": "float", "nullable": true, "meaning": "TDS amount on PO header" },
+        { "name": "DiscountPer", "dataType": "float", "nullable": true, "meaning": "Discount percent" },
+        { "name": "DiscountAmount", "dataType": "float", "nullable": true, "meaning": "Discount amount" },
+        { "name": "category", "dataType": "varchar(50)", "nullable": true, "meaning": "Category" },
+        { "name": "subcategory", "dataType": "varchar(50)", "nullable": true, "meaning": "Subcategory" },
+        { "name": "amendmentPoNo", "dataType": "varchar(50)", "nullable": true, "meaning": "Related amendment PO number if any" }
+      ],
+      "importantOtherColumns": [
+        "Pkg_Fwrd", "Insuranace", "TranInsurance", "tax/VAT/excise fields", "SpecialNote", "PONote", "SpecialNote1", "ReferenceNo", "PurchaseCategory", "PurchaseRefNo", "IsTrading", "ModeofPurchase", "LocationofPurchase", "groupname", "subgroupname", "RoundOff", "PCNO"
+      ],
+      "joins": [
+        { "to": "ApprovePO", "on": "PurchasePayment.PurchaseCode = ApprovePO.PoNo" },
+        { "to": "ApprovePOHOD", "on": "PurchasePayment.PurchaseCode = ApprovePOHOD.PoNo" },
+        { "to": "ApproveWorkOrder", "on": "PurchasePayment.PurchaseCode = ApproveWorkOrder.PoNo" },
+        { "to": "Vw_PurchaseOrder", "on": "PurchasePayment.PurchaseCode = Vw_PurchaseOrder.PurchaseCode" },
+        { "to": "FinalQuotation", "on": "PurchasePayment.PurchaseCode = FinalQuotation.PurchaseCode" }
+      ],
+      "synonyms": [
+        "PO amount",
+        "purchase order total",
+        "PO header",
+        "PurchasePayment",
+        "work order amount",
+        "PO company and currency"
+      ],
+      "exampleQuestions": [
+        "Pending POs with amount greater than 100000",
+        "What is the total amount of PO X?"
+      ],
+      "embeddingText": "Table PurchasePayment. Domain: PO and work-order header commercial data. Purpose: TotalAmount, CompanyName, Currency, delivery and payment terms for a PurchaseCode. Not bill/vendor payment requests (those are BillPayment*). Columns include PurchaseCode (PK), TotalAmount, CompanyName, Currency, LoginName, TypeOfPO, DepttName, deliverydate, Payment terms text, PoSignal, taxes/discounts. Joins: PurchaseCode = ApprovePO.PoNo / ApproveWorkOrder.PoNo / Vw_PurchaseOrder.PurchaseCode / FinalQuotation.PurchaseCode. Synonyms: PO amount, PO header total, purchase order value."
+    },
+    {
+      "id": "Vw_PurchaseOrder",
+      "objectName": "Vw_PurchaseOrder",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "PO",
+      "purpose": "Rich PO line/vendor view used for PO details and PDF/display. One or more rows per PurchaseCode (line items). Prefer this for vendor name (FirmName), item description, qty, rate. Prefer PurchasePayment.TotalAmount for header total when listing approvals.",
+      "primaryKeyHint": "No single PK; grain is typically line-level under PurchaseCode (transid/RowNum present).",
+      "statusColumn": null,
+      "statusNotes": "Not an approval status table. Use ApprovePO/ApprovePOHOD for approval state.",
+      "columns": [
+        { "name": "PurchaseCode", "dataType": "varchar(50)", "nullable": false, "meaning": "PO number (join key to ApprovePO.PoNo)" },
+        { "name": "FirmName", "dataType": "varchar(400)", "nullable": true, "meaning": "Vendor / supplier name" },
+        { "name": "ItemDesc", "dataType": "varchar(1000)", "nullable": true, "meaning": "Item description" },
+        { "name": "ItemCode", "dataType": "varchar(200)", "nullable": true, "meaning": "Item code" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Ordered quantity" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Unit rate" },
+        { "name": "Total", "dataType": "float", "nullable": true, "meaning": "Line total" },
+        { "name": "PendingQty", "dataType": "float", "nullable": true, "meaning": "Pending quantity" },
+        { "name": "Unit", "dataType": "varchar(50)", "nullable": true, "meaning": "UOM" },
+        { "name": "DepttName", "dataType": "varchar(100)", "nullable": true, "meaning": "Department" },
+        { "name": "CompanyName", "dataType": "varchar(500)", "nullable": true, "meaning": "Company" },
+        { "name": "Currency", "dataType": "varchar(50)", "nullable": true, "meaning": "Currency" },
+        { "name": "deliverydate", "dataType": "datetime", "nullable": true, "meaning": "Delivery date" },
+        { "name": "TotalAmount", "dataType": "float", "nullable": true, "meaning": "Header-related total on view (portal often uses PurchasePayment.TotalAmount instead)" },
+        { "name": "VendorCode", "dataType": "varchar(50)", "nullable": true, "meaning": "Vendor code" },
+        { "name": "VendorGST", "dataType": "varchar(20)", "nullable": true, "meaning": "Vendor GSTIN" },
+        { "name": "hsncode", "dataType": "varchar(50)", "nullable": true, "meaning": "HSN code" },
+        { "name": "CGSTPer", "dataType": "float", "nullable": true, "meaning": "CGST %" },
+        { "name": "SGSTPer", "dataType": "float", "nullable": true, "meaning": "SGST %" },
+        { "name": "IGSTPer", "dataType": "float", "nullable": true, "meaning": "IGST %" },
+        { "name": "StoreCode", "dataType": "varchar(50)", "nullable": true, "meaning": "Related store/indent store code" },
+        { "name": "SubCode", "dataType": "varchar(50)", "nullable": true, "meaning": "Related sub code" },
+        { "name": "Purpose", "dataType": "varchar(400)", "nullable": true, "meaning": "Purpose text" },
+        { "name": "POLoginName", "dataType": "varchar(50)", "nullable": true, "meaning": "PO creator login on view" },
+        { "name": "ApprovalDate", "dataType": "datetime", "nullable": true, "meaning": "Approval date on view (informational)" },
+        { "name": "transid", "dataType": "int", "nullable": false, "meaning": "Row/line id on view" }
+      ],
+      "importantOtherColumns": [
+        "Name", "Address", "GST", "ContactName", "TelNo1", "Email", "IndentDate", "IndentQty", "MachineName", "Stock", "Remarks", "category", "subcategory", "MAKE", "CGSTAmount", "SGSTAmount", "IGSTAmount", "CompanyGST", "SpecialNote", "PONote", "RowNum"
+      ],
+      "joins": [
+        { "to": "ApprovePO", "on": "Vw_PurchaseOrder.PurchaseCode = ApprovePO.PoNo" },
+        { "to": "PurchasePayment", "on": "Vw_PurchaseOrder.PurchaseCode = PurchasePayment.PurchaseCode" },
+        { "to": "FinalQuotation", "on": "Vw_PurchaseOrder.PurchaseCode = FinalQuotation.PurchaseCode" }
+      ],
+      "synonyms": [
+        "PO details",
+        "purchase order lines",
+        "vendor on PO",
+        "FirmName",
+        "PO item description",
+        "Vw_PurchaseOrder"
+      ],
+      "exampleQuestions": [
+        "Show details of PO X",
+        "What items are on purchase order Y?",
+        "Who is the vendor for this PO?"
+      ],
+      "embeddingText": "View Vw_PurchaseOrder. Domain: Purchase order line and vendor details. Purpose: display PO items, FirmName vendor, qty, rate, GST; used by portal PO details. Key columns: PurchaseCode, FirmName, ItemDesc, ItemCode, Qty, Rate, Total, PendingQty, DepttName, CompanyName, Currency, deliverydate, VendorCode, hsncode, tax fields. Join: PurchaseCode = ApprovePO.PoNo = PurchasePayment.PurchaseCode. Synonyms: PO details, PO line items, vendor name on PO. Not for approval status — use ApprovePO."
+    },
+    {
+      "id": "FinalQuotation",
+      "objectName": "FinalQuotation",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "PO",
+      "purpose": "Quoted/ordered line items tied to a PurchaseCode (PO). Used when building PO PDFs and item-level quote rates. Overlaps conceptually with Vw_PurchaseOrder lines; prefer Vw_PurchaseOrder for portal-style details unless quote-specific fields are needed.",
+      "primaryKeyHint": "transid",
+      "statusColumn": null,
+      "columns": [
+        { "name": "PurchaseCode", "dataType": "varchar(50)", "nullable": true, "meaning": "PO number" },
+        { "name": "FirmName", "dataType": "varchar(400)", "nullable": true, "meaning": "Vendor name" },
+        { "name": "ItemCode", "dataType": "varchar(200)", "nullable": true, "meaning": "Item code" },
+        { "name": "ItemDesc", "dataType": "varchar(1000)", "nullable": true, "meaning": "Item description" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Quantity" },
+        { "name": "PendingQty", "dataType": "float", "nullable": true, "meaning": "Pending qty" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Rate" },
+        { "name": "Discount", "dataType": "float", "nullable": true, "meaning": "Discount" },
+        { "name": "Total", "dataType": "float", "nullable": true, "meaning": "Line total" },
+        { "name": "Unit", "dataType": "varchar(50)", "nullable": true, "meaning": "UOM" },
+        { "name": "StoreCode", "dataType": "varchar(50)", "nullable": true, "meaning": "Store/indent related code" },
+        { "name": "SubCode", "dataType": "varchar(50)", "nullable": true, "meaning": "Sub code" },
+        { "name": "TypeOfPO", "dataType": "varchar(50)", "nullable": true, "meaning": "PO type" },
+        { "name": "LoginName", "dataType": "varchar(50)", "nullable": true, "meaning": "Login who created quote line" },
+        { "name": "HSNCODE", "dataType": "int", "nullable": true, "meaning": "HSN" },
+        { "name": "CGSTPer", "dataType": "float", "nullable": true, "meaning": "CGST %" },
+        { "name": "SGSTPer", "dataType": "float", "nullable": true, "meaning": "SGST %" },
+        { "name": "IGSTPer", "dataType": "float", "nullable": true, "meaning": "IGST %" },
+        { "name": "transid", "dataType": "int", "nullable": false, "meaning": "Row id" }
+      ],
+      "joins": [
+        { "to": "PurchasePayment", "on": "FinalQuotation.PurchaseCode = PurchasePayment.PurchaseCode" },
+        { "to": "Vw_PurchaseOrder", "on": "FinalQuotation.PurchaseCode = Vw_PurchaseOrder.PurchaseCode" }
+      ],
+      "synonyms": [
+        "final quotation",
+        "PO quote lines",
+        "quotation items",
+        "FinalQuotation"
+      ],
+      "exampleQuestions": [
+        "Show quotation lines for PO X",
+        "What rates were quoted on this purchase order?"
+      ],
+      "embeddingText": "Table FinalQuotation. Domain: PO quotation / ordered lines. Purpose: item rates and quantities for a PurchaseCode used in PO documents. Columns: PurchaseCode, FirmName, ItemCode, ItemDesc, Qty, Rate, Discount, Total, Unit, StoreCode, SubCode, HSNCODE, GST percents, transid. Join on PurchaseCode to PurchasePayment and Vw_PurchaseOrder. Synonyms: final quotation, PO quote lines. Prefer Vw_PurchaseOrder for general PO detail questions."
+    },
+    {
+      "id": "POAllocation",
+      "objectName": "POAllocation",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "PO",
+      "purpose": "Maps approver usernames to company, department, authority level and amount limits for PO approval routing. Used to determine who can approve and at what authority.",
+      "primaryKeyHint": "srno",
+      "statusColumn": null,
+      "columns": [
+        { "name": "username", "dataType": "varchar(50)", "nullable": true, "meaning": "Approver username (joins ApprovalName)" },
+        { "name": "CompanyName", "dataType": "varchar(100)", "nullable": true, "meaning": "Company scope" },
+        { "name": "POAmount", "dataType": "numeric", "nullable": true, "meaning": "PO amount authority limit" },
+        { "name": "ItemAmount", "dataType": "numeric", "nullable": true, "meaning": "Item amount limit" },
+        { "name": "PartyAmount", "dataType": "numeric", "nullable": true, "meaning": "Party/vendor amount limit" },
+        { "name": "NewVendor", "dataType": "varchar(100)", "nullable": true, "meaning": "New vendor rule flag/text" },
+        { "name": "NewItem", "dataType": "varchar(100)", "nullable": true, "meaning": "New item rule flag/text" },
+        { "name": "Deptt", "dataType": "varchar(500)", "nullable": true, "meaning": "Department scope" },
+        { "name": "srno", "dataType": "int", "nullable": false, "meaning": "Row id" },
+        { "name": "authority", "dataType": "int", "nullable": true, "meaning": "Authority level (e.g. 1, 2)" }
+      ],
+      "joins": [
+        { "to": "ApprovePO", "on": "POAllocation.username = ApprovePO.ApprovalName" },
+        { "to": "ApproveWorkOrder", "on": "POAllocation.username = ApproveWorkOrder.ApprovalName" }
+      ],
+      "synonyms": [
+        "PO approver allocation",
+        "approval authority limits",
+        "who can approve POs",
+        "POAllocation",
+        "poallocation"
+      ],
+      "exampleQuestions": [
+        "What companies can user X approve POs for?",
+        "What is the PO amount limit for approver Y?"
+      ],
+      "embeddingText": "Table POAllocation. Domain: PO approval authority mapping. Purpose: username to CompanyName, Deptt, authority level, POAmount/ItemAmount/PartyAmount limits. Columns: username, CompanyName, POAmount, ItemAmount, PartyAmount, NewVendor, NewItem, Deptt, srno, authority. Join username to ApprovePO.ApprovalName / ApproveWorkOrder.ApprovalName. Synonyms: PO approver allocation, authority limits, who can approve. Table name may appear as poallocation in older SQL."
+    },
+    {
+      "id": "BillPaymentHODApproval",
+      "objectName": "BillPaymentHODApproval",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Payment",
+      "purpose": "Bill payment request approval queue (HOD/approver assignments). Primary table for 'pending payments' in the approval portal. Join to BillPaymentEntry for company, bill dates, terms.",
+      "primaryKeyHint": "transId. Business key (paymentNo, ApprovalName).",
+      "statusColumn": "Status",
+      "statusNotes": "Pending exact: 'Pending'. Also 'Approved', 'Approved by <user>', 'Rejected'.",
+      "columns": [
+        { "name": "paymentNo", "dataType": "varchar(150)", "nullable": true, "meaning": "Payment request number; joins BillPaymentEntry.PaymentNo (validated)" },
+        { "name": "BillNo", "dataType": "varchar(150)", "nullable": true, "meaning": "Vendor bill number" },
+        { "name": "MRNo", "dataType": "varchar(150)", "nullable": true, "meaning": "MRN / material receipt number" },
+        { "name": "PartyName", "dataType": "varchar(200)", "nullable": true, "meaning": "Vendor / party name (portal maps as VendorName)" },
+        { "name": "PaymentAmount", "dataType": "float", "nullable": true, "meaning": "Amount to approve/pay" },
+        { "name": "PaymentDate", "dataType": "datetime", "nullable": true, "meaning": "Payment request date" },
+        { "name": "LoginName", "dataType": "varchar(50)", "nullable": true, "meaning": "Requester login" },
+        { "name": "ApprovalName", "dataType": "varchar(150)", "nullable": true, "meaning": "Approver username" },
+        { "name": "Status", "dataType": "varchar(50)", "nullable": true, "meaning": "Pending / Approved* / Rejected" },
+        { "name": "ApprovalDate", "dataType": "datetime", "nullable": true, "meaning": "When approver acted" },
+        { "name": "Comment", "dataType": "varchar(200)", "nullable": true, "meaning": "Approver comment" },
+        { "name": "transId", "dataType": "int", "nullable": false, "meaning": "Unique row id" }
+      ],
+      "joins": [
+        { "to": "BillPaymentEntry", "on": "BillPaymentHODApproval.paymentNo = BillPaymentEntry.PaymentNo", "note": "Portal pending payments INNER JOIN this way" },
+        { "to": "BillPaymentEntryApproval", "on": "BillPaymentHODApproval.paymentNo = BillPaymentEntryApproval.PaymentNo", "note": "History/comments path used in portal history API differs; see BillPaymentEntryApproval" },
+        { "to": "BillPaymentApprovalAllocation", "on": "BillPaymentHODApproval.ApprovalName = BillPaymentApprovalAllocation.ApprovalName" }
+      ],
+      "synonyms": [
+        "pending payment",
+        "bill payment approval",
+        "payment request pending",
+        "HOD payment approval",
+        "vendor payment approval",
+        "BillPaymentHODApproval",
+        "PRQ payment"
+      ],
+      "exampleQuestions": [
+        "How many bill payments are pending?",
+        "Pending payments for user X",
+        "Top vendors by pending payment amount"
+      ],
+      "embeddingText": "Table BillPaymentHODApproval. Domain: Bill payment approval. Purpose: pending/approved payment request assignments for approvers; main pending-payments table in the portal. Columns: paymentNo (join key), BillNo, MRNo, PartyName (vendor), PaymentAmount, PaymentDate, LoginName (requester), ApprovalName, Status (Pending/Approved/Rejected), ApprovalDate, Comment, transId. Join: paymentNo = BillPaymentEntry.PaymentNo. Synonyms: pending payment, bill payment approval, vendor payment request, PRQ. Pending filter: Status = 'Pending'."
+    },
+    {
+      "id": "BillPaymentEntry",
+      "objectName": "BillPaymentEntry",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Payment",
+      "purpose": "Bill payment request header/details: company, vendor, bill, MRN, amounts, bank, UTR, paid flags. Use with BillPaymentHODApproval for pending approver queues; query this alone for payment detail by PaymentNo.",
+      "primaryKeyHint": "PaymentNo (with BillNo/MRNno also NOT NULL in schema — treat PaymentNo as request id)",
+      "statusColumn": "status",
+      "statusNotes": "Entry-level status exists (Pending/Approved/Rejected) but portal pending list is driven by BillPaymentHODApproval.Status.",
+      "columns": [
+        { "name": "PaymentNo", "dataType": "varchar(100)", "nullable": false, "meaning": "Payment request number" },
+        { "name": "CompanyName", "dataType": "varchar(200)", "nullable": true, "meaning": "Company" },
+        { "name": "VendorName", "dataType": "varchar(500)", "nullable": true, "meaning": "Vendor name" },
+        { "name": "BillNo", "dataType": "varchar(100)", "nullable": false, "meaning": "Bill number" },
+        { "name": "BillDate", "dataType": "datetime", "nullable": true, "meaning": "Bill date" },
+        { "name": "MRNno", "dataType": "varchar(100)", "nullable": false, "meaning": "MRN number" },
+        { "name": "MRNDate", "dataType": "datetime", "nullable": true, "meaning": "MRN date" },
+        { "name": "BillAmount", "dataType": "float", "nullable": true, "meaning": "Bill amount" },
+        { "name": "PaymentAmount", "dataType": "float", "nullable": false, "meaning": "Payment amount" },
+        { "name": "PaymentDate", "dataType": "datetime", "nullable": true, "meaning": "Payment date" },
+        { "name": "PaymentTerms", "dataType": "varchar(200)", "nullable": true, "meaning": "Payment terms" },
+        { "name": "Loginname", "dataType": "varchar(150)", "nullable": true, "meaning": "Requester login" },
+        { "name": "Sysdate", "dataType": "datetime", "nullable": true, "meaning": "System created date; portal orders pending by this" },
+        { "name": "status", "dataType": "varchar(50)", "nullable": true, "meaning": "Entry status" },
+        { "name": "Remarks", "dataType": "varchar(500)", "nullable": true, "meaning": "Remarks" },
+        { "name": "PriorityLevel", "dataType": "varchar(50)", "nullable": true, "meaning": "Priority" },
+        { "name": "Currency", "dataType": "varchar(10)", "nullable": true, "meaning": "Currency" },
+        { "name": "CurrencyRate", "dataType": "float", "nullable": true, "meaning": "FX rate" },
+        { "name": "TDS", "dataType": "float", "nullable": true, "meaning": "TDS" },
+        { "name": "DebitNoteAmnt", "dataType": "float", "nullable": true, "meaning": "Debit note amount" },
+        { "name": "UTRno", "dataType": "varchar(100)", "nullable": true, "meaning": "Bank UTR" },
+        { "name": "isPaid", "dataType": "varchar(10)", "nullable": true, "meaning": "Paid flag" },
+        { "name": "IsCancel", "dataType": "varchar(10)", "nullable": true, "meaning": "Cancelled flag" },
+        { "name": "PaidDate", "dataType": "datetime", "nullable": true, "meaning": "Paid date" },
+        { "name": "PaymentBankName", "dataType": "varchar(150)", "nullable": true, "meaning": "Paying bank" },
+        { "name": "PaymentBankAccNo", "dataType": "varchar(150)", "nullable": true, "meaning": "Bank account" },
+        { "name": "LC", "dataType": "varchar(10)", "nullable": true, "meaning": "LC flag" },
+        { "name": "yr", "dataType": "varchar(20)", "nullable": true, "meaning": "Year code" },
+        { "name": "Indx", "dataType": "int", "nullable": true, "meaning": "Index/sequence" },
+        { "name": "SpeReq", "dataType": "int", "nullable": true, "meaning": "Special request flag" }
+      ],
+      "joins": [
+        { "to": "BillPaymentHODApproval", "on": "BillPaymentEntry.PaymentNo = BillPaymentHODApproval.paymentNo" },
+        { "to": "BillPaymentEntryApproval", "on": "BillPaymentEntry.PaymentNo = BillPaymentEntryApproval.PaymentNo" }
+      ],
+      "synonyms": [
+        "payment request details",
+        "bill payment entry",
+        "vendor bill payment",
+        "UTR",
+        "MRN payment",
+        "BillPaymentEntry"
+      ],
+      "exampleQuestions": [
+        "Show details of payment request X",
+        "Is payment Y paid? What is the UTR?"
+      ],
+      "embeddingText": "Table BillPaymentEntry. Domain: Bill payment request details. Purpose: company, vendor, bill, MRN, amounts, bank, UTR, isPaid for a PaymentNo. Columns: PaymentNo, CompanyName, VendorName, BillNo, BillDate, MRNno (join to StoreInwardsPayment.MRNo / material receipt number), MRNDate, BillAmount, PaymentAmount, PaymentDate, status, UTRno, isPaid, IsCancel. PREFERRED for 'payment raised against MRN X / how much' => SELECT PaymentNo, MRNno, BillNo, PaymentAmount, BillAmount, status, isPaid FROM BillPaymentEntry WHERE MRNno = 'RM 269'. Join PaymentNo = BillPaymentHODApproval.paymentNo. Synonyms: payment details, bill payment entry, UTR, vendor bill, payment against material receipt. Pending approver queue is primarily BillPaymentHODApproval."
+    },
+    {
+      "id": "BillPaymentEntryApproval",
+      "objectName": "BillPaymentEntryApproval",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Payment",
+      "purpose": "Payment approval history / snapshot rows including ApprovalName, ApprovalDate, comment. Portal GetPaymentHistory reads from this table (not only HOD table).",
+      "primaryKeyHint": "Composite-ish on PaymentNo + BillNo + MRNno + approval fields; no single documented PK beyond business keys.",
+      "statusColumn": "status",
+      "columns": [
+        { "name": "PaymentNo", "dataType": "varchar(50)", "nullable": false, "meaning": "Payment request number" },
+        { "name": "ApprovalName", "dataType": "varchar(20)", "nullable": true, "meaning": "Approver name on history row" },
+        { "name": "ApprovalDate", "dataType": "date", "nullable": true, "meaning": "Approval date" },
+        { "name": "comment", "dataType": "varchar(2000)", "nullable": true, "meaning": "Comment" },
+        { "name": "status", "dataType": "varchar(50)", "nullable": true, "meaning": "Status on history snapshot" },
+        { "name": "CompanyName", "dataType": "varchar(200)", "nullable": true, "meaning": "Company snapshot" },
+        { "name": "VendorName", "dataType": "varchar(500)", "nullable": true, "meaning": "Vendor snapshot" },
+        { "name": "BillNo", "dataType": "varchar(100)", "nullable": false, "meaning": "Bill number" },
+        { "name": "MRNno", "dataType": "varchar(100)", "nullable": false, "meaning": "MRN" },
+        { "name": "PaymentAmount", "dataType": "float", "nullable": false, "meaning": "Amount" },
+        { "name": "Loginname", "dataType": "varchar(150)", "nullable": true, "meaning": "Requester" },
+        { "name": "Outstanding", "dataType": "float", "nullable": true, "meaning": "Outstanding amount snapshot" },
+        { "name": "LedgerOSTAmt", "dataType": "float", "nullable": true, "meaning": "Ledger outstanding snapshot" },
+        { "name": "Remarks", "dataType": "varchar(500)", "nullable": true, "meaning": "Remarks" }
+      ],
+      "joins": [
+        { "to": "BillPaymentEntry", "on": "BillPaymentEntryApproval.PaymentNo = BillPaymentEntry.PaymentNo" },
+        { "to": "BillPaymentHODApproval", "on": "BillPaymentEntryApproval.PaymentNo = BillPaymentHODApproval.paymentNo" }
+      ],
+      "synonyms": [
+        "payment approval history",
+        "payment comments",
+        "who approved this payment",
+        "BillPaymentEntryApproval"
+      ],
+      "exampleQuestions": [
+        "Show approval history for payment X",
+        "What comments were left on this payment request?"
+      ],
+      "embeddingText": "Table BillPaymentEntryApproval. Domain: Bill payment approval history. Purpose: historical approval rows with ApprovalName, ApprovalDate, comment, status for a PaymentNo; used by portal payment history API. Join PaymentNo to BillPaymentEntry and BillPaymentHODApproval.paymentNo. Synonyms: payment approval history, payment comments, who approved payment."
+    },
+    {
+      "id": "BillPaymentApprovalAllocation",
+      "objectName": "BillPaymentApprovalAllocation",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Payment",
+      "purpose": "Maps payment approvers to company, department, authority, and ishod flag. Used during payment approve to resolve authority level.",
+      "primaryKeyHint": "transid",
+      "statusColumn": null,
+      "columns": [
+        { "name": "ApprovalName", "dataType": "varchar(150)", "nullable": true, "meaning": "Approver username" },
+        { "name": "CompanyName", "dataType": "varchar(200)", "nullable": true, "meaning": "Company scope" },
+        { "name": "authority", "dataType": "int", "nullable": true, "meaning": "Authority level" },
+        { "name": "Deptt", "dataType": "varchar(500)", "nullable": true, "meaning": "Department scope" },
+        { "name": "transid", "dataType": "int", "nullable": false, "meaning": "Row id" },
+        { "name": "ishod", "dataType": "varchar(10)", "nullable": true, "meaning": "Whether approver is HOD" }
+      ],
+      "joins": [
+        { "to": "BillPaymentHODApproval", "on": "BillPaymentApprovalAllocation.ApprovalName = BillPaymentHODApproval.ApprovalName" }
+      ],
+      "synonyms": [
+        "payment approver allocation",
+        "payment authority",
+        "who can approve payments",
+        "BillPaymentApprovalAllocation"
+      ],
+      "exampleQuestions": [
+        "What payment authority does user X have?",
+        "Which companies is payment approver Y allocated to?"
+      ],
+      "embeddingText": "Table BillPaymentApprovalAllocation. Domain: Payment approver allocation. Purpose: ApprovalName mapped to CompanyName, Deptt, authority, ishod for bill payment routing. Join ApprovalName to BillPaymentHODApproval.ApprovalName. Synonyms: payment approver allocation, payment authority matrix."
+    },
+    {
+      "id": "ItemInfo",
+      "objectName": "ItemInfo",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Indent",
+      "purpose": "Indent line item master details. code is the indent line/subcode (matches ApproveIndent.IndentSubCode), not the parent IndentNo.",
+      "primaryKeyHint": "code",
+      "statusColumn": "Approved",
+      "statusNotes": "Approved column is item-level flag text; workflow pending state lives on ApproveIndent.Status.",
+      "columns": [
+        { "name": "code", "dataType": "varchar(50)", "nullable": false, "meaning": "Indent line/subcode PK; join ApproveIndent.IndentSubCode" },
+        { "name": "itemcode", "dataType": "varchar(50)", "nullable": true, "meaning": "Item code" },
+        { "name": "itemdesc", "dataType": "varchar(2000)", "nullable": true, "meaning": "Item description" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Quantity" },
+        { "name": "Unit", "dataType": "varchar(50)", "nullable": true, "meaning": "UOM" },
+        { "name": "Stock", "dataType": "decimal", "nullable": true, "meaning": "Stock qty" },
+        { "name": "Required", "dataType": "varchar(50)", "nullable": true, "meaning": "Required flag/text" },
+        { "name": "MachineName", "dataType": "varchar(100)", "nullable": true, "meaning": "Machine" },
+        { "name": "Remarks", "dataType": "varchar(1000)", "nullable": true, "meaning": "Remarks" },
+        { "name": "LoginName", "dataType": "varchar(50)", "nullable": true, "meaning": "Creator login" },
+        { "name": "Storecode", "dataType": "varchar(50)", "nullable": true, "meaning": "Store code / related indent header context" },
+        { "name": "Approved", "dataType": "varchar(50)", "nullable": true, "meaning": "Item approved flag" },
+        { "name": "Rates", "dataType": "float", "nullable": true, "meaning": "Rate" },
+        { "name": "BrandName", "dataType": "varchar(200)", "nullable": true, "meaning": "Brand" },
+        { "name": "ReqDepartment", "dataType": "varchar(100)", "nullable": true, "meaning": "Requesting department" },
+        { "name": "DepttReq", "dataType": "varchar(50)", "nullable": true, "meaning": "Dept request flag/text" },
+        { "name": "isCancel", "dataType": "varchar(100)", "nullable": true, "meaning": "Cancelled flag" },
+        { "name": "RefNo", "dataType": "varchar(50)", "nullable": true, "meaning": "Reference" },
+        { "name": "ReqNo", "dataType": "varchar(50)", "nullable": true, "meaning": "Request number" },
+        { "name": "MnthConsum", "dataType": "varchar(50)", "nullable": true, "meaning": "Monthly consumption" },
+        { "name": "AvgMnthConum", "dataType": "float", "nullable": true, "meaning": "Average monthly consumption" }
+      ],
+      "joins": [
+        { "to": "ApproveIndent", "on": "ItemInfo.code = ApproveIndent.IndentSubCode", "note": "Validated live: IndentNo join returns 0 matches; SubCode join matches" },
+        { "to": "Vw_StoreDeptt", "on": "ItemInfo.code = Vw_StoreDeptt.code" }
+      ],
+      "synonyms": [
+        "indent line items",
+        "indent item details",
+        "ItemInfo",
+        "requisition items"
+      ],
+      "exampleQuestions": [
+        "What items are on indent line codes for this indent?",
+        "Show item description and qty for indent subcode X"
+      ],
+      "embeddingText": "Table ItemInfo. Domain: Indent line items. Purpose: itemcode, itemdesc, Qty, Unit, stock for indent lines. Critical: code equals ApproveIndent.IndentSubCode (line), not IndentNo (parent). Example IndentNo PIL/22-23/RWM00019 with IndentSubCode PIL/22-23/RWM00019/01. Synonyms: indent items, requisition lines, ItemInfo."
+    },
+    {
+      "id": "Vw_StoreDeptt",
+      "objectName": "Vw_StoreDeptt",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Indent",
+      "purpose": "Indent detail view used by portal indent details API. Expr1 is parent IndentNo; code is line/subcode. API references this as vw_storedeptt (same object under CI collation).",
+      "primaryKeyHint": "Grain is line-level (Expr1 + code).",
+      "statusColumn": "IndentApproved",
+      "statusNotes": "IndentApproved is view flag; approval workflow status is on ApproveIndent.Status.",
+      "columns": [
+        { "name": "Expr1", "dataType": "varchar(50)", "nullable": false, "meaning": "Parent indent number (= ApproveIndent.IndentNo). Portal filters details WHERE Expr1 = @indentNo" },
+        { "name": "code", "dataType": "varchar(50)", "nullable": false, "meaning": "Indent line/subcode (= ApproveIndent.IndentSubCode / ItemInfo.code)" },
+        { "name": "itemcode", "dataType": "varchar(50)", "nullable": true, "meaning": "Item code" },
+        { "name": "itemdesc", "dataType": "varchar(2000)", "nullable": true, "meaning": "Item description" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Indent qty" },
+        { "name": "Unit", "dataType": "varchar(50)", "nullable": true, "meaning": "UOM" },
+        { "name": "Purpose", "dataType": "varchar(400)", "nullable": true, "meaning": "Purpose" },
+        { "name": "ReqDepartment", "dataType": "varchar(100)", "nullable": false, "meaning": "Requesting department" },
+        { "name": "CompanyName", "dataType": "varchar(50)", "nullable": true, "meaning": "Company" },
+        { "name": "Deptt", "dataType": "varchar(100)", "nullable": true, "meaning": "Department" },
+        { "name": "sysDate", "dataType": "date", "nullable": true, "meaning": "Indent/system date" },
+        { "name": "Stock", "dataType": "decimal", "nullable": true, "meaning": "Stock" },
+        { "name": "Required", "dataType": "varchar(50)", "nullable": true, "meaning": "Required" },
+        { "name": "MachineName", "dataType": "varchar(100)", "nullable": true, "meaning": "Machine" },
+        { "name": "Remarks", "dataType": "varchar(1000)", "nullable": true, "meaning": "Remarks" },
+        { "name": "IndentSignal", "dataType": "varchar(500)", "nullable": true, "meaning": "Indent signal / status text" },
+        { "name": "IndentApproved", "dataType": "varchar(50)", "nullable": true, "meaning": "Approved flag on view" },
+        { "name": "rates", "dataType": "float", "nullable": true, "meaning": "Rate" },
+        { "name": "BrandName", "dataType": "varchar(200)", "nullable": true, "meaning": "Brand" },
+        { "name": "category", "dataType": "varchar(50)", "nullable": true, "meaning": "Category" },
+        { "name": "subcategory", "dataType": "varchar(50)", "nullable": true, "meaning": "Subcategory" },
+        { "name": "PurchaseReqNo", "dataType": "varchar(1000)", "nullable": true, "meaning": "Related purchase req numbers" },
+        { "name": "RefNo", "dataType": "varchar(200)", "nullable": true, "meaning": "Reference" },
+        { "name": "isCancel", "dataType": "varchar(100)", "nullable": true, "meaning": "Cancel flag" },
+        { "name": "DepttReq", "dataType": "varchar(50)", "nullable": true, "meaning": "Dept request" },
+        { "name": "MnthConsum", "dataType": "varchar(50)", "nullable": true, "meaning": "Monthly consumption" }
+      ],
+      "joins": [
+        { "to": "ApproveIndent", "on": "Vw_StoreDeptt.Expr1 = ApproveIndent.IndentNo", "note": "Also Vw_StoreDeptt.code = ApproveIndent.IndentSubCode for line match" },
+        { "to": "ItemInfo", "on": "Vw_StoreDeptt.code = ItemInfo.code" }
+      ],
+      "synonyms": [
+        "indent details",
+        "indent line items view",
+        "store department indent",
+        "Vw_StoreDeptt",
+        "vw_storedeptt",
+        "indent purpose and department"
+      ],
+      "exampleQuestions": [
+        "Show line items for indent X",
+        "What is the purpose and department on this indent?"
+      ],
+      "embeddingText": "View Vw_StoreDeptt (also referenced as vw_storedeptt). Domain: Indent details. Purpose: portal indent detail lines. Expr1 = parent IndentNo; code = IndentSubCode line. Columns: Expr1, code, itemcode, itemdesc, Qty, Unit, Purpose, ReqDepartment, CompanyName, Deptt, IndentSignal, rates, BrandName. Join Expr1 to ApproveIndent.IndentNo; code to ItemInfo.code. Synonyms: indent details, indent items, store indent view."
+    },
+    {
+      "id": "FactoryInfo",
+      "objectName": "FactoryInfo",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Ledger",
+      "purpose": "Company / factory / unit master used by ledger summary and accounting. Portal company dropdown reads Name, GroupName, SrNo. Each row is a company/unit; GroupName groups related companies.",
+      "primaryKeyHint": "SrNo",
+      "statusColumn": null,
+      "columns": [
+        { "name": "Name", "dataType": "varchar(50)", "nullable": false, "meaning": "Company / factory display name; joins LedgerMaster.CompanyName" },
+        { "name": "SrNo", "dataType": "int", "nullable": false, "meaning": "Company id (portal uses as CompanyId / C-{SrNo})" },
+        { "name": "GroupName", "dataType": "varchar(500)", "nullable": true, "meaning": "Company group; portal group filter G-{GroupName}" },
+        { "name": "Address", "dataType": "varchar(200)", "nullable": true, "meaning": "Address" },
+        { "name": "DispatchAddress", "dataType": "varchar(200)", "nullable": true, "meaning": "Dispatch address" },
+        { "name": "GST", "dataType": "varchar(50)", "nullable": true, "meaning": "Legacy GST field" },
+        { "name": "NewGSTNo", "dataType": "varchar(15)", "nullable": true, "meaning": "GSTIN" },
+        { "name": "CST", "dataType": "varchar(50)", "nullable": true, "meaning": "CST number" },
+        { "name": "ECC", "dataType": "varchar(50)", "nullable": true, "meaning": "ECC" },
+        { "name": "PermanentAccountNo", "dataType": "varchar(100)", "nullable": true, "meaning": "Company PAN. IMPORTANT: column name is PermanentAccountNo — there is NO PANNo on FactoryInfo" },
+        { "name": "TaxDeductionAccountNo", "dataType": "varchar(100)", "nullable": true, "meaning": "TAN" },
+        { "name": "IndentCode", "dataType": "varchar(50)", "nullable": true, "meaning": "Indent code prefix/context" },
+        { "name": "LedgerOpeningDate", "dataType": "datetime", "nullable": true, "meaning": "Ledger books opening date" },
+        { "name": "AccountDate", "dataType": "datetime", "nullable": true, "meaning": "Account date" },
+        { "name": "GroupTag", "dataType": "varchar(100)", "nullable": true, "meaning": "Group tag" },
+        { "name": "IsPurchase", "dataType": "varchar(5)", "nullable": true, "meaning": "Purchase-enabled flag" },
+        { "name": "FinanceClientCode", "dataType": "varchar(50)", "nullable": true, "meaning": "Finance client code" },
+        { "name": "Productioncode", "dataType": "varchar(50)", "nullable": true, "meaning": "Production code" },
+        { "name": "OrderPosition", "dataType": "int", "nullable": true, "meaning": "Display order" }
+      ],
+      "importantOtherColumns": [
+        "AccountGJ", "AccountGR", "ChallanAdd", "VoucherAddress", "PCAddress", "ExciseRange", "LicenseNo", "PONOte"
+      ],
+      "joins": [
+        { "to": "LedgerMaster", "on": "FactoryInfo.Name = LedgerMaster.CompanyName", "note": "Portal filters ledgers by company/group via this join" }
+      ],
+      "synonyms": [
+        "company list",
+        "factory list",
+        "unit master",
+        "FactoryInfo",
+        "company group",
+        "which companies",
+        "GST of company"
+      ],
+      "exampleQuestions": [
+        "List all companies / factories",
+        "What is the GST number for company X?",
+        "Which companies are in group Y?"
+      ],
+      "embeddingText": "Table FactoryInfo. Domain: Ledger / company master. Purpose: companies and factories for accounting and ledger summary. Columns: Name (company name), SrNo (company id), GroupName (group), Address, NewGSTNo (company GSTIN), GST (legacy), PermanentAccountNo (company PAN — NOT named PANNo; FactoryInfo has no PANNo column), LedgerOpeningDate, IndentCode, GroupTag. Join: FactoryInfo.Name = LedgerMaster.CompanyName. Synonyms: company list, factory list, unit master, company GST, company PAN, company group. For company GST/PAN questions select only from FactoryInfo using NewGSTNo and PermanentAccountNo."
+    },
+    {
+      "id": "LedgerMaster",
+      "objectName": "LedgerMaster",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Ledger",
+      "purpose": "Chart of accounts / party-vendor-bank ledger master per company. Portal ledger picker queries this as ledgermaster filtered by FactoryInfo. Use for listing ledgers, vendor GST/PAN/bank details, opening/pending balances on the master — NOT full voucher history (that uses SP sp_ac_LedgerSummary_BankRecoDate).",
+      "primaryKeyHint": "srno (row). Business key often (CompanyName, LedgerName).",
+      "statusColumn": "IsHold",
+      "statusNotes": "IsHold/IsAccClose/IsGovComp are int flags. Prefer ISNULL(LedgerName,'') <> '' when listing.",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar(100)", "nullable": false, "meaning": "Company; equals FactoryInfo.Name" },
+        { "name": "LedgerName", "dataType": "varchar(100)", "nullable": false, "meaning": "Ledger / party / account name (portal LedgerId)" },
+        { "name": "Under", "dataType": "varchar(100)", "nullable": true, "meaning": "Parent ledger/account group name. THIS is the source for 'ledger groups' / 'account groups' lists (SELECT DISTINCT Under). Not LedgerGroupMaster." },
+        { "name": "Openingbalance", "dataType": "float", "nullable": true, "meaning": "Opening balance on master. Use this for opening-balance questions (LedgerOpeningBalance table is empty)." },
+        { "name": "PendingBalance", "dataType": "float", "nullable": true, "meaning": "Pending/outstanding balance on master. Use this for pending-balance / outstanding questions (LedgerOpeningBalance table is empty)." },
+        { "name": "srno", "dataType": "int", "nullable": false, "meaning": "Row id" },
+        { "name": "Category", "dataType": "varchar(50)", "nullable": true, "meaning": "Category (e.g. Fixed Assets)" },
+        { "name": "MainCategory", "dataType": "varchar(20)", "nullable": true, "meaning": "Main category" },
+        { "name": "Type", "dataType": "varchar(50)", "nullable": true, "meaning": "Ledger type" },
+        { "name": "Address", "dataType": "varchar(1000)", "nullable": true, "meaning": "Address" },
+        { "name": "City", "dataType": "varchar(100)", "nullable": true, "meaning": "City" },
+        { "name": "State", "dataType": "varchar(50)", "nullable": true, "meaning": "State" },
+        { "name": "PINCode", "dataType": "varchar(50)", "nullable": true, "meaning": "PIN" },
+        { "name": "PANNo", "dataType": "varchar(100)", "nullable": true, "meaning": "Ledger/party PAN. Only on LedgerMaster — FactoryInfo uses PermanentAccountNo instead" },
+        { "name": "GSTNo", "dataType": "varchar(100)", "nullable": true, "meaning": "GST" },
+        { "name": "NewGSTNo", "dataType": "varchar(20)", "nullable": true, "meaning": "GSTIN" },
+        { "name": "BankAccNo", "dataType": "varchar(100)", "nullable": true, "meaning": "Bank account number" },
+        { "name": "BankName", "dataType": "varchar(500)", "nullable": true, "meaning": "Bank name" },
+        { "name": "IFSCCode", "dataType": "varchar(100)", "nullable": true, "meaning": "IFSC" },
+        { "name": "BranchName", "dataType": "varchar(500)", "nullable": true, "meaning": "Branch" },
+        { "name": "PaymentTerms", "dataType": "varchar(200)", "nullable": true, "meaning": "Payment terms" },
+        { "name": "ContactNo", "dataType": "varchar(200)", "nullable": true, "meaning": "Contact phone" },
+        { "name": "email", "dataType": "varchar(1000)", "nullable": true, "meaning": "Email" },
+        { "name": "ContactName", "dataType": "varchar(100)", "nullable": true, "meaning": "Contact person" },
+        { "name": "MSMENumber", "dataType": "varchar(19)", "nullable": true, "meaning": "MSME registration" },
+        { "name": "LVendorCode", "dataType": "varchar(50)", "nullable": true, "meaning": "Vendor code" },
+        { "name": "companyId", "dataType": "int", "nullable": true, "meaning": "Related company id" },
+        { "name": "IsHold", "dataType": "int", "nullable": true, "meaning": "Hold flag" },
+        { "name": "IsInterCompany", "dataType": "varchar(4)", "nullable": true, "meaning": "Inter-company flag" },
+        { "name": "IsTDS", "dataType": "varchar(50)", "nullable": true, "meaning": "TDS applicable" },
+        { "name": "tdsrate", "dataType": "float", "nullable": true, "meaning": "TDS rate" }
+      ],
+      "importantOtherColumns": [
+        "Title", "Houseno", "Landmark1", "Landmark2", "Country", "TINNo", "IECCode", "CSTNo", "ECCNo", "MICRCode", "Acctype", "swiftcode", "IBANCode", "IsBillWise", "IsInventory", "IsAccClose", "IsGovComp"
+      ],
+      "joins": [
+        { "to": "FactoryInfo", "on": "LedgerMaster.CompanyName = FactoryInfo.Name" }
+      ],
+      "synonyms": [
+        "ledger master",
+        "chart of accounts",
+        "party master",
+        "vendor ledger",
+        "ledger list",
+        "ledgermaster",
+        "LedgerMaster",
+        "account master",
+        "vendor GST PAN bank details",
+        "pending balance of ledger",
+        "opening balance of ledger",
+        "ledger outstanding",
+        "opening pending bill",
+        "LedgerOpeningBalance",
+        "ledger groups",
+        "account groups",
+        "ledger group list",
+        "Under groups",
+        "chart of accounts groups"
+      ],
+      "exampleQuestions": [
+        "List ledgers for company X",
+        "What is the GST and bank account for ledger Y?",
+        "How many ledgers does company Z have?",
+        "Show ledgers under group Fixed Assets for a company",
+        "List ledger groups",
+        "What account groups exist?",
+        "Show opening and pending balances for company Oswal Extrusion Limited",
+        "Which ledgers have PendingBalance greater than 0 for a company?"
+      ],
+      "embeddingText": "Table LedgerMaster (also queried as ledgermaster). Domain: Ledger / chart of accounts. Purpose: party, vendor, bank and GL ledger master per CompanyName. Columns: CompanyName, LedgerName, Under (parent account/ledger GROUP — use DISTINCT Under for ledger groups; never empty LedgerGroupMaster), Openingbalance (opening balance — use for opening-balance questions), PendingBalance (pending/outstanding — use for pending balance questions; LedgerOpeningBalance table is EMPTY do not query it), Category, MainCategory, GSTNo, NewGSTNo, PANNo (ledger/party PAN only — company PAN is FactoryInfo.PermanentAccountNo), BankAccNo, BankName, IFSCCode, PaymentTerms, email, ContactNo, MSMENumber, LVendorCode, IsHold. Join CompanyName = FactoryInfo.Name. Synonyms: ledger list, party master, opening balance, pending balance, ledger outstanding, LedgerOpeningBalance (redirect here), ledger groups, account groups. For pending/opening bills/balances: SELECT LedgerName, Openingbalance, PendingBalance FROM LedgerMaster WHERE CompanyName = .... Do not use for full voucher/ledger statement SP. Avoid vw_LedgerSummary."
+    },
+    {
+      "id": "CommonLedgerMaster",
+      "objectName": "CommonLedgerMaster",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Ledger",
+      "purpose": "Alternate/common ledger master similar to LedgerMaster (shared/group chart). Prefer LedgerMaster for portal-aligned company ledger lists unless the question explicitly says common ledger master.",
+      "primaryKeyHint": "srno",
+      "statusColumn": "LSTATUS",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar(100)", "nullable": false, "meaning": "Company" },
+        { "name": "LedgerName", "dataType": "varchar(500)", "nullable": false, "meaning": "Ledger name" },
+        { "name": "Under", "dataType": "varchar(500)", "nullable": true, "meaning": "Parent group" },
+        { "name": "Openingbalance", "dataType": "float", "nullable": true, "meaning": "Opening balance" },
+        { "name": "PendingBalance", "dataType": "float", "nullable": true, "meaning": "Pending balance" },
+        { "name": "srno", "dataType": "int", "nullable": false, "meaning": "Row id" },
+        { "name": "Category", "dataType": "varchar(50)", "nullable": true, "meaning": "Category" },
+        { "name": "NewGSTNo", "dataType": "varchar(20)", "nullable": true, "meaning": "GSTIN" },
+        { "name": "PANNo", "dataType": "varchar(100)", "nullable": true, "meaning": "Ledger PAN on CommonLedgerMaster — not for FactoryInfo company PAN" },
+        { "name": "BankAccNo", "dataType": "varchar(100)", "nullable": true, "meaning": "Bank account" },
+        { "name": "LSTATUS", "dataType": "int", "nullable": true, "meaning": "Status flag" }
+      ],
+      "joins": [
+        { "to": "FactoryInfo", "on": "CommonLedgerMaster.CompanyName = FactoryInfo.Name" }
+      ],
+      "synonyms": [
+        "common ledger master",
+        "CommonLedgerMaster",
+        "shared ledger master"
+      ],
+      "exampleQuestions": [
+        "List common ledger master entries for a company"
+      ],
+      "embeddingText": "Table CommonLedgerMaster. Domain: Ledger. Purpose: common/shared ledger master similar to LedgerMaster with CompanyName, LedgerName, Under, balances, GST/PAN/bank, LSTATUS. Prefer LedgerMaster for normal portal ledger questions. Synonyms: common ledger master, shared chart of accounts."
+    },
+    {
+      "id": "StoreInwardsPayment",
+      "objectName": "StoreInwardsPayment",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "MRN",
+      "purpose": "MRN / store inward HEADER: material receipt number (MRNo), vendor/party, bill, challan, company, gate inward, amounts. One header row per SrNo. Line items are in StoreInwards (same SrNo).",
+      "primaryKeyHint": "SrNo (MRN/document number such as HPBL/25-26/SII00815)",
+      "statusColumn": "Status",
+      "columns": [
+        { "name": "SrNo", "dataType": "varchar", "nullable": false, "meaning": "Inward/MRN document id; joins StoreInwards.SrNo" },
+        { "name": "MRNo", "dataType": "varchar", "nullable": true, "meaning": "Material Receipt Number (MRN). Joins BillPaymentEntry.MRNno" },
+        { "name": "PONo", "dataType": "varchar", "nullable": true, "meaning": "Related purchase order number" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "VENDOR/supplier party only — NOT the receiving company. For 'company X' use CompanyName." },
+        { "name": "SupplierName", "dataType": "varchar", "nullable": true, "meaning": "Supplier name (vendor side)" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Receiving company/unit (Factory). Use this when user says 'for company X'." },
+        { "name": "BillNo", "dataType": "varchar", "nullable": true, "meaning": "Supplier bill number" },
+        { "name": "BillDate", "dataType": "datetime", "nullable": true, "meaning": "Bill date" },
+        { "name": "BillAMount", "dataType": "float", "nullable": true, "meaning": "Bill amount (column spelling BillAMount)" },
+        { "name": "ChallanNo", "dataType": "varchar", "nullable": true, "meaning": "Challan number" },
+        { "name": "ChallanDate", "dataType": "datetime", "nullable": true, "meaning": "Challan date" },
+        { "name": "Deptt", "dataType": "varchar", "nullable": true, "meaning": "Department" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "System / inward date" },
+        { "name": "LoginName", "dataType": "varchar", "nullable": true, "meaning": "User who created MRN" },
+        { "name": "Gate_Inward_No", "dataType": "varchar", "nullable": true, "meaning": "Gate inward number" },
+        { "name": "Gate_Inward_Date", "dataType": "datetime", "nullable": true, "meaning": "Gate inward date" },
+        { "name": "EWayNo", "dataType": "varchar", "nullable": true, "meaning": "E-way bill number" },
+        { "name": "VehicalNo", "dataType": "varchar", "nullable": true, "meaning": "Vehicle number" },
+        { "name": "TransportName", "dataType": "varchar", "nullable": true, "meaning": "Transporter" },
+        { "name": "IndentNo", "dataType": "varchar", "nullable": true, "meaning": "Related indent" },
+        { "name": "PaymentTerms", "dataType": "varchar", "nullable": true, "meaning": "Payment terms" },
+        { "name": "Category", "dataType": "varchar", "nullable": true, "meaning": "Category" },
+        { "name": "SubCategory", "dataType": "varchar", "nullable": true, "meaning": "Subcategory" },
+        { "name": "Status", "dataType": "varchar", "nullable": true, "meaning": "Status flag" },
+        { "name": "Cancel", "dataType": "varchar", "nullable": true, "meaning": "Cancel flag" },
+        { "name": "Remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "TDSAmt", "dataType": "float", "nullable": true, "meaning": "TDS amount" }
+      ],
+      "joins": [
+        { "to": "StoreInwards", "on": "StoreInwardsPayment.SrNo = StoreInwards.SrNo", "note": "Header to line items" },
+        { "to": "Vw_StoreInwards", "on": "StoreInwardsPayment.SrNo = Vw_StoreInwards.SrNo" },
+        { "to": "BillPaymentEntry", "on": "StoreInwardsPayment.MRNo = BillPaymentEntry.MRNno", "note": "Validated live join" },
+        { "to": "PurchasePayment", "on": "StoreInwardsPayment.PONo = PurchasePayment.PurchaseCode" }
+      ],
+      "synonyms": [
+        "MRN header",
+        "material receipt",
+        "store inward header",
+        "MRN number",
+        "StoreInwardsPayment",
+        "goods receipt note",
+        "GRN"
+      ],
+      "exampleQuestions": [
+        "Show MRN details for MRN number X",
+        "List recent store inwards for a company",
+        "Which vendor and bill are on this MRN?"
+      ],
+      "embeddingText": "Table StoreInwardsPayment. Domain: MRN / store inward header. Purpose: MRNo, SrNo, CompanyName (receiving company), PartyName/SupplierName (VENDOR only — e.g. Plastene Polyfilms Ltd-Purchase), BillNo, BillDate (NO MRDate column), BillAMount, ChallanNo, Gate_Inward_No, PONo, IndentNo. Join SrNo to StoreInwards; MRNo to BillPaymentEntry.MRNno. Synonyms: MRN, material receipt, store inward, GRN, goods receipt, find by bill number. Prefer Vw_StoreInwards for combined questions."
+    },
+    {
+      "id": "StoreInwards",
+      "objectName": "StoreInwards",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "MRN",
+      "purpose": "MRN / store inward LINE ITEMS: item received quantities against an inward SrNo (and often a PO). Large table (~333k rows) — always use TOP / date filters.",
+      "primaryKeyHint": "SIIndex / transid; business key SrNo + item lines",
+      "statusColumn": null,
+      "columns": [
+        { "name": "SrNo", "dataType": "varchar", "nullable": false, "meaning": "Inward document id; joins StoreInwardsPayment.SrNo" },
+        { "name": "PONo", "dataType": "varchar", "nullable": true, "meaning": "PO number" },
+        { "name": "SysDate", "dataType": "datetime", "nullable": true, "meaning": "Line date" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item description" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ChallanQty", "dataType": "float", "nullable": true, "meaning": "Challan quantity" },
+        { "name": "RecdQty", "dataType": "float", "nullable": true, "meaning": "Received quantity" },
+        { "name": "AcceptedQty", "dataType": "float", "nullable": true, "meaning": "Accepted quantity" },
+        { "name": "OrderQty", "dataType": "float", "nullable": true, "meaning": "Ordered quantity" },
+        { "name": "PendingQty", "dataType": "float", "nullable": true, "meaning": "Pending quantity" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Rate" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Line amount" },
+        { "name": "IndentSubCode", "dataType": "varchar", "nullable": true, "meaning": "Indent line/subcode" },
+        { "name": "companyname", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "LoginName", "dataType": "varchar", "nullable": true, "meaning": "Creator" },
+        { "name": "purpose", "dataType": "varchar", "nullable": true, "meaning": "Purpose" },
+        { "name": "remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "CGSTPer", "dataType": "float", "nullable": true, "meaning": "CGST %" },
+        { "name": "SGSTPer", "dataType": "float", "nullable": true, "meaning": "SGST %" },
+        { "name": "IGSTPer", "dataType": "float", "nullable": true, "meaning": "IGST %" },
+        { "name": "SIIndex", "dataType": "int", "nullable": false, "meaning": "Line index" },
+        { "name": "transid", "dataType": "int", "nullable": false, "meaning": "Row id" }
+      ],
+      "joins": [
+        { "to": "StoreInwardsPayment", "on": "StoreInwards.SrNo = StoreInwardsPayment.SrNo" },
+        { "to": "ApprovePO", "on": "StoreInwards.PONo = ApprovePO.PoNo" },
+        { "to": "Vw_PurchaseOrder", "on": "StoreInwards.PONo = Vw_PurchaseOrder.PurchaseCode" }
+      ],
+      "synonyms": [
+        "MRN line items",
+        "store inward items",
+        "received quantity",
+        "StoreInwards",
+        "items received against MRN"
+      ],
+      "exampleQuestions": [
+        "What items were received on inward SrNo X?",
+        "Show received qty vs order qty for a PO"
+      ],
+      "embeddingText": "Table StoreInwards. Domain: MRN / store inward line items. Purpose: ItemCode, ItemName, RecdQty, AcceptedQty, OrderQty, PendingQty, Rate, Amount, PONo per SrNo. Join SrNo to StoreInwardsPayment for MRNo/party/bill. Large table — use TOP 50. Synonyms: MRN items, received materials, store inward lines."
+    },
+    {
+      "id": "Vw_StoreInwards",
+      "objectName": "Vw_StoreInwards",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "MRN",
+      "purpose": "Combined store inward / MRN view (header + lines). Best default for 'show this MRN' / 'what was received' questions. Includes MRNo, PartyName, BillNo, item qtys, gate inward, GST fields.",
+      "primaryKeyHint": "Grain is line-level under SrNo",
+      "statusColumn": "MRNStatus",
+      "columns": [
+        { "name": "SrNo", "dataType": "varchar", "nullable": false, "meaning": "Inward document id" },
+        { "name": "MRNo", "dataType": "varchar", "nullable": true, "meaning": "MRN number" },
+        { "name": "PONo", "dataType": "varchar", "nullable": true, "meaning": "PO number" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "VENDOR/supplier only. Do not use for receiving company filter." },
+        { "name": "SupplierName", "dataType": "varchar", "nullable": true, "meaning": "Supplier" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Receiving company/unit. Use when user says 'for company X' (e.g. Oswal Extrusion Limited)." },
+        { "name": "BillNo", "dataType": "varchar", "nullable": true, "meaning": "Bill number" },
+        { "name": "BillDate", "dataType": "datetime", "nullable": true, "meaning": "Bill date" },
+        { "name": "BillAMount", "dataType": "float", "nullable": true, "meaning": "Bill amount" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "RecdQty", "dataType": "float", "nullable": true, "meaning": "Received qty" },
+        { "name": "AcceptedQty", "dataType": "float", "nullable": true, "meaning": "Accepted qty" },
+        { "name": "OrderQty", "dataType": "float", "nullable": true, "meaning": "Order qty" },
+        { "name": "PendingQty", "dataType": "float", "nullable": true, "meaning": "Pending qty" },
+        { "name": "ChallanQty", "dataType": "float", "nullable": true, "meaning": "Challan qty" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Rate" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Amount" },
+        { "name": "Deptt", "dataType": "varchar", "nullable": true, "meaning": "Department" },
+        { "name": "IndentNo", "dataType": "varchar", "nullable": true, "meaning": "Indent" },
+        { "name": "IndentSubCode", "dataType": "varchar", "nullable": true, "meaning": "Indent subcode" },
+        { "name": "ChallanNo", "dataType": "varchar", "nullable": true, "meaning": "Challan" },
+        { "name": "GateInwardNo", "dataType": "varchar", "nullable": true, "meaning": "Gate inward no" },
+        { "name": "GateInwardDate", "dataType": "datetime", "nullable": true, "meaning": "Gate inward date" },
+        { "name": "VendorGST", "dataType": "varchar", "nullable": true, "meaning": "Vendor GST" },
+        { "name": "hsncode", "dataType": "varchar", "nullable": true, "meaning": "HSN" },
+        { "name": "EWayNo", "dataType": "varchar", "nullable": true, "meaning": "E-way bill" },
+        { "name": "SysDate", "dataType": "datetime", "nullable": true, "meaning": "Date" },
+        { "name": "LoginName", "dataType": "varchar", "nullable": true, "meaning": "MRN user" },
+        { "name": "MRNStatus", "dataType": "varchar", "nullable": true, "meaning": "MRN status" },
+        { "name": "Category", "dataType": "varchar", "nullable": true, "meaning": "Category" },
+        { "name": "Remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" }
+      ],
+      "importantOtherColumns": [
+        "CGSTPer", "SGSTPer", "IGSTPer", "VehicalNo", "TransportName", "PaymentTerms", "Cancel", "purpose", "GroupTag"
+      ],
+      "joins": [
+        { "to": "BillPaymentEntry", "on": "Vw_StoreInwards.MRNo = BillPaymentEntry.MRNno" },
+        { "to": "ApprovePO", "on": "Vw_StoreInwards.PONo = ApprovePO.PoNo" },
+        { "to": "ApproveIndent", "on": "Vw_StoreInwards.IndentNo = ApproveIndent.IndentNo" }
+      ],
+      "synonyms": [
+        "MRN details",
+        "store inward details",
+        "material received",
+        "Vw_StoreInwards",
+        "what was received against MRN",
+        "goods receipt details"
+      ],
+      "exampleQuestions": [
+        "Show details of MRN RM 283",
+        "What materials were received for a company last month?",
+        "List items received against a PO"
+      ],
+      "embeddingText": "View Vw_StoreInwards. Domain: MRN / store inward combined details. Preferred view for material receipt questions. Columns: SrNo, MRNo, PONo, CompanyName (receiving company), PartyName (VENDOR — e.g. Plastene Polyfilms Ltd-Purchase is a PartyName), BillNo, BillDate, GateInwardDate, SysDate, ItemName, ItemCode, RecdQty, AcceptedQty, OrderQty, PendingQty, Rate, Amount, Deptt, IndentNo, GateInwardNo, VendorGST, MRNStatus, LoginName. NO column MRDate — use BillDate/GateInwardDate/SysDate. Synonyms: goods receipt, GRN, material received, receipts by bill number. Example: Find receipts linked to bill number PPL/D/540 => WHERE BillNo = 'PPL/D/540' on THIS view (not BillPaymentEntry). Example: receipts for Plastene Polyfilms Ltd-Purchase => WHERE PartyName = '...'. Example: for company Oswal Extrusion Limited pending qty => CompanyName + PendingQty > 0. Always TOP 50."
+    },
+    {
+      "id": "vw_MRNList",
+      "objectName": "vw_MRNList",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "MRN",
+      "purpose": "MRN listing view for browsing receipts by company/party/date with item lines and bill/challan/gate inward fields.",
+      "primaryKeyHint": "Line grain; MRno + srno",
+      "statusColumn": null,
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Receiving company — use for 'for company X'" },
+        { "name": "Partyname", "dataType": "varchar", "nullable": true, "meaning": "VENDOR/party only — not receiving company" },
+        { "name": "MRNDate", "dataType": "date", "nullable": true, "meaning": "MRN date" },
+        { "name": "MRno", "dataType": "varchar", "nullable": true, "meaning": "MRN number (same idea as MRNo)" },
+        { "name": "BillNo", "dataType": "varchar", "nullable": true, "meaning": "Bill" },
+        { "name": "BillDate", "dataType": "date", "nullable": true, "meaning": "Bill date" },
+        { "name": "ChallanNo", "dataType": "varchar", "nullable": true, "meaning": "Challan" },
+        { "name": "ChallanDate", "dataType": "date", "nullable": true, "meaning": "Challan date" },
+        { "name": "GateInwardNo", "dataType": "varchar", "nullable": true, "meaning": "Gate inward" },
+        { "name": "GateInwardDate", "dataType": "date", "nullable": true, "meaning": "Gate inward date" },
+        { "name": "srno", "dataType": "varchar", "nullable": false, "meaning": "Inward SrNo" },
+        { "name": "Itemcode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "Itemname", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "PoNO", "dataType": "varchar", "nullable": true, "meaning": "PO" },
+        { "name": "Recdqty", "dataType": "float", "nullable": true, "meaning": "Received qty" },
+        { "name": "Acceptedqty", "dataType": "float", "nullable": true, "meaning": "Accepted qty" },
+        { "name": "OrderQty", "dataType": "float", "nullable": true, "meaning": "Order qty" },
+        { "name": "PendingQty", "dataType": "float", "nullable": true, "meaning": "Pending qty" },
+        { "name": "Billamount", "dataType": "float", "nullable": true, "meaning": "Bill amount" },
+        { "name": "Deptt", "dataType": "varchar", "nullable": true, "meaning": "Department" },
+        { "name": "category", "dataType": "varchar", "nullable": true, "meaning": "Category" },
+        { "name": "EWayNo", "dataType": "varchar", "nullable": false, "meaning": "E-way" }
+      ],
+      "joins": [
+        { "to": "BillPaymentEntry", "on": "vw_MRNList.MRno = BillPaymentEntry.MRNno" }
+      ],
+      "synonyms": [
+        "MRN list",
+        "list of material receipts",
+        "vw_MRNList",
+        "browse MRNs"
+      ],
+      "exampleQuestions": [
+        "List MRNs for a company",
+        "Show recent material receipts with party and bill"
+      ],
+      "embeddingText": "View vw_MRNList. Domain: MRN listing. Purpose: list material receipts with CompanyName (receiving company), Partyname (vendor only), MRNDate (spelled MRNDate — never invent MRDate), MRno, BillNo, item quantities, GateInwardNo. Synonyms: MRN list, material receipt list, browse MRNs, recent goods receipts. For company filter use CompanyName; for vendor like Plastene Polyfilms Ltd-Purchase use Partyname. Use TOP 50. Column MRno is the MRN number."
+    },
+    {
+      "id": "vw_MRNToBillPayment",
+      "objectName": "vw_MRNToBillPayment",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "MRN",
+      "purpose": "Bridge view from MRN/store inward to bill payment request: shows MRno, bill, party, and PaymentNo/PaymentAmount/UTRno when a payment exists. Use for 'was this MRN paid?' / 'payment against MRN' questions.",
+      "primaryKeyHint": "Line grain linking MRno to PaymentNo",
+      "statusColumn": null,
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "MRno", "dataType": "varchar", "nullable": true, "meaning": "MRN number" },
+        { "name": "Partyname", "dataType": "varchar", "nullable": true, "meaning": "Party" },
+        { "name": "Suppliername", "dataType": "varchar", "nullable": true, "meaning": "Supplier" },
+        { "name": "BillNo", "dataType": "varchar", "nullable": true, "meaning": "Bill" },
+        { "name": "BillDate", "dataType": "date", "nullable": true, "meaning": "Bill date" },
+        { "name": "Billamount", "dataType": "float", "nullable": true, "meaning": "Bill amount" },
+        { "name": "PoNO", "dataType": "varchar", "nullable": true, "meaning": "PO" },
+        { "name": "Itemcode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "Itemname", "dataType": "varchar", "nullable": true, "meaning": "Item" },
+        { "name": "Recdqty", "dataType": "float", "nullable": true, "meaning": "Received qty" },
+        { "name": "PaymentNo", "dataType": "varchar", "nullable": true, "meaning": "Payment request number; NULL on unpaid line rows — filter PaymentNo IS NOT NULL for payment questions" },
+        { "name": "PaymentDate", "dataType": "datetime", "nullable": true, "meaning": "Payment date" },
+        { "name": "PaymentAmount", "dataType": "float", "nullable": true, "meaning": "Payment amount; null when no payment linked" },
+        { "name": "UTRno", "dataType": "varchar", "nullable": true, "meaning": "Bank UTR" },
+        { "name": "PaymentTerms", "dataType": "varchar", "nullable": true, "meaning": "Terms" },
+        { "name": "Duedate", "dataType": "datetime", "nullable": true, "meaning": "Due date" },
+        { "name": "CreditDays", "dataType": "int", "nullable": true, "meaning": "Credit days" },
+        { "name": "GateInwardNo", "dataType": "varchar", "nullable": true, "meaning": "Gate inward" },
+        { "name": "VendorGST", "dataType": "varchar", "nullable": true, "meaning": "Vendor GST" }
+      ],
+      "importantOtherColumns": [
+        "ChallanNo", "[Challan Date]", "[Basic Amount]", "[MRN User]", "POUserName", "ReqDepartment"
+      ],
+      "joins": [
+        { "to": "BillPaymentEntry", "on": "vw_MRNToBillPayment.PaymentNo = BillPaymentEntry.PaymentNo" },
+        { "to": "BillPaymentHODApproval", "on": "vw_MRNToBillPayment.PaymentNo = BillPaymentHODApproval.paymentNo" }
+      ],
+      "synonyms": [
+        "MRN to payment",
+        "payment against MRN",
+        "was MRN paid",
+        "vw_MRNToBillPayment",
+        "UTR for material receipt"
+      ],
+      "exampleQuestions": [
+        "Is there a payment against MRN X?",
+        "Show payment number and UTR for an MRN",
+        "Which MRNs are linked to bill payments?"
+      ],
+      "embeddingText": "View vw_MRNToBillPayment. Domain: MRN linked to bill payment. Purpose: connect material receipt MRno to PaymentNo, PaymentAmount, UTRno, BillNo, Partyname. CRITICAL: view is LINE grain — many rows have NULL PaymentNo even when payments exist for that MRN. For 'was payment raised against MRN RM 269 and for how much' prefer BillPaymentEntry WHERE MRNno = 'RM 269'. If using this view: SELECT DISTINCT PaymentNo, PaymentAmount WHERE MRno = 'RM 269' AND PaymentNo IS NOT NULL. Never treat a NULL PaymentNo row as proof of no payment. Synonyms: payment against MRN, was MRN paid, UTR for MRN, PRQ for material receipt. Bracket spaced columns: [Challan Date], [Basic Amount], [MRN User]."
+    }
+  ],
+  "validatedJoinFacts": [
+    {
+      "fact": "ApproveIndent.IndentSubCode = ItemInfo.code matches (~301k rows); ApproveIndent.IndentNo = ItemInfo.code matches 0 rows",
+      "verifiedOn": "live MaterialProcessing query"
+    },
+    {
+      "fact": "BillPaymentHODApproval.paymentNo = BillPaymentEntry.PaymentNo works for pending rows",
+      "verifiedOn": "live MaterialProcessing query"
+    },
+    {
+      "fact": "Vw_StoreDeptt.Expr1 is parent indent; Vw_StoreDeptt.code is line subcode",
+      "verifiedOn": "live sample rows + IndentController details API"
+    },
+    {
+      "fact": "ApprovePO.PoNo = Vw_PurchaseOrder.PurchaseCode is the portal join; some pending PoNo values may not resolve vendor rows",
+      "verifiedOn": "live sample pending POs"
+    },
+    {
+      "fact": "FactoryInfo.Name joins LedgerMaster.CompanyName; portal filters ledgers by FactoryInfo.SrNo or GroupName",
+      "verifiedOn": "LedgerSummaryService.GetCompaniesAsync / GetLedgersAsync"
+    },
+    {
+      "fact": "LedgerOpeningBalance has 0 rows in MaterialProcessing; opening/pending balances for users come from LedgerMaster.Openingbalance / PendingBalance — LedgerOpeningBalance removed from chatbot allowlist",
+      "verifiedOn": "live COUNT(*) = 0; Oswal Extrusion Limited has PendingBalance rows on LedgerMaster"
+    },
+    {
+      "fact": "Ledger/account groups for users come from DISTINCT LedgerMaster.Under; LedgerGroupMaster is empty and removed from chatbot allowlist",
+      "verifiedOn": "Swagger empty LedgerGroupMaster + live LedgerMaster.Under samples"
+    },
+    {
+      "fact": "FactoryInfo company PAN column is PermanentAccountNo; LedgerMaster party PAN is PANNo. Selecting PANNo from FactoryInfo fails with Invalid column name",
+      "verifiedOn": "Swagger chat error 2026-08-11 + live sys.columns"
+    },
+    {
+      "fact": "Full ledger voucher statement uses EXEC sp_ac_LedgerSummary_BankRecoDate (blocked by chatbot SELECT-only guard); use LedgerMaster/FactoryInfo for SELECT balance questions",
+      "verifiedOn": "LedgerSummaryService.QuerySingleAsync + SqlGuardService"
+    },
+    {
+      "fact": "On Vw_StoreInwards, 'for company Oswal Extrusion Limited' must filter CompanyName (1994 pending rows), not PartyName (0 rows). PartyName is vendor.",
+      "verifiedOn": "live counts 2026-08-11"
+    },
+    {
+      "fact": "Plastene Polyfilms Ltd-Purchase is PartyName (15253 rows on Vw_StoreInwards); CompanyName exact match is 0. Receiving company for bill PPL/D/540 is Plastene India Limited. Company Plastene Polyfilms Limited also exists (45897 rows).",
+      "verifiedOn": "live counts 2026-08-11"
+    },
+    {
+      "fact": "No MRDate column on Vw_StoreInwards/StoreInwardsPayment/vw_MRNList. Use BillDate or GateInwardDate on Vw_StoreInwards; MRNDate only on vw_MRNList/BillPaymentEntry.",
+      "verifiedOn": "sys.columns 2026-08-11"
+    },
+    {
+      "fact": "StoreInwardsPayment.SrNo joins StoreInwards.SrNo; StoreInwardsPayment.MRNo joins BillPaymentEntry.MRNno (validated live)",
+      "verifiedOn": "live sample joins 2026-08-11"
+    },
+    {
+      "fact": "MRN RM 269 has 4 BillPaymentEntry payments totaling 731113 (PIL/PRQ/20-21/1194 493240, PIL2/PRQ/21-22/1737 148680, PIL/PRQ/23-24/898 14079, KPV/PRQ/23-24/1009 75114). vw_MRNToBillPayment has 94 line rows for RM 269 with only 4 non-null PaymentNo — TOP without PaymentNo IS NOT NULL can falsely look unpaid.",
+      "verifiedOn": "live counts 2026-08-11"
+    },
+    {
+      "fact": "Bill PPL/D/540 has 16 Vw_StoreInwards lines / 6 StoreInwardsPayment headers (party Plastene Polyfilms Ltd-Purchase). BillPaymentEntry.BillNo = 'PPL/D/540' returns 0 — use store BillNo for receipt-by-bill questions.",
+      "verifiedOn": "live counts 2026-08-11"
+    }
+  ],
+  "embeddingNotes": {
+    "recommendedModel": "sentence-transformers/all-MiniLM-L6-v2",
+    "recommendedBackend": "fastembed (ONNX) via build_embeddings.py; sentence-transformers fallback",
+    "outputFile": "schema-embeddings.json",
+    "textField": "embeddingText",
+    "chunkCount": 22,
+    "retrieveTopK": "3-8"
+  }
+}
