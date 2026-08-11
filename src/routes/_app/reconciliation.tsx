@@ -273,7 +273,7 @@ function ReconciliationPage() {
       } else if (statusFilter === "missing") {
         if (r.status !== "MissingInA" && r.status !== "MissingInB") return false;
       } else if (statusFilter === "other") {
-        if (r.status !== "Duplicate" && r.status !== "PotentialMatch") return false;
+        if (r.status !== "Duplicate" && r.status !== "PotentialMatch" && r.status !== "PendingRecord") return false;
       } else if (statusFilter !== "all" && r.status !== statusFilter) {
         return false;
       }
@@ -313,6 +313,7 @@ function ReconciliationPage() {
       MissingInB: 3,
       Duplicate: 4,
       PotentialMatch: 5,
+      PendingRecord: 6,
     };
     const dateValue = (r: ComparisonPair) => {
       const raw = r.entryA?.billDate || r.entryA?.date || r.entryB?.billDate || r.entryB?.date;
@@ -408,7 +409,7 @@ function ReconciliationPage() {
   function isPieSliceActive(filter: StatusFilter) {
     if (statusFilter === filter) return true;
     if (filter === "missing" && (statusFilter === "MissingInA" || statusFilter === "MissingInB")) return true;
-    if (filter === "other" && (statusFilter === "Duplicate" || statusFilter === "PotentialMatch")) return true;
+    if (filter === "other" && (statusFilter === "Duplicate" || statusFilter === "PotentialMatch" || statusFilter === "PendingRecord")) return true;
     return false;
   }
 
@@ -442,6 +443,87 @@ function ReconciliationPage() {
     setCurrentPage(1);
   }
 
+  function applyManualMatch(pairId: string, selectedRowIndicesA: number[], selectedRowIndicesB: number[]) {
+    setResult((prev) => {
+      if (!prev) return prev;
+      const source = prev.results.find((r) => r.id === pairId);
+      if (!source) return prev;
+
+      const rowsA = source.entriesA?.length ? source.entriesA : source.entryA ? [source.entryA] : [];
+      const rowsB = source.entriesB?.length ? source.entriesB : source.entryB ? [source.entryB] : [];
+      const selectedA = rowsA.filter((e) => selectedRowIndicesA.includes(e.rowIndex));
+      const selectedB = rowsB.filter((e) => selectedRowIndicesB.includes(e.rowIndex));
+      if (selectedA.length === 0 || selectedB.length === 0) return prev;
+
+      const totalA = sumSignedAmount(selectedA);
+      const totalB = sumSignedAmount(selectedB);
+      if (!canManualMatchTotals(totalA, totalB)) return prev;
+
+      const remainingA = rowsA.filter((e) => !selectedRowIndicesA.includes(e.rowIndex));
+      const remainingB = rowsB.filter((e) => !selectedRowIndicesB.includes(e.rowIndex));
+
+      const matchedPair: ComparisonPair = {
+        id: `${pairId}-manual-${Date.now()}`,
+        status: "Matched",
+        matchKind: "bill-group",
+        message: `Manually matched (${selectedA.length} ↔ ${selectedB.length} lines)`,
+        difference: 0,
+        entryA: summarizeEntries(selectedA, source.entryA?.company ?? source.entriesA?.[0]?.company ?? ""),
+        entryB: summarizeEntries(selectedB, source.entryB?.company ?? source.entriesB?.[0]?.company ?? ""),
+        entriesA: selectedA,
+        entriesB: selectedB,
+      };
+
+      const nextResults = prev.results.filter((r) => r.id !== pairId);
+      nextResults.push(matchedPair);
+
+      if (remainingA.length > 0 || remainingB.length > 0) {
+        const pendingPair: ComparisonPair = {
+          id: `${pairId}-pending-${Date.now()}`,
+          status: "PendingRecord",
+          matchKind: "bill-group",
+          message: "Residual lines pending record after manual match",
+          difference: Math.abs(Math.abs(sumSignedAmount(remainingA)) - Math.abs(sumSignedAmount(remainingB))),
+          entryA: remainingA.length ? summarizeEntries(remainingA, matchedPair.entryA?.company ?? "") : null,
+          entryB: remainingB.length ? summarizeEntries(remainingB, matchedPair.entryB?.company ?? "") : null,
+          entriesA: remainingA,
+          entriesB: remainingB,
+        };
+        nextResults.push(pendingPair);
+      }
+
+      const nextSummary = buildSummaryFromResults(prev.summary.totalA, prev.summary.totalB, nextResults);
+      return { ...prev, results: nextResults, summary: nextSummary };
+    });
+    setSelected(null);
+  }
+
+  function markAsAmountMismatch(pairId: string) {
+    setResult((prev) => {
+      if (!prev) return prev;
+      const source = prev.results.find((r) => r.id === pairId);
+      if (!source) return prev;
+
+      const rowsA = source.entriesA?.length ? source.entriesA : source.entryA ? [source.entryA] : [];
+      const rowsB = source.entriesB?.length ? source.entriesB : source.entryB ? [source.entryB] : [];
+      const difference = Math.abs(Math.abs(sumSignedAmount(rowsA)) - Math.abs(sumSignedAmount(rowsB)));
+
+      const updatedPair: ComparisonPair = {
+        ...source,
+        status: "AmountMismatch",
+        message: source.message?.startsWith("Manual amount mismatch")
+          ? source.message
+          : `Manual amount mismatch: ${source.message}`,
+        difference,
+      };
+
+      const nextResults = prev.results.map((r) => (r.id === pairId ? updatedPair : r));
+      const nextSummary = buildSummaryFromResults(prev.summary.totalA, prev.summary.totalB, nextResults);
+      return { ...prev, results: nextResults, summary: nextSummary };
+    });
+    setSelected(null);
+  }
+
   useEffect(() => {
     setCurrentPage(1);
   }, [statusFilter, q]);
@@ -462,7 +544,7 @@ function ReconciliationPage() {
           </Link>
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Ledger Reconciliation</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Compare two company ledgers. Match Bill No + Bill Date first, then Voucher Date; amounts must be opposite signs.
+            Compare two company ledgers. Match by Bill No first (including swapped formats), then Voucher Date; final reconciliation requires opposite signed amounts.
           </p>
         </div>
         {step === 3 && result && (
@@ -646,7 +728,7 @@ function ReconciliationPage() {
                 />
                 <StatCard
                   label="Other"
-                  value={result.summary.duplicates + result.summary.potentialMatches}
+                  value={result.summary.duplicates + result.summary.potentialMatches + (result.summary.pendingRecords ?? 0)}
                   description="Duplicates or potential matches"
                   tone="muted"
                   icon={HelpCircle}
@@ -716,7 +798,7 @@ function ReconciliationPage() {
                 />
                 <StatCard
                   label="Other"
-                  value={result.summary.duplicates + result.summary.potentialMatches}
+                  value={result.summary.duplicates + result.summary.potentialMatches + (result.summary.pendingRecords ?? 0)}
                   description="Dup / potential"
                   tone="muted"
                   icon={HelpCircle}
@@ -753,6 +835,7 @@ function ReconciliationPage() {
                 <option value="other">Other (dup / potential)</option>
                 <option value="Duplicate">Duplicate</option>
                 <option value="PotentialMatch">Potential match</option>
+                <option value="PendingRecord">Pending record</option>
               </select>
               <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             </div>
@@ -963,6 +1046,8 @@ function ReconciliationPage() {
           pair={selected}
           companyNameA={companyNameA}
           companyNameB={companyNameB}
+          onManualMatch={applyManualMatch}
+          onMarkAmountMismatch={markAsAmountMismatch}
           onClose={() => setSelected(null)}
         />
       )}
@@ -1571,6 +1656,7 @@ function ResultBadge({
     MissingInB: "bg-destructive/15 text-destructive border-destructive/30",
     Duplicate: "bg-primary/15 text-primary border-primary/30",
     PotentialMatch: "bg-secondary text-muted-foreground border-border",
+    PendingRecord: "bg-secondary/80 text-foreground border-border",
   };
 
   const missingCompany =
@@ -1610,16 +1696,34 @@ function DetailSheet({
   pair,
   companyNameA,
   companyNameB,
+  onManualMatch,
+  onMarkAmountMismatch,
   onClose,
 }: {
   pair: ComparisonPair;
   companyNameA: string;
   companyNameB: string;
+  onManualMatch: (pairId: string, selectedRowIndicesA: number[], selectedRowIndicesB: number[]) => void;
+  onMarkAmountMismatch: (pairId: string) => void;
   onClose: () => void;
 }) {
   const isBillGroup = pair.matchKind === "bill-group";
   const entriesA = pair.entriesA?.length ? pair.entriesA : pair.entryA ? [pair.entryA] : [];
   const entriesB = pair.entriesB?.length ? pair.entriesB : pair.entryB ? [pair.entryB] : [];
+  const [selectedA, setSelectedA] = useState<number[]>([]);
+  const [selectedB, setSelectedB] = useState<number[]>([]);
+  const canManual = pair.status === "PotentialMatch" || pair.status === "AmountMismatch";
+
+  useEffect(() => {
+    setSelectedA(entriesA.map((e) => e.rowIndex));
+    setSelectedB(entriesB.map((e) => e.rowIndex));
+  }, [pair.id]);
+
+  const selectedTotalA = sumSignedAmount(entriesA.filter((e) => selectedA.includes(e.rowIndex)));
+  const selectedTotalB = sumSignedAmount(entriesB.filter((e) => selectedB.includes(e.rowIndex)));
+  const diff = Math.abs(Math.abs(selectedTotalA) - Math.abs(selectedTotalB));
+  const canConfirm =
+    canManual && selectedA.length > 0 && selectedB.length > 0 && canManualMatchTotals(selectedTotalA, selectedTotalB);
 
   const fields: { label: string; a: string; b: string }[] = isBillGroup
     ? [
@@ -1759,8 +1863,67 @@ function DetailSheet({
                 Line breakdown
               </div>
               <div className="grid gap-3 md:grid-cols-2">
-                <LineList title={companyNameA} entries={entriesA} />
-                <LineList title={companyNameB} entries={entriesB} />
+                <LineList
+                  title={companyNameA}
+                  entries={entriesA}
+                  selectable={canManual}
+                  selected={selectedA}
+                  onToggle={(rowIndex) =>
+                    setSelectedA((prev) =>
+                      prev.includes(rowIndex) ? prev.filter((x) => x !== rowIndex) : [...prev, rowIndex],
+                    )
+                  }
+                />
+                <LineList
+                  title={companyNameB}
+                  entries={entriesB}
+                  selectable={canManual}
+                  selected={selectedB}
+                  onToggle={(rowIndex) =>
+                    setSelectedB((prev) =>
+                      prev.includes(rowIndex) ? prev.filter((x) => x !== rowIndex) : [...prev, rowIndex],
+                    )
+                  }
+                />
+              </div>
+            </div>
+          )}
+
+          {canManual && (
+            <div className="rounded-xl border border-border bg-surface/30 px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Manual reconciliation
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm tabular-nums">
+                <span>
+                  A selected: <b>{formatSigned(selectedTotalA)}</b>
+                </span>
+                <span>
+                  B selected: <b>{formatSigned(selectedTotalB)}</b>
+                </span>
+                <span>
+                  Diff:{" "}
+                  <b className={canManualMatchTotals(selectedTotalA, selectedTotalB) ? "text-success" : "text-warning"}>
+                    {formatSigned(diff)}
+                  </b>
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!canConfirm}
+                  onClick={() => onManualMatch(pair.id, selectedA, selectedB)}
+                  className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                >
+                  Manually match selected
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onMarkAmountMismatch(pair.id)}
+                  className="inline-flex h-9 items-center rounded-md border border-warning/40 bg-warning/10 px-3 text-sm font-semibold text-warning hover:bg-warning/20"
+                >
+                  Mark as amount mismatch
+                </button>
               </div>
             </div>
           )}
@@ -1779,7 +1942,19 @@ function DetailSheet({
   );
 }
 
-function LineList({ title, entries }: { title: string; entries: LedgerEntry[] }) {
+function LineList({
+  title,
+  entries,
+  selectable = false,
+  selected = [],
+  onToggle,
+}: {
+  title: string;
+  entries: LedgerEntry[];
+  selectable?: boolean;
+  selected?: number[];
+  onToggle?: (rowIndex: number) => void;
+}) {
   if (entries.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
@@ -1801,6 +1976,16 @@ function LineList({ title, entries }: { title: string; entries: LedgerEntry[] })
         {entries.map((e, idx) => (
           <li key={`${e.rowIndex}-${idx}`} className="flex items-start justify-between gap-3 py-2.5 text-sm">
             <div className="min-w-0">
+              {selectable && (
+                <label className="mb-1 inline-flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(e.rowIndex)}
+                    onChange={() => onToggle?.(e.rowIndex)}
+                  />
+                  Select
+                </label>
+              )}
               <div className="truncate font-medium">{e.particulars || "—"}</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
                 {formatDate(e.date)}
@@ -1842,6 +2027,56 @@ function lineCountLabel(row: ComparisonPair) {
   const a = row.entriesA?.length || (row.entryA ? 1 : 0);
   const b = row.entriesB?.length || (row.entryB ? 1 : 0);
   return `${a} ↔ ${b}`;
+}
+
+function entrySignedAmount(e: LedgerEntry) {
+  if (e.signedAmount != null && e.signedAmount !== 0) return e.signedAmount;
+  if (e.side === "Debit") return -Math.abs(e.amount ?? 0);
+  if (e.side === "Credit") return Math.abs(e.amount ?? 0);
+  return e.amount ?? 0;
+}
+
+function sumSignedAmount(entries: LedgerEntry[]) {
+  return entries.reduce((sum, e) => sum + entrySignedAmount(e), 0);
+}
+
+/** Match when opposite signs and absolute totals agree (e.g. +23,600 ↔ −23,600). */
+function canManualMatchTotals(totalA: number, totalB: number) {
+  if (totalA === 0 || totalB === 0) return false;
+  if (Math.sign(totalA) === Math.sign(totalB)) return false;
+  return Math.abs(Math.abs(totalA) - Math.abs(totalB)) <= 0.01;
+}
+
+function summarizeEntries(entries: LedgerEntry[], fallbackCompany: string): LedgerEntry | null {
+  if (entries.length === 0) return null;
+  const totalSigned = sumSignedAmount(entries);
+  const first = entries[0];
+  return {
+    ...first,
+    company: first.company || fallbackCompany,
+    particulars: entries.length === 1 ? first.particulars : `Manual total (${entries.length} lines)`,
+    voucherNo: entries.length === 1 ? first.voucherNo : "",
+    voucherRef: "",
+    signedAmount: totalSigned,
+    debit: totalSigned < 0 ? Math.abs(totalSigned) : 0,
+    credit: totalSigned > 0 ? totalSigned : 0,
+    amount: Math.abs(totalSigned),
+    side: totalSigned < 0 ? "Debit" : totalSigned > 0 ? "Credit" : "None",
+  };
+}
+
+function buildSummaryFromResults(totalA: number, totalB: number, results: ComparisonPair[]) {
+  return {
+    totalA,
+    totalB,
+    matched: results.filter((r) => r.status === "Matched").length,
+    amountMismatch: results.filter((r) => r.status === "AmountMismatch").length,
+    missingInA: results.filter((r) => r.status === "MissingInA").length,
+    missingInB: results.filter((r) => r.status === "MissingInB").length,
+    duplicates: results.filter((r) => r.status === "Duplicate").length,
+    potentialMatches: results.filter((r) => r.status === "PotentialMatch").length,
+    pendingRecords: results.filter((r) => r.status === "PendingRecord").length,
+  };
 }
 
 function EmptyState() {
@@ -1951,6 +2186,7 @@ function normalizeResult(data: any): ComparisonResult {
       missingInB: summary.missingInB ?? summary.MissingInB ?? 0,
       duplicates: summary.duplicates ?? summary.Duplicates ?? 0,
       potentialMatches: summary.potentialMatches ?? summary.PotentialMatches ?? 0,
+      pendingRecords: summary.pendingRecords ?? summary.PendingRecords ?? 0,
     },
     results,
   };

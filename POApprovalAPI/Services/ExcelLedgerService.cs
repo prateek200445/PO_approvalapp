@@ -363,33 +363,13 @@ public class ExcelLedgerService
                 continue;
             }
 
-            var sameBillNo = groupsB
-                .Where(kv => !usedBillKeysB.Contains(kv.Key))
-                .Where(kv => string.Equals(kv.Value.BillNoKey, ga.BillNoKey, StringComparison.OrdinalIgnoreCase))
-                .Select(kv => kv.Value)
-                .ToList();
-
-            if (sameBillNo.Count > 0)
+            var best = FindBestBillGroupCandidate(ga, groupsB, usedBillKeysB);
+            if (best != null)
             {
-                var best = sameBillNo
-                    .OrderBy(g => Math.Abs(Math.Abs(ga.SignedTotal) - Math.Abs(g.SignedTotal)))
-                    .First();
                 usedBillKeysB.Add(best.Key);
                 MarkUsed(usedA, ga.Entries);
                 MarkUsed(usedB, best.Entries);
-                results.Add(new ComparisonPairDto
-                {
-                    Id = Guid.NewGuid().ToString("N"),
-                    Status = "AmountMismatch",
-                    MatchKind = "bill-group",
-                    Message =
-                        $"Same Bill No but Bill Date must match exactly (A: {FormatDate(ga.BillDate)}, B: {FormatDate(best.BillDate)})",
-                    Difference = Math.Abs(Math.Abs(ga.SignedTotal) - Math.Abs(best.SignedTotal)),
-                    EntryA = ga.ToSummary(),
-                    EntryB = best.ToSummary(),
-                    EntriesA = ga.Entries.ToList(),
-                    EntriesB = best.Entries.ToList(),
-                });
+                results.Add(BuildBillGroupPair(ga, best, options));
                 continue;
             }
 
@@ -403,7 +383,7 @@ public class ExcelLedgerService
                 Id = Guid.NewGuid().ToString("N"),
                 Status = "MissingInB",
                 MatchKind = "bill-group",
-                Message = "No bill group with the same Bill No + Bill Date found in File B",
+                Message = "No bill group with a matching Bill No found in File B",
                 EntryA = ga.ToSummary(),
                 EntriesA = ga.Entries.ToList(),
             });
@@ -420,7 +400,7 @@ public class ExcelLedgerService
                 Id = Guid.NewGuid().ToString("N"),
                 Status = "MissingInA",
                 MatchKind = "bill-group",
-                Message = "No bill group with the same Bill No + Bill Date found in File A",
+                Message = "No bill group with a matching Bill No found in File A",
                 EntryB = gb.Value.ToSummary(),
                 EntriesB = gb.Value.Entries.ToList(),
             });
@@ -464,9 +444,9 @@ public class ExcelLedgerService
                 results.Add(new ComparisonPairDto
                 {
                     Id = Guid.NewGuid().ToString("N"),
-                    Status = "AmountMismatch",
+                    Status = "PotentialMatch",
                     MatchKind = "row",
-                    Message = reason,
+                    Message = $"Potential mismatch: {reason}",
                     Difference = AmountGap(a, best),
                     EntryA = a,
                     EntryB = best,
@@ -500,6 +480,8 @@ public class ExcelLedgerService
             });
         }
 
+        results = PromoteMissingPairsToPotential(results, options);
+
         return new ComparisonResultDto
         {
             Summary = new ComparisonSummary
@@ -511,10 +493,73 @@ public class ExcelLedgerService
                 MissingInA = results.Count(r => r.Status == "MissingInA"),
                 MissingInB = results.Count(r => r.Status == "MissingInB"),
                 Duplicates = 0,
-                PotentialMatches = 0,
+                PotentialMatches = results.Count(r => r.Status == "PotentialMatch"),
             },
             Results = results
         };
+    }
+
+    private static List<ComparisonPairDto> PromoteMissingPairsToPotential(List<ComparisonPairDto> results, LedgerMatchOptions options)
+    {
+        var list = results.ToList();
+        var missA = list
+            .Where(r => r.Status == "MissingInA" && r.EntryB != null && !string.IsNullOrWhiteSpace(r.EntryB.BillNo))
+            .ToList();
+        var missB = list
+            .Where(r => r.Status == "MissingInB" && r.EntryA != null && !string.IsNullOrWhiteSpace(r.EntryA.BillNo))
+            .ToList();
+
+        if (missA.Count == 0 || missB.Count == 0)
+            return list;
+
+        var consumedA = new HashSet<string>();
+        var consumedB = new HashSet<string>();
+        var extra = new List<ComparisonPairDto>();
+        var tolerance = Math.Max(options.AmountTolerance, 1m);
+
+        foreach (var a in missB)
+        {
+            if (a.EntryA == null || consumedA.Contains(a.Id))
+                continue;
+
+            var candidate = missA
+                .Where(b => b.EntryB != null && !consumedB.Contains(b.Id))
+                .Where(b => BillNumbersLookRelated(a.EntryA!.BillNo, b.EntryB!.BillNo))
+                .OrderBy(b => AmountGap(a.EntryA!, b.EntryB!))
+                .ThenBy(b => DateDiff(a.EntryA!.BillDate ?? a.EntryA.Date, b.EntryB!.BillDate ?? b.EntryB.Date))
+                .FirstOrDefault();
+
+            if (candidate == null || candidate.EntryB == null)
+                continue;
+
+            consumedA.Add(a.Id);
+            consumedB.Add(candidate.Id);
+
+            var entryA = a.EntryA!;
+            var entryB = candidate.EntryB!;
+            var gap = AmountGap(entryA, entryB);
+            var matched = OppositeSignedAmounts(entryA, entryB, tolerance);
+            var billLabel = BillMatchLabel(entryA.BillNo, entryB.BillNo);
+
+            extra.Add(new ComparisonPairDto
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Status = matched ? "Matched" : "PotentialMatch",
+                MatchKind = "bill-group",
+                Message = matched
+                    ? $"{billLabel}: amounts reconcile"
+                    : $"{billLabel}: potential amount mismatch (diff {gap:N2})",
+                Difference = matched ? 0 : gap,
+                EntryA = entryA,
+                EntryB = entryB,
+                EntriesA = a.EntriesA?.Count > 0 ? a.EntriesA : [entryA],
+                EntriesB = candidate.EntriesB?.Count > 0 ? candidate.EntriesB : [entryB],
+            });
+        }
+
+        list.RemoveAll(r => consumedA.Contains(r.Id) || consumedB.Contains(r.Id));
+        list.AddRange(extra);
+        return list;
     }
 
     private static Dictionary<string, BillGroup> BuildBillGroups(List<LedgerEntryDto> entries)
@@ -549,6 +594,22 @@ public class ExcelLedgerService
             used.Add(e.RowIndex);
     }
 
+    private static BillGroup? FindBestBillGroupCandidate(
+        BillGroup ga,
+        Dictionary<string, BillGroup> groupsB,
+        HashSet<string> usedBillKeysB)
+    {
+        return groupsB
+            .Where(kv => !usedBillKeysB.Contains(kv.Key))
+            .Where(kv =>
+                string.Equals(kv.Value.BillNoKey, ga.BillNoKey, StringComparison.OrdinalIgnoreCase) ||
+                BillNumbersLookRelated(ga.BillNo, kv.Value.BillNo))
+            .Select(kv => kv.Value)
+            .OrderBy(g => Math.Abs(Math.Abs(ga.SignedTotal) - Math.Abs(g.SignedTotal)))
+            .ThenBy(g => DateDiff(ga.BillDate, g.BillDate))
+            .FirstOrDefault();
+    }
+
     private static ComparisonPairDto BuildBillGroupPair(BillGroup a, BillGroup b, LedgerMatchOptions options)
     {
         var tolerance = BillAmountTolerance(options);
@@ -556,8 +617,9 @@ public class ExcelLedgerService
         var summaryB = b.ToSummary();
         var gap = Math.Abs(Math.Abs(a.SignedTotal) - Math.Abs(b.SignedTotal));
         var lines = $"{a.Entries.Count} ↔ {b.Entries.Count} lines";
+        var billLabel = BillMatchLabel(a.BillNo, b.BillNo);
 
-        // Both sides net to ~0 under the same Bill No + Bill Date → matched (settled bills)
+        // Both sides net to ~0 under the same Bill No → matched (settled bills)
         if (IsZeroNetBill(a, options) && IsZeroNetBill(b, options))
         {
             return new ComparisonPairDto
@@ -565,7 +627,7 @@ public class ExcelLedgerService
                 Id = Guid.NewGuid().ToString("N"),
                 Status = "Matched",
                 MatchKind = "bill-group",
-                Message = $"Bill totals both net to 0 and reconcile ({lines})",
+                Message = $"{billLabel}: bill totals both net to 0 and reconcile ({lines})",
                 EntryA = summaryA,
                 EntryB = summaryB,
                 EntriesA = a.Entries.ToList(),
@@ -582,7 +644,7 @@ public class ExcelLedgerService
                 Status = "Matched",
                 MatchKind = "bill-group",
                 Message =
-                    $"Bill total {summaryA.Side} {summaryA.Amount:N2} reconciles with {summaryB.Side} {summaryB.Amount:N2} ({lines})",
+                    $"{billLabel}: {summaryA.Side} {summaryA.Amount:N2} reconciles with {summaryB.Side} {summaryB.Amount:N2} ({lines})",
                 EntryA = summaryA,
                 EntryB = summaryB,
                 EntriesA = a.Entries.ToList(),
@@ -593,15 +655,24 @@ public class ExcelLedgerService
         return new ComparisonPairDto
         {
             Id = Guid.NewGuid().ToString("N"),
-            Status = "AmountMismatch",
+            Status = "PotentialMatch",
             MatchKind = "bill-group",
-            Message = $"Same Bill No + Bill Date but bill totals do not reconcile ({lines}, diff {gap:N2})",
+            Message = $"{billLabel}: potential amount mismatch ({lines}, diff {gap:N2})",
             Difference = gap,
             EntryA = summaryA,
             EntryB = summaryB,
             EntriesA = a.Entries.ToList(),
             EntriesB = b.Entries.ToList(),
         };
+    }
+
+    private static string BillMatchLabel(string? billNoA, string? billNoB)
+    {
+        if (string.IsNullOrWhiteSpace(billNoA) || string.IsNullOrWhiteSpace(billNoB))
+            return "Bill No";
+        if (string.Equals(NormalizeKey(billNoA), NormalizeKey(billNoB), StringComparison.OrdinalIgnoreCase))
+            return $"Bill No {billNoA.Trim()}";
+        return $"Related Bill No ({billNoA.Trim()} ↔ {billNoB.Trim()})";
     }
 
     private static decimal BillAmountTolerance(LedgerMatchOptions options) =>
@@ -630,9 +701,9 @@ public class ExcelLedgerService
         return new ComparisonPairDto
         {
             Id = Guid.NewGuid().ToString("N"),
-            Status = "AmountMismatch",
+            Status = "PotentialMatch",
             MatchKind = "row",
-            Message = $"Same Voucher Date but amounts do not reconcile (diff {AmountGap(a, b):N2})",
+            Message = $"Potential mismatch: same Voucher Date but amounts do not reconcile (diff {AmountGap(a, b):N2})",
             Difference = AmountGap(a, b),
             EntryA = a,
             EntryB = b,
@@ -680,6 +751,94 @@ public class ExcelLedgerService
             .ThenBy(b => DateDiff(a.BillDate ?? a.Date, b.BillDate ?? b.Date));
 
     private static bool HasBillNo(LedgerEntryDto e) => !string.IsNullOrWhiteSpace(e.BillNo);
+
+    private static bool BillNumbersLookRelated(string? billNoA, string? billNoB)
+    {
+        if (string.IsNullOrWhiteSpace(billNoA) || string.IsNullOrWhiteSpace(billNoB))
+            return false;
+
+        var a = NormalizeKey(billNoA);
+        var b = NormalizeKey(billNoB);
+        if (a == b) return true;
+
+        var tokensA = TokenizeBillNo(billNoA);
+        var tokensB = TokenizeBillNo(billNoB);
+        if (tokensA.NumericTokens.Count == 0 || tokensB.NumericTokens.Count == 0)
+            return false;
+
+        if (!HasStrongNumericCoreMatch(tokensA.NumericTokens, tokensB.NumericTokens))
+            return false;
+
+        // If both sides provide alpha prefixes, require overlap to avoid loose numeric collisions.
+        if (tokensA.AlphaTokens.Count > 0 && tokensB.AlphaTokens.Count > 0 &&
+            !tokensA.AlphaTokens.Overlaps(tokensB.AlphaTokens))
+            return false;
+
+        return true;
+    }
+
+    private static (HashSet<string> NumericTokens, HashSet<string> AlphaTokens) TokenizeBillNo(string value)
+    {
+        var numeric = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var alpha = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match match in Regex.Matches(value.ToLowerInvariant(), @"[a-z]+|\d+"))
+        {
+            var token = match.Value.Trim();
+            if (token.Length == 0) continue;
+            if (char.IsDigit(token[0])) numeric.Add(token);
+            else alpha.Add(token);
+        }
+        return (numeric, alpha);
+    }
+
+    private static bool HasStrongNumericCoreMatch(HashSet<string> numsA, HashSet<string> numsB)
+    {
+        if (numsA.Count == 0 || numsB.Count == 0)
+            return false;
+
+        var primaryA = FindPrimaryBillToken(numsA);
+        var primaryB = FindPrimaryBillToken(numsB);
+        if (!string.IsNullOrWhiteSpace(primaryA) && !string.IsNullOrWhiteSpace(primaryB) && primaryA != primaryB)
+            return false;
+
+        if (!numsA.Overlaps(numsB))
+            return false;
+
+        var fyA = ExtractFinancialYearTokens(numsA);
+        var fyB = ExtractFinancialYearTokens(numsB);
+        if (fyA.Count > 0 && fyB.Count > 0 && !fyA.Overlaps(fyB))
+            return false;
+
+        return true;
+    }
+
+    private static string FindPrimaryBillToken(HashSet<string> numericTokens)
+    {
+        return numericTokens
+            .Select(t => int.TryParse(t, out var n) ? (Token: t, Value: n, Len: t.Length) : (Token: "", Value: -1, Len: 0))
+            .Where(x => x.Value >= 100 || x.Len >= 3)
+            .OrderByDescending(x => x.Value)
+            .Select(x => x.Token)
+            .FirstOrDefault() ?? "";
+    }
+
+    private static HashSet<string> ExtractFinancialYearTokens(HashSet<string> numericTokens)
+    {
+        var years = numericTokens
+            .Where(t => t.Length <= 2)
+            .Select(t => int.TryParse(t, out var y) ? y : -1)
+            .Where(y => y >= 0 && y <= 99)
+            .Distinct()
+            .ToList();
+
+        var fySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var y in years)
+        {
+            if (years.Contains(y + 1) || years.Contains(y - 1))
+                fySet.Add(y.ToString("00"));
+        }
+        return fySet;
+    }
 
     /// <summary>
     /// Voucher-date fallback is allowed only when Bill No is missing on at least one side.

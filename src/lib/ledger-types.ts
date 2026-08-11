@@ -51,7 +51,8 @@ export type ComparisonStatus =
   | "MissingInA"
   | "MissingInB"
   | "Duplicate"
-  | "PotentialMatch";
+  | "PotentialMatch"
+  | "PendingRecord";
 
 export type ComparisonPair = {
   id: string;
@@ -74,6 +75,7 @@ export type ComparisonSummary = {
   missingInB: number;
   duplicates: number;
   potentialMatches: number;
+  pendingRecords?: number;
 };
 
 export type ComparisonResult = {
@@ -95,6 +97,7 @@ export const statusLabel: Record<ComparisonStatus, string> = {
   MissingInB: "Missing in B",
   Duplicate: "Duplicate",
   PotentialMatch: "Potential match",
+  PendingRecord: "Pending record",
 };
 
 export function formatStatusLabel(
