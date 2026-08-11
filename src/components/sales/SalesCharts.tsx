@@ -1,6 +1,7 @@
 import type {
   SalesByGroupItem,
   SalesBySubGroupItem,
+  SalesTrendItem,
   SalesTrendPeriod,
 } from "@/lib/sales-dashboard-types";
 import { formatCrores, formatSalesCurrency } from "@/lib/sales-dashboard-api";
@@ -33,12 +34,19 @@ const GROUP_COLORS = [
 interface SalesChartsProps {
   byGroup: SalesByGroupItem[];
   bySubGroup: SalesBySubGroupItem[];
-  /** Kept for filter state; trend chart is placeholder until ERP date series exists. */
+  trend?: SalesTrendItem[];
+  trendLoading?: boolean;
+  /** Kept for filter state compatibility. */
   trendPeriod?: SalesTrendPeriod;
   onTrendPeriodChange?: (period: SalesTrendPeriod) => void;
 }
 
-export function SalesCharts({ byGroup, bySubGroup }: SalesChartsProps) {
+export function SalesCharts({
+  byGroup,
+  bySubGroup,
+  trend = [],
+  trendLoading = false,
+}: SalesChartsProps) {
   const groupConfig = Object.fromEntries(
     byGroup.map((g, i) => [
       g.groupName,
@@ -50,21 +58,97 @@ export function SalesCharts({ byGroup, bySubGroup }: SalesChartsProps) {
     salesAmount: { label: "Sales", color: "var(--primary)" },
   } satisfies ChartConfig;
 
+  const trendConfig = {
+    amount: { label: "Total Sales", color: "var(--primary)" },
+  } satisfies ChartConfig;
+
   const pieData = byGroup.map((g, i) => ({
     name: g.groupName,
-    value: g.amount,
+    value: Number(g.amount) || 0,
     percentage: g.percentage,
     fill: GROUP_COLORS[i % GROUP_COLORS.length],
   }));
 
+  const subGroupChartData = bySubGroup.map((s) => ({
+    subGroupName: s.subGroupName,
+    salesAmount: Number(s.salesAmount) || 0,
+  }));
+
+  const trendChartData = trend.map((t) => ({
+    period: t.period,
+    amount: Number(t.amount) || 0,
+  }));
+
+  const subGroupMax = subGroupChartData.reduce(
+    (max, row) => (row.salesAmount > max ? row.salesAmount : max),
+    0,
+  );
+  const subGroupYMax = subGroupMax > 0 ? subGroupMax * 1.1 : 1;
+
+  const trendMax = trendChartData.reduce(
+    (max, row) => (row.amount > max ? row.amount : max),
+    0,
+  );
+  const trendYMax = trendMax > 0 ? trendMax * 1.1 : 1;
+
   return (
     <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
-      <section className="rounded-xl border border-dashed border-border bg-card/50 shadow-sm lg:col-span-1">
+      <section className="rounded-xl border border-border bg-card shadow-sm lg:col-span-1">
         <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales Trend (₹)</h2>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">Year by year (Indian FY)</p>
         </header>
-        <div className="flex min-h-[140px] items-center justify-center px-4 py-8 text-center text-xs text-muted-foreground sm:min-h-0 sm:aspect-[16/10] sm:py-0 sm:text-sm">
-          Coming soon — no date series in SP_Sales_EBIDTA
+        <div className="p-2 sm:p-4">
+          {trendLoading && trendChartData.length === 0 ? (
+            <div className="flex h-[180px] items-center justify-center text-sm text-muted-foreground sm:aspect-[16/10] sm:h-auto">
+              Loading yearly sales…
+            </div>
+          ) : trendChartData.length === 0 ? (
+            <div className="flex h-[180px] items-center justify-center text-sm text-muted-foreground sm:aspect-[16/10] sm:h-auto">
+              No yearly sales data
+            </div>
+          ) : (
+            <ChartContainer
+              config={trendConfig}
+              className="aspect-[16/11] w-full sm:aspect-[16/10]"
+            >
+              <BarChart data={trendChartData} margin={{ left: 4, right: 4, top: 8, bottom: 8 }}>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                <XAxis
+                  dataKey="period"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={6}
+                  fontSize={10}
+                  interval={0}
+                />
+                <YAxis
+                  type="number"
+                  domain={[0, trendYMax]}
+                  allowDataOverflow={false}
+                  tickLine={false}
+                  axisLine={false}
+                  width={48}
+                  fontSize={10}
+                  tickCount={5}
+                  tickFormatter={(v) => `${(Number(v) / 1e7).toFixed(1)}Cr`}
+                />
+                <ChartTooltip
+                  content={
+                    <ChartTooltipContent
+                      formatter={(value) => formatSalesCurrency(Number(value))}
+                    />
+                  }
+                />
+                <Bar
+                  dataKey="amount"
+                  fill="var(--color-amount)"
+                  radius={[4, 4, 0, 0]}
+                  isAnimationActive={false}
+                />
+              </BarChart>
+            </ChartContainer>
+          )}
         </div>
       </section>
 
@@ -137,19 +221,19 @@ export function SalesCharts({ byGroup, bySubGroup }: SalesChartsProps) {
         <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales by Sub Group (₹)</h2>
         </header>
-        <div className="p-2 sm:p-4 overflow-x-auto">
-          {bySubGroup.length === 0 ? (
+        <div className="overflow-x-auto p-2 sm:p-4">
+          {subGroupChartData.length === 0 ? (
             <div className="flex h-[180px] items-center justify-center text-sm text-muted-foreground sm:aspect-[16/10] sm:h-auto">
               No sub-group data
             </div>
           ) : (
             <ChartContainer
               config={subGroupConfig}
-              className="min-w-[280px] aspect-[16/11] w-full sm:min-w-0 sm:aspect-[16/10]"
+              className="aspect-[16/11] w-full min-w-[280px] sm:min-w-0 sm:aspect-[16/10]"
             >
               <BarChart
-                data={bySubGroup}
-                margin={{ left: 0, right: 4, top: 8, bottom: 28 }}
+                data={subGroupChartData}
+                margin={{ left: 4, right: 4, top: 8, bottom: 28 }}
               >
                 <CartesianGrid vertical={false} strokeDasharray="3 3" />
                 <XAxis
@@ -165,10 +249,14 @@ export function SalesCharts({ byGroup, bySubGroup }: SalesChartsProps) {
                   tickFormatter={(v) => String(v).slice(0, 10)}
                 />
                 <YAxis
+                  type="number"
+                  domain={[0, subGroupYMax]}
+                  allowDataOverflow={false}
                   tickLine={false}
                   axisLine={false}
-                  width={36}
+                  width={48}
                   fontSize={10}
+                  tickCount={5}
                   tickFormatter={(v) => `${(Number(v) / 1e7).toFixed(1)}Cr`}
                 />
                 <ChartTooltip
@@ -178,7 +266,12 @@ export function SalesCharts({ byGroup, bySubGroup }: SalesChartsProps) {
                     />
                   }
                 />
-                <Bar dataKey="salesAmount" fill="var(--color-salesAmount)" radius={[4, 4, 0, 0]} />
+                <Bar
+                  dataKey="salesAmount"
+                  fill="var(--color-salesAmount)"
+                  radius={[4, 4, 0, 0]}
+                  isAnimationActive={false}
+                />
               </BarChart>
             </ChartContainer>
           )}

@@ -127,6 +127,52 @@ public class SalesDashboardService
     }
 
     /// <summary>
+    /// Year-by-year Total Sales for Sales Trend chart.
+    /// Each point = SP_Sales_EBIDTA Sales grand-total Amount for that Indian FY (Apr–Mar).
+    /// Current FY is capped at <paramref name="asOf"/>.
+    /// </summary>
+    public async Task<List<SalesTrendDto>> GetSalesYearlyTrendAsync(
+        string company,
+        DateTime asOf,
+        int years = 5)
+    {
+        years = Math.Clamp(years, 1, 8);
+
+        // Indian FY: Apr 1 ? Mar 31. FY label uses start calendar year.
+        var currentFyStartYear = asOf.Month >= 4 ? asOf.Year : asOf.Year - 1;
+
+        var ranges = new List<(string Period, DateTime From, DateTime To)>();
+        for (var i = years - 1; i >= 0; i--)
+        {
+            var startYear = currentFyStartYear - i;
+            var from = new DateTime(startYear, 4, 1);
+            if (from > asOf)
+                continue;
+
+            var to = new DateTime(startYear + 1, 3, 31);
+            if (to > asOf)
+                to = asOf;
+
+            var label = $"FY {startYear % 100:D2}-{(startYear + 1) % 100:D2}";
+            ranges.Add((label, from, to));
+        }
+
+        // Parallel SP calls — each year uses the same ERP Total Sales grand-total logic
+        var tasks = ranges.Select(async range =>
+        {
+            var totals = await GetSalesTotalsAsync(company, range.From, range.To);
+            return new SalesTrendDto
+            {
+                Period = range.Period,
+                Amount = totals.TotalSales,
+            };
+        });
+
+        var points = await Task.WhenAll(tasks);
+        return points.ToList();
+    }
+
+    /// <summary>
     /// Prefer SP Sales grand-total row (Column1=Sales, blank InterGroup+Groupname).
     /// Amount = Total Sales; Netwt = Total Quantity; PerKg = Average Rate.
     /// Fallback: sum detail Sales Amount / Netwt; rate = ERP PerKg on single grand row,

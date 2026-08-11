@@ -125,6 +125,38 @@ export async function getTotalSales(filters: {
   };
 }
 
+/** Year-by-year Total Sales (Indian FY) from SP_Sales_EBIDTA grand-total Amount. */
+export async function getSalesYearlyTrend(filters: {
+  company: string;
+  asOf: string;
+  years?: number;
+}): Promise<SalesTrendItem[]> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    asOf: filters.asOf,
+    years: String(filters.years ?? 5),
+  });
+
+  const response = await fetch(
+    getSalesApiUrl(`/api/SalesDashboard/yearly-trend?${params}`),
+  );
+  const payload = (await response.json()) as {
+    trend?: Array<Record<string, unknown>>;
+    Trend?: Array<Record<string, unknown>>;
+    message?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.message || "Failed to load yearly sales trend");
+  }
+
+  const raw = payload.trend ?? payload.Trend ?? [];
+  return raw.map((t) => ({
+    period: str(t.period ?? t.Period),
+    amount: num(t.amount ?? t.Amount),
+  }));
+}
+
 type ApiSummary = {
   totalSales?: number;
   TotalSales?: number;
