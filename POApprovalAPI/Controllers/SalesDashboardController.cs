@@ -50,7 +50,7 @@ public class SalesDashboardController : ControllerBase
                 company,
                 dateFrom = from.ToString("yyyy-MM-dd"),
                 dateTo = to.ToString("yyyy-MM-dd"),
-                source = "SP_Sales_EBIDTA",
+                source = "vw_Sales_EBIDTA",
                 salesColumn = totals.SalesColumn,
                 quantityColumn = totals.QuantityColumn,
                 rateColumn = totals.RateColumn,
@@ -58,7 +58,9 @@ public class SalesDashboardController : ControllerBase
                 rowCount = totals.RowCount,
                 columns = totals.Columns,
                 elapsedSeconds = totals.ElapsedSeconds,
-                note = "KPIs from Sales grand-total row; byGroup/bySubGroup from Sales leaf rows (SubGroupName).",
+                note =
+                    "Mirrors SP_Sales_EBIDTA aggregation on vw_Sales_EBIDTA; excl. InterGroup='Intergroup' " +
+                    "(IsInterCompany='yes'). KPIs from Sales grand-total; byGroup/bySubGroup from leaf rows.",
             });
         }
         catch (Exception ex)
@@ -68,7 +70,8 @@ public class SalesDashboardController : ControllerBase
     }
 
     /// <summary>
-    /// Year-by-year Total Sales (Indian FY Apr–Mar) from SP_Sales_EBIDTA grand-total Amount.
+    /// Year-by-year Total Sales (Indian FY Apr–Mar) excl. intercompany
+    /// (same GetSalesTotalsAsync / vw_Sales_EBIDTA path as KPIs).
     /// </summary>
     [HttpGet("yearly-trend")]
     public async Task<IActionResult> GetYearlyTrend(
@@ -87,8 +90,48 @@ public class SalesDashboardController : ControllerBase
                 company,
                 asOf = through.ToString("yyyy-MM-dd"),
                 years,
-                source = "SP_Sales_EBIDTA",
-                note = "Each bar is Sales grand-total Amount for that FY (Apr–Mar); current FY capped at asOf.",
+                source = "vw_Sales_EBIDTA",
+                note =
+                    "Each bar is excl-IC Sales grand-total Amount for that FY (Apr–Mar); current FY capped at asOf. " +
+                    "Same basis as total-sales (vw_Sales_EBIDTA, InterGroup <> Intergroup).",
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Top countries by Sales Value from vw_Countrywise_sales_dashboard
+    /// (Value = Amount - DebitNote; intercompany already excluded in the view).
+    /// Company maps to FactoryInfo.GroupName; dates map to overlapping InvYear FYs.
+    /// </summary>
+    [HttpGet("by-country")]
+    public async Task<IActionResult> GetByCountry(
+        [FromQuery] string company = "All Companies",
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] int top = 5)
+    {
+        try
+        {
+            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
+            var to = dateTo ?? DateTime.Today;
+            var result = await _salesDashboard.GetSalesByCountryAsync(company, from, to, top);
+
+            return Ok(new
+            {
+                byCountry = result.ByCountry,
+                company,
+                dateFrom = from.ToString("yyyy-MM-dd"),
+                dateTo = to.ToString("yyyy-MM-dd"),
+                invYears = result.InvYears,
+                periodLabel = result.PeriodLabel,
+                groupNames = result.GroupNames,
+                top,
+                source = "vw_Countrywise_sales_dashboard",
+                note = "SUM(Value) by Country; Value = Amount - DebitNote; excl. intercompany in view; FY totals via InvYear; company maps to FactoryInfo.GroupName.",
             });
         }
         catch (Exception ex)

@@ -9,19 +9,39 @@ import type {
   SalesTrendItem,
   TopCustomer,
   TopProduct,
+  SalesByCountryItem,
+  SalesByCountryResponse,
   DetailedSalesAnalysisItem,
 } from "@/lib/sales-dashboard-types";
 import { viewToRptType } from "@/lib/sales-dashboard-types";
 import { formatINR, formatMoneyAmount } from "@/lib/mock-data";
 
-export const DEFAULT_SALES_FILTERS: SalesDashboardFilters = {
-  company: "Oswal Extrusion Limited",
-  dateFrom: "2025-04-01",
-  dateTo: "2025-07-31",
-  view: "Summary",
-  category: "Sales",
-  trendPeriod: "Last 6 Months",
-};
+/** Indian FY start year for a calendar date (Apr–Mar). */
+export function indianFyStartYear(date = new Date()): number {
+  return date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1;
+}
+
+/** Format Indian FY as YYYY-MM-DD range (Apr 1 – Mar 31). */
+export function indianFyDateRange(fyStartYear: number): { dateFrom: string; dateTo: string } {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return {
+    dateFrom: `${fyStartYear}-04-01`,
+    dateTo: `${fyStartYear + 1}-03-31`,
+  };
+}
+
+export const DEFAULT_SALES_FILTERS: SalesDashboardFilters = (() => {
+  const fy = indianFyStartYear();
+  const range = indianFyDateRange(fy);
+  return {
+    company: "Oswal Extrusion Limited",
+    dateFrom: range.dateFrom,
+    dateTo: new Date().toISOString().slice(0, 10),
+    view: "Summary" as const,
+    category: "Sales" as const,
+    trendPeriod: "Last 6 Months" as const,
+  };
+})();
 
 /**
  * Stock Analysis SP is slow; Vite's /api proxy can time out.
@@ -66,7 +86,7 @@ export async function getSalesCompanies(): Promise<string[]> {
   return ["All Companies", ...unique.filter((c) => c !== "All Companies")];
 }
 
-/** Live ERP Amount + Netwt + PerKg + byGroup/bySubGroup from SP_Sales_EBIDTA. */
+/** Live ERP Amount + Netwt + PerKg + byGroup/bySubGroup from vw_Sales_EBIDTA (excl. IC). */
 export async function getTotalSales(filters: {
   company: string;
   dateFrom: string;
@@ -125,7 +145,7 @@ export async function getTotalSales(filters: {
   };
 }
 
-/** Year-by-year Total Sales (Indian FY) from SP_Sales_EBIDTA grand-total Amount. */
+/** Year-by-year Total Sales (Indian FY) excl. IC from vw_Sales_EBIDTA (same as total-sales). */
 export async function getSalesYearlyTrend(filters: {
   company: string;
   asOf: string;
@@ -155,6 +175,54 @@ export async function getSalesYearlyTrend(filters: {
     period: str(t.period ?? t.Period),
     amount: num(t.amount ?? t.Amount),
   }));
+}
+
+/** Top countries by Sales Value from vw_Countrywise_sales_dashboard (excl. IC). */
+export async function getSalesByCountry(filters: {
+  company: string;
+  dateFrom: string;
+  dateTo: string;
+  top?: number;
+}): Promise<SalesByCountryResponse> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    top: String(filters.top ?? 5),
+  });
+
+  const response = await fetch(
+    getSalesApiUrl(`/api/SalesDashboard/by-country?${params}`),
+  );
+  const payload = (await response.json()) as {
+    byCountry?: Array<Record<string, unknown>>;
+    ByCountry?: Array<Record<string, unknown>>;
+    invYears?: string[];
+    InvYears?: string[];
+    periodLabel?: string;
+    PeriodLabel?: string;
+    message?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.message || "Failed to load sales by country");
+  }
+
+  const raw = payload.byCountry ?? payload.ByCountry ?? [];
+  const invYears = (payload.invYears ?? payload.InvYears ?? []).map(String);
+  const periodLabel =
+    str(payload.periodLabel ?? payload.PeriodLabel) ||
+    (invYears.length > 0 ? invYears.map((y) => `FY ${y}`).join(", ") : "");
+
+  return {
+    byCountry: raw.map((c, i) => ({
+      rank: num(c.rank ?? c.Rank) || i + 1,
+      countryName: str(c.countryName ?? c.CountryName) || "Unknown",
+      salesAmount: num(c.salesAmount ?? c.SalesAmount),
+    })),
+    invYears,
+    periodLabel,
+  };
 }
 
 type ApiSummary = {
@@ -205,6 +273,8 @@ type ApiResponse = {
   ByCompany?: Array<Record<string, unknown>>;
   topProducts?: Array<Record<string, unknown>>;
   TopProducts?: Array<Record<string, unknown>>;
+  byCountry?: Array<Record<string, unknown>>;
+  ByCountry?: Array<Record<string, unknown>>;
   topCustomers?: Array<Record<string, unknown>>;
   TopCustomers?: Array<Record<string, unknown>>;
   bySubGroup?: Array<Record<string, unknown>>;
@@ -329,6 +399,16 @@ function mapApiResponse(
     salesAmount: num(c.salesAmount ?? c.SalesAmount),
   }));
 
+  const byCountryRaw = payload.byCountry ?? payload.ByCountry ?? [];
+  const byCountry: SalesByCountryItem[] =
+    byCountryRaw.length > 0
+      ? byCountryRaw.map((c, i) => ({
+          rank: num(c.rank ?? c.Rank) || i + 1,
+          countryName: str(c.countryName ?? c.CountryName),
+          salesAmount: num(c.salesAmount ?? c.SalesAmount),
+        }))
+      : [];
+
   const bySubGroupRaw = payload.bySubGroup ?? payload.BySubGroup ?? [];
   const bySubGroup: SalesBySubGroupItem[] = bySubGroupRaw.map((s) => ({
     subGroupName: str(s.subGroupName ?? s.SubGroupName),
@@ -369,6 +449,7 @@ function mapApiResponse(
     byGroup,
     byCompany,
     topProducts,
+    byCountry,
     topCustomers,
     bySubGroup,
     detailedAnalysis,

@@ -8,6 +8,7 @@ import { SalesCharts } from "@/components/sales/SalesCharts";
 import { SalesSummaryTables } from "@/components/sales/SalesSummaryTables";
 import {
   DEFAULT_SALES_FILTERS,
+  getSalesByCountry,
   getSalesCompanies,
   getSalesYearlyTrend,
   getTotalSales,
@@ -94,6 +95,25 @@ function SalesDashboardPage() {
     retry: 1,
   });
 
+  const byCountryQuery = useQuery({
+    queryKey: [
+      "sales-by-country",
+      filters.company,
+      filters.dateFrom,
+      filters.dateTo,
+      refreshToken,
+    ],
+    queryFn: () =>
+      getSalesByCountry({
+        company: filters.company,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        top: 5,
+      }),
+    staleTime: 60_000,
+    retry: 1,
+  });
+
   // Prefer a real FactoryInfo company once the list loads
   useEffect(() => {
     if (!companyList?.length) return;
@@ -117,6 +137,7 @@ function SalesDashboardPage() {
     setRefreshToken((n) => n + 1);
     void totalsQuery.refetch();
     void yearlyTrendQuery.refetch();
+    void byCountryQuery.refetch();
   }
 
   const summary = useMemo<SalesDashboardSummary>(
@@ -146,8 +167,9 @@ function SalesDashboardPage() {
         <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
           <span className="sm:hidden">Live sales KPIs & group charts from ERP.</span>
           <span className="hidden sm:inline">
-            Live KPIs, Sales by Group & Sub Group from `SP_Sales_EBIDTA`. Other sections coming
-            soon.
+            Live KPIs, Sales by Group/Sub Group from `vw_Sales_EBIDTA` (excl. IC; same basis as
+            `SP_Sales_EBIDTA`), and Sales by Country from `vw_Countrywise_sales_dashboard` (excl. IC).
+            Other sections coming soon.
           </span>
         </p>
       </div>
@@ -155,7 +177,9 @@ function SalesDashboardPage() {
       <SalesFilters
         companies={companies}
         filters={filters}
-        isRefreshing={totalsQuery.isFetching || yearlyTrendQuery.isFetching}
+        isRefreshing={
+          totalsQuery.isFetching || yearlyTrendQuery.isFetching || byCountryQuery.isFetching
+        }
         onChange={patchFilters}
         onRefresh={handleRefresh}
       />
@@ -164,18 +188,18 @@ function SalesDashboardPage() {
         <p className="text-xs text-muted-foreground">Loading companies from FactoryInfo…</p>
       )}
 
-      {(totalsQuery.isFetching || yearlyTrendQuery.isFetching) && (
+      {(totalsQuery.isFetching || yearlyTrendQuery.isFetching || byCountryQuery.isFetching) && (
         <div
           className="flex items-center gap-2 text-xs text-muted-foreground"
           aria-live="polite"
         >
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          Loading live data from SP_Sales_EBIDTA…
+          Loading live sales data from ERP…
         </div>
       )}
       {totalsQuery.isError && (
         <p className="text-xs text-destructive" role="alert">
-          Live SP_Sales_EBIDTA failed.{" "}
+          Live sales totals failed.{" "}
           {totalsQuery.error instanceof Error ? totalsQuery.error.message : ""}
         </p>
       )}
@@ -183,6 +207,12 @@ function SalesDashboardPage() {
         <p className="text-xs text-destructive" role="alert">
           Yearly sales trend failed.{" "}
           {yearlyTrendQuery.error instanceof Error ? yearlyTrendQuery.error.message : ""}
+        </p>
+      )}
+      {byCountryQuery.isError && (
+        <p className="text-xs text-destructive" role="alert">
+          Sales by country failed.{" "}
+          {byCountryQuery.error instanceof Error ? byCountryQuery.error.message : ""}
         </p>
       )}
 
@@ -195,7 +225,12 @@ function SalesDashboardPage() {
         trendLoading={yearlyTrendQuery.isFetching}
       />
 
-      <SalesSummaryTables topProducts={[]} topCustomers={[]} bySubGroup={bySubGroup} />
+      <SalesSummaryTables
+        topProducts={[]}
+        byCountry={byCountryQuery.data?.byCountry ?? []}
+        countryPeriodLabel={byCountryQuery.data?.periodLabel}
+        bySubGroup={bySubGroup}
+      />
 
       <ComingSoonSection
         title="Detailed sales analysis"

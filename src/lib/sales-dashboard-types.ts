@@ -49,6 +49,22 @@ export interface TopProduct {
   salesAmount: number;
 }
 
+/** Sales amounts aggregated by destination/billing country (ERP-backed when available). */
+export interface SalesByCountryItem {
+  rank: number;
+  countryName: string;
+  salesAmount: number;
+}
+
+/** Response for GET /api/SalesDashboard/by-country including FY period label. */
+export interface SalesByCountryResponse {
+  byCountry: SalesByCountryItem[];
+  invYears: string[];
+  /** e.g. "FY 25-26" or "FY 24-25, FY 25-26" */
+  periodLabel: string;
+}
+
+/** @deprecated Prefer SalesByCountryItem — kept temporarily for older API shapes. */
 export interface TopCustomer {
   rank: number;
   customerName: string;
@@ -83,6 +99,8 @@ export interface SalesDashboardData {
   byGroup: SalesByGroupItem[];
   byCompany: SalesByCompanyItem[];
   topProducts: TopProduct[];
+  byCountry: SalesByCountryItem[];
+  /** @deprecated Prefer byCountry */
   topCustomers: TopCustomer[];
   bySubGroup: SalesBySubGroupItem[];
   detailedAnalysis: DetailedSalesAnalysisItem[];

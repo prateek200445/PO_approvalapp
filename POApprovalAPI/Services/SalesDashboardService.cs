@@ -39,8 +39,12 @@ public class SalesDashboardService
     }
 
     /// <summary>
-    /// Total Sales + Quantity + Average Rate from ERP SP_Sales_EBIDTA.
-    /// Amount / Netwt / PerKg on Sales grand-total row (Column1=Sales, blank InterGroup+Groupname).
+    /// Total Sales + Quantity + Average Rate + byGroup/bySubGroup.
+    /// Mirrors ERP SP_Sales_EBIDTA (aggregates vw_Sales_EBIDTA with the same GROUPING SETS),
+    /// but excludes intercompany: InterGroup &lt;&gt; 'Intergroup'
+    /// (vw_Sales_EBIDTA maps CommonLedgerMaster.IsInterCompany='yes' ? InterGroup='Intergroup').
+    /// SP_Sales_EBIDTA itself has no IC filter / param ? country chart uses the same IC flag
+    /// via vw_Countrywise_sales_dashboard (IsInterCompany != 'yes').
     /// </summary>
     public async Task<SalesTotalsDto> GetSalesTotalsAsync(
         string company,
@@ -53,19 +57,41 @@ public class SalesDashboardService
         var companies = (await GetCompaniesAsync()).ToList();
         var selectedCompanies = ResolveSelectedCompanies(company, companies);
         var companyTable = BuildCompanyTvp(selectedCompanies);
+        // Same TVP type SP_Sales_EBIDTA uses for @companyname
         var typeName = await ResolveCompanyTableTypeAsync(connection, "SP_Sales_EBIDTA");
 
+        // Exact SP_Sales_EBIDTA select shape + company join, plus InterGroup IC filter.
+        // Do not invent alternate Amount/Netwt math ? same ROUND/FORMAT as the SP.
+        const string sql = @"
+SELECT
+    'Sales' AS Column1,
+    InterGroup,
+    Groupname,
+    SubGroupName,
+    ROUND(SUM(Amount), 0) AS Amount,
+    ROUND(SUM(netwt), 0) AS Netwt,
+    CASE WHEN SUM(netwt) != 0
+         THEN FORMAT(ROUND(ROUND(SUM(Amount), 0) / ROUND(SUM(netwt), 0), 2), '#.00')
+         ELSE FORMAT(0, '#.00') END AS PerKg,
+    FORMAT(ROUND(SUM(SGSTAmount), 2), '#.00') AS SGSTAmount
+FROM dbo.vw_Sales_EBIDTA WITH (NOLOCK)
+INNER JOIN @companyname C ON C.StringValue = CompanyName
+WHERE invdate BETWEEN @DateFrom AND @DateTo
+  AND InterGroup <> N'Intergroup'
+GROUP BY GROUPING SETS ((InterGroup, Groupname, SubGroupName), (InterGroup), ())
+ORDER BY InterGroup, Groupname, SubGroupName";
+
         using var command = connection.CreateCommand();
-        command.CommandText = "SP_Sales_EBIDTA";
-        command.CommandType = CommandType.StoredProcedure;
+        command.CommandText = sql;
+        command.CommandType = CommandType.Text;
         command.CommandTimeout = 0;
 
         var companyParam = command.Parameters.Add("@companyname", SqlDbType.Structured);
         companyParam.TypeName = typeName;
         companyParam.Value = companyTable;
 
-        command.Parameters.Add("@DateFrom", SqlDbType.VarChar, 20).Value = dateFrom.ToString("yyyy-MM-dd");
-        command.Parameters.Add("@DateTo", SqlDbType.VarChar, 20).Value = dateTo.ToString("yyyy-MM-dd");
+        command.Parameters.Add("@DateFrom", SqlDbType.Date).Value = dateFrom.Date;
+        command.Parameters.Add("@DateTo", SqlDbType.Date).Value = dateTo.Date;
 
         var dataSet = new DataSet();
         using (var adapter = new SqlDataAdapter((SqlCommand)command))
@@ -86,14 +112,14 @@ public class SalesDashboardService
         if (salesCol == null)
         {
             throw new InvalidOperationException(
-                "SP_Sales_EBIDTA returned no recognizable Sales column. Columns: " +
+                "vw_Sales_EBIDTA (excl. IC) returned no recognizable Sales column. Columns: " +
                 string.Join(", ", columns));
         }
 
         var qtyCol = ResolveQuantityColumn(table);
         var rateCol = ResolveRateColumn(table);
 
-        // SP_Sales_EBIDTA row shape (ERP grid):
+        // Same row shape as SP_Sales_EBIDTA ERP grid (IC already filtered out):
         // Column1, InterGroup, Groupname, SubGroupName, Amount, Netwt, PerKg, SGSTAmount
         // Sales grand total: Column1=Sales, InterGroup blank, Groupname blank
         var totals = ResolveSalesGrandTotals(table, salesCol, qtyCol, rateCol);
@@ -107,7 +133,7 @@ public class SalesDashboardService
             SalesColumn = salesCol.ColumnName,
             QuantityColumn = qtyCol?.ColumnName ?? "",
             RateColumn = rateCol?.ColumnName ?? "",
-            Method = totals.Method,
+            Method = totals.Method + "_ExclIntercompany",
             RowCount = table.Rows.Count,
             Columns = columns,
             ElapsedSeconds = sw.Elapsed.TotalSeconds,
@@ -128,8 +154,8 @@ public class SalesDashboardService
 
     /// <summary>
     /// Year-by-year Total Sales for Sales Trend chart.
-    /// Each point = SP_Sales_EBIDTA Sales grand-total Amount for that Indian FY (Apr�Mar).
-    /// Current FY is capped at <paramref name="asOf"/>.
+    /// Each point = excl-IC Sales grand-total Amount (vw_Sales_EBIDTA, same as GetSalesTotalsAsync)
+    /// for that Indian FY (Apr?Mar). Current FY is capped at <paramref name="asOf"/>.
     /// </summary>
     public async Task<List<SalesTrendDto>> GetSalesYearlyTrendAsync(
         string company,
@@ -157,7 +183,7 @@ public class SalesDashboardService
             ranges.Add((label, from, to));
         }
 
-        // Parallel SP calls � each year uses the same ERP Total Sales grand-total logic
+        // Parallel SP calls ? each year uses the same ERP Total Sales grand-total logic
         var tasks = ranges.Select(async range =>
         {
             var totals = await GetSalesTotalsAsync(company, range.From, range.To);
@@ -170,6 +196,127 @@ public class SalesDashboardService
 
         var points = await Task.WhenAll(tasks);
         return points.ToList();
+    }
+
+    /// <summary>
+    /// Sales by Country from ERP vw_Countrywise_sales_dashboard (Value = Amount - DebitNote).
+    /// View already excludes intercompany (IsInterCompany != 'yes').
+    /// Filters: FactoryInfo.GroupName for selected company; InvYear for Indian FYs
+    /// overlapping dateFrom?dateTo. View is FY-aggregated (not day-level).
+    /// </summary>
+    public async Task<SalesByCountryResultDto> GetSalesByCountryAsync(
+        string company,
+        DateTime dateFrom,
+        DateTime dateTo,
+        int top = 5)
+    {
+        if (top <= 0)
+            top = 5;
+        top = Math.Clamp(top, 1, 100);
+
+        using var connection = _database.CreateConnection();
+
+        var allCompanies = (await GetCompaniesAsync()).ToList();
+        var selectedCompanies = ResolveSelectedCompanies(company, allCompanies);
+        var isAll = string.IsNullOrWhiteSpace(company) ||
+                    company.Equals("All Companies", StringComparison.OrdinalIgnoreCase) ||
+                    company.Contains("(All)", StringComparison.OrdinalIgnoreCase);
+
+        var groupNames = isAll
+            ? new List<string>()
+            : (await connection.QueryAsync<string>(
+                @"SELECT DISTINCT LTRIM(RTRIM(GroupName))
+                  FROM FactoryInfo WITH (NOLOCK)
+                  WHERE Name IN @Names
+                    AND ISNULL(LTRIM(RTRIM(GroupName)), '') <> ''",
+                new { Names = selectedCompanies })).ToList();
+
+        var invYears = GetInvYearsOverlapping(dateFrom, dateTo).ToList();
+        var periodLabel = FormatPeriodLabel(invYears);
+        if (invYears.Count == 0 || (!isAll && groupNames.Count == 0))
+        {
+            return new SalesByCountryResultDto
+            {
+                ByCountry = new List<SalesByCountryDto>(),
+                GroupNames = groupNames,
+                InvYears = invYears,
+                PeriodLabel = periodLabel,
+            };
+        }
+
+        // Value (= Amount - DebitNote) is the chart measure; IC already excluded in the view.
+        var sql = isAll
+            ? @"
+SELECT TOP (@Top)
+    Country AS CountryName,
+    SUM(CAST(Value AS float)) AS SalesAmount
+FROM dbo.vw_Countrywise_sales_dashboard WITH (NOLOCK)
+WHERE InvYear IN @InvYears
+GROUP BY Country
+ORDER BY SalesAmount DESC"
+            : @"
+SELECT TOP (@Top)
+    Country AS CountryName,
+    SUM(CAST(Value AS float)) AS SalesAmount
+FROM dbo.vw_Countrywise_sales_dashboard WITH (NOLOCK)
+WHERE InvYear IN @InvYears
+  AND GroupName IN @GroupNames
+GROUP BY Country
+ORDER BY SalesAmount DESC";
+
+        var rows = (await connection.QueryAsync<SalesByCountryDto>(
+            sql,
+            isAll
+                ? (object)new { Top = top, InvYears = invYears }
+                : new { Top = top, InvYears = invYears, GroupNames = groupNames })).ToList();
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            rows[i].Rank = i + 1;
+            rows[i].CountryName = string.IsNullOrWhiteSpace(rows[i].CountryName)
+                ? "Unknown"
+                : rows[i].CountryName.Trim();
+        }
+
+        return new SalesByCountryResultDto
+        {
+            ByCountry = rows,
+            GroupNames = groupNames,
+            InvYears = invYears,
+            PeriodLabel = periodLabel,
+        };
+    }
+
+    /// <summary>Indian FY labels (yy-yy+1) that overlap [dateFrom, dateTo].</summary>
+    private static IEnumerable<string> GetInvYearsOverlapping(DateTime dateFrom, DateTime dateTo)
+    {
+        if (dateTo < dateFrom)
+            (dateFrom, dateTo) = (dateTo, dateFrom);
+
+        var years = new SortedSet<string>(StringComparer.Ordinal);
+        var cursor = new DateTime(dateFrom.Year, dateFrom.Month, 1);
+        var end = new DateTime(dateTo.Year, dateTo.Month, 1);
+        while (cursor <= end)
+        {
+            years.Add(ToInvYearLabel(cursor));
+            cursor = cursor.AddMonths(1);
+        }
+
+        return years;
+    }
+
+    private static string ToInvYearLabel(DateTime date)
+    {
+        var startYear = date.Month >= 4 ? date.Year : date.Year - 1;
+        return $"{startYear % 100:D2}-{(startYear + 1) % 100:D2}";
+    }
+
+    /// <summary>e.g. "FY 25-26" or "FY 24-25, FY 25-26" from InvYear labels.</summary>
+    private static string FormatPeriodLabel(IReadOnlyList<string> invYears)
+    {
+        if (invYears == null || invYears.Count == 0)
+            return "";
+        return string.Join(", ", invYears.Select(y => $"FY {y}"));
     }
 
     /// <summary>
@@ -219,7 +366,7 @@ public class SalesDashboardService
 
         if (grandRowCount > 0)
         {
-            // One grand-total row → use ERP PerKg as-is. Multiple → weighted Amount/Netwt.
+            // One grand-total row ? use ERP PerKg as-is. Multiple ? weighted Amount/Netwt.
             var rate = grandRowCount == 1 && rateCol != null
                 ? lastPerKg
                 : (grandQty > 0 ? grandAmount / grandQty : 0);
@@ -284,8 +431,15 @@ public class SalesDashboardService
             var group = hasGroupname ? (Convert.ToString(row["Groupname"]) ?? "") : "";
             var sub = hasSubGroup ? (Convert.ToString(row["SubGroupName"]) ?? "") : "";
 
-            // Skip Sales grand-total row
+            // Defensive: never include IC (ERP InterGroup='Intergroup') in breakdowns
+            if (inter.Equals("Intergroup", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // Skip Sales grand-total / InterGroup-only subtotal rows
             if (string.IsNullOrWhiteSpace(inter) && string.IsNullOrWhiteSpace(group))
+                continue;
+            if (!string.IsNullOrWhiteSpace(inter) && string.IsNullOrWhiteSpace(group) &&
+                string.IsNullOrWhiteSpace(sub))
                 continue;
 
             if (!string.IsNullOrWhiteSpace(sub))
@@ -325,7 +479,7 @@ public class SalesDashboardService
             }
             else if (hasGroupname)
             {
-                // No subgroup column — expose group as subgroup fallback
+                // No subgroup column ? expose group as subgroup fallback
                 var group = (Convert.ToString(row["Groupname"]) ?? "").Trim();
                 if (!string.IsNullOrWhiteSpace(group))
                 {
@@ -379,7 +533,7 @@ public class SalesDashboardService
 
     private static DataColumn? ResolveRateColumn(DataTable table)
     {
-        // SP_Sales_EBIDTA uses PerKg for average rate (₹/kg)
+        // SP_Sales_EBIDTA uses PerKg for average rate (?/kg)
         string[] preferred = { "PerKg", "Per Kg", "AvgRate", "AverageRate", "Rate" };
         foreach (var name in preferred)
         {
@@ -401,7 +555,7 @@ public class SalesDashboardService
 
     private static DataColumn? ResolveSalesColumn(DataTable table)
     {
-        // SP_Sales_EBIDTA confirmed columns include Amount (₹ sales value)
+        // SP_Sales_EBIDTA confirmed columns include Amount (? sales value)
         string[] preferred =
         {
             "Amount", "Sales", "SalesAmount", "SaleAmount", "TotalSales", "NetSales", "Sales Value", "SalesValue"
@@ -1050,6 +1204,22 @@ public class TopCustomerDto
     public int Rank { get; set; }
     public string CustomerName { get; set; } = "";
     public double SalesAmount { get; set; }
+}
+
+public class SalesByCountryDto
+{
+    public int Rank { get; set; }
+    public string CountryName { get; set; } = "";
+    public double SalesAmount { get; set; }
+}
+
+public class SalesByCountryResultDto
+{
+    public List<SalesByCountryDto> ByCountry { get; set; } = new();
+    public List<string> GroupNames { get; set; } = new();
+    public List<string> InvYears { get; set; } = new();
+    /// <summary>Display label e.g. "FY 25-26" or "FY 24-25, FY 25-26".</summary>
+    public string PeriodLabel { get; set; } = "";
 }
 
 public class SalesBySubGroupDto

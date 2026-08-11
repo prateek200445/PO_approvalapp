@@ -1,4 +1,5 @@
 import type { SalesDashboardFilters, SalesReportCategory, SalesReportView } from "@/lib/sales-dashboard-types";
+import { indianFyDateRange, indianFyStartYear } from "@/lib/sales-dashboard-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +23,21 @@ interface SalesFiltersProps {
 
 const VIEWS: SalesReportView[] = ["Summary", "Detail", "Date Summary"];
 
+type FyPreset = "current" | "previous" | "custom";
+
+function detectFyPreset(dateFrom: string, dateTo: string): FyPreset {
+  const current = indianFyDateRange(indianFyStartYear());
+  const previous = indianFyDateRange(indianFyStartYear() - 1);
+  const today = new Date().toISOString().slice(0, 10);
+  if (dateFrom === current.dateFrom && (dateTo === current.dateTo || dateTo === today)) {
+    return "current";
+  }
+  if (dateFrom === previous.dateFrom && dateTo === previous.dateTo) {
+    return "previous";
+  }
+  return "custom";
+}
+
 export function SalesFilters({
   companies,
   filters,
@@ -29,6 +45,18 @@ export function SalesFilters({
   onChange,
   onRefresh,
 }: SalesFiltersProps) {
+  const fyPreset = detectFyPreset(filters.dateFrom, filters.dateTo);
+
+  function applyFyPreset(preset: FyPreset) {
+    if (preset === "custom") return;
+    const startYear = indianFyStartYear() - (preset === "previous" ? 1 : 0);
+    const range = indianFyDateRange(startYear);
+    onChange({
+      dateFrom: range.dateFrom,
+      dateTo: preset === "current" ? new Date().toISOString().slice(0, 10) : range.dateTo,
+    });
+  }
+
   return (
     <section
       className="rounded-xl border border-border bg-card p-3 shadow-sm sm:p-4"
@@ -53,6 +81,39 @@ export function SalesFilters({
             </SelectContent>
           </Select>
         </div>
+
+        <fieldset className="space-y-1.5">
+          <legend className="text-sm font-medium leading-none">Period (Indian FY)</legend>
+          <div
+            className="flex w-full overflow-x-auto rounded-md border border-border p-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            role="radiogroup"
+            aria-label="Financial year preset"
+          >
+            {(
+              [
+                { id: "current", label: "Current FY" },
+                { id: "previous", label: "Previous FY" },
+                { id: "custom", label: "Custom" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                role="radio"
+                aria-checked={fyPreset === opt.id}
+                onClick={() => applyFyPreset(opt.id)}
+                className={cn(
+                  "shrink-0 flex-1 rounded-sm px-2.5 py-2 text-xs font-medium transition-colors sm:flex-none sm:px-3 sm:text-sm",
+                  fyPreset === opt.id
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
 
         <div className="grid grid-cols-2 gap-2 sm:gap-3">
           <div className="min-w-0 space-y-1.5">
