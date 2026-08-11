@@ -73,6 +73,21 @@ public partial class SqlGuardService
                     "SQL blocked: despatch queries must filter CompanyName/Companyname, InvNo, PartyName, date, or packing list.");
         }
 
+        // Large production objects require a selective filter
+        if (Regex.IsMatch(sql,
+                @"\bvw_LoomProductionENtry\b|\bVW_PRODUCTION_EBD_DTL\b|\bvw_WIPReport\b",
+                RegexOptions.IgnoreCase))
+        {
+            if (!Regex.IsMatch(sql, @"\bWHERE\b", RegexOptions.IgnoreCase))
+                throw new InvalidOperationException(
+                    "SQL blocked: production loom/EBD/WIP queries require a WHERE filter (company, item, date, loom, or roll).");
+            if (!Regex.IsMatch(sql,
+                    @"\bCompanyName\b|\bcompanyname\b|\bItemCode\b|\bitemcode\b|\bSysdate\b|\bsysdate\b|\bDate\b|\bLoomNo\b|\bRollNo\b|\bPlantName\b|\bPartyName\b|\bPartyname\b",
+                    RegexOptions.IgnoreCase))
+                throw new InvalidOperationException(
+                    "SQL blocked: production loom/EBD/WIP queries must filter company, item, date, loom, roll, plant, or party.");
+        }
+
         return sql;
     }
 

@@ -69,6 +69,7 @@ public class ChatOrchestratorService
             - Job work: formal orders prefer Vw_EditJOBWorkOrder (PurchaseCode JRO/JWO; sparse). Live qty at job work: VW_JobWork_EBD_DTL (filter companyname/ItemCode). Receipts: VW_RECJOBWORK_EBD_DTL (MRNo like JBIN-SE). Returnable job-work sends also Vw_ReturnGatePass Purpose LIKE '%Job Work%'. Do not join JOBWORKORDER to PurchasePayment. Always TOP 50.
             - Sales invoices: prefer vw_Salesvoucher (InvNo, BuyerName, BillAMount, InvType, CompanyName). Lines: SalesVoucherItem on CompanyName+InvNo (ITEMCODE, ActualQty, Rate, Amount). List: vw_SalesInvList. Taxes: SalesVoucherTax. MIS qty: VW_SALES_EBD_DTL. Bracket [Company Address]/[Company GST] on vw_Salesvoucher. Sales credit notes: CreditNote. Always TOP 50.
             - Despatch/packing: roll history vw_MISrolldespatch; FIBC bails FIBCDespatch; yarn MIS_YarnDespatch; small bag SmallBagBailForDespatch; rolls waiting vw_RollforDespatch. ALWAYS filter CompanyName/Companyname or InvNo/PartyName/date + TOP 50 (million-row tables). Prefer view over MISRollforDespatch table.
+            - Production: factory daily vw_FactoryProduction (companyname, Particulars, TapeProduction/Fabric/SmallBag); tape plant vw_daily_tape_prod_New (bracket [Loom Dept]/[FIBC Dept]); loom rolls vw_LoomProductionENtry (MUST filter CompanyName/Sysdate/LoomNo + TOP 50 — ~716k; skip stale vw_Loom_Prod_Mtr); FIBC bags VW_FIBCBagwiseProduction (not _New); MIS qty VW_PRODUCTION_EBD_DTL; WIP vw_WIPReport; small bags SmallBagProductionEntry. Filter EBD/WIP/loom + TOP 50. Not despatch / not ApproveWorkOrder.
             - Prefer TOP 50 for detail lists. COUNT aggregates need no TOP.
             - Pending filters: status = 'Pending' or Status = 'Pending' (match column casing in schema).
             - Approved counts: status LIKE 'Approved%' when statuses vary.
@@ -127,6 +128,7 @@ public class ChatOrchestratorService
                 Reminder: job work live qty=VW_JobWork_EBD_DTL; receipts=VW_RECJOBWORK_EBD_DTL; formal orders=Vw_EditJOBWorkOrder (sparse); not PurchasePayment.
                 Reminder: sales invoices=vw_Salesvoucher + SalesVoucherItem (CompanyName+InvNo); BuyerName is customer; BillAMount spelling; bracket spaced GST address cols.
                 Reminder: despatch=vw_MISrolldespatch/FIBCDespatch/MIS_YarnDespatch/SmallBagBailForDespatch — must filter company or inv/party/date + TOP 50.
+                Reminder: production=vw_FactoryProduction / vw_daily_tape_prod_New / vw_LoomProductionENtry / VW_FIBCBagwiseProduction / VW_PRODUCTION_EBD_DTL / vw_WIPReport — filter company/date/item on large views + TOP 50; skip stale loom meter views; not despatch.
                 Return ONE corrected SELECT/WITH query only. No explanation.
                 """;
             sqlRaw = await _groq.CompleteAsync(sqlSystem, repairUser, ct);

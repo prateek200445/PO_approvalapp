@@ -1,6 +1,6 @@
 {
-  "version": "2.3.0",
-  "createdFor": "NL-to-SQL chatbot — prior domains + Sales + Despatch",
+  "version": "2.4.0",
+  "createdFor": "NL-to-SQL chatbot — prior domains + Sales + Despatch + Production",
   "database": {
     "server": "103.240.33.122,5115",
     "name": "MaterialProcessing",
@@ -36,7 +36,8 @@
     "GOVERNANCE (Gate pass): Returnable gate pass (RGP) — prefer Vw_ReturnGatePass / ReturnGatePass (GatePassNo like CO/yy-yy/GP/n; CompName NOT CompanyName; ActualPartyName/PurposePartyName; ItemCode, Qty, Purpose). Non-returnable (NRGP) — prefer Vw_NonReturnGatePass / NonReturnGatePass (GatePassNo like CO/yy-yy/NGP/n; PartyName; CompName). Inward against returnable: InwdReturnGatePass (InwGatePassNo; GatePassNo links to ReturnGatePass when set). Pending returns: vw_returngatepasspending (ReturnQty, InwardQty, PendingQty — filter PendingQty > 0). Company column is CompName on all gate-pass objects. ItemCode joins ItemInfo.itemcode. Always TOP 50.",
     "GOVERNANCE (Job work): Formal job-work orders are sparse (~7 headers / ~12 lines) — prefer Vw_EditJOBWorkOrder or Vw_JOBWORKORDER (PurchaseCode like PIL/JRO/... or PIL2/JWO/...; FirmName, ItemCode, JobWorkCharges, GatePassNo on edit view). Do NOT expect join to PurchasePayment/ApproveWorkOrder (0 matches live). Live MIS quantities: VW_JobWork_EBD_DTL (material at/sent job work by ItemCode, companyname) and VW_RECJOBWORK_EBD_DTL (received from job work with MRNo e.g. JBIN-SE). Prefer detail (_DTL) views over summary EBD. Returnable job-work movements also appear on Vw_ReturnGatePass WHERE Purpose LIKE '%Job Work%'. Skip empty Vw_StoreOutwardjobworkorder and tiny ApproveJOBWORKORDER. Always TOP 50; filter companyname/CompanyName and/or ItemCode on EBD views.",
     "GOVERNANCE (Sales): Sales invoices/vouchers — prefer vw_Salesvoucher (header: InvNo, InvDate, BuyerName, BillAMount, CompanyName, InvType, TypeofInvoice, currency) or SalesVoucher. Line items: SalesVoucherItem (join CompanyName+InvNo; ITEMCODE, ItemName, ActualQty, Rate, Amount, HSNCODE). Compact list: vw_SalesInvList (Invno, DespatchDate, BuyerName, OrgInvno). Tax lines: SalesVoucherTax (TaxledgerName, Amount; CreditNoteNumber links sales credit notes). MIS item sales: VW_SALES_EBD_DTL (itemcode, qTY, InvNo, companyname). BuyerName is the customer. InvType values include Sales, Export Sales, Commercial Export Sales, Sales InterUnit, Job Invoice, etc. Spaced columns on vw_Salesvoucher must be bracket-quoted e.g. [Company Address], [Company GST]. Sales credit notes remain CreditNote/vw_creditnote. Physical despatch/packing uses Despatch domain objects (not invoice headers alone). Always TOP 50.",
-    "GOVERNANCE (Despatch): Physical despatch/packing — ALWAYS filter CompanyName/Companyname and/or InvNo/Invno and/or PartyName/Partyname and/or date (sysdate/SysDate) and ALWAYS TOP 50 (tables are 200k–1.1M+). Roll despatch: prefer vw_MISrolldespatch (RollNO, Quality, NetWt, Companyname, Partyname, Invno, sysdate, PONO, PACKINGLISTNO on underlying MISRollforDespatch — prefer the view; do not also query MISRollforDespatch). FIBC bail despatch: FIBCDespatch (BailNo, Qty, Wt, InvNo, PACKINGLISTNO, PartyName, vVehicleNo). Yarn: MIS_YarnDespatch. Small bag bails: SmallBagBailForDespatch. Rolls waiting to despatch (no invoice yet): vw_RollforDespatch. Needle-loom rolls: MISNeedleRollforDespatch. Partyname/PartyName is customer/consignee. Link to sales invoice when InvNo matches vw_Salesvoucher.InvNo (formats vary — may need OrgInvno from vw_SalesInvList). Skip unused packing-list views that timeout."
+    "GOVERNANCE (Despatch): Physical despatch/packing — ALWAYS filter CompanyName/Companyname and/or InvNo/Invno and/or PartyName/Partyname and/or date (sysdate/SysDate) and ALWAYS TOP 50 (tables are 200k–1.1M+). Roll despatch: prefer vw_MISrolldespatch (RollNO, Quality, NetWt, Companyname, Partyname, Invno, sysdate, PONO, PACKINGLISTNO on underlying MISRollforDespatch — prefer the view; do not also query MISRollforDespatch). FIBC bail despatch: FIBCDespatch (BailNo, Qty, Wt, InvNo, PACKINGLISTNO, PartyName, vVehicleNo). Yarn: MIS_YarnDespatch. Small bag bails: SmallBagBailForDespatch. Rolls waiting to despatch (no invoice yet): vw_RollforDespatch. Needle-loom rolls: MISNeedleRollforDespatch. Partyname/PartyName is customer/consignee. Link to sales invoice when InvNo matches vw_Salesvoucher.InvNo (formats vary — may need OrgInvno from vw_SalesInvList). Skip unused packing-list views that timeout.",
+    "GOVERNANCE (Production): Factory daily summary — prefer vw_FactoryProduction (companyname, Sysdate, Particulars e.g. Tape/Fabric/Small Bag/WEBBING, TapeProduction, Loom, Fabric, SmallBag, Wastage). Tape plant daily — vw_daily_tape_prod_New (CompanyName, date, Opening, Production, Closing; bracket spaced cols [Total Production], [Loom Dept], [FIBC Dept], [Wastage Dept]). Loom roll production — prefer vw_LoomProductionENtry (CompanyName, Sysdate, LoomNo, RollNo, Quality, NetWt, Metre, Partyname) — ~716k MUST filter CompanyName and/or Sysdate/LoomNo/RollNo + TOP 50. FIBC bag production — prefer VW_FIBCBagwiseProduction (NOT stale VW_FIBCBagwiseProduction_New which ends 2016); BagPCS, BagWt, TYPEOFBAG, TeamNO, PartyName, PONO. Item/plant MIS qty — VW_PRODUCTION_EBD_DTL (itemcode, Qty, PlantName, companyname, sysdate) — filter company/item/date + TOP 50. WIP by item/dept — vw_WIPReport (ItemCode, Qty, Consumption, Deptt, CompanyName, Date). Small-bag line — SmallBagProductionEntry (Cutting, Stitching, BagPcs, PartyName). Skip stale vw_Loom_Prod_Mtr / vw_daily_loom_Meter_Rep (last ~2023), empty/timeout vw_totalproductionconsumption / Vw_Prod_WIPLoom, dailyProductionReport/DailyTotalProduction (no company), huge raw MISLOOMProductionEntryNew / misneedleloomproductionentry / Prod_Cutting_InOut / TapePlantConsumption / stockJournalProd. Production ≠ despatch and ≠ ApproveWorkOrder. Always TOP 50."
   ],
   "objects": [
     {
@@ -2734,6 +2735,289 @@
       "embeddingText": "View vw_RollforDespatch. Domain: Despatch. Rolls staged/available for despatch (~384k) — ROllNO, Quality, NetWt, Companyname (no Invno). Filter Companyname + TOP 50. Already shipped rolls with invoice: vw_MISrolldespatch. Synonyms: rolls for despatch, ready to despatch. Always TOP 50."
     },
     {
+      "id": "vw_FactoryProduction",
+      "objectName": "vw_FactoryProduction",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Production",
+      "purpose": "Preferred factory daily production summary (~48k). One or more rows per company/date by Particulars (Tape, Fabric, Small Bag, WEBBING, U/L FABRIC) with TapeProduction/Loom/Fabric/SmallBag/Wastage quantities.",
+      "primaryKeyHint": "companyname + Sysdate + Particulars",
+      "statusColumn": null,
+      "columns": [
+        { "name": "Particulars", "dataType": "varchar", "nullable": true, "meaning": "Line type: Tape, Fabric, Small Bag, WEBBING, U/L FABRIC" },
+        { "name": "Wastage", "dataType": "float", "nullable": true, "meaning": "Wastage qty" },
+        { "name": "fwastage", "dataType": "float", "nullable": true, "meaning": "Alternate wastage field" },
+        { "name": "TapeProduction", "dataType": "float", "nullable": true, "meaning": "Tape production qty (filled on Tape particulars)" },
+        { "name": "Loom", "dataType": "float", "nullable": true, "meaning": "Loom production qty when present" },
+        { "name": "NLoom", "dataType": "float", "nullable": true, "meaning": "Needle-loom qty when present" },
+        { "name": "Fabric", "dataType": "float", "nullable": true, "meaning": "Fabric production qty" },
+        { "name": "SmallBag", "dataType": "float", "nullable": true, "meaning": "Small bag production qty" },
+        { "name": "Sysdate", "dataType": "datetime", "nullable": true, "meaning": "Production date" },
+        { "name": "companyname", "dataType": "varchar", "nullable": true, "meaning": "Company (lowercase column)" }
+      ],
+      "joins": [
+        { "to": "vw_daily_tape_prod_New", "on": "vw_FactoryProduction.companyname = vw_daily_tape_prod_New.CompanyName AND vw_FactoryProduction.Sysdate = vw_daily_tape_prod_New.date", "note": "Tape detail vs factory summary" },
+        { "to": "VW_PRODUCTION_EBD_DTL", "on": "vw_FactoryProduction.companyname = VW_PRODUCTION_EBD_DTL.companyname" }
+      ],
+      "synonyms": [
+        "factory production",
+        "daily factory output",
+        "tape fabric small bag production",
+        "vw_FactoryProduction",
+        "plant production summary"
+      ],
+      "exampleQuestions": [
+        "Factory production for Oswal Extrusion Limited recent days",
+        "Tape and fabric production today by company"
+      ],
+      "embeddingText": "View vw_FactoryProduction. Domain: Production. Factory daily summary (~48k) — companyname, Sysdate, Particulars (Tape/Fabric/Small Bag/WEBBING), TapeProduction, Loom, Fabric, SmallBag, Wastage. Prefer for plant daily totals. Tape detail: vw_daily_tape_prod_New. Loom rolls: vw_LoomProductionENtry. FIBC bags: VW_FIBCBagwiseProduction. Synonyms: factory production, daily output. Always TOP 50. NOT despatch."
+    },
+    {
+      "id": "vw_daily_tape_prod_New",
+      "objectName": "vw_daily_tape_prod_New",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Production",
+      "purpose": "Tape plant daily opening/production/closing and department issues (~18k). Bracket-quote spaced column names.",
+      "primaryKeyHint": "CompanyName + date",
+      "statusColumn": null,
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "date", "dataType": "datetime", "nullable": true, "meaning": "Production date (column name date)" },
+        { "name": "Opening", "dataType": "float", "nullable": true, "meaning": "Opening stock/qty" },
+        { "name": "Production", "dataType": "float", "nullable": true, "meaning": "Tape production qty" },
+        { "name": "OtherReceipt", "dataType": "float", "nullable": true, "meaning": "Other receipts" },
+        { "name": "Total Production", "dataType": "float", "nullable": true, "meaning": "Spaced column — use [Total Production]" },
+        { "name": "Loom Dept", "dataType": "float", "nullable": true, "meaning": "Issue to loom — use [Loom Dept]" },
+        { "name": "Webbing Dept", "dataType": "float", "nullable": true, "meaning": "Issue to webbing — use [Webbing Dept]" },
+        { "name": "TFO Dept", "dataType": "float", "nullable": true, "meaning": "TFO dept — use [TFO Dept]" },
+        { "name": "FIBC Dept", "dataType": "float", "nullable": true, "meaning": "FIBC dept issue — use [FIBC Dept]" },
+        { "name": "Sale", "dataType": "float", "nullable": true, "meaning": "Sale qty" },
+        { "name": "Small Bag Dept", "dataType": "float", "nullable": true, "meaning": "Small bag dept — use [Small Bag Dept]" },
+        { "name": "Wastage Dept", "dataType": "float", "nullable": true, "meaning": "Wastage — use [Wastage Dept]" },
+        { "name": "Other", "dataType": "float", "nullable": true, "meaning": "Other issues" },
+        { "name": "Closing", "dataType": "float", "nullable": true, "meaning": "Closing qty" }
+      ],
+      "joins": [
+        { "to": "vw_FactoryProduction", "on": "vw_daily_tape_prod_New.CompanyName = vw_FactoryProduction.companyname" }
+      ],
+      "synonyms": [
+        "tape production",
+        "tape plant daily",
+        "tape opening closing",
+        "vw_daily_tape_prod_New"
+      ],
+      "exampleQuestions": [
+        "Tape production opening and closing for K.P. WOVEN today",
+        "How much tape issued to Loom Dept yesterday"
+      ],
+      "embeddingText": "View vw_daily_tape_prod_New. Domain: Production. Tape plant daily (~18k) — CompanyName, date, Opening, Production, Closing; bracket [Total Production] [Loom Dept] [FIBC Dept] [Wastage Dept] [Small Bag Dept]. Synonyms: tape production, tape plant. Always TOP 50. Factory summary: vw_FactoryProduction."
+    },
+    {
+      "id": "vw_LoomProductionENtry",
+      "objectName": "vw_LoomProductionENtry",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Production",
+      "purpose": "Preferred live loom roll production entries (~716k). MUST filter CompanyName and/or Sysdate/LoomNo/RollNo + TOP 50. Do NOT use stale vw_Loom_Prod_Mtr / vw_daily_loom_Meter_Rep (data ends ~2023).",
+      "primaryKeyHint": "transid / RollNo + CompanyName",
+      "statusColumn": null,
+      "columns": [
+        { "name": "LoomNo", "dataType": "varchar", "nullable": true, "meaning": "Loom number" },
+        { "name": "RollNo", "dataType": "varchar", "nullable": true, "meaning": "Produced roll number" },
+        { "name": "Quality", "dataType": "varchar", "nullable": true, "meaning": "Fabric quality" },
+        { "name": "Mesh", "dataType": "varchar", "nullable": true, "meaning": "Mesh" },
+        { "name": "ReqGSM", "dataType": "float", "nullable": true, "meaning": "Required GSM" },
+        { "name": "Sector", "dataType": "varchar", "nullable": true, "meaning": "Sector" },
+        { "name": "Metre", "dataType": "float", "nullable": true, "meaning": "Metres produced" },
+        { "name": "GrossWt", "dataType": "float", "nullable": true, "meaning": "Gross weight" },
+        { "name": "TareWt", "dataType": "float", "nullable": true, "meaning": "Tare weight" },
+        { "name": "NetWt", "dataType": "float", "nullable": true, "meaning": "Net weight" },
+        { "name": "ActualGPM", "dataType": "float", "nullable": true, "meaning": "Actual GPM" },
+        { "name": "ActualGSM", "dataType": "float", "nullable": true, "meaning": "Actual GSM" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "Sysdate", "dataType": "datetime", "nullable": true, "meaning": "Production date" },
+        { "name": "UserName", "dataType": "varchar", "nullable": true, "meaning": "Entry user" },
+        { "name": "Shift", "dataType": "varchar", "nullable": true, "meaning": "Shift" },
+        { "name": "transid", "dataType": "int", "nullable": true, "meaning": "Row id" },
+        { "name": "Partyname", "dataType": "varchar", "nullable": true, "meaning": "Party / customer for production" },
+        { "name": "MarketingOrderno", "dataType": "varchar", "nullable": true, "meaning": "Marketing order" },
+        { "name": "Material", "dataType": "varchar", "nullable": true, "meaning": "Material" },
+        { "name": "hodApprove", "dataType": "varchar", "nullable": true, "meaning": "HOD approval flag if used" }
+      ],
+      "joins": [
+        { "to": "vw_MISrolldespatch", "on": "vw_LoomProductionENtry.RollNo = vw_MISrolldespatch.RollNO", "note": "Produced roll later despatched" },
+        { "to": "vw_FactoryProduction", "on": "vw_LoomProductionENtry.CompanyName = vw_FactoryProduction.companyname" }
+      ],
+      "synonyms": [
+        "loom production",
+        "loom roll production",
+        "fabric roll produced",
+        "vw_LoomProductionENtry",
+        "daily loom output"
+      ],
+      "exampleQuestions": [
+        "Recent loom rolls produced at Oswal Extrusion Limited",
+        "Loom production for loom 8 today net weight and quality"
+      ],
+      "embeddingText": "View vw_LoomProductionENtry. Domain: Production. Live loom roll entries (~716k) — CompanyName, Sysdate, LoomNo, RollNo, Quality, NetWt, Metre, Partyname, Shift. MUST filter company/date/loom/roll + TOP 50. Skip stale vw_Loom_Prod_Mtr. Despatched rolls: vw_MISrolldespatch. Synonyms: loom production, fabric rolls produced. Always TOP 50."
+    },
+    {
+      "id": "VW_FIBCBagwiseProduction",
+      "objectName": "VW_FIBCBagwiseProduction",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Production",
+      "purpose": "Preferred FIBC/jumbo bag production by team (~live through 2026). Do NOT use VW_FIBCBagwiseProduction_New (stale through 2016).",
+      "primaryKeyHint": "CompanyName + Sysdate + TeamNO + PartyName + PONO",
+      "statusColumn": null,
+      "columns": [
+        { "name": "BagPCS", "dataType": "float", "nullable": true, "meaning": "Bags produced (PCS)" },
+        { "name": "BagWt", "dataType": "float", "nullable": true, "meaning": "Bag weight" },
+        { "name": "TYPEOFBAG", "dataType": "varchar", "nullable": true, "meaning": "Bag type e.g. Circular" },
+        { "name": "Sysdate", "dataType": "datetime", "nullable": true, "meaning": "Production date" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "TeamNO", "dataType": "varchar", "nullable": true, "meaning": "Production team" },
+        { "name": "BagSize", "dataType": "varchar", "nullable": true, "meaning": "Bag size" },
+        { "name": "IsPrinting", "dataType": "varchar", "nullable": true, "meaning": "Printing flag" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "Customer/party" },
+        { "name": "PONO", "dataType": "varchar", "nullable": true, "meaning": "Customer PO / order ref" }
+      ],
+      "joins": [
+        { "to": "FIBCDespatch", "on": "VW_FIBCBagwiseProduction.CompanyName = FIBCDespatch.CompanyName", "note": "Production vs later bail despatch — not 1:1" },
+        { "to": "SmallBagProductionEntry", "on": "VW_FIBCBagwiseProduction.CompanyName = SmallBagProductionEntry.CompanyName", "note": "Different product line (jumbo vs small bag)" }
+      ],
+      "synonyms": [
+        "FIBC production",
+        "jumbo bag production",
+        "bagwise production",
+        "VW_FIBCBagwiseProduction",
+        "team bag PCS"
+      ],
+      "exampleQuestions": [
+        "FIBC bag production for Oswal Extrusion Limited recent",
+        "Bag PCS and weight by team for Circular bags"
+      ],
+      "embeddingText": "View VW_FIBCBagwiseProduction. Domain: Production. FIBC/jumbo bag production — BagPCS, BagWt, TYPEOFBAG, TeamNO, PartyName, PONO, CompanyName, Sysdate. Prefer over stale VW_FIBCBagwiseProduction_New. Small bags: SmallBagProductionEntry. Despatch bails: FIBCDespatch. Synonyms: FIBC production, jumbo bags. Always TOP 50."
+    },
+    {
+      "id": "VW_PRODUCTION_EBD_DTL",
+      "objectName": "VW_PRODUCTION_EBD_DTL",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Production",
+      "purpose": "MIS item/plant production detail (~194k). MUST filter companyname and/or itemcode/sysdate + TOP 50. Prefer over summary VW_PRODUCTION_EBD.",
+      "primaryKeyHint": "companyname + itemcode + sysdate + PlantName",
+      "statusColumn": null,
+      "columns": [
+        { "name": "itemcode", "dataType": "varchar", "nullable": true, "meaning": "Item code (may be category like FIBC or ItemInfo.itemcode)" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "companyname", "dataType": "varchar", "nullable": true, "meaning": "Company (lowercase)" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Date" },
+        { "name": "PlantName", "dataType": "varchar", "nullable": true, "meaning": "Plant e.g. FIBC, Loom, Tape" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Production qty" },
+        { "name": "MISCATEGORY", "dataType": "varchar", "nullable": true, "meaning": "MIS category" },
+        { "name": "MISGRUPITEM", "dataType": "varchar", "nullable": true, "meaning": "MIS group item" }
+      ],
+      "joins": [
+        { "to": "ItemInfo", "on": "VW_PRODUCTION_EBD_DTL.itemcode = ItemInfo.itemcode", "note": "When itemcode is a real item code" },
+        { "to": "vw_FactoryProduction", "on": "VW_PRODUCTION_EBD_DTL.companyname = vw_FactoryProduction.companyname" }
+      ],
+      "synonyms": [
+        "production EBD",
+        "plant production qty",
+        "MIS production detail",
+        "VW_PRODUCTION_EBD_DTL"
+      ],
+      "exampleQuestions": [
+        "Production qty by plant for Oswal Extrusion Limited in July",
+        "FIBC plant production on VW_PRODUCTION_EBD_DTL"
+      ],
+      "embeddingText": "View VW_PRODUCTION_EBD_DTL. Domain: Production. MIS item/plant qty (~194k) — itemcode, ItemName, Qty, PlantName, companyname, sysdate, MISCATEGORY. MUST filter company/item/date + TOP 50. Prefer over VW_PRODUCTION_EBD summary. Synonyms: production EBD, plant output. Always TOP 50. NOT sales EBD."
+    },
+    {
+      "id": "vw_WIPReport",
+      "objectName": "vw_WIPReport",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Production",
+      "purpose": "WIP consumption/qty by item and department (~97k). Filter CompanyName and/or ItemCode/Date + TOP 50.",
+      "primaryKeyHint": "CompanyName + Date + ItemCode + Deptt",
+      "statusColumn": null,
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "Date", "dataType": "datetime", "nullable": true, "meaning": "WIP date" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "Consumption", "dataType": "varchar", "nullable": true, "meaning": "Consumption label e.g. FIBC WIP" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "WIP qty" },
+        { "name": "Deptt", "dataType": "varchar", "nullable": true, "meaning": "Department" },
+        { "name": "GroupName", "dataType": "varchar", "nullable": true, "meaning": "Item group" },
+        { "name": "SubGroupName", "dataType": "varchar", "nullable": true, "meaning": "Item subgroup" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code; joins ItemInfo.itemcode" }
+      ],
+      "joins": [
+        { "to": "ItemInfo", "on": "vw_WIPReport.ItemCode = ItemInfo.itemcode" },
+        { "to": "WareHouse", "on": "vw_WIPReport.ItemCode = WareHouse.ItemCode AND vw_WIPReport.CompanyName = WareHouse.CompanyName", "note": "WIP vs stock-in-hand" }
+      ],
+      "synonyms": [
+        "WIP report",
+        "work in progress",
+        "WIP consumption",
+        "vw_WIPReport"
+      ],
+      "exampleQuestions": [
+        "WIP consumption for WIP00013 at Oswal Extrusion Limited",
+        "FIBC WIP qty by item recent"
+      ],
+      "embeddingText": "View vw_WIPReport. Domain: Production. WIP by item/dept (~97k) — CompanyName, Date, ItemCode, ItemName, Qty, Consumption, Deptt, GroupName. Filter company/item/date + TOP 50. Synonyms: WIP report, work in progress. Stock-in-hand remains WareHouse. Always TOP 50."
+    },
+    {
+      "id": "SmallBagProductionEntry",
+      "objectName": "SmallBagProductionEntry",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Production",
+      "purpose": "Small-bag production line entries (~8k) — cutting/stitching/bailing/despatch PCS vs FIBC jumbo on VW_FIBCBagwiseProduction.",
+      "primaryKeyHint": "transid",
+      "statusColumn": null,
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "Sysdate", "dataType": "datetime", "nullable": true, "meaning": "Entry date" },
+        { "name": "Shift", "dataType": "varchar", "nullable": true, "meaning": "Shift" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "Party/customer" },
+        { "name": "MarketingOrdNo", "dataType": "varchar", "nullable": true, "meaning": "Marketing order" },
+        { "name": "BagSize", "dataType": "varchar", "nullable": true, "meaning": "Bag size" },
+        { "name": "OrderQty", "dataType": "float", "nullable": true, "meaning": "Order qty" },
+        { "name": "Cutting", "dataType": "float", "nullable": true, "meaning": "Cutting PCS" },
+        { "name": "Stitching", "dataType": "float", "nullable": true, "meaning": "Stitching PCS" },
+        { "name": "Printing", "dataType": "float", "nullable": true, "meaning": "Printing PCS" },
+        { "name": "Bailing", "dataType": "float", "nullable": true, "meaning": "Bailing PCS" },
+        { "name": "Despatch", "dataType": "float", "nullable": true, "meaning": "Despatch PCS on this entry (production domain; not FIBCDespatch table)" },
+        { "name": "Wastage", "dataType": "float", "nullable": true, "meaning": "Wastage" },
+        { "name": "BailingWt", "dataType": "float", "nullable": true, "meaning": "Bailing weight" },
+        { "name": "transid", "dataType": "int", "nullable": true, "meaning": "Row id" },
+        { "name": "TeamNo", "dataType": "varchar", "nullable": true, "meaning": "Team" },
+        { "name": "PONO", "dataType": "varchar", "nullable": true, "meaning": "PO / order ref" },
+        { "name": "BagWt", "dataType": "float", "nullable": true, "meaning": "Bag weight" },
+        { "name": "BagPcs", "dataType": "float", "nullable": true, "meaning": "Bag PCS" },
+        { "name": "REmark", "dataType": "varchar", "nullable": true, "meaning": "Remark (capital E spelling)" }
+      ],
+      "joins": [
+        { "to": "VW_FIBCBagwiseProduction", "on": "SmallBagProductionEntry.CompanyName = VW_FIBCBagwiseProduction.CompanyName", "note": "Small bag vs FIBC jumbo" },
+        { "to": "SmallBagBailForDespatch", "on": "SmallBagProductionEntry.CompanyName = SmallBagBailForDespatch.CompanyName", "note": "Production vs packing despatch" }
+      ],
+      "synonyms": [
+        "small bag production",
+        "smallbag cutting stitching",
+        "SmallBagProductionEntry"
+      ],
+      "exampleQuestions": [
+        "Small bag cutting and stitching for Oswal Extrusion Limited",
+        "Recent SmallBagProductionEntry BagPcs and party"
+      ],
+      "embeddingText": "Table SmallBagProductionEntry. Domain: Production. Small-bag line (~8k) — CompanyName, Sysdate, PartyName, Cutting, Stitching, Bailing, BagPcs, BagWt, TeamNo. FIBC jumbo: VW_FIBCBagwiseProduction. Bail despatch: SmallBagBailForDespatch. Synonyms: small bag production. Always TOP 50."
+    },
+    {
       "id": "LoginRights",
       "objectName": "loginentry.dbo.LoginRights",
       "schema": "loginentry.dbo",
@@ -2904,6 +3188,10 @@
     {
       "fact": "Despatch: vw_MISrolldespatch ~1.16M (prefer over MISRollforDespatch); FIBCDespatch ~1.02M; MIS_YarnDespatch ~219k; SmallBagBailForDespatch ~266k; vw_RollforDespatch ~384k (no Invno). Always filter company/inv/party/date + TOP 50. Oswal rolls on MIS view ~81k.",
       "verifiedOn": "live counts 2026-08-11"
+    },
+    {
+      "fact": "Production: vw_FactoryProduction ~48k (fresh); vw_daily_tape_prod_New ~18k; VW_FIBCBagwiseProduction live (Oswal Circular bags Aug 2026) — NOT _New (stale 2016); VW_PRODUCTION_EBD_DTL ~194k; vw_WIPReport ~97k; vw_LoomProductionENtry ~716k fresh (Oswal rolls Aug 2026); SmallBagProductionEntry ~8k. Skip stale vw_Loom_Prod_Mtr/vw_daily_loom_Meter_Rep (~2023), loomwisereport (~2014), timeout vw_totalproductionconsumption/Vw_Prod_WIPLoom. Filter large EBD/WIP/loom views + TOP 50.",
+      "verifiedOn": "live counts/max dates 2026-08-11"
     }
   ],
   "embeddingNotes": {
@@ -2911,7 +3199,7 @@
     "recommendedBackend": "fastembed (ONNX) via build_embeddings.py; sentence-transformers fallback",
     "outputFile": "schema-embeddings.json",
     "textField": "embeddingText",
-    "chunkCount": 61,
+    "chunkCount": 68,
     "retrieveTopK": "3-8"
   }
 }
