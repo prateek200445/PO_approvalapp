@@ -59,6 +59,14 @@ public class ChatOrchestratorService
             - NEVER invent MRDate. Vw_StoreInwards/StoreInwardsPayment: use BillDate, GateInwardDate, or SysDate. vw_MRNList/BillPaymentEntry: use MRNDate (not MRDate).
             - Payment against an MRN: prefer BillPaymentEntry WHERE MRNno = '<MRN>'. If using vw_MRNToBillPayment, require PaymentNo IS NOT NULL and DISTINCT PaymentNo/PaymentAmount. Never treat NULL PaymentNo lines as 'no payment'.
             - Receipts by supplier bill number: prefer Vw_StoreInwards WHERE BillNo = '<bill>'. Do not find store receipts via BillPaymentEntry.BillNo.
+            - Users / email / full name: use loginentry.dbo.LoginRights (or loginentry..loginrights). Username column is Name. NEVER SELECT Password or SELECT *. Join PurchasePayment.LoginName / BillPaymentEntry.Loginname / ApprovePO.ApprovalName = LoginRights.Name.
+            - Purchase requisition (PR): prefer Vw_PurchaseReq (Code is PR number, not IndentNo). Vendor quotations: prefer Vw_Quotation (FirmName, Rate, NegoRate, PurchaseCode). Never use empty ApproveQuotation. Vw_Quotation.StoreCode / Vw_IndentQuotation.Storecode = ApproveIndent.IndentNo.
+            - Store outward / material issue: prefer StoreOutwards (company column CompName NOT CompanyName; IssueSlipNo, Qty, Deptt, IssueTo, WareHouse, sysDate). Daily inward/outward by item: vw_ItemInwardOutward (companyname, Outwardqty). Monthly: vw_ItemMonthlyInwardOutward (Month, Year, OutwardQty). Join StoreOutwards.Itemcode = ItemInfo.itemcode (NOT ItemInfo.code). Skip WarehouseStoreoutwards. Always TOP 50.
+            - Warehouse / stock-in-hand: prefer vw_itemwiseStock (CompanyName, ItemCode, StkInHand, Warehousename) or WareHouse (also Minlevel/Maxlevel/ReOrder). Groups/dept: vw_inventoryitemwarehouse_all. Godown list: WareHouseMaster. Company column is CompanyName (not CompName). Join ItemCode = ItemInfo.itemcode. Below reorder: StkInHand < ReOrder AND ReOrder > 0 on WareHouse. Skip broken vw_ItemStockLedger. Always TOP 50.
+            - Debit notes (purchase/vendor): prefer vw_DebitNote or DebitNote (DebitNoteNumber, TotalDebitAmount, PartyName=vendor, CompanyName=ours, DebitType, BillNo, MRNo). Credit notes (sales/customer): prefer vw_creditnote or CreditNote (CreditNoteNumber, TotalCreditAmount/totalcreditamount, PartyName=customer). Line item tables are sparse — use headers unless user asks for items. MRNo joins StoreInwardsPayment. Do not join DebitNote.PONo to PurchasePayment. Bracket [Company Address] on vw_creditnote. Always TOP 50.
+            - Vendor master: prefer Vendor (FirmName, VendorCode, NewGSTNo, PANNo, Email, bank IFSC, PaymentTerms, ISMSME). Bank shortcut: vw_VendorListwithBankdtls. LedgerName mapping: vendordata. Join Vendor.FirmName/VendorCode to Vw_PurchaseOrder and Vw_Quotation. For pending balances use LedgerMaster. Vendor-item rates: prefer VendorRate (filter FirmName or ItemCode + TOP 50); Vw_VendorItem is slim but ~14M — same mandatory filters. For a specific quotation/PO use Vw_Quotation. Always TOP 50.
+            - Gate pass: returnable RGP prefer Vw_ReturnGatePass (GatePassNo .../GP/..., CompName NOT CompanyName). Non-returnable NRGP prefer Vw_NonReturnGatePass (.../NGP/...). Inward against RGP: InwdReturnGatePass. Pending returns: vw_returngatepasspending WHERE PendingQty > 0. Always TOP 50.
+            - Job work: formal orders prefer Vw_EditJOBWorkOrder (PurchaseCode JRO/JWO; sparse). Live qty at job work: VW_JobWork_EBD_DTL (filter companyname/ItemCode). Receipts: VW_RECJOBWORK_EBD_DTL (MRNo like JBIN-SE). Returnable job-work sends also Vw_ReturnGatePass Purpose LIKE '%Job Work%'. Do not join JOBWORKORDER to PurchasePayment. Always TOP 50.
             - Prefer TOP 50 for detail lists. COUNT aggregates need no TOP.
             - Pending filters: status = 'Pending' or Status = 'Pending' (match column casing in schema).
             - Approved counts: status LIKE 'Approved%' when statuses vary.
@@ -107,6 +115,14 @@ public class ChatOrchestratorService
                 Reminder: NEVER use MRDate. Use BillDate/GateInwardDate on Vw_StoreInwards, or MRNDate on vw_MRNList.
                 Reminder: payment-against-MRN prefer BillPaymentEntry.MRNno; if vw_MRNToBillPayment then PaymentNo IS NOT NULL.
                 Reminder: receipts by bill number use Vw_StoreInwards.BillNo — not BillPaymentEntry.BillNo.
+                Reminder: users/email use loginentry.dbo.LoginRights; NEVER SELECT Password; username column is Name.
+                Reminder: PR uses Vw_PurchaseReq; vendor quotes use Vw_Quotation — never empty ApproveQuotation.
+                Reminder: StoreOutwards uses CompName (not CompanyName); Itemcode joins ItemInfo.itemcode; daily view is vw_ItemInwardOutward.companyname/Outwardqty.
+                Reminder: stock-in-hand uses WareHouse/vw_itemwiseStock with CompanyName and StkInHand; reorder on WareHouse.ReOrder; not CompName.
+                Reminder: debit notes = DebitNote/vw_DebitNote (PartyName vendor); credit notes = CreditNote/vw_creditnote (PartyName customer); do not join DebitNote.PONo to PurchasePayment.
+                Reminder: vendor profile/GST/bank/MSME use Vendor or vw_VendorListwithBankdtls; balances use LedgerMaster; vendor rates use VendorRate/Vw_VendorItem with FirmName or ItemCode filter + TOP 50 (never unfiltered).
+                Reminder: gate pass uses CompName (not CompanyName); RGP=Vw_ReturnGatePass; NRGP=Vw_NonReturnGatePass; pending=vw_returngatepasspending PendingQty>0.
+                Reminder: job work live qty=VW_JobWork_EBD_DTL; receipts=VW_RECJOBWORK_EBD_DTL; formal orders=Vw_EditJOBWorkOrder (sparse); not PurchasePayment.
                 Return ONE corrected SELECT/WITH query only. No explanation.
                 """;
             sqlRaw = await _groq.CompleteAsync(sqlSystem, repairUser, ct);
@@ -172,6 +188,22 @@ public class ChatOrchestratorService
                     """;
             rows = await ExecuteReadOnlyAsync(sql, ct);
             warning = "Rewrote LedgerOpeningBalance (empty table) to LedgerMaster Openingbalance/PendingBalance (governed).";
+        }
+        else if (sql.Contains("ApproveQuotation", StringComparison.OrdinalIgnoreCase)
+                 || request.Message.Contains("ApproveQuotation", StringComparison.OrdinalIgnoreCase)
+                 || (rows.Count == 0 && LooksLikeVendorQuotationQuestion(request.Message)
+                     && !sql.Contains("Vw_Quotation", StringComparison.OrdinalIgnoreCase)
+                     && !sql.Contains("FinalQuotation", StringComparison.OrdinalIgnoreCase)
+                     && !sql.Contains("Vw_IndentQuotation", StringComparison.OrdinalIgnoreCase)))
+        {
+            _logger.LogWarning("ApproveQuotation empty / wrong path; rewriting to Vw_Quotation");
+            sql = """
+                SELECT TOP 50 PurchaseCode, FirmName, ItemCode, ItemDesc, Qty, Rate, NegoRate, Total, StoreCode, Sysdate
+                FROM Vw_Quotation
+                ORDER BY Sysdate DESC
+                """;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = "Rewrote ApproveQuotation (empty table) to recent Vw_Quotation rows (governed).";
         }
         else if (rows.Count == 0
                  && LooksLikeMrnReceivingCompanyIntent(request.Message)
@@ -277,6 +309,13 @@ public class ChatOrchestratorService
         };
     }
 
+    private static bool LooksLikeVendorQuotationQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        return m.Contains("quotation") || m.Contains("quoted") || m.Contains("quote")
+               || m.Contains("approvequotation") || m.Contains("nego rate") || m.Contains("vendor quote");
+    }
+
     private static bool LooksLikeLedgerGroupQuestion(string message)
     {
         var m = message.ToLowerInvariant();
@@ -313,6 +352,58 @@ public class ChatOrchestratorService
                     sql, @"\bMRDate\b", "BillDate", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             }
         }
+
+        // StoreOutwards / gate-pass company column is CompName (not CompanyName)
+        if ((sql.Contains("StoreOutwards", StringComparison.OrdinalIgnoreCase)
+             || sql.Contains("ReturnGatePass", StringComparison.OrdinalIgnoreCase)
+             || sql.Contains("NonReturnGatePass", StringComparison.OrdinalIgnoreCase)
+             || sql.Contains("InwdReturnGatePass", StringComparison.OrdinalIgnoreCase)
+             || sql.Contains("vw_returngatepasspending", StringComparison.OrdinalIgnoreCase))
+            && System.Text.RegularExpressions.Regex.IsMatch(
+                sql, @"\bCompanyName\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            sql = System.Text.RegularExpressions.Regex.Replace(
+                sql, @"\bCompanyName\b", "CompName", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        // Daily/monthly inward-outward views use companyname
+        if ((sql.Contains("vw_ItemInwardOutward", StringComparison.OrdinalIgnoreCase)
+             || sql.Contains("vw_ItemMonthlyInwardOutward", StringComparison.OrdinalIgnoreCase))
+            && !sql.Contains("StoreOutwards", StringComparison.OrdinalIgnoreCase)
+            && System.Text.RegularExpressions.Regex.IsMatch(
+                sql, @"\bCompanyName\b|\bCompName\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            sql = System.Text.RegularExpressions.Regex.Replace(
+                sql, @"\bCompanyName\b|\bCompName\b", "companyname",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        // Warehouse/stock objects use CompanyName (not CompName from StoreOutwards)
+        if ((sql.Contains("WareHouse", StringComparison.OrdinalIgnoreCase)
+             || sql.Contains("vw_itemwiseStock", StringComparison.OrdinalIgnoreCase)
+             || sql.Contains("vw_inventoryitemwarehouse", StringComparison.OrdinalIgnoreCase))
+            && !sql.Contains("StoreOutwards", StringComparison.OrdinalIgnoreCase)
+            && System.Text.RegularExpressions.Regex.IsMatch(
+                sql, @"\bCompName\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            sql = System.Text.RegularExpressions.Regex.Replace(
+                sql, @"\bCompName\b", "CompanyName", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        // WareHouseMaster uses lowercase companyname
+        if (sql.Contains("WareHouseMaster", StringComparison.OrdinalIgnoreCase)
+            && !sql.Contains("StoreOutwards", StringComparison.OrdinalIgnoreCase)
+            && !System.Text.RegularExpressions.Regex.IsMatch(
+                sql, @"\bWareHouse\b|\bvw_itemwiseStock\b|\bvw_inventoryitemwarehouse",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            && System.Text.RegularExpressions.Regex.IsMatch(
+                sql, @"\bCompanyName\b|\bCompName\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            sql = System.Text.RegularExpressions.Regex.Replace(
+                sql, @"\bCompanyName\b|\bCompName\b", "companyname",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
         return sql;
     }
 

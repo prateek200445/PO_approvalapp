@@ -1,11 +1,11 @@
 {
-  "version": "1.2.4",
-  "createdFor": "NL-to-SQL chatbot v1 (schema RAG) — PO/WO/Payment/Indent/Ledger + MRN/Store Inward",
+  "version": "2.1.0",
+  "createdFor": "NL-to-SQL chatbot — prior domains + Gate Pass + Job Work",
   "database": {
     "server": "103.240.33.122,5115",
     "name": "MaterialProcessing",
     "dialect": "Microsoft SQL Server (T-SQL)",
-    "relatedDatabase": "loginentry (users/rights; cross-db as loginentry..loginrights — out of v1 allowlist unless needed for email/name lookup)"
+    "relatedDatabase": "loginentry (users/rights; query as loginentry.dbo.LoginRights or loginentry..loginrights via cross-database SELECT from MaterialProcessing connection)"
   },
   "globalRules": [
     "Chatbot may only generate SELECT queries.",
@@ -25,7 +25,16 @@
     "COLUMN NAME TRAP (MRN): There is NO column named MRDate anywhere in MRN objects. Vw_StoreInwards / StoreInwardsPayment date columns are BillDate, GateInwardDate, SysDate, ChallanDate — never MRDate. vw_MRNList and BillPaymentEntry use MRNDate (spelled MRNDate, not MRDate). For 'recent' receipts ORDER BY BillDate or GateInwardDate DESC on Vw_StoreInwards.",
     "GOVERNANCE (MRN names): Names like 'Plastene Polyfilms Ltd-Purchase' are PartyName (vendor), not CompanyName. Receiving companies look like 'Plastene Polyfilms Limited' / 'Plastene India Limited'. If the question asks for receipts 'for <name> with party and bill', treat <name> as PartyName when it is a vendor-style name (often ends with -Purchase).",
     "GOVERNANCE (MRN payment): For 'payment against MRN / was payment raised / how much for material receipt X', prefer BillPaymentEntry WHERE MRNno = X (select PaymentNo, PaymentAmount, BillNo, UTRno, status, isPaid). vw_MRNToBillPayment is line-grain and often has NULL PaymentNo on unpaid lines — NEVER conclude 'no payment' from null rows alone. If using the view: WHERE MRno = X AND PaymentNo IS NOT NULL, SELECT DISTINCT PaymentNo, PaymentAmount.",
-    "GOVERNANCE (receipt by bill): For 'receipts linked to bill number X' / 'material receipt for bill X', filter Vw_StoreInwards.BillNo or StoreInwardsPayment.BillNo = X. Do NOT use BillPaymentEntry.BillNo for finding store receipts — that bill field is the payment-request bill and often does not match supplier bill numbers like PPL/D/540."
+    "GOVERNANCE (receipt by bill): For 'receipts linked to bill number X' / 'material receipt for bill X', filter Vw_StoreInwards.BillNo or StoreInwardsPayment.BillNo = X. Do NOT use BillPaymentEntry.BillNo for finding store receipts — that bill field is the payment-request bill and often does not match supplier bill numbers like PPL/D/540.",
+    "GOVERNANCE (Users): User master is loginentry.dbo.LoginRights (alias loginentry..loginrights). Username column is Name. NEVER SELECT Password. For email/full name/contact of a username use Email, FullName, ContactNo, EmpCode, Category. Role flags: IsAdmin, IsFinance, IsAccounts, IsPayroll, IsmaterialProc, IsMarketing, IsstoreHOD, ispurchasehod, isPaymentApprove (values often 'yes'/'no'). Join PurchasePayment.LoginName / BillPaymentEntry.Loginname / ApprovePO.ApprovalName to LoginRights.Name for requester/approver email. Prefer TOP 50. Do not SELECT * (hundreds of permission columns).",
+    "GOVERNANCE (PR/Quotation): Purchase requisitions use PurchaseReq / preferred view Vw_PurchaseReq (Code like CO/PR/yy-yy/...; NOT the same as IndentNo). Vendor quotations: prefer Vw_Quotation (FirmName, Rate, NegoRate, PurchaseCode, StoreCode). Vw_Quotation.PurchaseCode = PurchasePayment.PurchaseCode / FinalQuotation.PurchaseCode. Vw_Quotation.StoreCode and Vw_IndentQuotation.Storecode join ApproveIndent.IndentNo. Indent-line quotes: Vw_IndentQuotation (SubCode joins ItemInfo.code). ApproveQuotation table is EMPTY — never use it. QuotationMaster is nearly empty — prefer Vw_Quotation. Always TOP 50 on these large views.",
+    "GOVERNANCE (Store outward / issue): Material issued from store uses StoreOutwards (~1.1M rows) — company column is CompName (NOT CompanyName). Issue document key is IssueSlipNo; qty columns Qty / IssuedQty; destination IssueTo; department Deptt; warehouse WareHouse; date sysDate. For daily inward vs outward by item prefer vw_ItemInwardOutward (ItemCode, InwardQty, Outwardqty, companyname, Date). For month aggregates prefer vw_ItemMonthlyInwardOutward (Month, Year, MonthName, InwardQty, OutwardQty, companyname). Join StoreOutwards.Itemcode = ItemInfo.itemcode (NOT ItemInfo.code — that is indent subcode). Skip WarehouseStoreoutwards (multi-million, too heavy), empty Vw_StoreOutwardjobworkorder, and secondary StoreOutwards1 unless needed. Always TOP 50.",
+    "GOVERNANCE (Warehouse / stock): Current stock-in-hand uses WareHouse (StkInHand, Minlevel, Maxlevel, ReOrder, CompanyName, WareHouseName) or preferred simple view vw_itemwiseStock (Warehousename, CompanyName, ItemCode, ItemName, StkInHand). Richer inventory with groups: vw_inventoryitemwarehouse_all (Deptt, GroupName, SubGroupName, warehouse, unit). Warehouse master list: WareHouseMaster (companyname, warehousename). Company column is CompanyName / companyname — NOT CompName (that is StoreOutwards only). Join ItemCode/itemcode = ItemInfo.itemcode. For 'below reorder' filter StkInHand < ReOrder AND ReOrder > 0 on WareHouse. Skip broken vw_ItemStockLedger / VW_TradingStock, huge vw_stock_transactions, stale WareHouseOpeningStock (FY opening), session table warehousestock (no company), and multi-million WareHouseInwards/WarehouseStoreinwards (use MRN/outward domains instead). Always TOP 50.",
+    "GOVERNANCE (Debit/Credit notes): Purchase-side debit notes use DebitNote / preferred view vw_DebitNote (DebitNoteNumber like CO/DB/yy-yy/n; TotalDebitAmount; PartyName = vendor; CompanyName = our company; DebitType often Provisional / Qty Difference / Rate Difference; links BillNo, MRNo, SrNo store inward). Sales-side credit notes use CreditNote / preferred view vw_creditnote (CreditNoteNumber like CO/CR/yy-yy/n; TotalCreditAmount / totalcreditamount; PartyName = customer; CreditNoteDate; CreditType). Line items are sparse: DebitNoteItem ~179 rows, CreditNoteItem ~226 — most notes are header-only; prefer header/views unless user asks for item lines. DebitNote.MRNo joins StoreInwardsPayment.MRNo. Do NOT assume DebitNote.PONo joins PurchasePayment (0 matches live). Company vs party same as MRN: CompanyName is ours; PartyName is vendor/customer. Skip *_Delete, nearly empty DebitNote_Approval/CreditNote_Approval, and DebitNote_store unless needed. vw_creditnote has spaced column [Company Address] — bracket-quote. Always TOP 50.",
+    "GOVERNANCE (Vendor masters): Purchase vendor master is Vendor (~6.8k) — FirmName, VendorCode (Ven#####), NewGSTNo, PANNo, Email, ContactName, Address/City/State, BankAccountNo/BankName/IFSCCode, PaymentTerms, ModeofPayment, ISMSME/MSMENumber, TypeVendor (Local/Import), IsClosed. Bank-details shortcut view: vw_VendorListwithBankdtls. Alternate snapshot: vendordata (FirmName + LedgerName, fewer rows). Join Vendor.FirmName to Vw_PurchaseOrder.FirmName / Vw_Quotation.FirmName / DebitNote.PartyName (LTRIM/RTRIM; names may include GST suffixes). Vendor.VendorCode joins Vw_PurchaseOrder.VendorCode. For ledger balances prefer LedgerMaster (already allowlisted) via LedgerName/PANNo/NewGSTNo — Vendor is profile/bank/MSME, not full ledger statement. InternalVendor lists group companies treated as internal vendors. Always TOP 50.",
+    "GOVERNANCE (Vendor rates): Historical/vendor-item rates use VendorRate (~921k; preferred detailed) and Vw_VendorItem (~14.5M; slim ItemCode/FirmName/Rate/NegoRate/itemdesc). ALWAYS filter by FirmName and/or ItemCode (or SubCode) and ALWAYS TOP 50 — never SELECT without a selective WHERE. Prefer VendorRate for Rate/NegoRate/PaymentTerm/Discount/taxes; Vw_VendorItem when only itemdesc + rate list needed. For rates on a specific quotation/PO prefer Vw_Quotation (PurchaseCode/FirmName). VendorRate.FirmName joins Vendor.FirmName; ItemCode joins ItemInfo.itemcode; SubCode often joins ItemInfo.code (indent line). Example: Bright Rubber has recent VendorRate rows; WIP00013 has multiple vendors on VendorRate.",
+    "GOVERNANCE (Gate pass): Returnable gate pass (RGP) — prefer Vw_ReturnGatePass / ReturnGatePass (GatePassNo like CO/yy-yy/GP/n; CompName NOT CompanyName; ActualPartyName/PurposePartyName; ItemCode, Qty, Purpose). Non-returnable (NRGP) — prefer Vw_NonReturnGatePass / NonReturnGatePass (GatePassNo like CO/yy-yy/NGP/n; PartyName; CompName). Inward against returnable: InwdReturnGatePass (InwGatePassNo; GatePassNo links to ReturnGatePass when set). Pending returns: vw_returngatepasspending (ReturnQty, InwardQty, PendingQty — filter PendingQty > 0). Company column is CompName on all gate-pass objects. ItemCode joins ItemInfo.itemcode. Always TOP 50.",
+    "GOVERNANCE (Job work): Formal job-work orders are sparse (~7 headers / ~12 lines) — prefer Vw_EditJOBWorkOrder or Vw_JOBWORKORDER (PurchaseCode like PIL/JRO/... or PIL2/JWO/...; FirmName, ItemCode, JobWorkCharges, GatePassNo on edit view). Do NOT expect join to PurchasePayment/ApproveWorkOrder (0 matches live). Live MIS quantities: VW_JobWork_EBD_DTL (material at/sent job work by ItemCode, companyname) and VW_RECJOBWORK_EBD_DTL (received from job work with MRNo e.g. JBIN-SE). Prefer detail (_DTL) views over summary EBD. Returnable job-work movements also appear on Vw_ReturnGatePass WHERE Purpose LIKE '%Job Work%'. Skip empty Vw_StoreOutwardjobworkorder and tiny ApproveJOBWORKORDER. Always TOP 50; filter companyname/CompanyName and/or ItemCode on EBD views."
   ],
   "objects": [
     {
@@ -337,7 +346,7 @@
         "Show quotation lines for PO X",
         "What rates were quoted on this purchase order?"
       ],
-      "embeddingText": "Table FinalQuotation. Domain: PO quotation / ordered lines. Purpose: item rates and quantities for a PurchaseCode used in PO documents. Columns: PurchaseCode, FirmName, ItemCode, ItemDesc, Qty, Rate, Discount, Total, Unit, StoreCode, SubCode, HSNCODE, GST percents, transid. Join on PurchaseCode to PurchasePayment and Vw_PurchaseOrder. Synonyms: final quotation, PO quote lines. Prefer Vw_PurchaseOrder for general PO detail questions."
+      "embeddingText": "Table FinalQuotation. Domain: PO / Quotation. Purpose: final selected vendor quote lines for a PurchaseCode (FirmName, ItemCode, Qty, Rate, Total, GST). Join PurchaseCode to PurchasePayment, Vw_PurchaseOrder, and Vw_Quotation.PurchaseCode. Synonyms: final quotation, awarded quote, PO quote lines. For comparing multiple vendor quotes before finalization prefer Vw_Quotation. Always TOP 50."
     },
     {
       "id": "POAllocation",
@@ -590,7 +599,9 @@
       ],
       "joins": [
         { "to": "ApproveIndent", "on": "ItemInfo.code = ApproveIndent.IndentSubCode", "note": "Validated live: IndentNo join returns 0 matches; SubCode join matches" },
-        { "to": "Vw_StoreDeptt", "on": "ItemInfo.code = Vw_StoreDeptt.code" }
+        { "to": "Vw_StoreDeptt", "on": "ItemInfo.code = Vw_StoreDeptt.code" },
+        { "to": "StoreOutwards", "on": "ItemInfo.itemcode = StoreOutwards.Itemcode", "note": "Validated: ItemInfo.code join to StoreOutwards.Itemcode returns 0; use itemcode" },
+        { "to": "WareHouse", "on": "ItemInfo.itemcode = WareHouse.ItemCode", "note": "Stock-in-hand master" }
       ],
       "synonyms": [
         "indent line items",
@@ -602,7 +613,7 @@
         "What items are on indent line codes for this indent?",
         "Show item description and qty for indent subcode X"
       ],
-      "embeddingText": "Table ItemInfo. Domain: Indent line items. Purpose: itemcode, itemdesc, Qty, Unit, stock for indent lines. Critical: code equals ApproveIndent.IndentSubCode (line), not IndentNo (parent). Example IndentNo PIL/22-23/RWM00019 with IndentSubCode PIL/22-23/RWM00019/01. Synonyms: indent items, requisition lines, ItemInfo."
+      "embeddingText": "Table ItemInfo. Domain: Indent line items. Purpose: itemcode, itemdesc, Qty, Unit, stock for indent lines. Critical: code equals ApproveIndent.IndentSubCode (line), not IndentNo (parent). For store issues join ItemInfo.itemcode = StoreOutwards.Itemcode (not code). For warehouse stock join ItemInfo.itemcode = WareHouse.ItemCode. Example IndentNo PIL/22-23/RWM00019 with IndentSubCode PIL/22-23/RWM00019/01. Synonyms: indent items, requisition lines, ItemInfo."
     },
     {
       "id": "Vw_StoreDeptt",
@@ -1107,6 +1118,1257 @@
         "Which MRNs are linked to bill payments?"
       ],
       "embeddingText": "View vw_MRNToBillPayment. Domain: MRN linked to bill payment. Purpose: connect material receipt MRno to PaymentNo, PaymentAmount, UTRno, BillNo, Partyname. CRITICAL: view is LINE grain — many rows have NULL PaymentNo even when payments exist for that MRN. For 'was payment raised against MRN RM 269 and for how much' prefer BillPaymentEntry WHERE MRNno = 'RM 269'. If using this view: SELECT DISTINCT PaymentNo, PaymentAmount WHERE MRno = 'RM 269' AND PaymentNo IS NOT NULL. Never treat a NULL PaymentNo row as proof of no payment. Synonyms: payment against MRN, was MRN paid, UTR for MRN, PRQ for material receipt. Bracket spaced columns: [Challan Date], [Basic Amount], [MRN User]."
+    },
+    {
+      "id": "PurchaseReq",
+      "objectName": "PurchaseReq",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "PR",
+      "purpose": "Purchase requisition lines (PR). Code is the PR number (pattern like PIL/PR/25-26/STO00700) — not IndentNo. Contains company, dept, item, qty, purpose, requester loginname.",
+      "primaryKeyHint": "Line grain under Code + ItemCode",
+      "statusColumn": null,
+      "columns": [
+        { "name": "Code", "dataType": "varchar", "nullable": true, "meaning": "Purchase requisition number (PR). Not the same as ApproveIndent.IndentNo." },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "PR date" },
+        { "name": "Deptt", "dataType": "varchar", "nullable": true, "meaning": "Department" },
+        { "name": "Purpose", "dataType": "varchar", "nullable": true, "meaning": "Purpose / reason" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company / unit" },
+        { "name": "Type", "dataType": "varchar", "nullable": true, "meaning": "PR type" },
+        { "name": "RefNo", "dataType": "varchar", "nullable": true, "meaning": "Reference number" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ItemDesc", "dataType": "varchar", "nullable": true, "meaning": "Item description" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Requested qty" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "Stock", "dataType": "float", "nullable": true, "meaning": "Stock at request time" },
+        { "name": "loginname", "dataType": "varchar", "nullable": true, "meaning": "Requester username; join loginentry.dbo.LoginRights.Name" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Indicative rate" },
+        { "name": "ReqDepartment", "dataType": "varchar", "nullable": true, "meaning": "Requesting department" },
+        { "name": "Remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "MachineName", "dataType": "varchar", "nullable": true, "meaning": "Machine if any" }
+      ],
+      "joins": [
+        { "to": "Vw_PurchaseReq", "on": "PurchaseReq.Code = Vw_PurchaseReq.Code", "note": "Prefer view for POQty/RecdQty" },
+        { "to": "LoginRights", "on": "PurchaseReq.loginname = loginentry.dbo.LoginRights.Name" }
+      ],
+      "synonyms": ["purchase requisition", "PR", "purchase req", "PurchaseReq", "store purchase request"],
+      "exampleQuestions": [
+        "Show purchase requisition PIL/PR/25-26/STO00700",
+        "List recent PRs for Oswal Extrusion Limited"
+      ],
+      "embeddingText": "Table PurchaseReq. Domain: Purchase requisition (PR). Purpose: PR lines with Code (PR number like COMPANY/PR/yy-yy/...), CompanyName, Deptt, ItemCode, ItemDesc, Qty, Unit, Purpose, loginname, sysdate. Code is NOT IndentNo. Prefer Vw_PurchaseReq when comparing requested vs PO/received qty. Synonyms: purchase requisition, PR, purchase request. Always TOP 50."
+    },
+    {
+      "id": "Vw_PurchaseReq",
+      "objectName": "Vw_PurchaseReq",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "PR",
+      "purpose": "Preferred purchase-requisition view: PR Code with ReqQty, POQty, RecdQty, IndentQty, ChallanQty, PurchaseCode, company/dept/category. Use for PR progress vs PO.",
+      "primaryKeyHint": "Line grain under Code + ItemCode",
+      "statusColumn": null,
+      "columns": [
+        { "name": "Code", "dataType": "varchar", "nullable": true, "meaning": "PR number" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ItemDesc", "dataType": "varchar", "nullable": true, "meaning": "Item description" },
+        { "name": "Stock", "dataType": "float", "nullable": true, "meaning": "Stock" },
+        { "name": "storecode", "dataType": "varchar", "nullable": true, "meaning": "Store/indent-related code" },
+        { "name": "ReqQty", "dataType": "float", "nullable": true, "meaning": "Requested qty" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "PurchaseCode", "dataType": "varchar", "nullable": true, "meaning": "Linked PO number if any" },
+        { "name": "IndentQty", "dataType": "float", "nullable": true, "meaning": "Indent qty" },
+        { "name": "ChallanQty", "dataType": "float", "nullable": true, "meaning": "Challan qty" },
+        { "name": "RecdQty", "dataType": "float", "nullable": true, "meaning": "Received qty" },
+        { "name": "POQty", "dataType": "float", "nullable": true, "meaning": "Qty already on PO" },
+        { "name": "Deptt", "dataType": "varchar", "nullable": true, "meaning": "Department" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "category", "dataType": "varchar", "nullable": true, "meaning": "Category" },
+        { "name": "subcategory", "dataType": "varchar", "nullable": true, "meaning": "Subcategory" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Date" },
+        { "name": "loginname", "dataType": "varchar", "nullable": true, "meaning": "Requester" }
+      ],
+      "joins": [
+        { "to": "PurchasePayment", "on": "Vw_PurchaseReq.PurchaseCode = PurchasePayment.PurchaseCode" },
+        { "to": "PurchaseReq", "on": "Vw_PurchaseReq.Code = PurchaseReq.Code" }
+      ],
+      "synonyms": ["PR vs PO qty", "purchase requisition status", "Vw_PurchaseReq", "pending purchase req", "PR not yet ordered"],
+      "exampleQuestions": [
+        "Which PRs for Oswal Extrusion Limited still have ReqQty greater than POQty?",
+        "Show items on purchase requisition Code X with PO and received qty"
+      ],
+      "embeddingText": "View Vw_PurchaseReq. Domain: Purchase requisition (PR). Preferred view for PR questions. Columns: Code (PR number), ItemCode, ItemDesc, ReqQty, POQty, RecdQty, IndentQty, ChallanQty, PurchaseCode, CompanyName, Deptt, category, loginname, sysdate. Use WHERE CompanyName = 'Oswal Extrusion Limited' AND ReqQty > POQty for PRs not fully ordered. Synonyms: purchase requisition status, pending PR, PR vs PO. Large view — always TOP 50. Not for vendor quotations (use Vw_Quotation)."
+    },
+    {
+      "id": "Vw_Quotation",
+      "objectName": "Vw_Quotation",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Quotation",
+      "purpose": "Vendor quotation lines against a purchase/indent: FirmName vendor, Rate/NegoRate, Qty, Total, linked PurchaseCode and StoreCode (indent).",
+      "primaryKeyHint": "Line grain; PurchaseCode + FirmName + ItemCode",
+      "statusColumn": null,
+      "columns": [
+        { "name": "PurchaseCode", "dataType": "varchar", "nullable": true, "meaning": "PO / purchase code; joins PurchasePayment.PurchaseCode and FinalQuotation.PurchaseCode" },
+        { "name": "StoreCode", "dataType": "varchar", "nullable": true, "meaning": "Indent number; joins ApproveIndent.IndentNo" },
+        { "name": "SubCode", "dataType": "varchar", "nullable": true, "meaning": "Indent line subcode; often joins ItemInfo.code" },
+        { "name": "FirmName", "dataType": "varchar", "nullable": true, "meaning": "Vendor / quoting firm" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ItemDesc", "dataType": "varchar", "nullable": true, "meaning": "Item description" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Quoted qty" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Quoted rate" },
+        { "name": "NegoRate", "dataType": "float", "nullable": true, "meaning": "Negotiated rate" },
+        { "name": "Total", "dataType": "float", "nullable": true, "meaning": "Line total" },
+        { "name": "Discount", "dataType": "float", "nullable": true, "meaning": "Discount" },
+        { "name": "PaymentTerm", "dataType": "varchar", "nullable": true, "meaning": "Payment terms" },
+        { "name": "LoginName", "dataType": "varchar", "nullable": true, "meaning": "User who entered quote" },
+        { "name": "Sysdate", "dataType": "datetime", "nullable": true, "meaning": "Quote date" },
+        { "name": "ContactPerson", "dataType": "varchar", "nullable": true, "meaning": "Vendor contact" },
+        { "name": "Make", "dataType": "varchar", "nullable": true, "meaning": "Make/brand" },
+        { "name": "remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" }
+      ],
+      "joins": [
+        { "to": "PurchasePayment", "on": "Vw_Quotation.PurchaseCode = PurchasePayment.PurchaseCode", "note": "Validated live — high match" },
+        { "to": "FinalQuotation", "on": "Vw_Quotation.PurchaseCode = FinalQuotation.PurchaseCode" },
+        { "to": "ApproveIndent", "on": "Vw_Quotation.StoreCode = ApproveIndent.IndentNo", "note": "Validated live" },
+        { "to": "ItemInfo", "on": "Vw_Quotation.SubCode = ItemInfo.code" }
+      ],
+      "synonyms": ["vendor quotation", "quote comparison", "quotation rates", "Vw_Quotation", "who quoted for this PO", "nego rate"],
+      "exampleQuestions": [
+        "Which vendors quoted for purchase code KPV/SPR/26-27/539 and at what rates?",
+        "Show quotations linked to an indent StoreCode"
+      ],
+      "embeddingText": "View Vw_Quotation. Domain: Vendor quotation. Preferred for quotation / quote comparison questions. Columns: PurchaseCode (joins PO), StoreCode (joins ApproveIndent.IndentNo), SubCode, FirmName (vendor), ItemCode, ItemDesc, Qty, Rate, NegoRate, Total, Discount, PaymentTerm, LoginName, Sysdate. Example: vendors quoting PO KPV/SPR/26-27/539 => WHERE PurchaseCode = 'KPV/SPR/26-27/539' SELECT FirmName, Rate, NegoRate, Total. NEVER use empty ApproveQuotation table. Prefer this over QuotationMaster. Always TOP 50 — large view (~667k rows)."
+    },
+    {
+      "id": "Vw_IndentQuotation",
+      "objectName": "Vw_IndentQuotation",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Quotation",
+      "purpose": "Quotation lines tied to indent quantities: Storecode=IndentNo, SubCode indent line, Rate/NegoRate vs IndentQty.",
+      "primaryKeyHint": "Line grain Storecode + SubCode + Rate",
+      "statusColumn": null,
+      "columns": [
+        { "name": "Storecode", "dataType": "varchar", "nullable": true, "meaning": "Indent number; joins ApproveIndent.IndentNo" },
+        { "name": "SubCode", "dataType": "varchar", "nullable": true, "meaning": "Indent line subcode; joins ItemInfo.code" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "itemdesc", "dataType": "varchar", "nullable": true, "meaning": "Item description" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Quote qty" },
+        { "name": "IndentQty", "dataType": "float", "nullable": true, "meaning": "Indent qty" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "Quote UOM" },
+        { "name": "IndentUnit", "dataType": "varchar", "nullable": true, "meaning": "Indent UOM" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Rate" },
+        { "name": "NegoRate", "dataType": "float", "nullable": true, "meaning": "Negotiated / amount field as stored" },
+        { "name": "Discount", "dataType": "float", "nullable": true, "meaning": "Discount" }
+      ],
+      "joins": [
+        { "to": "ApproveIndent", "on": "Vw_IndentQuotation.Storecode = ApproveIndent.IndentNo", "note": "Validated live" },
+        { "to": "ItemInfo", "on": "Vw_IndentQuotation.SubCode = ItemInfo.code" },
+        { "to": "Vw_Quotation", "on": "Vw_IndentQuotation.Storecode = Vw_Quotation.StoreCode" }
+      ],
+      "synonyms": ["indent quotation", "quote against indent", "Vw_IndentQuotation", "indent vs quote qty"],
+      "exampleQuestions": [
+        "Show quotation rates against indent lines for an indent Storecode",
+        "Compare IndentQty and quoted Qty for an indent"
+      ],
+      "embeddingText": "View Vw_IndentQuotation. Domain: Quotation linked to indent. Columns: Storecode (IndentNo), SubCode (indent line / ItemInfo.code), ItemCode, itemdesc, Qty, IndentQty, Rate, NegoRate, Unit, IndentUnit, Discount. Use when question mixes indent and quotation quantities. Join Storecode = ApproveIndent.IndentNo. Prefer Vw_Quotation when asking by PurchaseCode/PO or vendor FirmName. Always TOP 50."
+    },
+    {
+      "id": "StoreOutwards",
+      "objectName": "StoreOutwards",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "StoreOutward",
+      "purpose": "Store material issue / outward lines (~1.1M). One row per item issued on a slip or day. Company filter uses CompName. Prefer for issue slip, department, warehouse, IssueTo questions. For daily inward/outward totals by item prefer vw_ItemInwardOutward.",
+      "primaryKeyHint": "transid (unique row). Business keys: IssueSlipNo + Itemcode + CompName + sysDate",
+      "statusColumn": null,
+      "columns": [
+        { "name": "IssueSlipNo", "dataType": "varchar", "nullable": true, "meaning": "Issue slip / issue document number (may be blank on some companies/rows)" },
+        { "name": "CompName", "dataType": "varchar", "nullable": true, "meaning": "Company / plant name — NOT CompanyName" },
+        { "name": "Itemcode", "dataType": "varchar", "nullable": true, "meaning": "Item code; joins ItemInfo.itemcode (not ItemInfo.code)" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item description on the issue line" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Issued quantity (primary qty)" },
+        { "name": "IssuedQty", "dataType": "float", "nullable": true, "meaning": "Alternate issued qty field (often 0 when Qty is populated)" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "Deptt", "dataType": "varchar", "nullable": true, "meaning": "Issuing / store department e.g. Stores/Spares, Consumables, SF" },
+        { "name": "IssueTo", "dataType": "varchar", "nullable": true, "meaning": "Destination area/machine group e.g. FIBC, Needle Loom, Circ Looms" },
+        { "name": "WareHouse", "dataType": "varchar", "nullable": true, "meaning": "Warehouse / godown name" },
+        { "name": "LoginName", "dataType": "varchar", "nullable": true, "meaning": "User who posted the issue" },
+        { "name": "sysDate", "dataType": "datetime", "nullable": true, "meaning": "Issue / transaction date" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Rate" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Line amount" },
+        { "name": "Remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "transid", "dataType": "int", "nullable": true, "meaning": "Unique transaction/row id" },
+        { "name": "subDept", "dataType": "varchar", "nullable": true, "meaning": "Sub department" },
+        { "name": "QtyInKgs", "dataType": "float", "nullable": true, "meaning": "Qty in kg if used" }
+      ],
+      "joins": [
+        { "to": "ItemInfo", "on": "StoreOutwards.Itemcode = ItemInfo.itemcode", "note": "Validated live: join on code returns 0; itemcode matches" },
+        { "to": "LoginRights", "on": "StoreOutwards.LoginName = loginentry.dbo.LoginRights.Name" },
+        { "to": "vw_ItemInwardOutward", "on": "StoreOutwards.Itemcode = vw_ItemInwardOutward.ItemCode AND StoreOutwards.CompName = vw_ItemInwardOutward.companyname", "note": "Summary view; prefer view for daily InwardQty/Outwardqty" }
+      ],
+      "synonyms": [
+        "store outward",
+        "store issue",
+        "material issue",
+        "issue slip",
+        "issued to department",
+        "StoreOutwards",
+        "stock issued",
+        "godown issue"
+      ],
+      "exampleQuestions": [
+        "Show items on issue slip 350 for K.P. WOVEN PRIVATE LIMITED",
+        "What was issued to FIBC at Oswal Extrusion Limited recently?",
+        "List store outwards for Oswal Extrusion Limited department SF"
+      ],
+      "embeddingText": "Table StoreOutwards. Domain: Store outward / material issue. Purpose: lines of material issued from store — IssueSlipNo, CompName (company, NOT CompanyName), Itemcode, ItemName, Qty, IssuedQty, Deptt, IssueTo, WareHouse, LoginName, sysDate. Large ~1.1M rows — always TOP 50. Join Itemcode = ItemInfo.itemcode (never ItemInfo.code). Synonyms: store issue, material issue, issue slip, issued to FIBC, stock issued, godown issue. Prefer vw_ItemInwardOutward for daily inward vs outward by item; vw_ItemMonthlyInwardOutward for monthly totals. Skip WarehouseStoreoutwards."
+    },
+    {
+      "id": "vw_ItemInwardOutward",
+      "objectName": "vw_ItemInwardOutward",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "StoreOutward",
+      "purpose": "Preferred daily item-level inward and outward quantities by company. Use for 'how much issued/received today' and inward vs outward comparisons. Company column is companyname.",
+      "primaryKeyHint": "ItemCode + companyname + Date",
+      "statusColumn": null,
+      "columns": [
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "InwardQty", "dataType": "decimal", "nullable": true, "meaning": "Inward / receipt quantity for the day" },
+        { "name": "Outwardqty", "dataType": "decimal", "nullable": true, "meaning": "Outward / issue quantity for the day (column spelling Outwardqty)" },
+        { "name": "InwardRate", "dataType": "decimal", "nullable": true, "meaning": "Inward rate" },
+        { "name": "OutwardRate", "dataType": "decimal", "nullable": true, "meaning": "Outward rate" },
+        { "name": "Date", "dataType": "datetime", "nullable": true, "meaning": "Transaction date" },
+        { "name": "companyname", "dataType": "varchar", "nullable": true, "meaning": "Company name (lowercase column); filter companyname = 'Oswal Extrusion Limited'" }
+      ],
+      "joins": [
+        { "to": "StoreOutwards", "on": "vw_ItemInwardOutward.ItemCode = StoreOutwards.Itemcode AND vw_ItemInwardOutward.companyname = StoreOutwards.CompName" },
+        { "to": "ItemInfo", "on": "vw_ItemInwardOutward.ItemCode = ItemInfo.itemcode" }
+      ],
+      "synonyms": [
+        "inward outward",
+        "daily issue qty",
+        "item inward outward",
+        "how much issued",
+        "stock movement daily",
+        "vw_ItemInwardOutward"
+      ],
+      "exampleQuestions": [
+        "For Oswal Extrusion Limited show items with outward qty today",
+        "Inward and outward qty for item WIP00013 at Oswal Extrusion Limited",
+        "Daily stock movement for Oswal Extrusion Limited"
+      ],
+      "embeddingText": "View vw_ItemInwardOutward. Domain: Store outward / inward summary. Preferred for daily InwardQty and Outwardqty by ItemCode, ItemName, companyname, Date. Company filter: companyname (not CompName, not CompanyName). Outward column spelling is Outwardqty. Example: Oswal Extrusion Limited WIP00013 outward 6988.50. Large view — always TOP 50. Synonyms: daily inward outward, how much issued, stock movement, item issue qty. For issue slip / Deptt / IssueTo use StoreOutwards. For monthly use vw_ItemMonthlyInwardOutward."
+    },
+    {
+      "id": "vw_ItemMonthlyInwardOutward",
+      "objectName": "vw_ItemMonthlyInwardOutward",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "StoreOutward",
+      "purpose": "Monthly inward/outward aggregates by item and company. Use when user asks for a month/year total of issues or receipts.",
+      "primaryKeyHint": "Itemcode + companyname + Month + Year",
+      "statusColumn": null,
+      "columns": [
+        { "name": "MonthName", "dataType": "varchar", "nullable": true, "meaning": "Month name e.g. August" },
+        { "name": "Month", "dataType": "int", "nullable": true, "meaning": "Month number 1-12" },
+        { "name": "Year", "dataType": "int", "nullable": true, "meaning": "Year e.g. 2026" },
+        { "name": "Itemcode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "Itemname", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "InwardQty", "dataType": "decimal", "nullable": true, "meaning": "Month inward qty" },
+        { "name": "OutwardQty", "dataType": "decimal", "nullable": true, "meaning": "Month outward/issue qty" },
+        { "name": "MaxInwardRate", "dataType": "decimal", "nullable": true, "meaning": "Max inward rate in month" },
+        { "name": "MaxOutwardRate", "dataType": "decimal", "nullable": true, "meaning": "Max outward rate in month" },
+        { "name": "companyname", "dataType": "varchar", "nullable": true, "meaning": "Company name" }
+      ],
+      "joins": [
+        { "to": "vw_ItemInwardOutward", "on": "vw_ItemMonthlyInwardOutward.Itemcode = vw_ItemInwardOutward.ItemCode AND vw_ItemMonthlyInwardOutward.companyname = vw_ItemInwardOutward.companyname" },
+        { "to": "ItemInfo", "on": "vw_ItemMonthlyInwardOutward.Itemcode = ItemInfo.itemcode" }
+      ],
+      "synonyms": [
+        "monthly inward outward",
+        "monthly issue total",
+        "month stock movement",
+        "vw_ItemMonthlyInwardOutward"
+      ],
+      "exampleQuestions": [
+        "Monthly outward for Oswal Extrusion Limited in August 2026",
+        "Which items had outward qty in August 2026 at Oswal?"
+      ],
+      "embeddingText": "View vw_ItemMonthlyInwardOutward. Domain: Store outward monthly summary. Columns: MonthName, Month, Year, Itemcode, Itemname, InwardQty, OutwardQty, companyname. Filter Year=2026 AND Month=8 for August 2026. Prefer this for month totals; use vw_ItemInwardOutward for daily; StoreOutwards for issue slips. Always TOP 50."
+    },
+    {
+      "id": "WareHouse",
+      "objectName": "WareHouse",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "WarehouseStock",
+      "purpose": "Primary warehouse stock master (~37k). Stock-in-hand per item, company, and warehouse with min/max/reorder levels. Prefer for reorder alerts and detailed stock. For simple stock lists prefer vw_itemwiseStock.",
+      "primaryKeyHint": "transid. Business key: ItemCode + CompanyName + WareHouseName",
+      "statusColumn": null,
+      "columns": [
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code; joins ItemInfo.itemcode" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "StkInHand", "dataType": "float", "nullable": true, "meaning": "Current stock quantity in this warehouse" },
+        { "name": "OpeningStock", "dataType": "float", "nullable": true, "meaning": "Opening stock on master row" },
+        { "name": "Minlevel", "dataType": "float", "nullable": true, "meaning": "Minimum stock level" },
+        { "name": "Maxlevel", "dataType": "float", "nullable": true, "meaning": "Maximum stock level" },
+        { "name": "ReOrder", "dataType": "float", "nullable": true, "meaning": "Reorder level; below-reorder when StkInHand < ReOrder and ReOrder > 0" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company / plant — NOT CompName" },
+        { "name": "WareHouseName", "dataType": "varchar", "nullable": true, "meaning": "Godown / warehouse name e.g. FIBC Bag Godown, Bobbin Godown" },
+        { "name": "Deptt", "dataType": "varchar", "nullable": true, "meaning": "Department e.g. FG, SF" },
+        { "name": "GroupName", "dataType": "varchar", "nullable": true, "meaning": "Item group" },
+        { "name": "SubGroupName", "dataType": "varchar", "nullable": true, "meaning": "Item sub group" },
+        { "name": "DtlSubGroupName", "dataType": "varchar", "nullable": true, "meaning": "Detail sub group" },
+        { "name": "MnthlyConsum", "dataType": "float", "nullable": true, "meaning": "Monthly consumption" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Rate" },
+        { "name": "LoginName", "dataType": "varchar", "nullable": true, "meaning": "Last update user" },
+        { "name": "transid", "dataType": "int", "nullable": true, "meaning": "Unique row id" }
+      ],
+      "joins": [
+        { "to": "ItemInfo", "on": "WareHouse.ItemCode = ItemInfo.itemcode", "note": "Validated live" },
+        { "to": "WareHouseMaster", "on": "WareHouse.CompanyName = WareHouseMaster.companyname AND WareHouse.WareHouseName = WareHouseMaster.warehousename" },
+        { "to": "vw_itemwiseStock", "on": "WareHouse.ItemCode = vw_itemwiseStock.ItemCode AND WareHouse.CompanyName = vw_itemwiseStock.CompanyName" }
+      ],
+      "synonyms": [
+        "warehouse stock",
+        "stock in hand",
+        "godown stock",
+        "reorder level",
+        "current stock",
+        "WareHouse",
+        "inventory stock"
+      ],
+      "exampleQuestions": [
+        "What is stock in hand for WIP00013 at Oswal Extrusion Limited?",
+        "Items below reorder level at Oswal Extrusion Limited",
+        "Show stock by warehouse for Oswal Extrusion Limited"
+      ],
+      "embeddingText": "Table WareHouse. Domain: Warehouse / stock. Purpose: current StkInHand per ItemCode, CompanyName, WareHouseName with Minlevel Maxlevel ReOrder. Company column CompanyName (not CompName). Join ItemCode = ItemInfo.itemcode. Below reorder: StkInHand < ReOrder AND ReOrder > 0. Example Oswal Extrusion Limited FIG00001 FIBC Bag Godown StkInHand ~2.1M; WIP00013 Liner Bag Godown 39476.4. Synonyms: stock in hand, godown stock, reorder level, current inventory. Prefer vw_itemwiseStock for simple lists. Always TOP 50. Not for material issue slips (use StoreOutwards)."
+    },
+    {
+      "id": "vw_itemwiseStock",
+      "objectName": "vw_itemwiseStock",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "WarehouseStock",
+      "purpose": "Preferred simple view for current stock-in-hand by warehouse and company (~24k). Use for 'what is stock of item X' and warehouse-wise stock lists.",
+      "primaryKeyHint": "ItemCode + CompanyName + Warehousename",
+      "statusColumn": null,
+      "columns": [
+        { "name": "Warehousename", "dataType": "varchar", "nullable": true, "meaning": "Warehouse / godown name" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company name" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "StkInHand", "dataType": "float", "nullable": true, "meaning": "Stock quantity in hand" }
+      ],
+      "joins": [
+        { "to": "WareHouse", "on": "vw_itemwiseStock.ItemCode = WareHouse.ItemCode AND vw_itemwiseStock.CompanyName = WareHouse.CompanyName" },
+        { "to": "ItemInfo", "on": "vw_itemwiseStock.ItemCode = ItemInfo.itemcode" }
+      ],
+      "synonyms": [
+        "item wise stock",
+        "stock by warehouse",
+        "vw_itemwiseStock",
+        "stock balance",
+        "available stock"
+      ],
+      "exampleQuestions": [
+        "Show stock in hand by warehouse for item WIP00013 at Oswal Extrusion Limited",
+        "Top stock items at Oswal Extrusion Limited"
+      ],
+      "embeddingText": "View vw_itemwiseStock. Domain: Warehouse / stock. Preferred simple stock view: Warehousename, CompanyName, ItemCode, ItemName, StkInHand. Filter CompanyName = 'Oswal Extrusion Limited'. Synonyms: item wise stock, stock by godown, available stock, stock balance. For min/max/reorder use WareHouse. For group/dept use vw_inventoryitemwarehouse_all. Always TOP 50."
+    },
+    {
+      "id": "vw_inventoryitemwarehouse_all",
+      "objectName": "vw_inventoryitemwarehouse_all",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "WarehouseStock",
+      "purpose": "Richer inventory stock by company/warehouse with department and item group hierarchy (~56k). Prefer when user asks stock by group/dept; otherwise vw_itemwiseStock or WareHouse.",
+      "primaryKeyHint": "itemcode + CompanyName + warehouse",
+      "statusColumn": null,
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "itemcode", "dataType": "varchar", "nullable": true, "meaning": "Item code (lowercase column)" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "Deptt", "dataType": "varchar", "nullable": true, "meaning": "Department" },
+        { "name": "GroupName", "dataType": "varchar", "nullable": true, "meaning": "Item group" },
+        { "name": "SubGroupName", "dataType": "varchar", "nullable": true, "meaning": "Sub group" },
+        { "name": "DtlSubGroupName", "dataType": "varchar", "nullable": true, "meaning": "Detail sub group" },
+        { "name": "StkInHand", "dataType": "float", "nullable": true, "meaning": "Stock in hand" },
+        { "name": "unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "warehouse", "dataType": "varchar", "nullable": true, "meaning": "Warehouse / godown (column name warehouse)" }
+      ],
+      "joins": [
+        { "to": "WareHouse", "on": "vw_inventoryitemwarehouse_all.itemcode = WareHouse.ItemCode AND vw_inventoryitemwarehouse_all.CompanyName = WareHouse.CompanyName" },
+        { "to": "ItemInfo", "on": "vw_inventoryitemwarehouse_all.itemcode = ItemInfo.itemcode" }
+      ],
+      "synonyms": [
+        "inventory by group",
+        "stock by department",
+        "vw_inventoryitemwarehouse_all",
+        "group wise stock"
+      ],
+      "exampleQuestions": [
+        "Stock by group for Oswal Extrusion Limited",
+        "Show FG department stock at Oswal Extrusion Limited"
+      ],
+      "embeddingText": "View vw_inventoryitemwarehouse_all. Domain: Warehouse / stock. Rich inventory: CompanyName, itemcode, ItemName, Deptt, GroupName, SubGroupName, StkInHand, unit, warehouse. Prefer when question mentions group or department. Simpler stock lists: vw_itemwiseStock. Reorder levels: WareHouse. Always TOP 50. Prefer this over smaller vw_inventoryitemwarehouse."
+    },
+    {
+      "id": "WareHouseMaster",
+      "objectName": "WareHouseMaster",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "WarehouseStock",
+      "purpose": "Master list of warehouses/godowns per company with entry/approval users (~349). Use for 'which godowns exist for company X', not for stock quantities.",
+      "primaryKeyHint": "Srno (with companyname + warehousename)",
+      "statusColumn": null,
+      "columns": [
+        { "name": "companyname", "dataType": "varchar", "nullable": true, "meaning": "Company name (lowercase)" },
+        { "name": "warehousename", "dataType": "varchar", "nullable": true, "meaning": "Warehouse / godown name" },
+        { "name": "Srno", "dataType": "int", "nullable": true, "meaning": "Warehouse serial / id" },
+        { "name": "EntryUser1", "dataType": "varchar", "nullable": true, "meaning": "Entry user 1" },
+        { "name": "Approvalauth1", "dataType": "varchar", "nullable": true, "meaning": "Approval authority 1" },
+        { "name": "IsRoll", "dataType": "varchar", "nullable": true, "meaning": "Roll warehouse flag" },
+        { "name": "IsNeedleLoom", "dataType": "varchar", "nullable": true, "meaning": "Needle loom warehouse flag" },
+        { "name": "ApprovalReq", "dataType": "bit", "nullable": true, "meaning": "Whether approval is required" },
+        { "name": "EmailTo", "dataType": "varchar", "nullable": true, "meaning": "Notification email To" },
+        { "name": "EmailCC", "dataType": "varchar", "nullable": true, "meaning": "Notification email CC" }
+      ],
+      "joins": [
+        { "to": "WareHouse", "on": "WareHouseMaster.companyname = WareHouse.CompanyName AND WareHouseMaster.warehousename = WareHouse.WareHouseName" },
+        { "to": "LoginRights", "on": "WareHouseMaster.EntryUser1 = loginentry.dbo.LoginRights.Name" }
+      ],
+      "synonyms": [
+        "warehouse master",
+        "godown list",
+        "list of warehouses",
+        "WareHouseMaster",
+        "which godowns"
+      ],
+      "exampleQuestions": [
+        "List warehouses for Oswal Extrusion Limited",
+        "Which godowns exist at Plastene India Limited Unit II?"
+      ],
+      "embeddingText": "Table WareHouseMaster. Domain: Warehouse / stock. Purpose: master list of godowns — companyname, warehousename, Srno, entry/approval users. Examples: FIBC Bag Godown, Bobbin Godown, Raw Material Godown for Oswal Extrusion Limited. Does NOT hold StkInHand — use WareHouse or vw_itemwiseStock for quantities. Synonyms: list of warehouses, godown master, which warehouses."
+    },
+    {
+      "id": "DebitNote",
+      "objectName": "DebitNote",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "DebitCreditNote",
+      "purpose": "Purchase-side debit note headers (~4.2k). Issued to vendors for qty/rate/discount differences or provisional adjustments. Prefer vw_DebitNote when item columns are needed; most notes are header-only.",
+      "primaryKeyHint": "DebitNoteNumber (and DebitNoteSrNo). transId unique.",
+      "statusColumn": "ApprovalStatus",
+      "statusNotes": "ApprovalStatus is numeric (0/1); not Pending/Approved text. Prefer DebitType for business classification.",
+      "columns": [
+        { "name": "DebitNoteNumber", "dataType": "varchar", "nullable": true, "meaning": "Debit note number e.g. OEL/DB/26-27/16, PPL/DB/26-27/3" },
+        { "name": "DebitNoteSrNo", "dataType": "int", "nullable": true, "meaning": "Serial within year" },
+        { "name": "DebitType", "dataType": "varchar", "nullable": true, "meaning": "Provisional / Qty Difference / Rate Difference / Discount Difference(%)" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Our company issuing the debit note" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "Vendor / party being debited" },
+        { "name": "TotalDebitAmount", "dataType": "float", "nullable": true, "meaning": "Total debit amount" },
+        { "name": "Basic", "dataType": "float", "nullable": true, "meaning": "Basic amount before tax" },
+        { "name": "BillNo", "dataType": "varchar", "nullable": true, "meaning": "Related supplier bill number" },
+        { "name": "billDate", "dataType": "datetime", "nullable": true, "meaning": "Bill date" },
+        { "name": "MRNo", "dataType": "varchar", "nullable": true, "meaning": "Related MRN / material receipt number; joins StoreInwardsPayment.MRNo" },
+        { "name": "SrNo", "dataType": "varchar", "nullable": true, "meaning": "Related store inward SrNo e.g. PPL/26-27/SII00663" },
+        { "name": "PONo", "dataType": "varchar", "nullable": true, "meaning": "PO number if present — live join to PurchasePayment often empty" },
+        { "name": "Note", "dataType": "varchar", "nullable": true, "meaning": "Narration / reason text" },
+        { "name": "Particaulars", "dataType": "varchar", "nullable": true, "meaning": "Particulars (spelling Particaulars)" },
+        { "name": "PurchaseLedger", "dataType": "varchar", "nullable": true, "meaning": "Purchase ledger name" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Debit note date" },
+        { "name": "LoginName", "dataType": "varchar", "nullable": true, "meaning": "Creator login" },
+        { "name": "currency", "dataType": "varchar", "nullable": true, "meaning": "Currency e.g. INR" },
+        { "name": "AmountinWords", "dataType": "varchar", "nullable": true, "meaning": "Amount in words" },
+        { "name": "RefNo", "dataType": "varchar", "nullable": true, "meaning": "Reference number" },
+        { "name": "Yr", "dataType": "varchar", "nullable": true, "meaning": "FY e.g. 26-27" },
+        { "name": "transId", "dataType": "int", "nullable": true, "meaning": "Unique row id" }
+      ],
+      "joins": [
+        { "to": "StoreInwardsPayment", "on": "DebitNote.MRNo = StoreInwardsPayment.MRNo", "note": "Validated live when MRNo populated" },
+        { "to": "vw_DebitNote", "on": "DebitNote.DebitNoteNumber = vw_DebitNote.DebitNoteNumber" },
+        { "to": "LoginRights", "on": "DebitNote.LoginName = loginentry.dbo.LoginRights.Name" }
+      ],
+      "synonyms": [
+        "debit note",
+        "debit notes",
+        "DN",
+        "DebitNote",
+        "vendor debit",
+        "purchase debit note"
+      ],
+      "exampleQuestions": [
+        "Show debit notes for Oswal Extrusion Limited",
+        "Debit note OEL/DB/26-27/16 amount and party",
+        "Debit notes linked to MRN for company X"
+      ],
+      "embeddingText": "Table DebitNote. Domain: Debit / credit notes. Purchase debit note headers — DebitNoteNumber (CO/DB/yy-yy/n), DebitType (Provisional, Qty Difference, Rate Difference), CompanyName (ours), PartyName (vendor), TotalDebitAmount, BillNo, MRNo, SrNo, Note, PurchaseLedger, sysdate. Prefer vw_DebitNote for combined header+sparse item columns. MRNo joins StoreInwardsPayment.MRNo. Do not rely on PONo=PurchasePayment. Synonyms: debit note, DN, vendor debit. Always TOP 50."
+    },
+    {
+      "id": "vw_DebitNote",
+      "objectName": "vw_DebitNote",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "DebitCreditNote",
+      "purpose": "Preferred debit note view (~4.2k) with header fields plus optional item columns (mostly null; only ~179 rows have ItemCode). Use for debit note lookups and amounts.",
+      "primaryKeyHint": "DebitNoteNumber (+ item SIIndex when present)",
+      "statusColumn": null,
+      "columns": [
+        { "name": "DebitNoteNumber", "dataType": "varchar", "nullable": true, "meaning": "Debit note number" },
+        { "name": "DebitNoteSrNo", "dataType": "int", "nullable": true, "meaning": "Serial" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Our company" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "Vendor" },
+        { "name": "DebitType", "dataType": "varchar", "nullable": true, "meaning": "Provisional / Qty Difference / Rate Difference" },
+        { "name": "TotalDebitAmount", "dataType": "float", "nullable": true, "meaning": "Total debit amount" },
+        { "name": "BillNo", "dataType": "varchar", "nullable": true, "meaning": "Supplier bill" },
+        { "name": "MRNo", "dataType": "varchar", "nullable": true, "meaning": "MRN number" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Note date" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code when line exists (often null)" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item name when line exists" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Line amount if item row" },
+        { "name": "RateDifference", "dataType": "float", "nullable": true, "meaning": "Rate difference" },
+        { "name": "QtyDifference", "dataType": "float", "nullable": true, "meaning": "Qty difference" },
+        { "name": "Note", "dataType": "varchar", "nullable": true, "meaning": "Narration" },
+        { "name": "Particaulars", "dataType": "varchar", "nullable": true, "meaning": "Particulars" },
+        { "name": "PurchaseLedger", "dataType": "varchar", "nullable": true, "meaning": "Purchase ledger" },
+        { "name": "basic", "dataType": "float", "nullable": true, "meaning": "Basic amount" },
+        { "name": "NewGSTNo", "dataType": "varchar", "nullable": true, "meaning": "Company GST" },
+        { "name": "currency", "dataType": "varchar", "nullable": true, "meaning": "Currency" }
+      ],
+      "joins": [
+        { "to": "DebitNote", "on": "vw_DebitNote.DebitNoteNumber = DebitNote.DebitNoteNumber" },
+        { "to": "StoreInwardsPayment", "on": "vw_DebitNote.MRNo = StoreInwardsPayment.MRNo" }
+      ],
+      "synonyms": [
+        "vw_DebitNote",
+        "debit note details",
+        "debit note with items"
+      ],
+      "exampleQuestions": [
+        "List recent debit notes with amounts for Plastene Polyfilms Limited",
+        "Show debit note details for PPL/DB/26-27/3"
+      ],
+      "embeddingText": "View vw_DebitNote. Domain: Debit / credit notes. Preferred debit note view — DebitNoteNumber, CompanyName, PartyName, DebitType, TotalDebitAmount, BillNo, MRNo, sysdate, optional ItemCode/ItemName (often blank). Prefer over DebitNote_store. Synonyms: debit note details, DN list. Always TOP 50."
+    },
+    {
+      "id": "CreditNote",
+      "objectName": "CreditNote",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "DebitCreditNote",
+      "purpose": "Sales-side credit note headers (~1.2k). Issued to customers for discounts, rate/qty differences, or provisional credits. Prefer vw_creditnote for display fields.",
+      "primaryKeyHint": "CreditNoteNumber (and CreditNotesrno). transid unique.",
+      "statusColumn": "ApprovalStatus",
+      "statusNotes": "Numeric ApprovalStatus; classify with CreditType.",
+      "columns": [
+        { "name": "CreditNoteNumber", "dataType": "varchar", "nullable": true, "meaning": "Credit note number e.g. PPL/CR/26-27/9" },
+        { "name": "CreditNotesrno", "dataType": "int", "nullable": true, "meaning": "Serial" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Our company issuing credit note" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "Customer / party receiving credit" },
+        { "name": "TotalCreditAmount", "dataType": "float", "nullable": true, "meaning": "Total credit amount" },
+        { "name": "CreditType", "dataType": "varchar", "nullable": true, "meaning": "Provisional / Rate Difference / Qty Difference / Discount Difference(%) / Quality" },
+        { "name": "CreditNoteDate", "dataType": "datetime", "nullable": true, "meaning": "Credit note date" },
+        { "name": "invno", "dataType": "varchar", "nullable": true, "meaning": "Related sales invoice number" },
+        { "name": "invDate", "dataType": "datetime", "nullable": true, "meaning": "Invoice date" },
+        { "name": "Note", "dataType": "varchar", "nullable": true, "meaning": "Narration" },
+        { "name": "Particulars", "dataType": "varchar", "nullable": true, "meaning": "Particulars" },
+        { "name": "BillDetail", "dataType": "varchar", "nullable": true, "meaning": "Bill / invoice detail text" },
+        { "name": "SalesLedger", "dataType": "varchar", "nullable": true, "meaning": "Sales ledger" },
+        { "name": "basic", "dataType": "float", "nullable": true, "meaning": "Basic amount" },
+        { "name": "UserName", "dataType": "varchar", "nullable": true, "meaning": "Creator username" },
+        { "name": "currency", "dataType": "varchar", "nullable": true, "meaning": "Currency (INR/USD etc.)" },
+        { "name": "ExchangeRate", "dataType": "float", "nullable": true, "meaning": "FX rate when foreign currency" },
+        { "name": "year", "dataType": "varchar", "nullable": true, "meaning": "FY e.g. 26-27" },
+        { "name": "Ref", "dataType": "varchar", "nullable": true, "meaning": "Reference" },
+        { "name": "transid", "dataType": "int", "nullable": true, "meaning": "Unique row id" }
+      ],
+      "joins": [
+        { "to": "vw_creditnote", "on": "CreditNote.CreditNoteNumber = vw_creditnote.creditnotenumber" },
+        { "to": "LoginRights", "on": "CreditNote.UserName = loginentry.dbo.LoginRights.Name" }
+      ],
+      "synonyms": [
+        "credit note",
+        "credit notes",
+        "CN",
+        "CreditNote",
+        "customer credit",
+        "sales credit note"
+      ],
+      "exampleQuestions": [
+        "Show credit notes for Plastene Polyfilms Limited",
+        "Credit note PPL/CR/26-27/9 amount and party",
+        "Oswal Extrusion Limited credit notes"
+      ],
+      "embeddingText": "Table CreditNote. Domain: Debit / credit notes. Sales credit note headers — CreditNoteNumber (CO/CR/yy-yy/n), CompanyName, PartyName (customer), TotalCreditAmount, CreditType, CreditNoteDate, invno, Note, SalesLedger, currency. Prefer vw_creditnote. Synonyms: credit note, CN, customer credit. Not purchase debit notes (use DebitNote). Always TOP 50."
+    },
+    {
+      "id": "vw_creditnote",
+      "objectName": "vw_creditnote",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "DebitCreditNote",
+      "purpose": "Preferred credit note view (~1.2k) with party address/GST display fields. Column names are mostly lowercase; spaced column [Company Address] must be bracket-quoted.",
+      "primaryKeyHint": "creditnotenumber",
+      "statusColumn": null,
+      "columns": [
+        { "name": "creditnotenumber", "dataType": "varchar", "nullable": true, "meaning": "Credit note number" },
+        { "name": "partyname", "dataType": "varchar", "nullable": true, "meaning": "Customer" },
+        { "name": "companyname", "dataType": "varchar", "nullable": true, "meaning": "Our company (lowercase)" },
+        { "name": "invno", "dataType": "varchar", "nullable": true, "meaning": "Invoice number" },
+        { "name": "creditnotedate", "dataType": "datetime", "nullable": true, "meaning": "Credit note date" },
+        { "name": "totalcreditamount", "dataType": "float", "nullable": true, "meaning": "Total credit amount" },
+        { "name": "credittype", "dataType": "varchar", "nullable": true, "meaning": "Credit type" },
+        { "name": "note", "dataType": "varchar", "nullable": true, "meaning": "Narration" },
+        { "name": "particulars", "dataType": "varchar", "nullable": true, "meaning": "Particulars" },
+        { "name": "salesledger", "dataType": "varchar", "nullable": true, "meaning": "Sales ledger" },
+        { "name": "basic", "dataType": "float", "nullable": true, "meaning": "Basic" },
+        { "name": "NewGSTNo", "dataType": "varchar", "nullable": true, "meaning": "Party GST" },
+        { "name": "CompanyGSTIN", "dataType": "varchar", "nullable": true, "meaning": "Company GSTIN" },
+        { "name": "currency", "dataType": "varchar", "nullable": true, "meaning": "Currency" },
+        { "name": "Company Address", "dataType": "varchar", "nullable": true, "meaning": "Company address — MUST select as [Company Address]" }
+      ],
+      "joins": [
+        { "to": "CreditNote", "on": "vw_creditnote.creditnotenumber = CreditNote.CreditNoteNumber" }
+      ],
+      "synonyms": [
+        "vw_creditnote",
+        "credit note details",
+        "credit note list"
+      ],
+      "exampleQuestions": [
+        "List credit notes with amounts for Plastene Polyfilms Limited",
+        "Show credit note PPL/CR/26-27/9 details"
+      ],
+      "embeddingText": "View vw_creditnote. Domain: Debit / credit notes. Preferred credit note view — creditnotenumber, companyname, partyname, totalcreditamount, credittype, creditnotedate, invno, note, salesledger. Lowercase column names. Bracket [Company Address]. Synonyms: credit note details, CN list. Always TOP 50."
+    },
+    {
+      "id": "Vendor",
+      "objectName": "Vendor",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Vendor",
+      "purpose": "Purchase vendor master (~6.8k). Firm name, code, GST/PAN, contact, address, bank, payment terms, MSME flags. Prefer for 'vendor details / GST / bank / email / MSME'. For vendor-item rates use VendorRate (detailed) or Vw_VendorItem (slim); for a specific quotation/PO use Vw_Quotation.",
+      "primaryKeyHint": "VendorCode (business). FirmName is display name.",
+      "statusColumn": "IsClosed",
+      "statusNotes": "IsClosed 0=active, 1=closed. IsHold may flag held vendors.",
+      "columns": [
+        { "name": "FirmName", "dataType": "varchar", "nullable": true, "meaning": "Vendor firm name; joins Vw_PurchaseOrder.FirmName / Vw_Quotation.FirmName / DebitNote.PartyName (trim; may include GST suffix)" },
+        { "name": "VendorCode", "dataType": "varchar", "nullable": true, "meaning": "Vendor code e.g. Ven00171; joins Vw_PurchaseOrder.VendorCode" },
+        { "name": "NewGSTNo", "dataType": "varchar", "nullable": true, "meaning": "GSTIN (may be N.A.)" },
+        { "name": "PANNo", "dataType": "varchar", "nullable": true, "meaning": "PAN" },
+        { "name": "Email", "dataType": "varchar", "nullable": true, "meaning": "Vendor email(s)" },
+        { "name": "EmailCc", "dataType": "varchar", "nullable": true, "meaning": "Email CC" },
+        { "name": "ContactName", "dataType": "varchar", "nullable": true, "meaning": "Contact person" },
+        { "name": "TelNo1", "dataType": "varchar", "nullable": true, "meaning": "Phone 1" },
+        { "name": "TelNo2", "dataType": "varchar", "nullable": true, "meaning": "Phone 2" },
+        { "name": "Address", "dataType": "varchar", "nullable": true, "meaning": "Address" },
+        { "name": "City", "dataType": "varchar", "nullable": true, "meaning": "City" },
+        { "name": "State", "dataType": "varchar", "nullable": true, "meaning": "State" },
+        { "name": "Country", "dataType": "varchar", "nullable": true, "meaning": "Country" },
+        { "name": "PINCode", "dataType": "varchar", "nullable": true, "meaning": "PIN" },
+        { "name": "BankAccountNo", "dataType": "varchar", "nullable": true, "meaning": "Bank account number" },
+        { "name": "BankName", "dataType": "varchar", "nullable": true, "meaning": "Bank name" },
+        { "name": "BankBranchName", "dataType": "varchar", "nullable": true, "meaning": "Branch" },
+        { "name": "IFSCCode", "dataType": "varchar", "nullable": true, "meaning": "IFSC" },
+        { "name": "PaymentTerms", "dataType": "varchar", "nullable": true, "meaning": "Payment terms text" },
+        { "name": "ModeofPayment", "dataType": "varchar", "nullable": true, "meaning": "RTGS / mode" },
+        { "name": "TypeVendor", "dataType": "varchar", "nullable": true, "meaning": "Local / Import (typo Loca also appears)" },
+        { "name": "ISMSME", "dataType": "varchar", "nullable": true, "meaning": "MSME flag Yes/No/yes/no" },
+        { "name": "MSMENumber", "dataType": "varchar", "nullable": true, "meaning": "MSME registration number" },
+        { "name": "IsClosed", "dataType": "int", "nullable": true, "meaning": "0 active, 1 closed" },
+        { "name": "IsHold", "dataType": "varchar", "nullable": true, "meaning": "Hold flag if set" },
+        { "name": "Website", "dataType": "varchar", "nullable": true, "meaning": "Website" },
+        { "name": "ledgercode", "dataType": "varchar", "nullable": true, "meaning": "Related ledger code if any" },
+        { "name": "LoginName", "dataType": "varchar", "nullable": true, "meaning": "Creator/updater login" }
+      ],
+      "joins": [
+        { "to": "Vw_PurchaseOrder", "on": "Vendor.VendorCode = Vw_PurchaseOrder.VendorCode OR Vendor.FirmName = Vw_PurchaseOrder.FirmName", "note": "Validated live ~4.6k code matches" },
+        { "to": "Vw_Quotation", "on": "Vendor.FirmName = Vw_Quotation.FirmName" },
+        { "to": "VendorRate", "on": "Vendor.FirmName = VendorRate.FirmName", "note": "Historical rates; always filter + TOP 50" },
+        { "to": "Vw_VendorItem", "on": "Vendor.FirmName = Vw_VendorItem.FirmName" },
+        { "to": "LedgerMaster", "on": "Vendor.NewGSTNo = LedgerMaster.NewGSTNo OR Vendor.PANNo = LedgerMaster.PANNo", "note": "For balances use LedgerMaster" },
+        { "to": "DebitNote", "on": "Vendor.FirmName = DebitNote.PartyName" }
+      ],
+      "synonyms": [
+        "vendor master",
+        "supplier master",
+        "vendor GST",
+        "vendor bank details",
+        "MSME vendor",
+        "Vendor",
+        "supplier email",
+        "vendor IFSC"
+      ],
+      "exampleQuestions": [
+        "What is the GST and email for Bright Rubber?",
+        "Show bank details and IFSC for Chemline India Ltd",
+        "List MSME vendors with MSME number",
+        "Vendor code and payment terms for Lohia Corp"
+      ],
+      "embeddingText": "Table Vendor. Domain: Vendor masters. Purchase supplier master — FirmName, VendorCode (Ven#####), NewGSTNo, PANNo, Email, ContactName, Address City State, BankAccountNo BankName IFSCCode, PaymentTerms, ModeofPayment, ISMSME MSMENumber, TypeVendor Local/Import, IsClosed. Examples: Bright Rubber Ven00171 GST 24AACFB1249A1ZA; Chemline India Ltd Ven00191. Join FirmName/VendorCode to Vw_PurchaseOrder and Vw_Quotation. For vendor item rates use VendorRate or Vw_VendorItem (filter FirmName/ItemCode + TOP 50). For ledger pending balance use LedgerMaster not Vendor.Balance. Synonyms: vendor master, supplier GST, vendor bank, MSME vendor, IFSC. Always TOP 50."
+    },
+    {
+      "id": "vw_VendorListwithBankdtls",
+      "objectName": "vw_VendorListwithBankdtls",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Vendor",
+      "purpose": "Compact vendor bank/GST/payment-terms list (~6.8k). Prefer for bank IFSC MSME payment questions when full Vendor profile is not needed.",
+      "primaryKeyHint": "FirmName",
+      "statusColumn": null,
+      "columns": [
+        { "name": "FirmName", "dataType": "varchar", "nullable": true, "meaning": "Vendor name" },
+        { "name": "NewGSTNo", "dataType": "varchar", "nullable": true, "meaning": "GSTIN" },
+        { "name": "BankAccountNo", "dataType": "varchar", "nullable": true, "meaning": "Bank A/C" },
+        { "name": "BankBranchName", "dataType": "varchar", "nullable": true, "meaning": "Branch" },
+        { "name": "IFSCCode", "dataType": "varchar", "nullable": true, "meaning": "IFSC" },
+        { "name": "MSMENumber", "dataType": "varchar", "nullable": true, "meaning": "MSME number" },
+        { "name": "PaymentTerms", "dataType": "varchar", "nullable": true, "meaning": "Payment terms" },
+        { "name": "ModeofPayment", "dataType": "varchar", "nullable": true, "meaning": "Payment mode" }
+      ],
+      "joins": [
+        { "to": "Vendor", "on": "vw_VendorListwithBankdtls.FirmName = Vendor.FirmName" }
+      ],
+      "synonyms": [
+        "vendor bank list",
+        "vendor IFSC list",
+        "vw_VendorListwithBankdtls"
+      ],
+      "exampleQuestions": [
+        "Show vendor bank account and IFSC for a firm",
+        "Payment terms and GST for vendors"
+      ],
+      "embeddingText": "View vw_VendorListwithBankdtls. Domain: Vendor masters. Compact list: FirmName, NewGSTNo, BankAccountNo, BankBranchName, IFSCCode, MSMENumber, PaymentTerms, ModeofPayment. Prefer for bank/IFSC questions. Full profile: Vendor table. Always TOP 50."
+    },
+    {
+      "id": "vendordata",
+      "objectName": "vendordata",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Vendor",
+      "purpose": "Alternate vendor snapshot (~4.1k) with FirmName and LedgerName plus bank/MSME/contact. Prefer Vendor for complete master; use vendordata when LedgerName mapping is needed.",
+      "primaryKeyHint": "FirmName / LedgerName",
+      "statusColumn": null,
+      "columns": [
+        { "name": "FirmName", "dataType": "varchar", "nullable": true, "meaning": "Vendor firm name" },
+        { "name": "LedgerName", "dataType": "varchar", "nullable": true, "meaning": "Accounting ledger name; joins LedgerMaster.LedgerName" },
+        { "name": "PaymentTerms", "dataType": "varchar", "nullable": true, "meaning": "Payment terms" },
+        { "name": "ISMSME", "dataType": "varchar", "nullable": true, "meaning": "MSME Yes/No" },
+        { "name": "MSMENumber", "dataType": "varchar", "nullable": true, "meaning": "MSME number" },
+        { "name": "NewGSTNo", "dataType": "varchar", "nullable": true, "meaning": "GSTIN" },
+        { "name": "PANNo", "dataType": "varchar", "nullable": true, "meaning": "PAN" },
+        { "name": "Email", "dataType": "varchar", "nullable": true, "meaning": "Email" },
+        { "name": "ContactName", "dataType": "varchar", "nullable": true, "meaning": "Contact" },
+        { "name": "BankAccountNo", "dataType": "varchar", "nullable": true, "meaning": "Bank A/C" },
+        { "name": "BankName", "dataType": "varchar", "nullable": true, "meaning": "Bank" },
+        { "name": "IFSCCode", "dataType": "varchar", "nullable": true, "meaning": "IFSC" },
+        { "name": "Address", "dataType": "varchar", "nullable": true, "meaning": "Address" },
+        { "name": "City", "dataType": "varchar", "nullable": true, "meaning": "City" },
+        { "name": "State", "dataType": "varchar", "nullable": true, "meaning": "State" }
+      ],
+      "joins": [
+        { "to": "Vendor", "on": "vendordata.FirmName = Vendor.FirmName", "note": "~1482 overlap; not a full duplicate" },
+        { "to": "LedgerMaster", "on": "vendordata.LedgerName = LedgerMaster.LedgerName" }
+      ],
+      "synonyms": [
+        "vendordata",
+        "vendor ledger name",
+        "supplier ledger mapping"
+      ],
+      "exampleQuestions": [
+        "What ledger name is linked to vendor FirmName X?",
+        "MSME vendors from vendordata"
+      ],
+      "embeddingText": "Table vendordata. Domain: Vendor masters. Snapshot with FirmName, LedgerName, GST PAN Email bank MSME. Prefer Vendor for full master/VendorCode. Use when mapping vendor to LedgerName for LedgerMaster balances. Always TOP 50."
+    },
+    {
+      "id": "InternalVendor",
+      "objectName": "InternalVendor",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Vendor",
+      "purpose": "Small list (~154) of group/internal company names treated as internal vendors (e.g. Plastene India Limited units). Not the full external vendor master.",
+      "primaryKeyHint": "FirmName",
+      "statusColumn": null,
+      "columns": [
+        { "name": "FirmName", "dataType": "varchar", "nullable": true, "meaning": "Internal/group company name" },
+        { "name": "actualCompanyId", "dataType": "int", "nullable": true, "meaning": "Related company id" }
+      ],
+      "joins": [
+        { "to": "FactoryInfo", "on": "InternalVendor.actualCompanyId relates to FactoryInfo.SrNo", "note": "Soft link; verify before relying" }
+      ],
+      "synonyms": [
+        "internal vendor",
+        "group company vendor",
+        "InternalVendor"
+      ],
+      "exampleQuestions": [
+        "Which companies are listed as internal vendors?"
+      ],
+      "embeddingText": "Table InternalVendor. Domain: Vendor masters. Internal/group firm names (Plastene India Limited units etc.) with actualCompanyId. Not external suppliers — use Vendor for supplier GST/bank. Synonyms: internal vendor, group company as vendor."
+    },
+    {
+      "id": "VendorRate",
+      "objectName": "VendorRate",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Vendor",
+      "purpose": "Preferred detailed vendor–item rate history (~921k). Rate, NegoRate, Qty, PaymentTerm, Discount, taxes. MUST filter FirmName and/or ItemCode (or SubCode) and TOP 50. For rates on a known quotation/PO prefer Vw_Quotation.",
+      "primaryKeyHint": "No single PK; grain is FirmName + ItemCode/SubCode + Sysdate (+ qty/rate)",
+      "statusColumn": null,
+      "columns": [
+        { "name": "FirmName", "dataType": "varchar", "nullable": true, "meaning": "Vendor name; joins Vendor.FirmName" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code; joins ItemInfo.itemcode" },
+        { "name": "SubCode", "dataType": "varchar", "nullable": true, "meaning": "Indent/sub line code; often joins ItemInfo.code" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Quoted/unit rate" },
+        { "name": "NegoRate", "dataType": "float", "nullable": true, "meaning": "Negotiated rate / line amount style field" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Quantity" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "Discount", "dataType": "float", "nullable": true, "meaning": "Discount" },
+        { "name": "PaymentTerm", "dataType": "varchar", "nullable": true, "meaning": "Payment terms on this rate row" },
+        { "name": "Sysdate", "dataType": "datetime", "nullable": true, "meaning": "Rate entry date; ORDER BY Sysdate DESC for latest" },
+        { "name": "Total", "dataType": "float", "nullable": true, "meaning": "Line total" },
+        { "name": "Terms", "dataType": "varchar", "nullable": true, "meaning": "Terms text" },
+        { "name": "Mode", "dataType": "varchar", "nullable": true, "meaning": "Mode" },
+        { "name": "ContactPerson", "dataType": "varchar", "nullable": true, "meaning": "Contact on rate row" },
+        { "name": "LoginName", "dataType": "varchar", "nullable": true, "meaning": "Entry user" },
+        { "name": "remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "make", "dataType": "varchar", "nullable": true, "meaning": "Make/brand" },
+        { "name": "cgstper", "dataType": "float", "nullable": true, "meaning": "CGST %" },
+        { "name": "sgstper", "dataType": "float", "nullable": true, "meaning": "SGST %" },
+        { "name": "igstper", "dataType": "float", "nullable": true, "meaning": "IGST %" },
+        { "name": "Pack_Forwd", "dataType": "float", "nullable": true, "meaning": "Packing/forwarding" },
+        { "name": "Insurance", "dataType": "float", "nullable": true, "meaning": "Insurance" }
+      ],
+      "joins": [
+        { "to": "Vendor", "on": "VendorRate.FirmName = Vendor.FirmName", "note": "Validated ~662k matches" },
+        { "to": "ItemInfo", "on": "VendorRate.ItemCode = ItemInfo.itemcode" },
+        { "to": "Vw_Quotation", "on": "VendorRate.FirmName = Vw_Quotation.FirmName AND VendorRate.ItemCode = Vw_Quotation.ItemCode", "note": "Prefer Vw_Quotation when PurchaseCode known" },
+        { "to": "Vw_VendorItem", "on": "VendorRate.FirmName = Vw_VendorItem.FirmName AND VendorRate.ItemCode = Vw_VendorItem.ItemCode" }
+      ],
+      "synonyms": [
+        "vendor rate",
+        "vendor rates",
+        "supplier rate history",
+        "item rate by vendor",
+        "VendorRate",
+        "last rate from vendor",
+        "nego rate vendor"
+      ],
+      "exampleQuestions": [
+        "Latest rates from Bright Rubber with item codes",
+        "Which vendors quoted rates for item WIP00013?",
+        "Show Rate and NegoRate history for Chemline India Ltd"
+      ],
+      "embeddingText": "Table VendorRate. Domain: Vendor rates. Detailed vendor-item rate history (~921k) — FirmName, ItemCode, SubCode, Rate, NegoRate, Qty, Unit, PaymentTerm, Discount, Sysdate, taxes. MUST WHERE FirmName or ItemCode and TOP 50. Example Bright Rubber recent UTI01107 Rate 2050; WIP00013 vendors include Gayatri Plastics. Prefer over Vw_VendorItem for PaymentTerm/taxes. For a specific PO/quotation use Vw_Quotation. Synonyms: vendor rate history, supplier rate, last rate, nego rate by vendor. Always TOP 50."
+    },
+    {
+      "id": "Vw_VendorItem",
+      "objectName": "Vw_VendorItem",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Vendor",
+      "purpose": "Slim vendor–item rate view (~14.5M) with itemdesc. Use only with FirmName or ItemCode filter + TOP 50. Prefer VendorRate when PaymentTerm/Discount/taxes needed; prefer Vw_Quotation for a specific quote/PO.",
+      "primaryKeyHint": "ItemCode + FirmName + Sysdate (not unique)",
+      "statusColumn": null,
+      "columns": [
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "FirmName", "dataType": "varchar", "nullable": true, "meaning": "Vendor name" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Rate" },
+        { "name": "NegoRate", "dataType": "float", "nullable": true, "meaning": "Negotiated rate" },
+        { "name": "Sysdate", "dataType": "datetime", "nullable": true, "meaning": "Date" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Qty" },
+        { "name": "itemdesc", "dataType": "varchar", "nullable": true, "meaning": "Item description" }
+      ],
+      "joins": [
+        { "to": "VendorRate", "on": "Vw_VendorItem.FirmName = VendorRate.FirmName AND Vw_VendorItem.ItemCode = VendorRate.ItemCode" },
+        { "to": "Vendor", "on": "Vw_VendorItem.FirmName = Vendor.FirmName" },
+        { "to": "ItemInfo", "on": "Vw_VendorItem.ItemCode = ItemInfo.itemcode" }
+      ],
+      "synonyms": [
+        "vendor item rates",
+        "Vw_VendorItem",
+        "who supplies this item",
+        "vendors for item code"
+      ],
+      "exampleQuestions": [
+        "List vendors and rates for item WIP00013 with description",
+        "Which firms supply item UTI01107?"
+      ],
+      "embeddingText": "View Vw_VendorItem. Domain: Vendor rates. Slim ~14.5M view: ItemCode, FirmName, Rate, NegoRate, Qty, itemdesc, Sysdate. CRITICAL: always filter ItemCode or FirmName and TOP 50 — never unfiltered scan. Prefer VendorRate for detailed terms/taxes. Synonyms: vendors for item, vendor item rates, who supplies item. Always TOP 50."
+    },
+    {
+      "id": "Vw_ReturnGatePass",
+      "objectName": "Vw_ReturnGatePass",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "GatePass",
+      "purpose": "Preferred returnable gate pass (RGP) view (~6.1k). Material sent out that should return. Company column CompName. Includes party FirmName/GST display fields.",
+      "primaryKeyHint": "GatePassNo + GatePassIndex",
+      "statusColumn": null,
+      "columns": [
+        { "name": "GatePassNo", "dataType": "varchar", "nullable": true, "meaning": "Returnable gate pass number e.g. KPV/26-27/GP/162, PIL2/19-20/GP/23" },
+        { "name": "GatePassIndex", "dataType": "int", "nullable": true, "meaning": "Line index on the pass" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Gate pass date" },
+        { "name": "CompName", "dataType": "varchar", "nullable": true, "meaning": "Our company — NOT CompanyName" },
+        { "name": "ActualPartyName", "dataType": "varchar", "nullable": true, "meaning": "Actual party / vendor" },
+        { "name": "PurposePartyName", "dataType": "varchar", "nullable": true, "meaning": "Purpose party" },
+        { "name": "FirmName", "dataType": "varchar", "nullable": true, "meaning": "Firm name on view (often purpose party)" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code; joins ItemInfo.itemcode" },
+        { "name": "ItemDesc", "dataType": "varchar", "nullable": true, "meaning": "Item description" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Quantity sent out" },
+        { "name": "Purpose", "dataType": "varchar", "nullable": true, "meaning": "Purpose e.g. Job Work, Repairing, Loan Basis" },
+        { "name": "Remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "Through", "dataType": "varchar", "nullable": true, "meaning": "Vehicle / through" },
+        { "name": "UserName", "dataType": "varchar", "nullable": true, "meaning": "Creator" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Rate" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Amount" },
+        { "name": "GST", "dataType": "varchar", "nullable": true, "meaning": "Company GST" },
+        { "name": "VGST", "dataType": "varchar", "nullable": true, "meaning": "Party GST" },
+        { "name": "Yr", "dataType": "varchar", "nullable": true, "meaning": "FY" },
+        { "name": "note", "dataType": "varchar", "nullable": true, "meaning": "Note" }
+      ],
+      "joins": [
+        { "to": "InwdReturnGatePass", "on": "Vw_ReturnGatePass.GatePassNo = InwdReturnGatePass.GatePassNo", "note": "Inward against RGP when GatePassNo set" },
+        { "to": "vw_returngatepasspending", "on": "Vw_ReturnGatePass.GatePassNo = vw_returngatepasspending.GatePassNo" },
+        { "to": "ItemInfo", "on": "Vw_ReturnGatePass.ItemCode = ItemInfo.itemcode" }
+      ],
+      "synonyms": [
+        "returnable gate pass",
+        "RGP",
+        "return gate pass",
+        "Vw_ReturnGatePass",
+        "material sent for job work returnable"
+      ],
+      "exampleQuestions": [
+        "Show returnable gate passes for K.P. WOVEN PRIVATE LIMITED",
+        "Gate pass KPV/26-27/GP/162 items and qty",
+        "Returnable gate passes pending return"
+      ],
+      "embeddingText": "View Vw_ReturnGatePass. Domain: Gate pass. Returnable gate pass (RGP) — GatePassNo (CO/yy-yy/GP/n), CompName (not CompanyName), ActualPartyName, PurposePartyName, ItemCode, ItemDesc, Qty, Purpose, Through, Rate. Pending returns: vw_returngatepasspending. Non-returnable uses Vw_NonReturnGatePass (NGP). Synonyms: returnable gate pass, RGP, return gate pass. Always TOP 50."
+    },
+    {
+      "id": "Vw_NonReturnGatePass",
+      "objectName": "Vw_NonReturnGatePass",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "GatePass",
+      "purpose": "Preferred non-returnable gate pass (NRGP) view (~5.2k). Material sent out not expected back. CompName; PartyName.",
+      "primaryKeyHint": "GatePassNo + GatePassIndex",
+      "statusColumn": null,
+      "columns": [
+        { "name": "GatePassNo", "dataType": "varchar", "nullable": true, "meaning": "Non-returnable gate pass e.g. OEL/26-27/NGP/2" },
+        { "name": "GatePassIndex", "dataType": "int", "nullable": true, "meaning": "Line index" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Date" },
+        { "name": "CompName", "dataType": "varchar", "nullable": true, "meaning": "Our company — NOT CompanyName" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "Party receiving material" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item name (column ItemName not ItemDesc)" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Qty" },
+        { "name": "Purpose", "dataType": "varchar", "nullable": true, "meaning": "Purpose" },
+        { "name": "Remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "Through", "dataType": "varchar", "nullable": true, "meaning": "Through / vehicle" },
+        { "name": "Loginname", "dataType": "varchar", "nullable": true, "meaning": "Creator" },
+        { "name": "Yr", "dataType": "varchar", "nullable": true, "meaning": "FY" },
+        { "name": "note", "dataType": "varchar", "nullable": true, "meaning": "Note" },
+        { "name": "GST", "dataType": "varchar", "nullable": true, "meaning": "Company GST" },
+        { "name": "VGST", "dataType": "varchar", "nullable": true, "meaning": "Party GST" }
+      ],
+      "joins": [
+        { "to": "ItemInfo", "on": "Vw_NonReturnGatePass.ItemCode = ItemInfo.itemcode" },
+        { "to": "Vendor", "on": "Vw_NonReturnGatePass.PartyName = Vendor.FirmName" }
+      ],
+      "synonyms": [
+        "non returnable gate pass",
+        "NRGP",
+        "non-returnable gate pass",
+        "Vw_NonReturnGatePass",
+        "NGP"
+      ],
+      "exampleQuestions": [
+        "Show non-returnable gate passes for Oswal Extrusion Limited",
+        "NRGP OEL/26-27/NGP/2 details"
+      ],
+      "embeddingText": "View Vw_NonReturnGatePass. Domain: Gate pass. Non-returnable gate pass (NRGP/NGP) — GatePassNo (CO/yy-yy/NGP/n), CompName, PartyName, ItemCode, ItemName, Qty, Purpose. Not returnable — for pending returns use vw_returngatepasspending / Vw_ReturnGatePass. Synonyms: non returnable gate pass, NRGP, NGP. Always TOP 50."
+    },
+    {
+      "id": "InwdReturnGatePass",
+      "objectName": "InwdReturnGatePass",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "GatePass",
+      "purpose": "Inward entries against returnable gate passes (~4k). InwGatePassNo is inward doc; GatePassNo links to original RGP when populated.",
+      "primaryKeyHint": "InwGatePassNo + GatePassIndex",
+      "statusColumn": null,
+      "columns": [
+        { "name": "InwGatePassNo", "dataType": "varchar", "nullable": true, "meaning": "Inward gate pass number e.g. PPL/26-27/IGP/9" },
+        { "name": "GatePassNo", "dataType": "varchar", "nullable": true, "meaning": "Original returnable GatePassNo when linked" },
+        { "name": "GatePassIndex", "dataType": "int", "nullable": true, "meaning": "Line index" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Inward date" },
+        { "name": "CompName", "dataType": "varchar", "nullable": true, "meaning": "Company — NOT CompanyName" },
+        { "name": "ActualPartyName", "dataType": "varchar", "nullable": true, "meaning": "Party" },
+        { "name": "PurposePartyName", "dataType": "varchar", "nullable": true, "meaning": "Purpose party" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ItemDesc", "dataType": "varchar", "nullable": true, "meaning": "Item description" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Inward qty" },
+        { "name": "Purpose", "dataType": "varchar", "nullable": true, "meaning": "Purpose" },
+        { "name": "Remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "UserName", "dataType": "varchar", "nullable": true, "meaning": "User" },
+        { "name": "Through", "dataType": "varchar", "nullable": true, "meaning": "Through" },
+        { "name": "Yr", "dataType": "varchar", "nullable": true, "meaning": "FY" },
+        { "name": "note", "dataType": "varchar", "nullable": true, "meaning": "Note" }
+      ],
+      "joins": [
+        { "to": "Vw_ReturnGatePass", "on": "InwdReturnGatePass.GatePassNo = Vw_ReturnGatePass.GatePassNo", "note": "Validated when GatePassNo set (~3.7k rows have link)" },
+        { "to": "ItemInfo", "on": "InwdReturnGatePass.ItemCode = ItemInfo.itemcode" }
+      ],
+      "synonyms": [
+        "inward return gate pass",
+        "gate pass return inward",
+        "IGP",
+        "InwdReturnGatePass",
+        "material returned against gate pass"
+      ],
+      "exampleQuestions": [
+        "Show inward returns against returnable gate passes for Plastene Polyfilms Limited",
+        "Inward gate pass PPL/26-27/IGP/9"
+      ],
+      "embeddingText": "Table InwdReturnGatePass. Domain: Gate pass. Inward against RGP — InwGatePassNo (IGP), GatePassNo link to returnable pass, CompName, ItemCode, Qty. Synonyms: inward return gate pass, IGP, material returned. Pending open qty: vw_returngatepasspending. Always TOP 50."
+    },
+    {
+      "id": "vw_returngatepasspending",
+      "objectName": "vw_returngatepasspending",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "GatePass",
+      "purpose": "Returnable gate pass pending return quantities (~5.8k; ~546 with PendingQty>0). Prefer for 'what is still pending to return'.",
+      "primaryKeyHint": "GatePassNo + ItemCode",
+      "statusColumn": null,
+      "columns": [
+        { "name": "GatePassNo", "dataType": "varchar", "nullable": true, "meaning": "Returnable gate pass number" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Original pass date" },
+        { "name": "CompName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "ActualPartyName", "dataType": "varchar", "nullable": true, "meaning": "Party" },
+        { "name": "PurposePartyName", "dataType": "varchar", "nullable": true, "meaning": "Purpose party" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item" },
+        { "name": "ItemDesc", "dataType": "varchar", "nullable": true, "meaning": "Description" },
+        { "name": "ReturnQty", "dataType": "float", "nullable": true, "meaning": "Qty expected/sent on returnable basis" },
+        { "name": "InwardQty", "dataType": "float", "nullable": true, "meaning": "Qty already inwarded back" },
+        { "name": "PendingQty", "dataType": "float", "nullable": true, "meaning": "Still pending; filter PendingQty > 0 for open returns" },
+        { "name": "Purpose", "dataType": "varchar", "nullable": true, "meaning": "Purpose" },
+        { "name": "Remarks", "dataType": "varchar", "nullable": true, "meaning": "Remarks" },
+        { "name": "note", "dataType": "varchar", "nullable": true, "meaning": "Note" }
+      ],
+      "joins": [
+        { "to": "Vw_ReturnGatePass", "on": "vw_returngatepasspending.GatePassNo = Vw_ReturnGatePass.GatePassNo" },
+        { "to": "InwdReturnGatePass", "on": "vw_returngatepasspending.GatePassNo = InwdReturnGatePass.GatePassNo" }
+      ],
+      "synonyms": [
+        "pending gate pass return",
+        "gate pass pending",
+        "returnable pending qty",
+        "vw_returngatepasspending",
+        "open returnable gate pass"
+      ],
+      "exampleQuestions": [
+        "Which returnable gate passes still have pending qty for K.P. WOVEN?",
+        "Pending returns on gate passes"
+      ],
+      "embeddingText": "View vw_returngatepasspending. Domain: Gate pass. Pending returnable quantities — GatePassNo, CompName, ItemCode, ReturnQty, InwardQty, PendingQty. Filter PendingQty > 0 for open returns (~546). Synonyms: pending gate pass return, open RGP, returnable pending. Always TOP 50."
+    },
+    {
+      "id": "Vw_EditJOBWorkOrder",
+      "objectName": "Vw_EditJOBWorkOrder",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "JobWork",
+      "purpose": "Preferred formal job-work order view (~12 lines). PurchaseCode like PIL/JRO/... or .../JWO/...; includes FirmName, items, JobWorkCharges, GatePassNo. Module is small/legacy — for live qty at job worker use VW_JobWork_EBD_DTL / VW_RECJOBWORK_EBD_DTL.",
+      "primaryKeyHint": "PurchaseCode + ItemCode/SubCode",
+      "statusColumn": null,
+      "columns": [
+        { "name": "PurchaseCode", "dataType": "varchar", "nullable": true, "meaning": "Job work order number e.g. PIL2/JRO/14-15/1" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Our company" },
+        { "name": "FirmName", "dataType": "varchar", "nullable": true, "meaning": "Job worker / vendor firm" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ItemDesc", "dataType": "varchar", "nullable": true, "meaning": "Item description" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Order qty" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Rate" },
+        { "name": "Total", "dataType": "float", "nullable": true, "meaning": "Line total" },
+        { "name": "Unit", "dataType": "varchar", "nullable": true, "meaning": "UOM" },
+        { "name": "JobWorkCharges", "dataType": "float", "nullable": true, "meaning": "Job work charges on order" },
+        { "name": "GatePassNo", "dataType": "varchar", "nullable": true, "meaning": "Linked gate pass if any" },
+        { "name": "FPItemCode", "dataType": "varchar", "nullable": true, "meaning": "Finished product item code" },
+        { "name": "FPItemNAme", "dataType": "varchar", "nullable": true, "meaning": "Finished product name" },
+        { "name": "TotalAmount", "dataType": "float", "nullable": true, "meaning": "Header total amount" },
+        { "name": "DepttName", "dataType": "varchar", "nullable": true, "meaning": "Department" },
+        { "name": "Currency", "dataType": "varchar", "nullable": true, "meaning": "Currency" },
+        { "name": "StoreCode", "dataType": "varchar", "nullable": true, "meaning": "Store/indent code" },
+        { "name": "SubCode", "dataType": "varchar", "nullable": true, "meaning": "Sub code / indent line" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Date" },
+        { "name": "Discount", "dataType": "float", "nullable": true, "meaning": "Discount" }
+      ],
+      "joins": [
+        { "to": "Vw_ReturnGatePass", "on": "Vw_EditJOBWorkOrder.GatePassNo = Vw_ReturnGatePass.GatePassNo" },
+        { "to": "Vendor", "on": "Vw_EditJOBWorkOrder.FirmName = Vendor.FirmName" },
+        { "to": "ItemInfo", "on": "Vw_EditJOBWorkOrder.ItemCode = ItemInfo.itemcode" }
+      ],
+      "synonyms": [
+        "job work order",
+        "jobwork order",
+        "JWO",
+        "JRO",
+        "Vw_EditJOBWorkOrder",
+        "job work charges order"
+      ],
+      "exampleQuestions": [
+        "Show job work order PIL2/JRO/14-15/1",
+        "List formal job work orders with JobWorkCharges"
+      ],
+      "embeddingText": "View Vw_EditJOBWorkOrder. Domain: Job work. Formal job-work orders (~12 lines) — PurchaseCode (PIL/JRO or JWO), CompanyName, FirmName (job worker), ItemCode, ItemDesc, Qty, Rate, JobWorkCharges, GatePassNo, FPItemCode. Sparse legacy module — does not join PurchasePayment. For live material at job work use VW_JobWork_EBD_DTL; receipts VW_RECJOBWORK_EBD_DTL; returnable sends also Vw_ReturnGatePass Purpose Job Work. Synonyms: job work order, JWO, JRO, jobwork charges. Always TOP 50."
+    },
+    {
+      "id": "VW_JobWork_EBD_DTL",
+      "objectName": "VW_JobWork_EBD_DTL",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "JobWork",
+      "purpose": "Preferred live item-level view of material related to job work (~20k). Filter companyname and/or ItemCode; TOP 50. Prefer over summary VW_JobWork_EBD.",
+      "primaryKeyHint": "ItemCode + companyname + sysdate (not unique)",
+      "statusColumn": null,
+      "columns": [
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "companyname", "dataType": "varchar", "nullable": true, "meaning": "Company (lowercase)" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Transaction date" },
+        { "name": "DescriptionGoods", "dataType": "varchar", "nullable": true, "meaning": "Goods description" },
+        { "name": "GroupName", "dataType": "varchar", "nullable": true, "meaning": "Group" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Quantity" },
+        { "name": "MISCATEGORY", "dataType": "varchar", "nullable": true, "meaning": "MIS category e.g. RM, SF" },
+        { "name": "MISGRUPITEM", "dataType": "varchar", "nullable": true, "meaning": "MIS group item" }
+      ],
+      "joins": [
+        { "to": "ItemInfo", "on": "VW_JobWork_EBD_DTL.ItemCode = ItemInfo.itemcode" },
+        { "to": "VW_RECJOBWORK_EBD_DTL", "on": "VW_JobWork_EBD_DTL.ItemCode = VW_RECJOBWORK_EBD_DTL.ITEMCODE AND VW_JobWork_EBD_DTL.companyname = VW_RECJOBWORK_EBD_DTL.CompanyName" }
+      ],
+      "synonyms": [
+        "material at job work",
+        "job work quantity",
+        "qty at job work",
+        "VW_JobWork_EBD_DTL",
+        "jobwork EBD"
+      ],
+      "exampleQuestions": [
+        "Job work material quantities for Plastene India Limited Unit II",
+        "Show job work EBD detail for item FIB02003"
+      ],
+      "embeddingText": "View VW_JobWork_EBD_DTL. Domain: Job work. Live item-level job-work MIS (~20k) — ItemCode, ItemName, companyname, Qty, GroupName, DescriptionGoods, MISCATEGORY, sysdate. Filter companyname/ItemCode + TOP 50. Prefer over VW_JobWork_EBD summary. Receipts from job work: VW_RECJOBWORK_EBD_DTL. Formal job-work orders: Vw_EditJOBWorkOrder. NOT for pending purchase work-order approval (use ApproveWorkOrder). Synonyms: material at job work, qty at job work, jobwork EBD. Always TOP 50."
+    },
+    {
+      "id": "VW_RECJOBWORK_EBD_DTL",
+      "objectName": "VW_RECJOBWORK_EBD_DTL",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "JobWork",
+      "purpose": "Preferred live item-level receipts from job work (~17k) with MRNo (e.g. JBIN-SE). Filter CompanyName and/or ITEMCODE; TOP 50.",
+      "primaryKeyHint": "ITEMCODE + CompanyName + MRNo + sysdate",
+      "statusColumn": null,
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "ITEMCODE", "dataType": "varchar", "nullable": true, "meaning": "Item code (uppercase column)" },
+        { "name": "ITEMNAME", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "MRNo", "dataType": "varchar", "nullable": true, "meaning": "Receipt/MRN style number e.g. JBIN-SE 103" },
+        { "name": "sysdate", "dataType": "datetime", "nullable": true, "meaning": "Receipt date" },
+        { "name": "GroupName", "dataType": "varchar", "nullable": true, "meaning": "Group" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Received qty" },
+        { "name": "miscategory", "dataType": "varchar", "nullable": true, "meaning": "MIS category" },
+        { "name": "misgrupitem", "dataType": "varchar", "nullable": true, "meaning": "MIS group item" }
+      ],
+      "joins": [
+        { "to": "VW_JobWork_EBD_DTL", "on": "VW_RECJOBWORK_EBD_DTL.ITEMCODE = VW_JobWork_EBD_DTL.ItemCode" },
+        { "to": "ItemInfo", "on": "VW_RECJOBWORK_EBD_DTL.ITEMCODE = ItemInfo.itemcode" },
+        { "to": "StoreInwardsPayment", "on": "VW_RECJOBWORK_EBD_DTL.MRNo may relate to store MRNo", "note": "MRNo format often JBIN-SE; verify before joining" }
+      ],
+      "synonyms": [
+        "job work receipt",
+        "received from job work",
+        "VW_RECJOBWORK_EBD_DTL",
+        "jobwork inward",
+        "JBIN"
+      ],
+      "exampleQuestions": [
+        "Job work receipts for Plastene India Limited with MRNo",
+        "Received from job work item WIP00004"
+      ],
+      "embeddingText": "View VW_RECJOBWORK_EBD_DTL. Domain: Job work. Receipts from job work (~17k) — CompanyName, ITEMCODE, ITEMNAME, MRNo (JBIN-SE...), Qty, GroupName, sysdate. Filter CompanyName/ITEMCODE + TOP 50. Sent/at job work: VW_JobWork_EBD_DTL. Formal job-work orders: Vw_EditJOBWorkOrder. NOT pending WO approval (ApproveWorkOrder). Synonyms: job work receipt, received from job work, JBIN. Always TOP 50."
+    },
+    {
+      "id": "LoginRights",
+      "objectName": "loginentry.dbo.LoginRights",
+      "schema": "loginentry.dbo",
+      "objectType": "TABLE",
+      "domain": "Users",
+      "purpose": "ERP user master in database loginentry: usernames, email, full name, contact, employee code, category, and module role flags. Portal login and email lookups use this table. Cross-database from MaterialProcessing as loginentry.dbo.LoginRights or loginentry..loginrights.",
+      "primaryKeyHint": "Name (username)",
+      "statusColumn": null,
+      "columns": [
+        { "name": "Name", "dataType": "varchar(50)", "nullable": false, "meaning": "Username / login id; joins PurchasePayment.LoginName, BillPaymentEntry.Loginname, ApprovePO.ApprovalName, POAllocation.username" },
+        { "name": "FullName", "dataType": "varchar", "nullable": true, "meaning": "Display full name" },
+        { "name": "Email", "dataType": "varchar", "nullable": true, "meaning": "User email (portal notifications)" },
+        { "name": "ContactNo", "dataType": "varchar", "nullable": true, "meaning": "Phone / contact number" },
+        { "name": "EmpCode", "dataType": "varchar", "nullable": true, "meaning": "Employee code" },
+        { "name": "Category", "dataType": "varchar", "nullable": true, "meaning": "User category e.g. Account, Purchase, Store, Marketing, Payroll, Finance, Production, Approval, HO" },
+        { "name": "IsAdmin", "dataType": "varchar", "nullable": true, "meaning": "Admin flag; typically yes/no" },
+        { "name": "IsFinance", "dataType": "varchar", "nullable": true, "meaning": "Finance role flag yes/no" },
+        { "name": "IsAccounts", "dataType": "varchar", "nullable": true, "meaning": "Accounts role flag yes/no" },
+        { "name": "IsPayroll", "dataType": "varchar", "nullable": true, "meaning": "Payroll role flag" },
+        { "name": "IsmaterialProc", "dataType": "varchar", "nullable": true, "meaning": "Material processing access flag" },
+        { "name": "IsMarketing", "dataType": "varchar", "nullable": true, "meaning": "Marketing role flag" },
+        { "name": "IsstoreHOD", "dataType": "varchar", "nullable": true, "meaning": "Store HOD flag" },
+        { "name": "ispurchasehod", "dataType": "varchar", "nullable": true, "meaning": "Purchase HOD flag" },
+        { "name": "isPaymentApprove", "dataType": "varchar", "nullable": true, "meaning": "Can approve payments flag" },
+        { "name": "ISAccounthOD", "dataType": "varchar", "nullable": true, "meaning": "Accounts HOD flag" },
+        { "name": "Version", "dataType": "varchar", "nullable": true, "meaning": "Client/version tag if present" }
+      ],
+      "importantOtherColumns": [
+        "Do NOT select Password. Hundreds of Cr*/Up*/Del*/Dis*/App* permission flags exist — omit unless user asks a specific module right."
+      ],
+      "joins": [
+        { "to": "PurchasePayment", "on": "loginentry.dbo.LoginRights.Name = PurchasePayment.LoginName", "note": "Requester email for a PO" },
+        { "to": "BillPaymentEntry", "on": "loginentry.dbo.LoginRights.Name = BillPaymentEntry.Loginname", "note": "Payment requester email" },
+        { "to": "ApprovePO", "on": "loginentry.dbo.LoginRights.Name = ApprovePO.ApprovalName", "note": "Approver profile" },
+        { "to": "POAllocation", "on": "loginentry.dbo.LoginRights.Name = POAllocation.username", "note": "Authority/dept allocation" }
+      ],
+      "synonyms": [
+        "user master",
+        "login rights",
+        "loginrights",
+        "user email",
+        "who is this username",
+        "employee email",
+        "approver email",
+        "requester email",
+        "ERP users",
+        "LoginRights"
+      ],
+      "exampleQuestions": [
+        "What is the email for user jinal?",
+        "Show full name and contact for username account5",
+        "How many users have IsAdmin = yes?",
+        "List users in Category Purchase with email",
+        "What is the email of the person who created this PO?"
+      ],
+      "embeddingText": "Table loginentry.dbo.LoginRights (also loginentry..loginrights). Domain: Users / login rights. Purpose: ERP user master — Name (username), FullName, Email, ContactNo, EmpCode, Category (Account/Purchase/Store/Marketing/Payroll/Finance/Production/Approval/HO), role flags IsAdmin IsFinance IsAccounts IsPayroll IsmaterialProc IsMarketing IsstoreHOD ispurchasehod isPaymentApprove ISAccounthOD. NEVER select Password. Cross-database query from MaterialProcessing. Joins: Name = PurchasePayment.LoginName for PO requester email; Name = BillPaymentEntry.Loginname; Name = ApprovePO.ApprovalName; Name = POAllocation.username. Synonyms: user email, login rights, who is username, employee contact, approver email, requester email, email id of user, jinal ka email, email kya hai, finance people emails. Example: SELECT TOP 50 Name, FullName, Email FROM loginentry.dbo.LoginRights WHERE Name = 'jinal'. Admin filter: IsAdmin = 'yes'. Prefer listed identity columns only — do not SELECT *."
     }
   ],
   "validatedJoinFacts": [
@@ -1169,6 +2431,50 @@
     {
       "fact": "Bill PPL/D/540 has 16 Vw_StoreInwards lines / 6 StoreInwardsPayment headers (party Plastene Polyfilms Ltd-Purchase). BillPaymentEntry.BillNo = 'PPL/D/540' returns 0 — use store BillNo for receipt-by-bill questions.",
       "verifiedOn": "live counts 2026-08-11"
+    },
+    {
+      "fact": "loginentry.dbo.LoginRights has 736 users (~706 with email). Username column is Name. User jinal email is jinal@champalalgroup.com. Cross-db join PurchasePayment.LoginName = loginentry..loginrights.Name works from MaterialProcessing. Never select Password. InactiveUser table is empty (0 rows).",
+      "verifiedOn": "live loginentry 2026-08-11"
+    },
+    {
+      "fact": "PurchaseReq/Vw_PurchaseReq Code is PR number (~102k / ~628k rows), not IndentNo (0 join to ApproveIndent). Vw_Quotation.PurchaseCode joins PurchasePayment (667k). Vw_Quotation.StoreCode and Vw_IndentQuotation.Storecode join ApproveIndent.IndentNo. ApproveQuotation is empty (0 rows) — use Vw_Quotation.",
+      "verifiedOn": "live counts/joins 2026-08-11"
+    },
+    {
+      "fact": "StoreOutwards company column is CompName (~1.12M rows; Oswal ~163k). StoreOutwards.Itemcode = ItemInfo.itemcode matches; ItemInfo.code join returns 0. IssueSlipNo 350 for K.P. WOVEN has 121 lines; Oswal slip 215 has many lines. Skip WarehouseStoreoutwards (~3.4M).",
+      "verifiedOn": "live counts/joins 2026-08-11"
+    },
+    {
+      "fact": "vw_ItemInwardOutward uses companyname + Outwardqty; Oswal WIP00013 on 2026-08-11 Outwardqty=6988.50. vw_ItemMonthlyInwardOutward uses Month/Year/OutwardQty for month totals.",
+      "verifiedOn": "live samples 2026-08-11"
+    },
+    {
+      "fact": "WareHouse has ~37k stock rows (Oswal 6348). CompanyName + WareHouseName + ItemCode + StkInHand. ItemCode joins ItemInfo.itemcode. Below-reorder Oswal count with StkInHand < ReOrder AND ReOrder>0 = 108. WIP00013 Oswal stock mainly Liner Bag Godown 39476.4 and Loom Godown 17786.",
+      "verifiedOn": "live counts 2026-08-11"
+    },
+    {
+      "fact": "vw_itemwiseStock (~24k) is preferred simple stock view; vw_inventoryitemwarehouse_all (~56k) adds Deptt/GroupName. WareHouseMaster (~349) lists godowns. Skip broken vw_ItemStockLedger and VW_TradingStock; skip warehousestock (no company); skip stale WareHouseOpeningStock.",
+      "verifiedOn": "live inspect 2026-08-11"
+    },
+    {
+      "fact": "DebitNote ~4212 rows (Oswal ~280–341); CreditNote ~1223 (Oswal ~86–94). DebitType mostly Provisional. DebitNote.MRNo joins StoreInwardsPayment.MRNo; DebitNote.PONo to PurchasePayment = 0. DebitNoteItem/CreditNoteItem sparse (~179/~226) — prefer DebitNote/vw_DebitNote and CreditNote/vw_creditnote headers.",
+      "verifiedOn": "live counts/joins 2026-08-11"
+    },
+    {
+      "fact": "Vendor ~6826 rows. VendorCode joins Vw_PurchaseOrder.VendorCode (~4668). FirmName joins Vw_PurchaseOrder/Vw_Quotation. Bright Rubber=Ven00171 GST 24AACFB1249A1ZA; Chemline India Ltd=Ven00191. vendordata ~4115 with LedgerName; InternalVendor ~154 group firms.",
+      "verifiedOn": "live counts/joins 2026-08-11"
+    },
+    {
+      "fact": "VendorRate ~921k (Bright Rubber ~1780; WIP00013 has multiple FirmNames). Vw_VendorItem ~14.5M slim view with itemdesc. Always filter FirmName/ItemCode + TOP 50. VendorRate.FirmName joins Vendor; ItemCode joins ItemInfo.itemcode; SubCode joins ItemInfo.code (~409k).",
+      "verifiedOn": "live counts/joins 2026-08-11"
+    },
+    {
+      "fact": "Gate pass: Vw_ReturnGatePass/ReturnGatePass ~6127 (CompName); Vw_NonReturnGatePass ~5233; InwdReturnGatePass ~4043 with GatePassNo link when set; vw_returngatepasspending ~5865 with ~546 PendingQty>0. Company column CompName not CompanyName. Example pending KPV/26-27/GP/162.",
+      "verifiedOn": "live counts 2026-08-11"
+    },
+    {
+      "fact": "Job work formal orders JOBWORKORDER/Vw_EditJOBWorkOrder ~7/12 rows (codes JRO/JWO); no join to PurchasePayment. Live MIS: VW_JobWork_EBD_DTL ~20k, VW_RECJOBWORK_EBD_DTL ~17k with MRNo JBIN-SE. ~76 returnable gate passes Purpose like Job Work. Skip empty Vw_StoreOutwardjobworkorder.",
+      "verifiedOn": "live counts 2026-08-11"
     }
   ],
   "embeddingNotes": {
@@ -1176,7 +2482,7 @@
     "recommendedBackend": "fastembed (ONNX) via build_embeddings.py; sentence-transformers fallback",
     "outputFile": "schema-embeddings.json",
     "textField": "embeddingText",
-    "chunkCount": 22,
+    "chunkCount": 51,
     "retrieveTopK": "3-8"
   }
 }

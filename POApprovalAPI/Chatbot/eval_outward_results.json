@@ -1,0 +1,74 @@
+﻿[
+    {
+        "id":  "slip_350_kp",
+        "pass":  false,
+        "failedChecks":  "sql_has:StoreOutwards;sql_has:350;sql_has:CompName;rows_gt:0;answer_not_no_data",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "The remote server returned an error: (400) Bad Request.",
+        "warning":  "The remote server returned an error: (400) Bad Request."
+    },
+    {
+        "id":  "oswal_slip_215",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 IssueSlipNo, Itemcode, Qty, Deptt, IssueTo, WareHouse, sysDate\nFROM StoreOutwards\nWHERE IssueSlipNo = \u0027215\u0027 AND CompName = \u0027Oswal Extrusion Limited\u0027",
+        "rowCount":  50,
+        "answer":  "**Materials issued on Issue Slip 215 (Oswal Extrusion Limited)**  \n\n| Itemcode | Qty | Deptt | Issue To | Warehouse | Issue Date |\n|----------|-----|-------|----------|-----------|------------|\n| SMF00054 | 100 | SF | FIBC | FIBC Bag Godown | 2020‑06‑10 |\n| SMF00047 | 100 | SF | FIBC | FIBC Bag Godown | 2020‑06‑10 |\n| ELE01664 | 2 | Stores/Spares | FIBC | Consumable Godown | 2020‑06‑17 |\n| ELE01094 | 1 | Stores/Spares | FIBC | Spares Godown | 2020‑06‑17 |\n| ELE02557 | 2 | Stores/Spares | FIBC | Consumable Godown | 2020‑06‑17 |\n| ELE04060 | 1 | Stores/Spares | FIBC | Spares Godown | 2020‑06‑17 |\n| OTH01878 | 54 | Stores/Spares | FIBC | Spares Godown | 2020‑06‑17 |\n| TAP00547 | 100 | Stores/Spares | FIBC | Spares Godown | 2020‑06‑17 |\n| OTH01962 | 100 | Capex | FIBC | Spares Godown | 2020‑06‑17 |\n| STI00813 | 1 | Stores/Spares | FIBC | Spares Godown | 2020‑06‑01 |\n| STI00665 | 2 | Stores/Spares | FIBC | Spares Godown | 2020‑06‑01 |\n| FIB02498 | 2 | Stores/Spares | FIBC | Spares Godown | 2020‑06‑01 |\n| STI00927 | 2 | Stores/Spares | FIBC | Spares Godown | 2020‑06‑01 |\n| OTH00202 | 2 | Consumables | FIBC | Consumable Godown | 2020‑06‑01 |\n| STI00702 | 2 | Stores/Spares | FIBC | Spares Godown | 2020‑06‑01 |\n| SMF00149 | 7.3 | RM Consumables | FIBC | Consumable Godown | 2021‑03‑31 |\n| RAW05124 | 41.8 | Consumables | FIBC | Consumable Godown | 2021‑03‑31 |\n| OTH00820 | 1 | Printing \u0026 Stationery | FIBC | Consumable Godown | 2021‑04‑04 |\n| “Marker Pen CD/DVD/OHP” | 2 | Printing \u0026 Stationery | Office/General | Consumable Godown | 2021‑02‑12 |\n| OTH00650 | 20 | Printing \u0026 Stationery | Office/General | Consumable Godown | 2021‑01‑02 |\n| LOO01284 | 15 | Consumables | Circ Looms | Consumable Godown | 2020‑10‑08 |\n| GEN00057 | 0.5 | Consumables | Circ Looms | Consumable Godown | 2020‑10‑08 |\n| NEE00476 | 10 | Stores/Spares | Needle Loom | Spares Godown | 2020‑09‑09 |\n| FIB03900 | 1 | Stores/Spares | FIBC | Spares Godown | 2020‑08‑08 |\n| FIB03896 | 1 | Stores/Spares | FIBC | Spares Godown | 2020‑08‑08 |\n| STI01162 | 1 | Stores/Spares | FIBC | Spares Godown | 2020‑08‑08 |\n| FIB18742 | 1 | Stores/Spares | FIBC | Spares Godown | 2020‑08‑08 |\n| STI00927 | 2 | Stores/Spares | FIBC | Spares Godown | 2020‑08‑08 |\n| PAC00377 | 3 | Stores/Spares | Cutting \u0026 Printing ‑ FIBC | Spares Godown | 2021‑03‑12 |\n| CAP00458 | 12 | Packing Material | Cutting",
+        "warning":  null
+    },
+    {
+        "id":  "oswal_issued_to_fibc",
+        "pass":  false,
+        "failedChecks":  "sql_has:StoreOutwards;sql_has:CompName;sql_has:IssueTo|FIBC;rows_gt:0",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "The remote server returned an error: (400) Bad Request.",
+        "warning":  "The remote server returned an error: (400) Bad Request."
+    },
+    {
+        "id":  "daily_outward_oswal",
+        "pass":  false,
+        "failedChecks":  "sql_has:vw_ItemInwardOutward;sql_has:companyname|Oswal;sql_has:Outward;rows_gt:0",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "The remote server returned an error: (400) Bad Request.",
+        "warning":  "The remote server returned an error: (400) Bad Request."
+    },
+    {
+        "id":  "item_wip00013_movement",
+        "pass":  false,
+        "failedChecks":  "sql_has:vw_ItemInwardOutward|StoreOutwards;sql_has:WIP00013;sql_has:Oswal;rows_gt:0;answer_not_no_data",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "The remote server returned an error: (400) Bad Request.",
+        "warning":  "The remote server returned an error: (400) Bad Request."
+    },
+    {
+        "id":  "monthly_aug_2026",
+        "pass":  false,
+        "failedChecks":  "sql_has:vw_ItemMonthlyInwardOutward;sql_has:2026;sql_has:Oswal;rows_gt:0",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "The remote server returned an error: (400) Bad Request.",
+        "warning":  "The remote server returned an error: (400) Bad Request."
+    },
+    {
+        "id":  "messy_issue_slip",
+        "pass":  false,
+        "failedChecks":  "sql_has:StoreOutwards;sql_has:350;rows_gt:0",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "The remote server returned an error: (400) Bad Request.",
+        "warning":  "The remote server returned an error: (400) Bad Request."
+    },
+    {
+        "id":  "messy_oswal_outward",
+        "pass":  false,
+        "failedChecks":  "sql_has:vw_ItemInwardOutward|StoreOutwards;sql_has:Oswal;rows_gt:0",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "The remote server returned an error: (400) Bad Request.",
+        "warning":  "The remote server returned an error: (400) Bad Request."
+    }
+]
