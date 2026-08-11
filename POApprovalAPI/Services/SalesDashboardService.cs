@@ -46,25 +46,53 @@ public class SalesDashboardService
     /// SP_Sales_EBIDTA itself has no IC filter / param ? country chart uses the same IC flag
     /// via vw_Countrywise_sales_dashboard (IsInterCompany != 'yes').
     /// </summary>
-    public async Task<SalesTotalsDto> GetSalesTotalsAsync(
+    public Task<SalesTotalsDto> GetSalesTotalsAsync(
+        string company,
+        DateTime dateFrom,
+        DateTime dateTo) =>
+        GetEbidtaTotalsAsync("Sales", company, dateFrom, dateTo);
+
+    /// <summary>
+    /// Total Purchase + Quantity + Average Rate + byGroup/bySubGroup.
+    /// Mirrors ERP SP_Purchase_EBIDTA (aggregates vw_Purchase_EBIDTA with the same GROUPING SETS),
+    /// but excludes intercompany: InterGroup &lt;&gt; 'Intergroup'
+    /// (vw_Purchase_EBIDTA maps CommonLedgerMaster.IsInterCompany='yes' ? InterGroup='Intergroup').
+    /// </summary>
+    public Task<SalesTotalsDto> GetPurchaseTotalsAsync(
+        string company,
+        DateTime dateFrom,
+        DateTime dateTo) =>
+        GetEbidtaTotalsAsync("Purchase", company, dateFrom, dateTo);
+
+    /// <summary>
+    /// Shared EBIDTA totals for Sales or Purchase (same column shape / IC filter).
+    /// </summary>
+    private async Task<SalesTotalsDto> GetEbidtaTotalsAsync(
+        string category,
         string company,
         DateTime dateFrom,
         DateTime dateTo)
     {
+        var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
+        var column1 = isPurchase ? "Purchase" : "Sales";
+        var viewName = isPurchase ? "vw_Purchase_EBIDTA" : "vw_Sales_EBIDTA";
+        var procedureName = isPurchase ? "SP_Purchase_EBIDTA" : "SP_Sales_EBIDTA";
+
         var sw = System.Diagnostics.Stopwatch.StartNew();
         using var connection = _database.CreateConnection();
 
         var companies = (await GetCompaniesAsync()).ToList();
         var selectedCompanies = ResolveSelectedCompanies(company, companies);
         var companyTable = BuildCompanyTvp(selectedCompanies);
-        // Same TVP type SP_Sales_EBIDTA uses for @companyname
-        var typeName = await ResolveCompanyTableTypeAsync(connection, "SP_Sales_EBIDTA");
+        // Same TVP type the matching EBIDTA SP uses for @companyname
+        var typeName = await ResolveCompanyTableTypeAsync(connection, procedureName);
 
-        // Exact SP_Sales_EBIDTA select shape + company join, plus InterGroup IC filter.
-        // Do not invent alternate Amount/Netwt math ? same ROUND/FORMAT as the SP.
-        const string sql = @"
+        // Exact SP select shape + company join, plus InterGroup IC filter.
+        // Do not invent alternate Amount/Netwt math ? same ROUND/FORMAT as the SP
+        // (with safe PerKg when Netwt = 0, matching the sales path).
+        var sql = $@"
 SELECT
-    'Sales' AS Column1,
+    N'{column1}' AS Column1,
     InterGroup,
     Groupname,
     SubGroupName,
@@ -74,7 +102,7 @@ SELECT
          THEN FORMAT(ROUND(ROUND(SUM(Amount), 0) / ROUND(SUM(netwt), 0), 2), '#.00')
          ELSE FORMAT(0, '#.00') END AS PerKg,
     FORMAT(ROUND(SUM(SGSTAmount), 2), '#.00') AS SGSTAmount
-FROM dbo.vw_Sales_EBIDTA WITH (NOLOCK)
+FROM dbo.{viewName} WITH (NOLOCK)
 INNER JOIN @companyname C ON C.StringValue = CompanyName
 WHERE invdate BETWEEN @DateFrom AND @DateTo
   AND InterGroup <> N'Intergroup'
@@ -108,29 +136,30 @@ ORDER BY InterGroup, Groupname, SubGroupName";
 
         var table = dataSet.Tables[0];
         var columns = table.Columns.Cast<DataColumn>().Select(c => c.ColumnName).ToList();
-        var salesCol = ResolveSalesColumn(table);
-        if (salesCol == null)
+        var amountCol = ResolveSalesColumn(table);
+        if (amountCol == null)
         {
             throw new InvalidOperationException(
-                "vw_Sales_EBIDTA (excl. IC) returned no recognizable Sales column. Columns: " +
+                $"{viewName} (excl. IC) returned no recognizable Amount column. Columns: " +
                 string.Join(", ", columns));
         }
 
         var qtyCol = ResolveQuantityColumn(table);
         var rateCol = ResolveRateColumn(table);
 
-        // Same row shape as SP_Sales_EBIDTA ERP grid (IC already filtered out):
+        // Same row shape as SP_*_EBIDTA ERP grid (IC already filtered out):
         // Column1, InterGroup, Groupname, SubGroupName, Amount, Netwt, PerKg, SGSTAmount
-        // Sales grand total: Column1=Sales, InterGroup blank, Groupname blank
-        var totals = ResolveSalesGrandTotals(table, salesCol, qtyCol, rateCol);
-        var (byGroup, bySubGroup) = BuildSalesBreakdowns(table, salesCol, qtyCol);
+        // Grand total: Column1=Sales|Purchase, InterGroup blank, Groupname blank
+        var totals = ResolveEbidtaGrandTotals(table, amountCol, qtyCol, rateCol, column1);
+        var (byGroup, bySubGroup) = BuildEbidtaBreakdowns(table, amountCol, qtyCol, column1);
 
         return new SalesTotalsDto
         {
-            TotalSales = totals.Amount,
+            TotalSales = isPurchase ? 0 : totals.Amount,
+            TotalPurchase = isPurchase ? totals.Amount : 0,
             TotalQuantity = totals.Quantity,
             AverageRate = totals.AverageRate,
-            SalesColumn = salesCol.ColumnName,
+            SalesColumn = amountCol.ColumnName,
             QuantityColumn = qtyCol?.ColumnName ?? "",
             RateColumn = rateCol?.ColumnName ?? "",
             Method = totals.Method + "_ExclIntercompany",
@@ -142,7 +171,7 @@ ORDER BY InterGroup, Groupname, SubGroupName";
         };
     }
 
-    /// <summary>Backward-compatible wrapper. </summary>
+    /// <summary> Backward-compatible wrapper. </summary>
     public async Task<(double TotalSales, string SalesColumn, int RowCount, List<string> Columns, double ElapsedSeconds)> GetTotalSalesAsync(
         string company,
         DateTime dateFrom,
@@ -157,12 +186,29 @@ ORDER BY InterGroup, Groupname, SubGroupName";
     /// Each point = excl-IC Sales grand-total Amount (vw_Sales_EBIDTA, same as GetSalesTotalsAsync)
     /// for that Indian FY (Apr?Mar). Current FY is capped at <paramref name="asOf"/>.
     /// </summary>
-    public async Task<List<SalesTrendDto>> GetSalesYearlyTrendAsync(
+    public Task<List<SalesTrendDto>> GetSalesYearlyTrendAsync(
+        string company,
+        DateTime asOf,
+        int years = 5) =>
+        GetEbidtaYearlyTrendAsync("Sales", company, asOf, years);
+
+    /// <summary>
+    /// Year-by-year Total Purchase for trend chart (vw_Purchase_EBIDTA, excl. IC).
+    /// </summary>
+    public Task<List<SalesTrendDto>> GetPurchaseYearlyTrendAsync(
+        string company,
+        DateTime asOf,
+        int years = 5) =>
+        GetEbidtaYearlyTrendAsync("Purchase", company, asOf, years);
+
+    private async Task<List<SalesTrendDto>> GetEbidtaYearlyTrendAsync(
+        string category,
         string company,
         DateTime asOf,
         int years = 5)
     {
         years = Math.Clamp(years, 1, 8);
+        var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
 
         // Indian FY: Apr 1 ? Mar 31. FY label uses start calendar year.
         var currentFyStartYear = asOf.Month >= 4 ? asOf.Year : asOf.Year - 1;
@@ -183,14 +229,14 @@ ORDER BY InterGroup, Groupname, SubGroupName";
             ranges.Add((label, from, to));
         }
 
-        // Parallel SP calls ? each year uses the same ERP Total Sales grand-total logic
+        // Parallel calls ? each year uses the same ERP grand-total logic
         var tasks = ranges.Select(async range =>
         {
-            var totals = await GetSalesTotalsAsync(company, range.From, range.To);
+            var totals = await GetEbidtaTotalsAsync(category, company, range.From, range.To);
             return new SalesTrendDto
             {
                 Period = range.Period,
-                Amount = totals.TotalSales,
+                Amount = isPurchase ? totals.TotalPurchase : totals.TotalSales,
             };
         });
 
@@ -320,16 +366,17 @@ ORDER BY SalesAmount DESC";
     }
 
     /// <summary>
-    /// Prefer SP Sales grand-total row (Column1=Sales, blank InterGroup+Groupname).
-    /// Amount = Total Sales; Netwt = Total Quantity; PerKg = Average Rate.
-    /// Fallback: sum detail Sales Amount / Netwt; rate = ERP PerKg on single grand row,
+    /// Prefer SP grand-total row (Column1=Sales|Purchase, blank InterGroup+Groupname).
+    /// Amount = category total; Netwt = Total Quantity; PerKg = Average Rate.
+    /// Fallback: sum detail Amount / Netwt; rate = ERP PerKg on single grand row,
     /// or Amount/Netwt when multiple / detail-only (do not sum PerKg).
     /// </summary>
-    private static (double Amount, double Quantity, double AverageRate, string Method) ResolveSalesGrandTotals(
+    private static (double Amount, double Quantity, double AverageRate, string Method) ResolveEbidtaGrandTotals(
         DataTable table,
-        DataColumn salesCol,
+        DataColumn amountCol,
         DataColumn? qtyCol,
-        DataColumn? rateCol)
+        DataColumn? rateCol,
+        string categoryLabel)
     {
         var hasColumn1 = table.Columns.Contains("Column1");
         var hasInterGroup = table.Columns.Contains("InterGroup");
@@ -345,17 +392,17 @@ ORDER BY SalesAmount DESC";
             if (IsTotalLabelRow(row))
                 continue;
 
-            var col1 = hasColumn1 ? (Convert.ToString(row["Column1"]) ?? "") : "Sales";
-            if (!col1.Contains("Sales", StringComparison.OrdinalIgnoreCase))
+            var col1 = hasColumn1 ? (Convert.ToString(row["Column1"]) ?? "") : categoryLabel;
+            if (!col1.Contains(categoryLabel, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             var inter = hasInterGroup ? (Convert.ToString(row["InterGroup"]) ?? "") : "";
             var group = hasGroupname ? (Convert.ToString(row["Groupname"]) ?? "") : "";
 
-            // ERP Sales block grand total row
+            // ERP category block grand total row
             if (string.IsNullOrWhiteSpace(inter) && string.IsNullOrWhiteSpace(group))
             {
-                grandAmount += ToDouble(row[salesCol]);
+                grandAmount += ToDouble(row[amountCol]);
                 if (qtyCol != null)
                     grandQty += ToDouble(row[qtyCol]);
                 if (rateCol != null)
@@ -370,7 +417,7 @@ ORDER BY SalesAmount DESC";
             var rate = grandRowCount == 1 && rateCol != null
                 ? lastPerKg
                 : (grandQty > 0 ? grandAmount / grandQty : 0);
-            return (grandAmount, grandQty, rate, "Sales_GrandTotal_Row");
+            return (grandAmount, grandQty, rate, $"{categoryLabel}_GrandTotal_Row");
         }
 
         // Fallback: sum detail lines only (Groupname not blank)
@@ -384,28 +431,29 @@ ORDER BY SalesAmount DESC";
             if (hasColumn1)
             {
                 var col1 = Convert.ToString(row["Column1"]) ?? "";
-                if (!col1.Contains("Sales", StringComparison.OrdinalIgnoreCase))
+                if (!col1.Contains(categoryLabel, StringComparison.OrdinalIgnoreCase))
                     continue;
             }
 
-            detailAmount += ToDouble(row[salesCol]);
+            detailAmount += ToDouble(row[amountCol]);
             if (qtyCol != null)
                 detailQty += ToDouble(row[qtyCol]);
         }
 
         var detailRate = detailQty > 0 ? detailAmount / detailQty : 0;
-        return (detailAmount, detailQty, detailRate, "Sum_Sales_Detail");
+        return (detailAmount, detailQty, detailRate, $"Sum_{categoryLabel}_Detail");
     }
 
     /// <summary>
-    /// Aggregate Sales Amount by Groupname / SubGroupName from leaf Sales rows only
+    /// Aggregate Amount by Groupname / SubGroupName from leaf category rows only
     /// (SubGroupName filled). Avoids double-counting group header / grand-total rows.
-    /// Fallback: Groupname-filled Sales rows excluding blank InterGroup+Groupname grand total.
+    /// Fallback: Groupname-filled rows excluding blank InterGroup+Groupname grand total.
     /// </summary>
-    private static (List<SalesByGroupDto> ByGroup, List<SalesBySubGroupDto> BySubGroup) BuildSalesBreakdowns(
+    private static (List<SalesByGroupDto> ByGroup, List<SalesBySubGroupDto> BySubGroup) BuildEbidtaBreakdowns(
         DataTable table,
-        DataColumn salesCol,
-        DataColumn? qtyCol)
+        DataColumn amountCol,
+        DataColumn? qtyCol,
+        string categoryLabel)
     {
         var hasColumn1 = table.Columns.Contains("Column1");
         var hasInterGroup = table.Columns.Contains("InterGroup");
@@ -423,7 +471,7 @@ ORDER BY SalesAmount DESC";
             if (hasColumn1)
             {
                 var col1 = Convert.ToString(row["Column1"]) ?? "";
-                if (!col1.Contains("Sales", StringComparison.OrdinalIgnoreCase))
+                if (!col1.Contains(categoryLabel, StringComparison.OrdinalIgnoreCase))
                     continue;
             }
 
@@ -435,7 +483,7 @@ ORDER BY SalesAmount DESC";
             if (inter.Equals("Intergroup", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            // Skip Sales grand-total / InterGroup-only subtotal rows
+            // Skip category grand-total / InterGroup-only subtotal rows
             if (string.IsNullOrWhiteSpace(inter) && string.IsNullOrWhiteSpace(group))
                 continue;
             if (!string.IsNullOrWhiteSpace(inter) && string.IsNullOrWhiteSpace(group) &&
@@ -455,7 +503,7 @@ ORDER BY SalesAmount DESC";
 
         foreach (var row in sourceRows)
         {
-            var amount = ToDouble(row[salesCol]);
+            var amount = ToDouble(row[amountCol]);
             var qty = qtyCol != null ? ToDouble(row[qtyCol]) : 0;
 
             if (hasGroupname)
@@ -1110,6 +1158,7 @@ WHERE {companyFilter}
 public class SalesTotalsDto
 {
     public double TotalSales { get; set; }
+    public double TotalPurchase { get; set; }
     public double TotalQuantity { get; set; }
     public double AverageRate { get; set; }
     public string SalesColumn { get; set; } = "";

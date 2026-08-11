@@ -40,9 +40,12 @@ export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCards
     {
       id: "totalSales",
       label: "Total Sales",
-      displayValue: formatSalesCurrency(summary.totalSales),
+      displayValue: unavailableFields.includes("totalSales")
+        ? "—"
+        : formatSalesCurrency(summary.totalSales),
       changePercent: summary.totalSalesChangePercent,
-      showChange: !noChange,
+      showChange: !noChange && !unavailableFields.includes("totalSales"),
+      unavailable: unavailableFields.includes("totalSales"),
       icon: BarChart3,
       tone: "bg-primary/10 text-primary border-primary/20",
     },

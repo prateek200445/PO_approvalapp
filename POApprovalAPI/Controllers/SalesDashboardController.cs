@@ -70,30 +70,89 @@ public class SalesDashboardController : ControllerBase
     }
 
     /// <summary>
-    /// Year-by-year Total Sales (Indian FY Apr–Mar) excl. intercompany
-    /// (same GetSalesTotalsAsync / vw_Sales_EBIDTA path as KPIs).
+    /// Total Purchase + Quantity + Average Rate + byGroup/bySubGroup from vw_Purchase_EBIDTA
+    /// (mirrors SP_Purchase_EBIDTA; excl. InterGroup='Intergroup').
+    /// </summary>
+    [HttpGet("total-purchase")]
+    public async Task<IActionResult> GetTotalPurchase(
+        [FromQuery] string company = "All Companies",
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null)
+    {
+        try
+        {
+            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
+            var to = dateTo ?? DateTime.Today;
+            var totals = await _salesDashboard.GetPurchaseTotalsAsync(company, from, to);
+
+            return Ok(new
+            {
+                totalPurchase = totals.TotalPurchase,
+                totalQuantity = totals.TotalQuantity,
+                averageRate = totals.AverageRate,
+                byGroup = totals.ByGroup,
+                bySubGroup = totals.BySubGroup,
+                company,
+                dateFrom = from.ToString("yyyy-MM-dd"),
+                dateTo = to.ToString("yyyy-MM-dd"),
+                source = "vw_Purchase_EBIDTA",
+                salesColumn = totals.SalesColumn,
+                quantityColumn = totals.QuantityColumn,
+                rateColumn = totals.RateColumn,
+                method = totals.Method,
+                rowCount = totals.RowCount,
+                columns = totals.Columns,
+                elapsedSeconds = totals.ElapsedSeconds,
+                note =
+                    "Mirrors SP_Purchase_EBIDTA aggregation on vw_Purchase_EBIDTA; excl. InterGroup='Intergroup' " +
+                    "(IsInterCompany='yes'). KPIs from Purchase grand-total; byGroup/bySubGroup from leaf rows.",
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Year-by-year Total Sales or Purchase (Indian FY Apr–Mar) excl. intercompany.
+    /// category=Sales → vw_Sales_EBIDTA; category=Purchase → vw_Purchase_EBIDTA.
     /// </summary>
     [HttpGet("yearly-trend")]
     public async Task<IActionResult> GetYearlyTrend(
         [FromQuery] string company = "All Companies",
         [FromQuery] DateTime? asOf = null,
-        [FromQuery] int years = 5)
+        [FromQuery] int years = 5,
+        [FromQuery] string category = "Sales")
     {
         try
         {
+            if (!string.Equals(category, "Sales", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(category, "Purchase", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { message = "category must be Sales or Purchase." });
+            }
+
+            var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
             var through = asOf ?? DateTime.Today;
-            var trend = await _salesDashboard.GetSalesYearlyTrendAsync(company, through, years);
+            var trend = isPurchase
+                ? await _salesDashboard.GetPurchaseYearlyTrendAsync(company, through, years)
+                : await _salesDashboard.GetSalesYearlyTrendAsync(company, through, years);
+
+            var source = isPurchase ? "vw_Purchase_EBIDTA" : "vw_Sales_EBIDTA";
+            var label = isPurchase ? "Purchase" : "Sales";
 
             return Ok(new
             {
                 trend,
                 company,
+                category = label,
                 asOf = through.ToString("yyyy-MM-dd"),
                 years,
-                source = "vw_Sales_EBIDTA",
+                source,
                 note =
-                    "Each bar is excl-IC Sales grand-total Amount for that FY (Apr–Mar); current FY capped at asOf. " +
-                    "Same basis as total-sales (vw_Sales_EBIDTA, InterGroup <> Intergroup).",
+                    $"Each bar is excl-IC {label} grand-total Amount for that FY (Apr–Mar); current FY capped at asOf. " +
+                    $"Same basis as total-{(isPurchase ? "purchase" : "sales")} ({source}, InterGroup <> Intergroup).",
             });
         }
         catch (Exception ex)

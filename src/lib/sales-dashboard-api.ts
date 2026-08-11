@@ -86,6 +86,31 @@ export async function getSalesCompanies(): Promise<string[]> {
   return ["All Companies", ...unique.filter((c) => c !== "All Companies")];
 }
 
+function mapTotalsBreakdown(payload: {
+  byGroup?: Array<Record<string, unknown>>;
+  ByGroup?: Array<Record<string, unknown>>;
+  bySubGroup?: Array<Record<string, unknown>>;
+  BySubGroup?: Array<Record<string, unknown>>;
+}): {
+  byGroup: SalesByGroupItem[];
+  bySubGroup: SalesBySubGroupItem[];
+} {
+  const byGroupRaw = payload.byGroup ?? payload.ByGroup ?? [];
+  const bySubGroupRaw = payload.bySubGroup ?? payload.BySubGroup ?? [];
+  return {
+    byGroup: byGroupRaw.map((g) => ({
+      groupName: str(g.groupName ?? g.GroupName),
+      amount: num(g.amount ?? g.Amount),
+      percentage: num(g.percentage ?? g.Percentage),
+    })),
+    bySubGroup: bySubGroupRaw.map((s) => ({
+      subGroupName: str(s.subGroupName ?? s.SubGroupName),
+      quantity: num(s.quantity ?? s.Quantity),
+      salesAmount: num(s.salesAmount ?? s.SalesAmount),
+    })),
+  };
+}
+
 /** Live ERP Amount + Netwt + PerKg + byGroup/bySubGroup from vw_Sales_EBIDTA (excl. IC). */
 export async function getTotalSales(filters: {
   company: string;
@@ -125,36 +150,75 @@ export async function getTotalSales(filters: {
     throw new Error(payload.message || "Failed to load total sales");
   }
 
-  const byGroupRaw = payload.byGroup ?? payload.ByGroup ?? [];
-  const bySubGroupRaw = payload.bySubGroup ?? payload.BySubGroup ?? [];
-
+  const breakdown = mapTotalsBreakdown(payload);
   return {
     totalSales: num(payload.totalSales ?? payload.TotalSales),
     totalQuantity: num(payload.totalQuantity ?? payload.TotalQuantity),
     averageRate: num(payload.averageRate ?? payload.AverageRate),
-    byGroup: byGroupRaw.map((g) => ({
-      groupName: str(g.groupName ?? g.GroupName),
-      amount: num(g.amount ?? g.Amount),
-      percentage: num(g.percentage ?? g.Percentage),
-    })),
-    bySubGroup: bySubGroupRaw.map((s) => ({
-      subGroupName: str(s.subGroupName ?? s.SubGroupName),
-      quantity: num(s.quantity ?? s.Quantity),
-      salesAmount: num(s.salesAmount ?? s.SalesAmount),
-    })),
+    ...breakdown,
   };
 }
 
-/** Year-by-year Total Sales (Indian FY) excl. IC from vw_Sales_EBIDTA (same as total-sales). */
+/** Live ERP Amount + Netwt + PerKg + byGroup/bySubGroup from vw_Purchase_EBIDTA (excl. IC). */
+export async function getTotalPurchase(filters: {
+  company: string;
+  dateFrom: string;
+  dateTo: string;
+}): Promise<{
+  totalPurchase: number;
+  totalQuantity: number;
+  averageRate: number;
+  byGroup: SalesByGroupItem[];
+  bySubGroup: SalesBySubGroupItem[];
+}> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+  });
+
+  const response = await fetch(
+    getSalesApiUrl(`/api/SalesDashboard/total-purchase?${params}`),
+  );
+  const payload = (await response.json()) as {
+    totalPurchase?: number;
+    TotalPurchase?: number;
+    totalQuantity?: number;
+    TotalQuantity?: number;
+    averageRate?: number;
+    AverageRate?: number;
+    byGroup?: Array<Record<string, unknown>>;
+    ByGroup?: Array<Record<string, unknown>>;
+    bySubGroup?: Array<Record<string, unknown>>;
+    BySubGroup?: Array<Record<string, unknown>>;
+    message?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.message || "Failed to load total purchase");
+  }
+
+  const breakdown = mapTotalsBreakdown(payload);
+  return {
+    totalPurchase: num(payload.totalPurchase ?? payload.TotalPurchase),
+    totalQuantity: num(payload.totalQuantity ?? payload.TotalQuantity),
+    averageRate: num(payload.averageRate ?? payload.AverageRate),
+    ...breakdown,
+  };
+}
+
+/** Year-by-year Total Sales or Purchase (Indian FY) excl. IC. */
 export async function getSalesYearlyTrend(filters: {
   company: string;
   asOf: string;
   years?: number;
+  category?: "Sales" | "Purchase";
 }): Promise<SalesTrendItem[]> {
   const params = new URLSearchParams({
     company: filters.company,
     asOf: filters.asOf,
     years: String(filters.years ?? 5),
+    category: filters.category ?? "Sales",
   });
 
   const response = await fetch(
@@ -167,7 +231,7 @@ export async function getSalesYearlyTrend(filters: {
   };
 
   if (!response.ok) {
-    throw new Error(payload.message || "Failed to load yearly sales trend");
+    throw new Error(payload.message || "Failed to load yearly trend");
   }
 
   const raw = payload.trend ?? payload.Trend ?? [];

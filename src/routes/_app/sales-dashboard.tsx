@@ -11,6 +11,7 @@ import {
   getSalesByCountry,
   getSalesCompanies,
   getSalesYearlyTrend,
+  getTotalPurchase,
   getTotalSales,
 } from "@/lib/sales-dashboard-api";
 import type {
@@ -38,10 +39,17 @@ const EMPTY_SUMMARY: SalesDashboardSummary = {
   grossProfitChangePercent: 0,
 };
 
-/** KPI keys reserved until ERP wiring is ready. */
-const PLACEHOLDER_FIELDS = [
+/** KPI keys reserved until ERP wiring is ready (varies by category). */
+const SALES_PLACEHOLDER_FIELDS = [
   "gstAmount",
   "totalPurchase",
+  "grossProfit",
+  "changePercents",
+];
+
+const PURCHASE_PLACEHOLDER_FIELDS = [
+  "gstAmount",
+  "totalSales",
   "grossProfit",
   "changePercents",
 ];
@@ -58,6 +66,7 @@ function ComingSoonSection({ title, description }: { title: string; description:
 function SalesDashboardPage() {
   const [filters, setFilters] = useState<SalesDashboardFilters>(DEFAULT_SALES_FILTERS);
   const [refreshToken, setRefreshToken] = useState(0);
+  const isPurchase = filters.category === "Purchase";
 
   const { data: companyList, isLoading: companiesLoading } = useQuery({
     queryKey: ["sales-dashboard-companies"],
@@ -65,7 +74,7 @@ function SalesDashboardPage() {
     staleTime: 5 * 60_000,
   });
 
-  const totalsQuery = useQuery({
+  const salesTotalsQuery = useQuery({
     queryKey: [
       "sales-totals",
       filters.company,
@@ -79,17 +88,44 @@ function SalesDashboardPage() {
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
       }),
+    enabled: !isPurchase,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  const purchaseTotalsQuery = useQuery({
+    queryKey: [
+      "purchase-totals",
+      filters.company,
+      filters.dateFrom,
+      filters.dateTo,
+      refreshToken,
+    ],
+    queryFn: () =>
+      getTotalPurchase({
+        company: filters.company,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+      }),
+    enabled: isPurchase,
     staleTime: 60_000,
     retry: 1,
   });
 
   const yearlyTrendQuery = useQuery({
-    queryKey: ["sales-yearly-trend", filters.company, filters.dateTo, refreshToken],
+    queryKey: [
+      "ebidta-yearly-trend",
+      filters.category,
+      filters.company,
+      filters.dateTo,
+      refreshToken,
+    ],
     queryFn: () =>
       getSalesYearlyTrend({
         company: filters.company,
         asOf: filters.dateTo,
         years: 5,
+        category: filters.category,
       }),
     staleTime: 5 * 60_000,
     retry: 1,
@@ -110,6 +146,7 @@ function SalesDashboardPage() {
         dateTo: filters.dateTo,
         top: 5,
       }),
+    enabled: !isPurchase,
     staleTime: 60_000,
     retry: 1,
   });
@@ -135,28 +172,64 @@ function SalesDashboardPage() {
 
   function handleRefresh() {
     setRefreshToken((n) => n + 1);
-    void totalsQuery.refetch();
+    if (isPurchase) {
+      void purchaseTotalsQuery.refetch();
+    } else {
+      void salesTotalsQuery.refetch();
+      void byCountryQuery.refetch();
+    }
     void yearlyTrendQuery.refetch();
-    void byCountryQuery.refetch();
   }
 
-  const summary = useMemo<SalesDashboardSummary>(
-    () => ({
-      ...EMPTY_SUMMARY,
-      totalSales: totalsQuery.data?.totalSales ?? 0,
-      totalQuantity: totalsQuery.data?.totalQuantity ?? 0,
-      averageRate: totalsQuery.data?.averageRate ?? 0,
-    }),
-    [totalsQuery.data],
-  );
+  const totalsFetching = isPurchase
+    ? purchaseTotalsQuery.isFetching
+    : salesTotalsQuery.isFetching;
+  const totalsError = isPurchase ? purchaseTotalsQuery.isError : salesTotalsQuery.isError;
+  const totalsErrorMessage = isPurchase
+    ? purchaseTotalsQuery.error instanceof Error
+      ? purchaseTotalsQuery.error.message
+      : ""
+    : salesTotalsQuery.error instanceof Error
+      ? salesTotalsQuery.error.message
+      : "";
 
-  const byGroup = totalsQuery.data?.byGroup ?? [];
-  const bySubGroup = totalsQuery.data?.bySubGroup ?? [];
+  const summary = useMemo<SalesDashboardSummary>(() => {
+    if (isPurchase) {
+      return {
+        ...EMPTY_SUMMARY,
+        totalPurchase: purchaseTotalsQuery.data?.totalPurchase ?? 0,
+        totalQuantity: purchaseTotalsQuery.data?.totalQuantity ?? 0,
+        averageRate: purchaseTotalsQuery.data?.averageRate ?? 0,
+      };
+    }
+    return {
+      ...EMPTY_SUMMARY,
+      totalSales: salesTotalsQuery.data?.totalSales ?? 0,
+      totalQuantity: salesTotalsQuery.data?.totalQuantity ?? 0,
+      averageRate: salesTotalsQuery.data?.averageRate ?? 0,
+    };
+  }, [isPurchase, purchaseTotalsQuery.data, salesTotalsQuery.data]);
+
+  const byGroup = isPurchase
+    ? (purchaseTotalsQuery.data?.byGroup ?? [])
+    : (salesTotalsQuery.data?.byGroup ?? []);
+  const bySubGroup = isPurchase
+    ? (purchaseTotalsQuery.data?.bySubGroup ?? [])
+    : (salesTotalsQuery.data?.bySubGroup ?? []);
 
   const companies = useMemo(() => {
     if (companyList?.length) return companyList;
     return ["All Companies"];
   }, [companyList]);
+
+  const placeholderFields = isPurchase
+    ? PURCHASE_PLACEHOLDER_FIELDS
+    : SALES_PLACEHOLDER_FIELDS;
+
+  const isRefreshing =
+    totalsFetching ||
+    yearlyTrendQuery.isFetching ||
+    (!isPurchase && byCountryQuery.isFetching);
 
   return (
     <div className="space-y-4 pb-2 sm:space-y-5 md:space-y-6">
@@ -165,11 +238,24 @@ function SalesDashboardPage() {
           Sales Dashboard
         </h1>
         <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-          <span className="sm:hidden">Live sales KPIs & group charts from ERP.</span>
+          <span className="sm:hidden">
+            {isPurchase
+              ? "Live purchase KPIs & group charts from ERP."
+              : "Live sales KPIs & group charts from ERP."}
+          </span>
           <span className="hidden sm:inline">
-            Live KPIs, Sales by Group/Sub Group from `vw_Sales_EBIDTA` (excl. IC; same basis as
-            `SP_Sales_EBIDTA`), and Sales by Country from `vw_Countrywise_sales_dashboard` (excl. IC).
-            Other sections coming soon.
+            {isPurchase ? (
+              <>
+                Live KPIs, Purchase by Group/Sub Group from `vw_Purchase_EBIDTA` (excl. IC; same
+                basis as `SP_Purchase_EBIDTA`). Country breakdown is sales-only for now.
+              </>
+            ) : (
+              <>
+                Live KPIs, Sales by Group/Sub Group from `vw_Sales_EBIDTA` (excl. IC; same basis as
+                `SP_Sales_EBIDTA`), and Sales by Country from `vw_Countrywise_sales_dashboard` (excl.
+                IC). Other sections coming soon.
+              </>
+            )}
           </span>
         </p>
       </div>
@@ -177,9 +263,7 @@ function SalesDashboardPage() {
       <SalesFilters
         companies={companies}
         filters={filters}
-        isRefreshing={
-          totalsQuery.isFetching || yearlyTrendQuery.isFetching || byCountryQuery.isFetching
-        }
+        isRefreshing={isRefreshing}
         onChange={patchFilters}
         onRefresh={handleRefresh}
       />
@@ -188,35 +272,37 @@ function SalesDashboardPage() {
         <p className="text-xs text-muted-foreground">Loading companies from FactoryInfo…</p>
       )}
 
-      {(totalsQuery.isFetching || yearlyTrendQuery.isFetching || byCountryQuery.isFetching) && (
+      {isRefreshing && (
         <div
           className="flex items-center gap-2 text-xs text-muted-foreground"
           aria-live="polite"
         >
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          Loading live sales data from ERP…
+          {isPurchase
+            ? "Loading live purchase data from ERP…"
+            : "Loading live sales data from ERP…"}
         </div>
       )}
-      {totalsQuery.isError && (
+      {totalsError && (
         <p className="text-xs text-destructive" role="alert">
-          Live sales totals failed.{" "}
-          {totalsQuery.error instanceof Error ? totalsQuery.error.message : ""}
+          {isPurchase ? "Live purchase totals failed. " : "Live sales totals failed. "}
+          {totalsErrorMessage}
         </p>
       )}
       {yearlyTrendQuery.isError && (
         <p className="text-xs text-destructive" role="alert">
-          Yearly sales trend failed.{" "}
+          Yearly {isPurchase ? "purchase" : "sales"} trend failed.{" "}
           {yearlyTrendQuery.error instanceof Error ? yearlyTrendQuery.error.message : ""}
         </p>
       )}
-      {byCountryQuery.isError && (
+      {!isPurchase && byCountryQuery.isError && (
         <p className="text-xs text-destructive" role="alert">
           Sales by country failed.{" "}
           {byCountryQuery.error instanceof Error ? byCountryQuery.error.message : ""}
         </p>
       )}
 
-      <SalesKpiCards summary={summary} unavailableFields={PLACEHOLDER_FIELDS} />
+      <SalesKpiCards summary={summary} unavailableFields={placeholderFields} />
 
       <SalesCharts
         byGroup={byGroup}
@@ -225,16 +311,27 @@ function SalesDashboardPage() {
         trendLoading={yearlyTrendQuery.isFetching}
       />
 
-      <SalesSummaryTables
-        topProducts={[]}
-        byCountry={byCountryQuery.data?.byCountry ?? []}
-        countryPeriodLabel={byCountryQuery.data?.periodLabel}
-        bySubGroup={bySubGroup}
-      />
+      {isPurchase ? (
+        <ComingSoonSection
+          title="Purchase by country"
+          description="No ERP purchase-by-country view (vw_Countrywise_sales_dashboard is sales-only). Group/Sub Group charts above use purchase EBIDTA."
+        />
+      ) : (
+        <SalesSummaryTables
+          topProducts={[]}
+          byCountry={byCountryQuery.data?.byCountry ?? []}
+          countryPeriodLabel={byCountryQuery.data?.periodLabel}
+          bySubGroup={bySubGroup}
+        />
+      )}
 
       <ComingSoonSection
-        title="Detailed sales analysis"
-        description="Line-level sales analysis grid will appear here later."
+        title={isPurchase ? "Detailed purchase analysis" : "Detailed sales analysis"}
+        description={
+          isPurchase
+            ? "Line-level purchase analysis grid will appear here later."
+            : "Line-level sales analysis grid will appear here later."
+        }
       />
     </div>
   );
