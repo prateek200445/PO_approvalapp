@@ -1,4 +1,4 @@
-# Wave 3 — Store outward / issue golden eval
+﻿# Wave 3 â€” Store outward / issue golden eval
 param([string]$BaseUrl = "http://localhost:5115")
 $ErrorActionPreference = "Stop"
 
@@ -90,7 +90,7 @@ foreach ($c in $cases) {
   $ans=[string]$resp.answer; if ($ans.Length -gt 220) { $ans = $ans.Substring(0,220)+"..." }
   Write-Host "Answer: $ans"
   $results += [pscustomobject]@{ id=$c.id; pass=($failed.Count -eq 0); failedChecks=($failed -join ';'); sql=$resp.sql; rowCount=$resp.rowCount; answer=$resp.answer; warning=$resp.warning }
-  Start-Sleep -Seconds 12
+  Start-Sleep -Seconds 60
 }
 $out = Join-Path $PSScriptRoot "eval_outward_results.json"
 $results | ConvertTo-Json -Depth 6 | Set-Content $out -Encoding UTF8

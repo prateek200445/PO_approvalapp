@@ -1,4 +1,4 @@
-# Sales wave golden eval (run when Groq quota allows)
+﻿# Sales wave golden eval (run when Groq quota allows)
 param([string]$BaseUrl = "http://localhost:5115")
 $ErrorActionPreference = "Stop"
 
@@ -60,7 +60,7 @@ foreach ($c in $cases) {
   Write-Host "SQL: $($resp.sql)"
   Write-Host "Rows: $($resp.rowCount)"
   $results += [pscustomobject]@{ id=$c.id; pass=($failed.Count -eq 0); sql=$resp.sql; rowCount=$resp.rowCount }
-  Start-Sleep -Seconds 12
+  Start-Sleep -Seconds 60
 }
 $out = Join-Path $PSScriptRoot "eval_sales_results.json"
 $results | ConvertTo-Json -Depth 6 | Set-Content $out -Encoding UTF8

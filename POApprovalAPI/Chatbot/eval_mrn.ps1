@@ -1,4 +1,4 @@
-# MRN golden eval: posts user-style questions to /api/chat and checks SQL/rows heuristics.
+﻿# MRN golden eval: posts user-style questions to /api/chat and checks SQL/rows heuristics.
 # Usage: powershell -File eval_mrn.ps1 [-BaseUrl http://localhost:5115]
 
 param(
@@ -198,7 +198,7 @@ foreach ($c in $cases) {
       answer = ""
     }
   }
-  Start-Sleep -Seconds 12
+  Start-Sleep -Seconds 60
 }
 
 $out = Join-Path $PSScriptRoot "eval_mrn_results.json"

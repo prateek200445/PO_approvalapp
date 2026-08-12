@@ -1,4 +1,4 @@
-# Wave 6 — Vendor master golden eval (run when Groq quota allows)
+﻿# Wave 6 â€” Vendor master golden eval (run when Groq quota allows)
 param([string]$BaseUrl = "http://localhost:5115")
 $ErrorActionPreference = "Stop"
 
@@ -83,7 +83,7 @@ foreach ($c in $cases) {
   $ans=[string]$resp.answer; if ($ans.Length -gt 220) { $ans = $ans.Substring(0,220)+"..." }
   Write-Host "Answer: $ans"
   $results += [pscustomobject]@{ id=$c.id; pass=($failed.Count -eq 0); failedChecks=($failed -join ';'); sql=$resp.sql; rowCount=$resp.rowCount; answer=$resp.answer; warning=$resp.warning }
-  Start-Sleep -Seconds 12
+  Start-Sleep -Seconds 60
 }
 $out = Join-Path $PSScriptRoot "eval_vendor_results.json"
 $results | ConvertTo-Json -Depth 6 | Set-Content $out -Encoding UTF8
