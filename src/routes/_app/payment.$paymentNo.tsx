@@ -1,13 +1,15 @@
 import { useAuth } from "@/lib/auth-context";
 import { getApiUrl } from "@/lib/api-config";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { ArrowLeft, CheckCircle2, XCircle, Building2, Calendar, User as UserIcon, Hash, IndianRupee, Briefcase, Loader2, Landmark, Wallet} from "lucide-react";
+import { useState, useEffect } from "react";
+import { CheckCircle2, XCircle, Building2, Calendar, User as UserIcon, Hash, IndianRupee, Briefcase, Loader2, Landmark, Wallet} from "lucide-react";
 import { formatINR } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SkeletonCard, SkeletonSection } from "@/components/SkeletonLoader";
+import { ApprovalDetailNav } from "@/components/ApprovalDetailNav";
+import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
 
 export const Route = createFileRoute("/_app/payment/$paymentNo")({
  head: ({ params }) => ({
@@ -27,6 +29,21 @@ function PaymentDetails() {
   const [confirm, setConfirm] = useState<null | "approve" | "reject">(null);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
+
+  const paymentNavigation = useApprovalListNavigation({
+    kind: "payment",
+    currentId: paymentNo,
+    listQueryKey: "payment-list",
+    fallbackApiPath: (username) =>
+      `/api/Payment/pending/${username}?amount=&filterType=gte`,
+    extractId: (row) =>
+      (row.paymentNo as string | undefined) ?? (row.PaymentNo as string | undefined),
+  });
+
+  useEffect(() => {
+    setRemarks("");
+    setConfirm(null);
+  }, [paymentNo]);
 
   // Fetch Payment details with React Query (cache indefinitely - immutable data)
   const { data: paymentData, isLoading: paymentLoading } = useQuery({
@@ -260,12 +277,25 @@ const headerItems = [
 
   return (
     <div className="space-y-5 pb-24 md:pb-0 max-w-full overflow-x-hidden">
-      <div className="flex items-center justify-between">
-        <button onClick={() => navigate({ to: "/payments" })} className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> Back
-        </button>
-        <StatusBadge status="Pending" />
-      </div>
+      <ApprovalDetailNav
+        onBack={() => navigate({ to: "/payments" })}
+        navigation={paymentNavigation}
+        onPrevious={() =>
+          paymentNavigation.prev &&
+          navigate({
+            to: "/payment/$paymentNo",
+            params: { paymentNo: paymentNavigation.prev },
+          })
+        }
+        onNext={() =>
+          paymentNavigation.next &&
+          navigate({
+            to: "/payment/$paymentNo",
+            params: { paymentNo: paymentNavigation.next },
+          })
+        }
+        trailing={<StatusBadge status="Pending" />}
+      />
 
      {/* Header card */}
 <div className="rounded-xl border border-border bg-card p-5">

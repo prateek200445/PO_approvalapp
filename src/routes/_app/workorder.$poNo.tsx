@@ -2,12 +2,14 @@ import { useAuth } from "@/lib/auth-context";
 import { getApiUrl } from "@/lib/api-config";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
-import { ArrowLeft, FileText, Download, CheckCircle2, XCircle, Building2, Calendar, User as UserIcon, Hash, IndianRupee, Briefcase, ExternalLink, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader2 } from "lucide-react";
+import { FileText, Download, CheckCircle2, XCircle, Building2, Calendar, User as UserIcon, Hash, IndianRupee, Briefcase, ExternalLink, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader2 } from "lucide-react";
 import { currencyLabel, formatMoney, formatMoneyAmount, type ApprovalStep } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SkeletonCard, SkeletonSection, SkeletonTable, SkeletonWorkflow } from "@/components/SkeletonLoader";
+import { ApprovalDetailNav } from "@/components/ApprovalDetailNav";
+import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
 
 export const Route = createFileRoute("/_app/workorder/$poNo")({
  head: ({ params }) => ({
@@ -28,6 +30,20 @@ function WorkOrderDetails() {
   const [confirm, setConfirm] = useState<null | "approve" | "reject">(null);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
+
+  const workOrderNavigation = useApprovalListNavigation({
+    kind: "workorder",
+    currentId: poNo,
+    listQueryKey: "workorder-list",
+    fallbackApiPath: (username) =>
+      `/api/WorkOrder/pending/${username}?amount=&filterType=gte`,
+    extractId: (row) => (row.PoNo as string | undefined) ?? undefined,
+  });
+
+  useEffect(() => {
+    setRemarks("");
+    setConfirm(null);
+  }, [poNo]);
 
   // PDF.js Inline Viewer State
   const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -389,12 +405,19 @@ if (!po || po.length === 0) {
 
   return (
     <div className="space-y-5 pb-24 md:pb-0 max-w-full overflow-x-hidden min-w-0">
-      <div className="flex items-center justify-between">
-        <button onClick={() => navigate({ to: "/workorders" })} className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> Back
-        </button>
-        <StatusBadge status="Pending" />
-      </div>
+      <ApprovalDetailNav
+        onBack={() => navigate({ to: "/workorders" })}
+        navigation={workOrderNavigation}
+        onPrevious={() =>
+          workOrderNavigation.prev &&
+          navigate({ to: "/workorder/$poNo", params: { poNo: workOrderNavigation.prev } })
+        }
+        onNext={() =>
+          workOrderNavigation.next &&
+          navigate({ to: "/workorder/$poNo", params: { poNo: workOrderNavigation.next } })
+        }
+        trailing={<StatusBadge status="Pending" />}
+      />
 
       {/* Header card */}
       <div className="rounded-xl border border-border bg-card p-5 shadow-sm">

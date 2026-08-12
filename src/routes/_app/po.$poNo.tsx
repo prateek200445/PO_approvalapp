@@ -8,6 +8,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SkeletonCard, SkeletonSection, SkeletonTable, SkeletonWorkflow } from "@/components/SkeletonLoader";
+import { ApprovalDetailNav } from "@/components/ApprovalDetailNav";
+import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
 
 export const Route = createFileRoute("/_app/po/$poNo")({
   head: ({ params }) => ({ meta: [{ title: `${params.poNo} — PO Details` }] }),
@@ -75,6 +77,19 @@ function PODetails() {
     },
     staleTime: Infinity, // Cache indefinitely
   });
+
+  const poNavigation = useApprovalListNavigation({
+    kind: "po",
+    currentId: poNo,
+    listQueryKey: "pending-list",
+    fallbackApiPath: (username) => `/api/PO/pending/${username}?amount=&filterType=gte`,
+    extractId: (row) => (row.PoNo as string | undefined) ?? undefined,
+  });
+
+  useEffect(() => {
+    setRemarks("");
+    setConfirm(null);
+  }, [poNo]);
 
   // Transform data to match original format
   const po = poData;
@@ -366,12 +381,19 @@ function PODetails() {
 
   return (
     <div className="space-y-5 pb-24 md:pb-0 max-w-full overflow-x-hidden">
-      <div className="flex items-center justify-between">
-        <button onClick={() => navigate({ to: "/pending" })} className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" /> Back
-        </button>
-        <StatusBadge status="Pending" />
-      </div>
+      <ApprovalDetailNav
+        onBack={() => navigate({ to: "/pending" })}
+        navigation={poNavigation}
+        onPrevious={() =>
+          poNavigation.prev &&
+          navigate({ to: "/po/$poNo", params: { poNo: poNavigation.prev } })
+        }
+        onNext={() =>
+          poNavigation.next &&
+          navigate({ to: "/po/$poNo", params: { poNo: poNavigation.next } })
+        }
+        trailing={<StatusBadge status="Pending" />}
+      />
 
       {/* Header card */}
       <div className="rounded-xl border border-border bg-card p-5 shadow-sm">

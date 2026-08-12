@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebounce } from "@/hooks/useDebounce";
 import { SkeletonPendingList } from "@/components/SkeletonLoader";
 import { toast } from "sonner";
+import { setApprovalListNav } from "@/lib/approval-list-nav";
 
 const MAX_BULK = 50;
 
@@ -413,6 +414,7 @@ function PendingList() {
                 key={p.PoNo}
                 to="/po/$poNo"
                 params={{ poNo: p.PoNo }}
+                onClick={() => setApprovalListNav("po", filtered.map((row) => row.PoNo))}
                 className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -496,6 +498,7 @@ function PendingList() {
                         <Link
                           to="/po/$poNo"
                           params={{ poNo: p.PoNo }}
+                          onClick={() => setApprovalListNav("po", filtered.map((row) => row.PoNo))}
                           className="hover:text-primary hover:underline"
                         >
                           {p.PoNo}

@@ -1,7 +1,9 @@
 import { useAuth } from "@/lib/auth-context";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { getApiUrl } from "@/lib/api-config";
 import { useEffect, useState, ReactNode } from "react";
+import { ApprovalDetailNav } from "@/components/ApprovalDetailNav";
+import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
 
 export const Route = createFileRoute("/_app/indent/$indentNo")({
   component: IndentDetailsPage,
@@ -10,10 +12,23 @@ export const Route = createFileRoute("/_app/indent/$indentNo")({
 function IndentDetailsPage() {
   const { indentNo } = Route.useParams();
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [items, setItems] = useState<any[]>([]);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [workflow, setWorkflow] = useState<any[]>([]);
+
+  const indentNavigation = useApprovalListNavigation({
+    kind: "indent",
+    currentId: indentNo,
+    listQueryKey: "indent-list",
+    fallbackApiPath: (username) => `/api/Indent/pending/${username}?amount=&filterType=gte`,
+    extractId: (row) => (row.IndentNo as string | undefined) ?? undefined,
+  });
+
+  useEffect(() => {
+    setSelectedItems([]);
+  }, [indentNo]);
 
   useEffect(() => {
   if (!user?.username) return;
@@ -95,6 +110,19 @@ async function rejectIndent() {
 
   return (
     <div className="space-y-6">
+      <ApprovalDetailNav
+        onBack={() => navigate({ to: "/indents" })}
+        navigation={indentNavigation}
+        onPrevious={() =>
+          indentNavigation.prev &&
+          navigate({ to: "/indent/$indentNo", params: { indentNo: indentNavigation.prev } })
+        }
+        onNext={() =>
+          indentNavigation.next &&
+          navigate({ to: "/indent/$indentNo", params: { indentNo: indentNavigation.next } })
+        }
+      />
+
       <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
   <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
     Indent Approval

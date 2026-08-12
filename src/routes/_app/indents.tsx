@@ -5,6 +5,7 @@ import {  useState, useEffect } from "react";
 import { Search, ArrowUpDown, Filter, X } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
+import { setApprovalListNav } from "@/lib/approval-list-nav";
 
 export const Route = createFileRoute("/_app/indents")({
   head: () => ({ meta: [{ title: "Pending Indents — Approval Portal" }] }),
@@ -186,6 +187,12 @@ function PendingList() {
            key={p.IndentNo}
 to="/indent/$indentNo"
 params={{ indentNo: p.IndentNo }}
+onClick={() =>
+  setApprovalListNav(
+    "indent",
+    filtered.map((row) => row.IndentNo).filter(Boolean),
+  )
+}
             className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
           >
            <div className="flex items-start gap-3">
@@ -231,6 +238,12 @@ params={{ indentNo: p.IndentNo }}
   <Link
     to="/indent/$indentNo"
     params={{ indentNo: p.IndentNo }}
+    onClick={() =>
+      setApprovalListNav(
+        "indent",
+        filtered.map((row) => row.IndentNo).filter(Boolean),
+      )
+    }
     className="hover:text-primary hover:underline"
   >
     {p.IndentNo}

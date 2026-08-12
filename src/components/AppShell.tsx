@@ -124,7 +124,7 @@ export function AppShell() {
                   )}
                 >
                   <n.icon className="h-4 w-4" />
-                  <span className="hidden xl:inline">{n.label}</span>
+                  <span className="hidden lg:inline">{n.label}</span>
                 </Link>
               );
             })}

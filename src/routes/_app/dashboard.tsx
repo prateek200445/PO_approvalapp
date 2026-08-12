@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth-context";
 import { useQuery } from "@tanstack/react-query";
 import { SkeletonStats, SkeletonPendingList } from "@/components/SkeletonLoader";
+import { setApprovalListNav } from "@/lib/approval-list-nav";
 
 export const Route = createFileRoute("/_app/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — PO Approval Portal" }] }),
@@ -146,7 +147,12 @@ function Dashboard() {
             ) : (
               pending.map((p) => (
                 <li key={p.PoNo}>
-                  <Link to="/po/$poNo" params={{ poNo: p.PoNo }} className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-secondary/40">
+                  <Link
+                    to="/po/$poNo"
+                    params={{ poNo: p.PoNo }}
+                    onClick={() => setApprovalListNav("po", pending.map((row) => row.PoNo))}
+                    className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-secondary/40"
+                  >
                     <div className="min-w-0">
                       <div className="truncate font-medium text-sm">{p.PoNo}</div>
                       <div className="truncate text-xs text-muted-foreground">{p.FirmName}</div>
