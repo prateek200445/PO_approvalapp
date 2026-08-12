@@ -37,7 +37,8 @@ type AppPath =
   | "/export-bill-overdue"
   | "/daily-production"
   | "/bom"
-  | "/profile";
+  | "/profile"
+  | "/assistant";
 
 type NavItem = {
   to: AppPath;
@@ -54,6 +55,7 @@ export function AppShell() {
   const router = useRouterState();
   const path = router.location.pathname;
   const fullScreenReport = path.includes("export-bill-overdue");
+  const isCopilot = path.startsWith("/assistant");
   const [dark, setDark] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -247,6 +249,16 @@ export function AppShell() {
           </span>
         )}
       </Link>
+    );
+  }
+
+  if (isCopilot) {
+    return (
+      <div className="h-dvh overflow-hidden bg-background">
+        <main className="h-full w-full overflow-hidden" id="main-content">
+          <Outlet />
+        </main>
+      </div>
     );
   }
 

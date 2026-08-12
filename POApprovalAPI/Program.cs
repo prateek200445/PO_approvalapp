@@ -84,8 +84,23 @@ builder.Services.AddHostedService<SalesDashboardCacheWarmupService>();
 builder.Services.AddHostedService<ExportBillOverdueCacheWarmupService>();
 
 builder.Services.AddSingleton<SchemaRetrievalService>();
+builder.Services.AddSingleton<SchemaCatalogService>();
 builder.Services.AddSingleton<SqlGuardService>();
-builder.Services.AddHttpClient<GroqChatService>();
+
+var llmProvider = (Environment.GetEnvironmentVariable("LLM_PROVIDER")
+                   ?? builder.Configuration["Llm:Provider"]
+                   ?? "gemini").Trim().ToLowerInvariant();
+if (llmProvider == "groq")
+{
+    builder.Services.AddHttpClient<GroqChatService>();
+    builder.Services.AddScoped<IChatCompletionService>(sp => sp.GetRequiredService<GroqChatService>());
+}
+else
+{
+    builder.Services.AddHttpClient<GeminiChatService>();
+    builder.Services.AddScoped<IChatCompletionService>(sp => sp.GetRequiredService<GeminiChatService>());
+}
+
 builder.Services.AddScoped<ChatOrchestratorService>();
 
 builder.Services.AddCors(options =>
@@ -94,7 +109,8 @@ builder.Services.AddCors(options =>
     {
         policy.AllowAnyOrigin()
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .WithExposedHeaders("X-Row-Count", "X-Truncated", "X-Total-Count");
     });
 });
 

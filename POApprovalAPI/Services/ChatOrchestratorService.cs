@@ -6,26 +6,30 @@ using POApprovalAPI.Models;
 
 namespace POApprovalAPI.Services;
 
-public class ChatOrchestratorService
+public partial class ChatOrchestratorService
 {
     private readonly SchemaRetrievalService _retrieval;
-    private readonly GroqChatService _groq;
+    private readonly SchemaCatalogService _schemaCatalog;
+    private readonly IChatCompletionService _llm;
     private readonly SqlGuardService _sqlGuard;
     private readonly DatabaseService _database;
     private readonly ILogger<ChatOrchestratorService> _logger;
 
     private const int MaxReturnRows = 50;
-    private const int SqlTimeoutSeconds = 30;
+    private const int MaxExportRows = 5000;
+    private const int SqlTimeoutSeconds = 60;
 
     public ChatOrchestratorService(
         SchemaRetrievalService retrieval,
-        GroqChatService groq,
+        SchemaCatalogService schemaCatalog,
+        IChatCompletionService llm,
         SqlGuardService sqlGuard,
         DatabaseService database,
         ILogger<ChatOrchestratorService> logger)
     {
         _retrieval = retrieval;
-        _groq = groq;
+        _schemaCatalog = schemaCatalog;
+        _llm = llm;
         _sqlGuard = sqlGuard;
         _database = database;
         _logger = logger;
@@ -50,12 +54,15 @@ public class ChatOrchestratorService
             - SELECT or WITH...SELECT only. Never modify data.
             - Use only tables/views described in the provided schema context.
             - Use ONLY exact column names listed for each table. Do not invent or borrow columns from other tables.
+            - ApprovePO / ApprovePOHOD / ApproveWorkOrder key column is PoNo (NOT POCode, NOT PurchaseCode on those tables). Join PoNo = PurchasePayment.PurchaseCode.
+            - ApproveWorkOrder / ApprovePO / ApprovePOHOD have NO CompanyName, CompName, or TotalAmount — those are on PurchasePayment (CompanyName, TotalAmount). Never SELECT CompName/TotalAmt FROM ApproveWorkOrder.
             - FactoryInfo is OUR company/unit master only (Oswal Extrusion Limited, Plastene Polyfilms Limited, etc.). NEVER use FactoryInfo for supplier/vendor firm names (Chemline, Bright Rubber, Lohia, etc.) — those live in Vendor.
             - FactoryInfo PAN column is PermanentAccountNo (NOT PANNo). LedgerMaster PAN column is PANNo.
             - FactoryInfo GST prefer NewGSTNo. LedgerMaster has GSTNo/NewGSTNo for parties.
             - Supplier/vendor GST/PAN/email/address/city/bank/IFSC/MSME/vendor code: ALWAYS Vendor (full profile) or vw_VendorListwithBankdtls (bank/IFSC shortcut). NEVER FactoryInfo for vendors.
             - Ledger/account groups: use SELECT DISTINCT Under FROM LedgerMaster (filter empty Under). NEVER query LedgerGroupMaster.
             - Opening/pending ledger balances: use LedgerMaster.Openingbalance and LedgerMaster.PendingBalance. NEVER query LedgerOpeningBalance (table is empty).
+            - Named party/customer/vendor ledger outstanding: ALWAYS LedgerMaster WHERE LedgerName LIKE '%party%' (PendingBalance, Openingbalance, CompanyName). Never Vendor for balances. Optional CompanyName = our plant when user names it. Always TOP 50.
             - MRN / material receipt / store inward: prefer Vw_StoreInwards or vw_MRNList; header table StoreInwardsPayment; lines StoreInwards. MRN number column is MRNo/MRno; payment link via vw_MRNToBillPayment or BillPaymentEntry.MRNno. Always TOP 50.
             - MRN company vs vendor: 'for company X' uses CompanyName. Vendor/supplier/party names use PartyName/Partyname. Names ending in -Purchase (e.g. Plastene Polyfilms Ltd-Purchase) are PartyName, not CompanyName.
             - NEVER invent MRDate. Vw_StoreInwards/StoreInwardsPayment: use BillDate, GateInwardDate, or SysDate. vw_MRNList/BillPaymentEntry: use MRNDate (not MRDate).
@@ -71,42 +78,253 @@ public class ChatOrchestratorService
             - Gate pass: returnable RGP prefer Vw_ReturnGatePass (GatePassNo format CO/yy-yy/GP/n e.g. KPV/26-27/GP/162, OEL/26-27/GP/n for Oswal — NEVER reversed like 162/KPV). Filter company via CompName LIKE '%Oswal%' OR GatePassNo LIKE 'OEL%/GP/%' (prefixes: Oswal=OEL, KP Woven=KPV, Polyfilms=PPL). Non-returnable NRGP prefer Vw_NonReturnGatePass (.../NGP/...). Inward against RGP: InwdReturnGatePass (.../IGP/...). Pending/open returns: vw_returngatepasspending WHERE PendingQty > 0. CompName NOT CompanyName. Always TOP 50.
             - Job work: formal orders prefer Vw_EditJOBWorkOrder (PurchaseCode JRO/JWO; sparse). Live qty at job work: VW_JobWork_EBD_DTL (filter companyname/ItemCode). Receipts: VW_RECJOBWORK_EBD_DTL (MRNo like JBIN-SE). Returnable job-work sends also Vw_ReturnGatePass Purpose LIKE '%Job Work%'. Do not join JOBWORKORDER to PurchasePayment. Always TOP 50.
             - Sales invoices: prefer vw_Salesvoucher (InvNo, BuyerName, BillAMount, InvType, CompanyName). Lines: SalesVoucherItem on CompanyName+InvNo (ITEMCODE, ActualQty, Rate, Amount). List: vw_SalesInvList. Taxes: SalesVoucherTax. MIS qty: VW_SALES_EBD_DTL. Bracket [Company Address]/[Company GST] on vw_Salesvoucher. Sales credit notes: CreditNote. Always TOP 50.
+            - Top export customers / export sales ranking: ALWAYS vw_Salesvoucher (NOT despatch). Filter InvType LIKE '%Export%', Indian FY on InvDate (FY 2024-25 = 2024-04-01 to <2025-04-01), GROUP BY BuyerName, ORDER BY SUM(BillAMount) DESC, TOP N. For '<company> group' use CompanyName IN (SELECT Name FROM FactoryInfo WHERE GroupName LIKE '%hint%' OR Name LIKE '%hint%'). When user says exclude inter-company / inter unit / group companies: also NOT EXISTS buyer matching FactoryInfo.Name for that same group (do not count sister companies as export customers). BillAMount spelling. Always TOP N (default 5).
             - Despatch/packing: roll history vw_MISrolldespatch; FIBC bails FIBCDespatch; yarn MIS_YarnDespatch; small bag SmallBagBailForDespatch; rolls waiting vw_RollforDespatch. ALWAYS filter CompanyName/Companyname or InvNo/PartyName/date + TOP 50 (million-row tables). Prefer view over MISRollforDespatch table.
-            - Production: factory daily vw_FactoryProduction (companyname, Particulars, TapeProduction/Fabric/SmallBag); tape plant vw_daily_tape_prod_New (bracket [Loom Dept]/[FIBC Dept]); loom rolls vw_LoomProductionENtry (MUST filter CompanyName/Sysdate/LoomNo + TOP 50 — ~716k; skip stale vw_Loom_Prod_Mtr); FIBC bags VW_FIBCBagwiseProduction (not _New); MIS qty VW_PRODUCTION_EBD_DTL; WIP vw_WIPReport; small bags SmallBagProductionEntry. Filter EBD/WIP/loom + TOP 50. Not despatch / not ApproveWorkOrder.
+            - Production: factory daily vw_FactoryProduction (companyname, Particulars, TapeProduction/Fabric/SmallBag); tape plant vw_daily_tape_prod_New (bracket [Loom Dept]/[FIBC Dept]); loom rolls vw_LoomProductionENtry (MUST filter CompanyName/Sysdate/LoomNo + TOP 50 — ~716k; skip stale vw_Loom_Prod_Mtr); FIBC bags VW_FIBCBagwiseProduction (not _New); MIS qty VW_PRODUCTION_EBD_DTL; WIP vw_WIPReport; small bags SmallBagProductionEntry (Cutting/Stitching — live data mainly Plastene/HCP units, NOT Oswal; Oswal uses Tape/Fabric/WEBBING in vw_FactoryProduction). Filter EBD/WIP/loom + TOP 50. Not despatch / not ApproveWorkOrder.
             - Prefer TOP 50 for detail lists. COUNT aggregates need no TOP.
             - Pending filters: status = 'Pending' or Status = 'Pending' (match column casing in schema).
             - Approved counts: status LIKE 'Approved%' when statuses vary.
             - Use correct joins from the schema notes.
+            - OUR company nicknames MUST use full legal CompanyName/CompName/companyname — never the nickname string:
+              kp woven / k.p. woven / kpv → 'K.P. WOVEN PRIVATE LIMITED';
+              oswal → 'Oswal Extrusion Limited';
+              polyfilms / ppl → 'Plastene Polyfilms Limited';
+              hcp / bulkpack → 'HCP Plastene Bulkpack Ltd';
+              plastene india → 'Plastene India Limited' (or Unit -II when user says unit 2).
+              Names ending -Purchase are vendors (PartyName/FirmName), NOT our CompanyName.
+            - PurchasePayment header: PurchaseCode, TotalAmount, CompanyName, Currency, LoginName, DepttName, deliverydate — NO PurchaseDate, NO PODate. PO date is ApprovePO.PODate / ApprovePOHOD.PODate. For pending PO lists join PurchasePayment to ApprovePO and ApprovePOHOD (status = 'Pending').
+            - Pending POs AT/FOR our company X → PurchasePayment.CompanyName = full legal name. Pending POs TO a vendor/supplier → Vw_PurchaseOrder.FirmName LIKE '%name%'. Always start FROM pending ApprovePO/ApprovePOHOD then join — never SELECT FROM Vw_PurchaseOrder without joining the pending set first (view is huge and times out).
+            """;
+
+        var resolvedOurCompany = ResolveOutwardCompanyAlias(request.Message);
+        var companyHint = string.IsNullOrWhiteSpace(resolvedOurCompany)
+            ? ""
+            : $"""
+
+            Resolved our-company for this question (use this exact literal for CompanyName/CompName/companyname filters):
+            '{resolvedOurCompany}'
             """;
 
         var sqlUser = $"""
             Schema context:
             {schemaBlock}
-
+            {companyHint}
             User question:
             {request.Message}
             """;
 
-        var sqlRaw = await _groq.CompleteAsync(sqlSystem, sqlUser, ct);
-        var sql = _sqlGuard.NormalizeAndValidate(sqlRaw);
-        sql = ApplyKnownColumnFixes(sql);
-
-        List<Dictionary<string, object?>> rows;
+        List<Dictionary<string, object?>> rows = new();
         string? warning = null;
+        string? supplementalAnswerContext = null;
+        string sql;
+        string? columnRepairHint = null;
+
+        // Governed: top export customers by FY / company group — skip LLM SQL
+        if (TryBuildTopExportCustomersSql(request.Message, out var topExportSql, out var topExportWarning))
+        {
+            _logger.LogInformation("Using governed top-export-customers SQL");
+            sql = topExportSql;
+            warning = topExportWarning;
+        }
+        else if (TryBuildLedgerOutstandingSql(request.Message, out var ledgerOstSql, out var ledgerOstWarning))
+        {
+            _logger.LogInformation("Using governed ledger-outstanding SQL");
+            sql = ledgerOstSql;
+            warning = ledgerOstWarning;
+        }
+        else if (TryBuildGovernedDomainSql(request.Message, out var govSql, out var govWarning))
+        {
+            _logger.LogInformation("Using governed domain SQL");
+            sql = govSql;
+            warning = govWarning;
+        }
+        else
+        {
+            var sqlRaw = await _llm.CompleteAsync(sqlSystem, sqlUser, ct);
+            sql = ApplySqlPostProcess(sqlRaw, request.Message, out columnRepairHint);
+
+            if (TryBuildPendingWorkOrderSql(request.Message, sql, out var pendingWoSql, out var pendingWoWarning))
+            {
+                _logger.LogInformation("Rewriting pending WO query ({Mode})", pendingWoWarning);
+                sql = pendingWoSql;
+                warning = pendingWoWarning;
+                columnRepairHint = null;
+            }
+            else if (TryBuildPendingPoApprovalSql(request.Message, sql, out var pendingPoSql, out var pendingPoWarning))
+            {
+                _logger.LogInformation("Rewriting pending PO query ({Mode})", pendingPoWarning);
+                sql = pendingPoSql;
+                warning = pendingPoWarning;
+                columnRepairHint = null; // governed SQL is catalog-safe
+            }
+            else if (TryBuildLedgerOutstandingSql(request.Message, out var pendingLedgerSql, out var pendingLedgerWarn))
+            {
+                _logger.LogInformation("Rewriting to governed ledger-outstanding SQL");
+                sql = pendingLedgerSql;
+                warning = pendingLedgerWarn;
+                columnRepairHint = null;
+            }
+        }
+
+        // Still-unknown columns after auto-fix → one targeted repair before execute
+        if (!string.IsNullOrWhiteSpace(columnRepairHint))
+        {
+            _logger.LogWarning("Unresolved hallucinated columns; requesting catalog-aware repair");
+            var colRepairUser = $"""
+                The previous SQL uses invalid column names.
+
+                Question: {request.Message}
+
+                Schema context:
+                {schemaBlock}
+
+                Failed SQL:
+                {sql}
+
+                {columnRepairHint}
+
+                Return ONE corrected SELECT/WITH query only. Use exact column names from the schema.
+                """;
+            var sqlRaw = await _llm.CompleteAsync(sqlSystem, colRepairUser, ct);
+            sql = ApplySqlPostProcess(sqlRaw, request.Message, out columnRepairHint);
+            if (TryBuildTopExportCustomersSql(request.Message, out var colTopExport, out var colTopExportWarn))
+            {
+                sql = colTopExport;
+                warning = colTopExportWarn;
+                columnRepairHint = null;
+            }
+            else if (TryBuildLedgerOutstandingSql(request.Message, out var colLedgerOst, out var colLedgerOstWarn))
+            {
+                sql = colLedgerOst;
+                warning = colLedgerOstWarn;
+                columnRepairHint = null;
+            }
+            else if (TryBuildGovernedDomainSql(request.Message, out var colGov, out var colGovWarn))
+            {
+                sql = colGov;
+                warning = colGovWarn;
+                columnRepairHint = null;
+            }
+            else if (TryBuildPendingWorkOrderSql(request.Message, sql, out var colPendingWo, out var colPendingWoWarn))
+            {
+                sql = colPendingWo;
+                warning = colPendingWoWarn;
+            }
+            else if (TryBuildPendingPoApprovalSql(request.Message, sql, out var colPendingSql, out var colPendingWarn))
+            {
+                sql = colPendingSql;
+                warning = colPendingWarn;
+            }
+        }
+
         try
         {
             rows = await ExecuteReadOnlyAsync(sql, ct);
         }
         catch (Exception ex)
         {
-            if (await TryGovernedVendorProfileRewriteAsync(request.Message, sql, ct) is { } governed)
+            var recovered = false;
+
+            // Timeout / bad join: force governed rewrites before LLM repair
+            if (TryBuildTopExportCustomersSql(request.Message, out var timeoutExportSql, out var timeoutExportWarn)
+                && !string.Equals(timeoutExportSql, sql, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    _logger.LogWarning(ex, "SQL failed; retrying governed top-export-customers rewrite");
+                    sql = timeoutExportSql;
+                    rows = await ExecuteReadOnlyAsync(sql, ct);
+                    warning = timeoutExportWarn;
+                    recovered = true;
+                }
+                catch (Exception retryEx)
+                {
+                    _logger.LogWarning(retryEx, "Governed top-export-customers rewrite also failed");
+                }
+            }
+
+            if (!recovered
+                && TryBuildLedgerOutstandingSql(request.Message, out var timeoutLedgerSql, out var timeoutLedgerWarn)
+                && !string.Equals(timeoutLedgerSql, sql, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    _logger.LogWarning(ex, "SQL failed; retrying governed ledger-outstanding rewrite");
+                    sql = timeoutLedgerSql;
+                    rows = await ExecuteReadOnlyAsync(sql, ct);
+                    warning = timeoutLedgerWarn;
+                    recovered = true;
+                }
+                catch (Exception retryEx)
+                {
+                    _logger.LogWarning(retryEx, "Governed ledger-outstanding rewrite also failed");
+                }
+            }
+
+            if (!recovered
+                && TryBuildGovernedDomainSql(request.Message, out var timeoutGovSql, out var timeoutGovWarn)
+                && !string.Equals(timeoutGovSql, sql, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    _logger.LogWarning(ex, "SQL failed; retrying governed domain rewrite");
+                    sql = timeoutGovSql;
+                    rows = await ExecuteReadOnlyAsync(sql, ct);
+                    warning = timeoutGovWarn;
+                    recovered = true;
+                }
+                catch (Exception retryEx)
+                {
+                    _logger.LogWarning(retryEx, "Governed domain rewrite also failed");
+                }
+            }
+
+            if (!recovered
+                && TryBuildPendingWorkOrderSql(request.Message, sql, out var timeoutWoSql, out var timeoutWoWarning)
+                && !string.Equals(timeoutWoSql, sql, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    _logger.LogWarning(ex, "SQL failed; retrying governed pending WO rewrite");
+                    sql = timeoutWoSql;
+                    rows = await ExecuteReadOnlyAsync(sql, ct);
+                    warning = timeoutWoWarning;
+                    recovered = true;
+                }
+                catch (Exception retryEx)
+                {
+                    _logger.LogWarning(retryEx, "Governed pending WO rewrite also failed");
+                }
+            }
+
+            if (!recovered
+                && TryBuildPendingPoApprovalSql(request.Message, sql, out var timeoutPoSql, out var timeoutPoWarning)
+                && !string.Equals(timeoutPoSql, sql, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    _logger.LogWarning(ex, "SQL failed; retrying governed pending PO rewrite");
+                    sql = timeoutPoSql;
+                    rows = await ExecuteReadOnlyAsync(sql, ct);
+                    warning = timeoutPoWarning;
+                    recovered = true;
+                }
+                catch (Exception retryEx)
+                {
+                    _logger.LogWarning(retryEx, "Governed pending PO rewrite also failed");
+                }
+            }
+
+            if (!recovered && await TryGovernedVendorProfileRewriteAsync(request.Message, sql, ct) is { } governed)
             {
                 _logger.LogWarning(ex, "SQL failed for vendor profile; using governed Vendor rewrite");
                 sql = governed.Sql;
                 rows = governed.Rows;
                 warning = governed.Warning;
+                recovered = true;
             }
-            else
+
+            if (!recovered)
             {
             _logger.LogWarning(ex, "SQL execution failed; asking model to repair once");
             var repairUser = $"""
@@ -142,10 +360,33 @@ public class ChatOrchestratorService
                 Reminder: sales invoices=vw_Salesvoucher + SalesVoucherItem (CompanyName+InvNo); BuyerName is customer; BillAMount spelling; bracket spaced GST address cols.
                 Reminder: despatch=vw_MISrolldespatch/FIBCDespatch/MIS_YarnDespatch/SmallBagBailForDespatch — must filter company or inv/party/date + TOP 50.
                 Reminder: production=vw_FactoryProduction / vw_daily_tape_prod_New / vw_LoomProductionENtry / VW_FIBCBagwiseProduction / VW_PRODUCTION_EBD_DTL / vw_WIPReport — filter company/date/item on large views + TOP 50; skip stale loom meter views; not despatch.
+                Reminder: PurchasePayment has deliverydate only — NO PurchaseDate/PODate; join ApprovePO/ApprovePOHOD for PODate on pending PO lists.
+                Reminder: pending POs TO a vendor use Vw_PurchaseOrder.FirmName LIKE — start FROM pending ApprovePO/ApprovePOHOD then join; never scan full Vw_PurchaseOrder unfiltered. 'at company X' = PurchasePayment.CompanyName; 'to vendor X' = FirmName.
+                {(columnRepairHint is null ? "" : "\n" + columnRepairHint)}
                 Return ONE corrected SELECT/WITH query only. No explanation.
                 """;
-            sqlRaw = await _groq.CompleteAsync(sqlSystem, repairUser, ct);
-            sql = ApplyKnownColumnFixes(_sqlGuard.NormalizeAndValidate(sqlRaw));
+            var sqlRaw = await _llm.CompleteAsync(sqlSystem, repairUser, ct);
+            sql = ApplySqlPostProcess(sqlRaw, request.Message, out _);
+            if (TryBuildTopExportCustomersSql(request.Message, out var repairExportSql, out var repairExportWarn))
+            {
+                sql = repairExportSql;
+                warning = repairExportWarn;
+            }
+            else if (TryBuildLedgerOutstandingSql(request.Message, out var repairLedgerSql, out var repairLedgerWarn))
+            {
+                sql = repairLedgerSql;
+                warning = repairLedgerWarn;
+            }
+            else if (TryBuildPendingWorkOrderSql(request.Message, sql, out var repairPendingWoSql, out var repairPendingWoWarning))
+            {
+                sql = repairPendingWoSql;
+                warning = repairPendingWoWarning;
+            }
+            else if (TryBuildPendingPoApprovalSql(request.Message, sql, out var repairPendingPoSql, out var repairPendingWarning))
+            {
+                sql = repairPendingPoSql;
+                warning = repairPendingWarning;
+            }
             try
             {
                 rows = await ExecuteReadOnlyAsync(sql, ct);
@@ -201,24 +442,44 @@ public class ChatOrchestratorService
                      && !sql.Contains("PendingBalance", StringComparison.OrdinalIgnoreCase)
                      && !sql.Contains("Openingbalance", StringComparison.OrdinalIgnoreCase)))
         {
-            _logger.LogWarning("LedgerOpeningBalance is empty; rewriting to LedgerMaster balances");
-            var company = TryExtractCompanyName(request.Message);
-            sql = string.IsNullOrWhiteSpace(company)
-                ? """
-                    SELECT TOP 50 CompanyName, LedgerName, Openingbalance, PendingBalance
-                    FROM LedgerMaster
-                    WHERE ISNULL(PendingBalance, 0) <> 0 OR ISNULL(Openingbalance, 0) <> 0
-                    ORDER BY ABS(ISNULL(PendingBalance, 0)) DESC
-                    """
-                : $"""
-                    SELECT TOP 50 CompanyName, LedgerName, Openingbalance, PendingBalance
-                    FROM LedgerMaster
-                    WHERE CompanyName = '{EscapeSqlLiteral(company)}'
-                      AND (ISNULL(PendingBalance, 0) <> 0 OR ISNULL(Openingbalance, 0) <> 0)
-                    ORDER BY ABS(ISNULL(PendingBalance, 0)) DESC
-                    """;
+            if (TryBuildLedgerOutstandingSql(request.Message, out var namedOstSql, out var namedOstWarn))
+            {
+                _logger.LogWarning("Empty/wrong ledger balance path; using governed named-party outstanding");
+                sql = namedOstSql;
+                warning = namedOstWarn;
+            }
+            else
+            {
+                _logger.LogWarning("LedgerOpeningBalance is empty; rewriting to LedgerMaster balances");
+                var company = TryExtractCompanyName(request.Message)
+                              ?? ResolveOutwardCompanyAlias(request.Message);
+                sql = string.IsNullOrWhiteSpace(company)
+                    ? """
+                        SELECT TOP 50 CompanyName, LedgerName, Openingbalance, PendingBalance
+                        FROM LedgerMaster
+                        WHERE ISNULL(PendingBalance, 0) <> 0 OR ISNULL(Openingbalance, 0) <> 0
+                        ORDER BY ABS(ISNULL(PendingBalance, 0)) DESC
+                        """
+                    : $"""
+                        SELECT TOP 50 CompanyName, LedgerName, Openingbalance, PendingBalance
+                        FROM LedgerMaster
+                        WHERE CompanyName = '{EscapeSqlLiteral(company)}'
+                          AND (ISNULL(PendingBalance, 0) <> 0 OR ISNULL(Openingbalance, 0) <> 0)
+                        ORDER BY ABS(ISNULL(PendingBalance, 0)) DESC
+                        """;
+                warning = "Rewrote LedgerOpeningBalance (empty table) to LedgerMaster Openingbalance/PendingBalance (governed).";
+            }
             rows = await ExecuteReadOnlyAsync(sql, ct);
-            warning = "Rewrote LedgerOpeningBalance (empty table) to LedgerMaster Openingbalance/PendingBalance (governed).";
+        }
+        else if (rows.Count == 0
+                 && TryBuildLedgerOutstandingSql(request.Message, out var emptyLedgerOstSql, out var emptyLedgerOstWarn)
+                 && (!sql.Contains("LedgerMaster", StringComparison.OrdinalIgnoreCase)
+                     || !sql.Contains("LedgerName", StringComparison.OrdinalIgnoreCase)))
+        {
+            _logger.LogWarning("Empty named ledger outstanding; rewriting to governed LedgerMaster LIKE");
+            sql = emptyLedgerOstSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = emptyLedgerOstWarn;
         }
         else if (sql.Contains("ApproveQuotation", StringComparison.OrdinalIgnoreCase)
                  || request.Message.Contains("ApproveQuotation", StringComparison.OrdinalIgnoreCase)
@@ -429,6 +690,27 @@ public class ChatOrchestratorService
             warning = "Rewrote credit-note filters: CompanyName=our company, PartyName=customer (governed; fixed swapped/polyfilms-Purchase mistake).";
         }
         else if (rows.Count == 0
+                 && LooksLikeTopExportCustomersQuestion(request.Message)
+                 && TryBuildTopExportCustomersSql(request.Message, out var emptyExportSql, out var emptyExportWarn)
+                 && !string.Equals(emptyExportSql, sql, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Empty top-export-customers result; retrying governed SQL");
+            sql = emptyExportSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = emptyExportWarn;
+        }
+        else if (rows.Count == 0
+                 && LooksLikeTopExportCustomersQuestion(request.Message)
+                 && sql.Contains("FactoryInfo", StringComparison.OrdinalIgnoreCase)
+                 && TryBuildTopExportCustomersFallbackSql(request.Message, out var fallbackExportSql, out var fallbackExportWarn))
+        {
+            // GroupName may not match — fall back to CompanyName LIKE
+            _logger.LogWarning("Empty top-export group filter; falling back to CompanyName LIKE");
+            sql = fallbackExportSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = fallbackExportWarn;
+        }
+        else if (rows.Count == 0
                  && sql.Contains("LedgerMaster", StringComparison.OrdinalIgnoreCase)
                  && (LooksLikeVendorPendingBalanceQuestion(request.Message)
                      || LedgerSqlHasVendorCodeAsPan(sql))
@@ -461,23 +743,94 @@ public class ChatOrchestratorService
                 ? "Rewrote vendor profile query: FactoryInfo → Vendor (governed; suppliers are not in FactoryInfo)."
                 : "Rewrote vendor profile query: exact FirmName → Vendor LIKE match (governed).";
         }
+        else if (rows.Count == 0
+                 && request.Message.Contains("needle", StringComparison.OrdinalIgnoreCase)
+                 && sql.Contains("vw_RollforDespatch", StringComparison.OrdinalIgnoreCase)
+                 && TryBuildRollsWaitingDespatchSql(request.Message, out var rollRelaxedSql, out var rollRelaxedWarn, relaxNeedleFilter: true)
+                 && !string.Equals(rollRelaxedSql, sql, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Empty needle-loom despatch result; relaxing to all rolls waiting on vw_RollforDespatch");
+            sql = rollRelaxedSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = rollRelaxedWarn;
+        }
+        else if (rows.Count == 0
+                 && LooksLikePendingIndentQuestion(request.Message)
+                 && (TryExtractDepartmentFragment(request.Message)?.Equals("Store", StringComparison.OrdinalIgnoreCase) == true
+                     || request.Message.Contains("store indent", StringComparison.OrdinalIgnoreCase))
+                 && TryBuildPendingIndentSql(request.Message, out var indentRelaxedSql, out var indentRelaxedWarn, relaxStoreDept: true)
+                 && !string.Equals(indentRelaxedSql, sql, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Empty store-dept pending indent result; retrying with relaxed Store filter (company-only)");
+            sql = indentRelaxedSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = indentRelaxedWarn;
+        }
+        else if (rows.Count == 0
+                 && LooksLikeAboveMaxStockQuestion(request.Message)
+                 && sql.Contains("WareHouse", StringComparison.OrdinalIgnoreCase)
+                 && TryBuildAboveMaxStockViaInventorySql(request.Message, out var invMaxSql, out var invMaxWarn))
+        {
+            _logger.LogWarning("Empty above-max on WareHouse; retrying vw_inventoryitemwarehouse_all join to WareHouse max levels");
+            sql = invMaxSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = invMaxWarn;
+        }
+        else if (rows.Count == 0
+                 && sql.Contains("SmallBagProductionEntry", StringComparison.OrdinalIgnoreCase)
+                 && LooksLikeSmallBagProductionQuestion(request.Message))
+        {
+            var company = TryExtractSqlCompanyNameLiteral(sql) ?? TryExtractCompanyName(request.Message);
+            if (!string.IsNullOrWhiteSpace(company))
+            {
+                _logger.LogWarning(
+                    "Empty SmallBagProductionEntry for {Company}; fetching factory production summary",
+                    company);
+                var summarySql = $"""
+                    SELECT TOP 20 Particulars, COUNT(*) AS entryCnt, MAX(Sysdate) AS lastDate, SUM(ISNULL(SmallBag, 0)) AS totalSmallBag
+                    FROM vw_FactoryProduction
+                    WHERE companyname = '{EscapeSqlLiteral(company)}'
+                    GROUP BY Particulars
+                    ORDER BY COUNT(*) DESC
+                    """;
+                var summaryRows = await ExecuteReadOnlyAsync(summarySql, ct);
+                if (summaryRows.Count > 0)
+                {
+                    supplementalAnswerContext = JsonSerializer.Serialize(summaryRows);
+                    warning =
+                        "SmallBagProductionEntry returned no rows; included vw_FactoryProduction summary by Particulars for context (governed).";
+                }
+            }
+        }
         }
 
-        var truncated = rows.Count > MaxReturnRows;
-        if (truncated)
+        var hitCap = rows.Count > MaxReturnRows;
+        if (hitCap)
             rows = rows.Take(MaxReturnRows).ToList();
+
+        var (totalCount, truncated) = await ResolveListCardinalityAsync(sql, rows, hitCap, ct);
 
         var preview = JsonSerializer.Serialize(rows);
         if (preview.Length > 12000)
             preview = preview[..12000] + "...(truncated)";
 
+        var cardinalityNote = totalCount.HasValue
+            ? truncated
+                ? $"Cardinality: showing {rows.Count} of {totalCount.Value} matching rows (chat caps at {MaxReturnRows}). State the full count clearly and note that Export CSV has the full set."
+                : $"Cardinality: {totalCount.Value} matching row(s); all are included below."
+            : truncated
+                ? $"Cardinality: result capped at {MaxReturnRows} rows; full count unknown. Say you are showing a sample and suggest Export CSV for more."
+                : "";
+
         var answerSystem = """
             You answer business questions using ONLY the SQL result data provided.
             Be concise and factual. If the result is empty, say so.
+            If supplemental context is provided for an empty small-bag query, explain that SmallBagProductionEntry has no rows for that company and summarize what production types (Particulars) the company does have instead — do not invent small-bag figures.
             Do not invent numbers. Mention key figures clearly.
             For payment questions: ignore rows where PaymentNo is null; only null/empty after filtering means no payment.
             If multiple payment rows exist, list each PaymentNo with amount and give a total when useful.
             For receipt/bill questions: if multiple distinct MRNo/SrNo values appear, say how many distinct receipts and list them — do not claim a single receipt when several exist.
+            When cardinality notes say the chat is capped, never imply the sample size is the full population.
             """;
         var answerUser = $"""
             Question: {request.Message}
@@ -485,32 +838,82 @@ public class ChatOrchestratorService
             SQL used:
             {sql}
 
+            {cardinalityNote}
+
             Result rows (JSON):
             {preview}
+            {(string.IsNullOrEmpty(supplementalAnswerContext)
+                ? ""
+                : $"""
+
+            Supplemental context (factory production by Particulars for same company — use only when main result is empty):
+            {supplementalAnswerContext}
+            """)}
 
             Write a short natural-language answer.
             """;
 
-        var answer = await _groq.CompleteAsync(answerSystem, answerUser, ct);
+        var answer = await _llm.CompleteAsync(answerSystem, answerUser, ct);
 
         if (truncated)
-            warning = string.IsNullOrEmpty(warning)
-                ? $"Result truncated to {MaxReturnRows} rows."
-                : warning + $" Result truncated to {MaxReturnRows} rows.";
+        {
+            var capMsg = totalCount.HasValue
+                ? $"Showing {rows.Count} of {totalCount.Value} rows (chat capped at {MaxReturnRows}). Use Export CSV for the full set."
+                : $"Result truncated to {MaxReturnRows} rows. Use Export CSV for more.";
+            warning = string.IsNullOrEmpty(warning) ? capMsg : warning + " " + capMsg;
+        }
 
         return new ChatResponse
         {
             Answer = answer,
             Sql = sql,
-            TablesUsed = chunks.Select(c => new RetrievedTableDto
-            {
-                ObjectName = c.ObjectName,
-                Domain = c.Domain ?? "",
-                Score = Math.Round(c.Score, 4)
-            }).ToList(),
+            TablesUsed = BuildTablesUsed(chunks, sql, warning),
             Rows = rows,
             RowCount = rows.Count,
+            TotalCount = totalCount,
+            Truncated = truncated,
             Warning = warning
+        };
+    }
+
+    public async Task<ChatExportResult> ExportCsvAsync(string rawSql, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(rawSql))
+            throw new ArgumentException("Sql is required.");
+
+        var sql = _sqlGuard.NormalizeAndValidate(rawSql);
+        var exportSql = StripLeadingTop(sql);
+
+        int? totalCount = null;
+        if (TryBuildCountWrapperSql(exportSql, out var countSql))
+        {
+            try
+            {
+                var countRows = await ExecuteReadOnlyAsync(countSql, ct, maxRows: 1);
+                totalCount = TryReadFirstInt(countRows);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Export count query failed");
+            }
+        }
+
+        var rows = await ExecuteReadOnlyAsync(exportSql, ct, maxRows: MaxExportRows);
+        var truncated = rows.Count > MaxExportRows;
+        if (truncated)
+            rows = rows.Take(MaxExportRows).ToList();
+
+        if (totalCount.HasValue)
+            truncated = totalCount.Value > rows.Count;
+
+        var stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+        return new ChatExportResult
+        {
+            CsvBytes = BuildCsvBytes(rows),
+            FileName = $"assistant-export-{stamp}.csv",
+            RowCount = rows.Count,
+            TotalCount = totalCount,
+            Truncated = truncated
         };
     }
 
@@ -536,6 +939,181 @@ public class ChatOrchestratorService
         var mentionsBalance = m.Contains("opening") || m.Contains("pending") || m.Contains("outstanding");
         var mentionsLedgerContext = m.Contains("ledger") || m.Contains("bill") || m.Contains("balance");
         return mentionsBalance && mentionsLedgerContext;
+    }
+
+    /// <summary>
+    /// Named customer/vendor/party ledger outstanding → LedgerMaster.LedgerName LIKE (governed).
+    /// </summary>
+    private static bool TryBuildLedgerOutstandingSql(
+        string message,
+        out string sql,
+        out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeOpeningPendingBalanceQuestion(message)
+            && !LooksLikeLooseOutstandingBalanceQuestion(message))
+            return false;
+
+        var party = TryExtractLedgerPartyName(message);
+        if (string.IsNullOrWhiteSpace(party))
+            return false;
+
+        // Our-company-only questions are company-wide lists, not a named party
+        var asOurCompany = CanonicalizeCompanyName(party) ?? ResolveOutwardCompanyAlias(party);
+        if (!string.IsNullOrWhiteSpace(asOurCompany)
+            && NamesLooselyMatch(party, asOurCompany)
+            && !message.Contains("customer", StringComparison.OrdinalIgnoreCase)
+            && !message.Contains("buyer", StringComparison.OrdinalIgnoreCase)
+            && !message.Contains("vendor", StringComparison.OrdinalIgnoreCase)
+            && !message.Contains("supplier", StringComparison.OrdinalIgnoreCase)
+            && !message.Contains("party", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var ourCompany = ResolveOutwardCompanyAlias(message);
+        // If the only company mention is the party itself, don't also filter CompanyName
+        if (!string.IsNullOrWhiteSpace(ourCompany) && NamesLooselyMatch(party, ourCompany))
+            ourCompany = null;
+
+        var like = EscapeSqlLiteral(party.Trim());
+        var where = new List<string>
+        {
+            $"LedgerName LIKE '%{like}%'"
+        };
+        if (!string.IsNullOrWhiteSpace(ourCompany))
+            where.Add($"CompanyName = '{EscapeSqlLiteral(ourCompany)}'");
+
+        sql = $"""
+            SELECT TOP 50
+                CompanyName,
+                LedgerName,
+                PendingBalance,
+                Openingbalance,
+                PANNo,
+                Under,
+                Category
+            FROM LedgerMaster
+            WHERE {string.Join(" AND ", where)}
+            ORDER BY ABS(ISNULL(PendingBalance, 0)) DESC, ABS(ISNULL(Openingbalance, 0)) DESC
+            """;
+
+        warning = string.IsNullOrWhiteSpace(ourCompany)
+            ? $"Governed ledger outstanding: LedgerMaster.LedgerName LIKE '%{party}%' (PendingBalance/Openingbalance)."
+            : $"Governed ledger outstanding: LedgerName LIKE '%{party}%' AND CompanyName = '{ourCompany}'.";
+        return true;
+    }
+
+    private static bool LooksLikeLooseOutstandingBalanceQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        return m.Contains("outstanding")
+               || m.Contains("pending balance")
+               || m.Contains("opening balance")
+               || (m.Contains("pending") && m.Contains("balance"));
+    }
+
+    private static string? TryExtractLedgerPartyName(string message)
+    {
+        var alias = ResolveVendorFirmAlias(message);
+        if (!string.IsNullOrWhiteSpace(alias))
+            return alias;
+
+        static string? CleanParty(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return null;
+            var s = raw.Trim().TrimEnd('.', ',', ';', '?', '!', ':');
+            s = System.Text.RegularExpressions.Regex.Replace(
+                s,
+                @"^(?:the\s+|a\s+|an\s+)",
+                "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            s = System.Text.RegularExpressions.Regex.Replace(
+                s,
+                @"^(?:customer|buyer|party|vendor|supplier|ledger)\s+",
+                "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            s = System.Text.RegularExpressions.Regex.Replace(
+                s,
+                @"\s+(?:ledger|outstanding|pending|opening|balance|bill|amount|please).*$",
+                "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            s = s.Trim().TrimEnd('.', ',', ';', '?', '!');
+            if (s.Length < 3) return null;
+            // Reject generic leftovers
+            if (s.Equals("customer", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("vendor", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("party", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("company", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("ledger", StringComparison.OrdinalIgnoreCase))
+                return null;
+            return s;
+        }
+
+        // "for customer Procon Pacific LLC" / "for vendor Bright Rubber"
+        var m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:for|of|against)\s+(?:the\s+)?(?:customer|buyer|party|vendor|supplier|ledger)\s+(.+)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var p = CleanParty(m.Groups[1].Value);
+            if (p is not null) return p;
+        }
+
+        // "outstanding for Procon Pacific LLC" / "pending balance of X"
+        m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:ledger\s+)?(?:outstanding|pending(?:\s+balance)?|opening(?:\s+balance)?|balance)\s+(?:for|of|against)\s+(?:the\s+)?(?:customer|buyer|party|vendor|supplier)?\s*(.+)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var p = CleanParty(m.Groups[1].Value);
+            if (p is not null) return p;
+        }
+
+        // "Procon Pacific LLC ledger outstanding" / "find Procon Pacific pending balance"
+        m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"^(?:find|show|get|list|what(?:'s| is)?|give\s+me)?\s*(.+?)\s+(?:ledger\s+)?(?:outstanding|pending\s+balance|opening\s+balance)\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var p = CleanParty(m.Groups[1].Value);
+            if (p is not null
+                && !p.Contains("ledger", StringComparison.OrdinalIgnoreCase)
+                && !LooksLikeOnlyOurCompanyPhrase(p))
+                return p;
+        }
+
+        // "ledger outstanding Procon Pacific LLC" (name at end without for/)
+        m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:ledger\s+)?(?:outstanding|pending\s+balance|opening\s+balance)\s+(.+)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var p = CleanParty(m.Groups[1].Value);
+            if (p is not null && !LooksLikeOnlyOurCompanyPhrase(p))
+                return p;
+        }
+
+        return null;
+    }
+
+    private static bool LooksLikeOnlyOurCompanyPhrase(string phrase)
+    {
+        var c = CanonicalizeCompanyName(phrase) ?? ResolveOutwardCompanyAlias(phrase);
+        return !string.IsNullOrWhiteSpace(c) && NamesLooselyMatch(phrase, c);
+    }
+
+    private static bool NamesLooselyMatch(string a, string b)
+    {
+        static string Norm(string s) =>
+            System.Text.RegularExpressions.Regex.Replace(s.ToLowerInvariant(), @"[^a-z0-9]+", "");
+        var na = Norm(a);
+        var nb = Norm(b);
+        if (na.Length < 3 || nb.Length < 3) return false;
+        return na == nb || na.Contains(nb) || nb.Contains(na);
     }
 
     private sealed record GovernedVendorProfileResult(
@@ -824,6 +1402,78 @@ public class ChatOrchestratorService
         return null;
     }
 
+    private string ApplySqlPostProcess(string sqlRaw, string message, out string? columnRepairHint)
+    {
+        var sql = _sqlGuard.NormalizeAndValidate(sqlRaw);
+        sql = ApplyCanonicalOurCompanyName(ApplyKnownColumnFixes(sql), message);
+        sql = _schemaCatalog.FixHallucinatedColumns(sql, out var columnFixes);
+        columnRepairHint = _schemaCatalog.FormatUnknownColumnsForRepair(columnFixes);
+        return sql;
+    }
+
+    /// <summary>
+    /// Rewrite our-company nicknames in SQL (e.g. CompanyName = 'KP Woven')
+    /// to canonical FactoryInfo / PurchasePayment names (e.g. 'K.P. WOVEN PRIVATE LIMITED').
+    /// Schema RAG does not resolve company aliases — this does.
+    /// </summary>
+    private static string ApplyCanonicalOurCompanyName(string sql, string message)
+    {
+        var fromMessage = ResolveOutwardCompanyAlias(message);
+        return System.Text.RegularExpressions.Regex.Replace(
+            sql,
+            @"\b(?<col>CompanyName|companyname|CompName)\b\s*(?<op>=|LIKE)\s*'(?<lit>[^']*)'",
+            m =>
+            {
+                var col = m.Groups["col"].Value;
+                var op = m.Groups["op"].Value;
+                var lit = m.Groups["lit"].Value;
+                var bare = lit.Trim().Trim('%').Trim();
+                if (bare.Length == 0) return m.Value;
+
+                var fromLit = CanonicalizeCompanyName(bare);
+                string? use = null;
+                if (!string.IsNullOrWhiteSpace(fromLit)
+                    && !fromLit.Equals(bare, StringComparison.OrdinalIgnoreCase))
+                {
+                    use = fromLit;
+                }
+                else if (!string.IsNullOrWhiteSpace(fromMessage)
+                         && IsOurCompanyNickname(bare, fromMessage))
+                {
+                    use = fromMessage;
+                }
+
+                if (string.IsNullOrWhiteSpace(use)
+                    || use.Equals(bare, StringComparison.OrdinalIgnoreCase))
+                    return m.Value;
+
+                var escaped = EscapeSqlLiteral(use);
+                if (op.Equals("LIKE", StringComparison.OrdinalIgnoreCase))
+                    return $"{col} LIKE '%{escaped}%'";
+                return $"{col} = '{escaped}'";
+            },
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    private static bool IsOurCompanyNickname(string literal, string canonical)
+    {
+        if (literal.Equals(canonical, StringComparison.OrdinalIgnoreCase)) return false;
+        var via = CanonicalizeCompanyName(literal);
+        if (!string.IsNullOrWhiteSpace(via)
+            && via.Equals(canonical, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        static string Norm(string s) =>
+            System.Text.RegularExpressions.Regex.Replace(
+                s.ToLowerInvariant(), @"[^a-z0-9]+", "");
+
+        var nLit = Norm(literal);
+        var nCan = Norm(canonical);
+        if (nLit.Length < 4) return false;
+        // "kpwoven" ⊂ "kpwovenprivatelimited"; "oswal" ⊂ "oswalextrusionlimited"
+        return nCan.Contains(nLit, StringComparison.Ordinal);
+    }
+
     private static string ApplyKnownColumnFixes(string sql)
     {
         // Hallucinated MRDate: map by object present in the SQL
@@ -942,7 +1592,309 @@ public class ChatOrchestratorService
                 sql, @"\bPANNo\b", "PermanentAccountNo", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         }
 
+        // PurchasePayment has deliverydate — NOT PurchaseDate or PODate (those are on ApprovePO/ApprovePOHOD)
+        if (sql.Contains("PurchasePayment", StringComparison.OrdinalIgnoreCase)
+            && System.Text.RegularExpressions.Regex.IsMatch(
+                sql, @"\bPurchaseDate\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            sql = System.Text.RegularExpressions.Regex.Replace(
+                sql, @"\bPurchaseDate\b", "deliverydate", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        // ApprovePO / ApprovePOHOD / ApproveWorkOrder key is PoNo — models often invent POCode / PurchaseCode on Approve*
+        if (System.Text.RegularExpressions.Regex.IsMatch(
+                sql,
+                @"\bApprovePO\b|\bApprovePOHOD\b|\bApproveWorkOrder\b|\bApproveIndent\b",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+            && System.Text.RegularExpressions.Regex.IsMatch(
+                sql, @"\bPOCode\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            sql = System.Text.RegularExpressions.Regex.Replace(
+                sql, @"\bPOCode\b", "PoNo", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
         return sql;
+    }
+
+    /// <summary>
+    /// Pending work orders: ApproveWorkOrder has no CompanyName/TotalAmount — join PurchasePayment.
+    /// Models invent CompName/TotalAmt on ApproveWorkOrder alone.
+    /// </summary>
+    private static bool TryBuildPendingWorkOrderSql(
+        string message,
+        string sql,
+        out string rewritten,
+        out string warning)
+    {
+        rewritten = sql;
+        warning = "";
+
+        var looksWo = LooksLikePendingWorkOrderQuestion(message)
+                      || sql.Contains("ApproveWorkOrder", StringComparison.OrdinalIgnoreCase);
+        if (!looksWo) return false;
+        if (LooksLikePendingPoQuestion(message)
+            && !sql.Contains("ApproveWorkOrder", StringComparison.OrdinalIgnoreCase)
+            && !message.Contains("work order", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var badCols = System.Text.RegularExpressions.Regex.IsMatch(
+                          sql, @"\bCompName\b|\bTotalAmt\b|\bCompanyName\b|\bTotalAmount\b",
+                          System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                      && sql.Contains("ApproveWorkOrder", StringComparison.OrdinalIgnoreCase)
+                      && !sql.Contains("PurchasePayment", StringComparison.OrdinalIgnoreCase);
+
+        if (!LooksLikePendingWorkOrderQuestion(message) && !badCols) return false;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "")
+                      ?? TryExtractSqlCompanyNameLiteral(sql);
+
+        // CompName = '...' mistaken literal on WO — treat as company
+        if (string.IsNullOrWhiteSpace(company))
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(
+                sql, @"\bCompName\b\s*=\s*'([^']+)'", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (m.Success) company = CanonicalizeCompanyName(m.Groups[1].Value);
+        }
+
+        var filters = new List<string> { "a.status = 'Pending'" };
+        if (!string.IsNullOrWhiteSpace(company))
+            filters.Add($"pp.CompanyName = '{EscapeSqlLiteral(company)}'");
+        if (TryExtractAmountThreshold(message) is { } minAmt)
+            filters.Add($"ISNULL(pp.TotalAmount, 0) > {minAmt.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+
+        rewritten = $"""
+            SELECT TOP 50
+                a.PoNo AS WorkOrderNo,
+                pp.CompanyName,
+                pp.TotalAmount,
+                pp.Currency,
+                MAX(a.PODate) AS PODate,
+                MAX(a.ApprovalName) AS ApprovalName,
+                MAX(a.status) AS status
+            FROM ApproveWorkOrder a
+            INNER JOIN PurchasePayment pp ON a.PoNo = pp.PurchaseCode
+            WHERE {string.Join(" AND ", filters)}
+            GROUP BY a.PoNo, pp.CompanyName, pp.TotalAmount, pp.Currency
+            ORDER BY MAX(a.PODate) DESC
+            """;
+        warning = string.IsNullOrWhiteSpace(company)
+            ? "Rewrote pending work-order query: ApproveWorkOrder JOIN PurchasePayment (no CompName/TotalAmt on ApproveWorkOrder)."
+            : $"Rewrote pending work-order query for CompanyName = '{company}' via PurchasePayment join.";
+        return true;
+    }
+
+    private static bool LooksLikePendingWorkOrderQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (!m.Contains("pending")) return false;
+        return m.Contains("work order")
+               || m.Contains("workorder")
+               || m.Contains("work-order")
+               || System.Text.RegularExpressions.Regex.IsMatch(m, @"\bwos?\b");
+    }
+
+    /// <summary>
+    /// Pending PO questions often hallucinate PurchaseDate, scan huge Vw_PurchaseOrder,
+    /// or confuse buyer CompanyName with vendor FirmName. Always rewrite to a safe shape.
+    /// </summary>
+    private static bool TryBuildPendingPoApprovalSql(
+        string message,
+        string sql,
+        out string rewritten,
+        out string warning)
+    {
+        rewritten = sql;
+        warning = "";
+        if (!LooksLikePendingPoQuestion(message)) return false;
+
+        var vendorIntent = LooksLikePendingPoVendorIntent(message, sql);
+        var minAmount = TryExtractAmountThreshold(message);
+
+        // Pending set first (small), then join header/lines — never scan full Vw_PurchaseOrder.
+        const string pendingUnion = """
+            SELECT PoNo, PODate, ApprovalName, status FROM ApprovePO WHERE status = 'Pending'
+            UNION ALL
+            SELECT PoNo, PODate, ApprovalName, status FROM ApprovePOHOD WHERE status = 'Pending'
+            """;
+
+        if (vendorIntent)
+        {
+            var vendorFrag = TryResolvePendingPoVendorFragment(message, sql);
+            if (string.IsNullOrWhiteSpace(vendorFrag))
+                return false;
+
+            var amountFilter = minAmount is { } amt
+                ? $"AND ISNULL(pp.TotalAmount, 0) > {amt.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+                : "";
+
+            rewritten = $"""
+                SELECT TOP 50
+                    a.PoNo AS PurchaseCode,
+                    MAX(v.FirmName) AS FirmName,
+                    pp.CompanyName,
+                    pp.TotalAmount,
+                    pp.Currency,
+                    MAX(a.PODate) AS PODate,
+                    MAX(a.ApprovalName) AS ApprovalName,
+                    MAX(a.status) AS status
+                FROM (
+                    {pendingUnion}
+                ) a
+                INNER JOIN PurchasePayment pp ON a.PoNo = pp.PurchaseCode
+                INNER JOIN Vw_PurchaseOrder v ON a.PoNo = v.PurchaseCode
+                WHERE v.FirmName LIKE '%{EscapeSqlLiteral(vendorFrag)}%'
+                  {amountFilter}
+                GROUP BY a.PoNo, pp.CompanyName, pp.TotalAmount, pp.Currency
+                ORDER BY MAX(a.PODate) DESC
+                """;
+            warning =
+                $"Rewrote pending PO query for vendor FirmName LIKE '%{vendorFrag}%' (start from pending approvals; avoid full Vw_PurchaseOrder scan).";
+            return true;
+        }
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "")
+                      ?? TryExtractSqlCompanyNameLiteral(sql);
+
+        var filters = new List<string>();
+        if (!string.IsNullOrWhiteSpace(company))
+            filters.Add($"pp.CompanyName = '{EscapeSqlLiteral(company)}'");
+        if (minAmount is { } minAmt)
+            filters.Add($"ISNULL(pp.TotalAmount, 0) > {minAmt.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+
+        var where = filters.Count > 0 ? "WHERE " + string.Join(" AND ", filters) : "";
+
+        rewritten = $"""
+            SELECT TOP 50
+                pp.PurchaseCode,
+                pp.CompanyName,
+                pp.TotalAmount,
+                pp.Currency,
+                MAX(a.PODate) AS PODate,
+                MAX(a.ApprovalName) AS ApprovalName,
+                MAX(a.status) AS status
+            FROM PurchasePayment pp
+            INNER JOIN (
+                {pendingUnion}
+            ) a ON pp.PurchaseCode = a.PoNo
+            {where}
+            GROUP BY pp.PurchaseCode, pp.CompanyName, pp.TotalAmount, pp.Currency
+            ORDER BY MAX(a.PODate) DESC
+            """;
+        warning = string.IsNullOrWhiteSpace(company)
+            ? "Rewrote pending PO query to join ApprovePO/ApprovePOHOD (deduped; PurchasePayment has no PurchaseDate)."
+            : $"Rewrote pending PO query for buyer CompanyName = '{company}' (deduped; not vendor FirmName).";
+        return true;
+    }
+
+    private static bool LooksLikePendingPoVendorIntent(string message, string sql)
+    {
+        var m = message.ToLowerInvariant();
+        if (m.Contains("vendor") || m.Contains("supplier") || m.Contains("firm name") || m.Contains("firmname"))
+            return true;
+        if (sql.Contains("FirmName", StringComparison.OrdinalIgnoreCase)
+            && !sql.Contains("CompanyName", StringComparison.OrdinalIgnoreCase))
+            return true;
+        // "to kp woven" / "to vendor X" — vendor/supplier direction (not "at company")
+        if (System.Text.RegularExpressions.Regex.IsMatch(
+                m,
+                @"\bto\s+(?:the\s+)?(?:vendor\s+|supplier\s+)?(?:kp\b|k\.p|oswal|polyfilms|hcp|plastene|bright|chemline|lohia|woven)"))
+            return true;
+        if (System.Text.RegularExpressions.Regex.IsMatch(
+                m, @"\b(?:for|against)\s+(?:vendor|supplier)\b"))
+            return true;
+        // Explicit "at company" / "for company" stays buyer-side
+        if (m.Contains("at company") || m.Contains("for company") || m.Contains("our company"))
+            return false;
+        return false;
+    }
+
+    private static string? TryResolvePendingPoVendorFragment(string message, string sql)
+    {
+        if (ResolveVendorFirmAlias(message) is { } alias)
+            return alias;
+
+        var m = message.ToLowerInvariant();
+        if ((m.Contains("woven") || m.Contains("kpv"))
+            && (m.Contains("kp") || m.Contains("k.p") || m.Contains("kpv") || m.Contains("woven")))
+            return "K.P. Woven"; // matches "K.P. Woven Pvt Ltd - Unit 3 -Purchase"
+
+        var firmLit = System.Text.RegularExpressions.Regex.Match(
+            sql,
+            @"\bFirmName\b\s*(?:=|LIKE)\s*'%?([^'%]+)%?'",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (firmLit.Success)
+        {
+            var lit = firmLit.Groups[1].Value.Trim();
+            if (lit.Length >= 3
+                && !lit.Equals("K.P. WOVEN PRIVATE LIMITED", StringComparison.OrdinalIgnoreCase))
+                return lit;
+            if (lit.Contains("WOVEN", StringComparison.OrdinalIgnoreCase))
+                return "K.P. Woven";
+        }
+
+        var named = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:vendor|supplier|firm\s*name)\s+([A-Za-z0-9 .,&\-()]+?)(?:\s+over|\s+above|\s+pending|\s+with|\s*$)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (named.Success)
+        {
+            var cand = named.Groups[1].Value.Trim().TrimEnd('.', ',', ';', '?', '!');
+            if (cand.Length >= 3) return cand;
+        }
+
+        return null;
+    }
+
+    private static bool LooksLikePendingPoQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (m.Contains("work order") || m.Contains("workorder")) return false;
+        if (m.Contains("reject")) return false;
+        if (m.Contains("compare") || m.Contains(" vs ") || m.Contains("versus")) return false;
+        if (m.Contains("high-value") || m.Contains("high value") || m.Contains("descending")) return false;
+        if (m.Contains("currency") || m.Contains("delivery date") || m.Contains("payment term")) return false;
+        if (!m.Contains("pending")) return false;
+        return m.Contains("purchase order")
+               || m.Contains("purchase orders")
+               || System.Text.RegularExpressions.Regex.IsMatch(m, @"\bpos?\b")
+               || m.Contains("po approval")
+               || (m.Contains("approval") && m.Contains("purchase"));
+    }
+
+    private static decimal? TryExtractAmountThreshold(string message)
+    {
+        var m = message.ToLowerInvariant();
+
+        var lakh = System.Text.RegularExpressions.Regex.Match(
+            m, @"(?:over|above|greater than|>\s*)\s*(?:rs\.?|₹|inr)?\s*([\d,.]+)\s*lakh");
+        if (lakh.Success
+            && decimal.TryParse(lakh.Groups[1].Value.Replace(",", ""),
+                System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var lakhAmt))
+            return lakhAmt * 100_000m;
+
+        if (m.Contains("lakh")
+            && (m.Contains("over") || m.Contains("above") || m.Contains("greater than") || m.Contains('>')))
+        {
+            var lakhAnywhere = System.Text.RegularExpressions.Regex.Match(m, @"([\d,.]+)\s*lakh");
+            if (lakhAnywhere.Success
+                && decimal.TryParse(lakhAnywhere.Groups[1].Value.Replace(",", ""),
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture, out var lakhAmt2))
+                return lakhAmt2 * 100_000m;
+        }
+
+        var plain = System.Text.RegularExpressions.Regex.Match(
+            m, @"(?:over|above|greater than|>\s*)\s*(?:rs\.?|₹)?\s*([\d,]+)");
+        if (plain.Success
+            && decimal.TryParse(plain.Groups[1].Value.Replace(",", ""),
+                System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var amt))
+            return amt;
+
+        return null;
     }
 
     private static bool TryRewriteEmptyCompanyFilterToParty(string sql, out string rewritten)
@@ -1574,6 +2526,14 @@ public class ChatOrchestratorService
         return m.Success ? m.Groups[1].Value.Trim() : null;
     }
 
+    private static bool LooksLikeSmallBagProductionQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        return m.Contains("small bag")
+               || m.Contains("smallbag")
+               || (m.Contains("cutting") && m.Contains("stitching"));
+    }
+
     private static string? CanonicalizeCompanyName(string raw)
     {
         var t = raw.Trim().TrimEnd('.', ',', ';', '?', '!');
@@ -1708,6 +2668,320 @@ public class ChatOrchestratorService
         return false;
     }
 
+    private static bool LooksLikeTopExportCustomersQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (!(m.Contains("export") && (m.Contains("customer") || m.Contains("buyer") || m.Contains("client"))))
+            return false;
+        // Ranking / list intent
+        return m.Contains("top")
+               || m.Contains("highest")
+               || m.Contains("largest")
+               || m.Contains("biggest")
+               || m.Contains("ranking")
+               || m.Contains("rank");
+    }
+
+    private static bool TryBuildTopExportCustomersSql(
+        string message,
+        out string sql,
+        out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeTopExportCustomersQuestion(message))
+            return false;
+
+        var topN = ParseTopN(message, defaultN: 5);
+        var (fyStart, fyEndExclusive, fyLabel) = ParseIndianFinancialYear(message);
+        var wantsGroup = message.Contains("group", StringComparison.OrdinalIgnoreCase);
+        var groupHint = ResolveFactoryGroupHint(message);
+        var companyExact = ResolveOutwardCompanyAlias(message)
+                           ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+
+        string companyFilter;
+        string companyNote;
+        if (wantsGroup && !string.IsNullOrWhiteSpace(groupHint))
+        {
+            var hint = EscapeSqlLiteral(groupHint);
+            companyFilter = $"""
+                CompanyName IN (
+                    SELECT Name FROM FactoryInfo
+                    WHERE GroupName LIKE '%{hint}%'
+                       OR Name LIKE '%{hint}%'
+                )
+                """;
+            companyNote = $"FactoryInfo group/name LIKE '%{groupHint}%'";
+        }
+        else if (!string.IsNullOrWhiteSpace(companyExact))
+        {
+            companyFilter = $"CompanyName = '{EscapeSqlLiteral(companyExact)}'";
+            companyNote = companyExact;
+        }
+        else if (!string.IsNullOrWhiteSpace(groupHint))
+        {
+            // Nickname without explicit "group" — still allow LIKE on company name
+            var hint = EscapeSqlLiteral(groupHint);
+            companyFilter = $"CompanyName LIKE '%{hint}%'";
+            companyNote = $"CompanyName LIKE '%{groupHint}%'";
+        }
+        else
+        {
+            return false;
+        }
+
+        var startLit = fyStart.ToString("yyyy-MM-dd");
+        var endLit = fyEndExclusive.ToString("yyyy-MM-dd");
+        var excludeInter = WantsExcludeInterCompany(message);
+        var interCompanyFilter = excludeInter
+            ? BuildExcludeInterCompanyBuyerFilter(groupHint, companyExact)
+            : "";
+        var interNote = excludeInter ? ", excluding inter-company buyers (InternalVendor + all FactoryInfo)" : "";
+
+        sql = $"""
+            SELECT TOP {topN}
+                BuyerName AS Customer,
+                SUM(ISNULL(BillAMount, 0)) AS TotalExportAmount,
+                COUNT(*) AS InvoiceCount
+            FROM vw_Salesvoucher
+            WHERE InvType LIKE '%Export%'
+              AND InvDate >= '{startLit}'
+              AND InvDate < '{endLit}'
+              AND BuyerName IS NOT NULL
+              AND LTRIM(RTRIM(BuyerName)) <> ''
+              AND {companyFilter}
+              {interCompanyFilter}
+            GROUP BY BuyerName
+            ORDER BY SUM(ISNULL(BillAMount, 0)) DESC
+            """;
+
+        warning =
+            $"Governed top-{topN} export customers on vw_Salesvoucher for FY {fyLabel} ({startLit} to <{endLit}), company={companyNote}, InvType LIKE '%Export%'{interNote}.";
+        return true;
+    }
+
+    /// <summary>
+    /// When FactoryInfo.GroupName filter returns no rows, filter vw_Salesvoucher.CompanyName LIKE hint instead.
+    /// </summary>
+    private static bool TryBuildTopExportCustomersFallbackSql(
+        string message,
+        out string sql,
+        out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeTopExportCustomersQuestion(message))
+            return false;
+
+        var groupHint = ResolveFactoryGroupHint(message);
+        var companyExact = ResolveOutwardCompanyAlias(message)
+                           ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var likeHint = groupHint
+                       ?? (companyExact is not null
+                           ? System.Text.RegularExpressions.Regex.Replace(
+                               companyExact,
+                               @"\s+(Limited|Ltd\.?|Pvt\.?|Private).*$",
+                               "",
+                               System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim()
+                           : null);
+        if (string.IsNullOrWhiteSpace(likeHint))
+            return false;
+
+        var topN = ParseTopN(message, defaultN: 5);
+        var (fyStart, fyEndExclusive, fyLabel) = ParseIndianFinancialYear(message);
+        var startLit = fyStart.ToString("yyyy-MM-dd");
+        var endLit = fyEndExclusive.ToString("yyyy-MM-dd");
+        var hint = EscapeSqlLiteral(likeHint);
+        var excludeInter = WantsExcludeInterCompany(message);
+        var interCompanyFilter = excludeInter
+            ? BuildExcludeInterCompanyBuyerFilter(groupHint, companyExact)
+            : "";
+        var interNote = excludeInter ? ", excluding inter-company buyers (InternalVendor + all FactoryInfo)" : "";
+
+        sql = $"""
+            SELECT TOP {topN}
+                BuyerName AS Customer,
+                SUM(ISNULL(BillAMount, 0)) AS TotalExportAmount,
+                COUNT(*) AS InvoiceCount
+            FROM vw_Salesvoucher
+            WHERE InvType LIKE '%Export%'
+              AND InvDate >= '{startLit}'
+              AND InvDate < '{endLit}'
+              AND BuyerName IS NOT NULL
+              AND LTRIM(RTRIM(BuyerName)) <> ''
+              AND CompanyName LIKE '%{hint}%'
+              {interCompanyFilter}
+            GROUP BY BuyerName
+            ORDER BY SUM(ISNULL(BillAMount, 0)) DESC
+            """;
+
+        warning =
+            $"Governed top-{topN} export customers fallback: CompanyName LIKE '%{likeHint}%' for FY {fyLabel} (FactoryInfo group returned no rows){interNote}.";
+        return true;
+    }
+
+    private static bool WantsExcludeInterCompany(string message)
+    {
+        var m = message.ToLowerInvariant();
+        return m.Contains("exclud")
+               && (m.Contains("inter company")
+                   || m.Contains("inter-company")
+                   || m.Contains("intercompany")
+                   || m.Contains("inter unit")
+                   || m.Contains("inter-unit")
+                   || m.Contains("interunit")
+                   || m.Contains("group compan")
+                   || m.Contains("sister compan")
+                   || m.Contains("related compan"));
+    }
+
+    /// <summary>
+    /// Drop buyers that are our sister/group companies.
+    /// Uses InternalVendor (ERP inter-company list) + FactoryInfo rows with a real GroupName —
+    /// not only the same GroupName (KP Woven is its own group but still internal).
+    /// </summary>
+    private static string BuildExcludeInterCompanyBuyerFilter(string? groupHint, string? companyExact)
+    {
+        _ = groupHint;
+        _ = companyExact;
+
+        return """
+            AND NOT EXISTS (
+                SELECT 1
+                FROM FactoryInfo f
+                WHERE ISNULL(f.Name, '') <> ''
+                  AND ISNULL(f.GroupName, '') <> ''
+                  AND (
+                      LTRIM(RTRIM(BuyerName)) = LTRIM(RTRIM(f.Name))
+                      OR BuyerName LIKE '%' + LTRIM(RTRIM(f.Name)) + '%'
+                      OR LTRIM(RTRIM(f.Name)) LIKE '%' + LTRIM(RTRIM(BuyerName)) + '%'
+                      OR (
+                          LEN(REPLACE(REPLACE(REPLACE(REPLACE(f.Name, ' PRIVATE LIMITED', ''), ' Limited', ''), ' Ltd', ''), ' Pvt', '')) >= 6
+                          AND (
+                              BuyerName LIKE '%'
+                                  + LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(REPLACE(f.Name, ' PRIVATE LIMITED', ''), ' Limited', ''), ' Ltd', ''), ' Pvt', '')))
+                                  + '%'
+                              OR REPLACE(REPLACE(REPLACE(BuyerName, '.', ''), ' ', ''), '-', '')
+                                 LIKE '%'
+                                  + REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(f.Name, ' PRIVATE LIMITED', ''), ' Limited', ''), ' Ltd', ''), ' Pvt', ''), '.', ''), ' ', '')
+                                  + '%'
+                          )
+                      )
+                  )
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM InternalVendor iv
+                WHERE ISNULL(iv.FirmName, '') <> ''
+                  AND (
+                      LTRIM(RTRIM(BuyerName)) = LTRIM(RTRIM(iv.FirmName))
+                      OR BuyerName LIKE '%' + LTRIM(RTRIM(iv.FirmName)) + '%'
+                      OR LTRIM(RTRIM(iv.FirmName)) LIKE '%' + LTRIM(RTRIM(BuyerName)) + '%'
+                      OR (
+                          LEN(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(iv.FirmName, ' -Sales', ''), ' -Purchase', ''), '-Sales', ''), '-Purchase', ''), ' - Sales', ''), ' - Purchase', '')) >= 8
+                          AND (
+                              BuyerName LIKE '%'
+                                  + LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(iv.FirmName, ' -Sales', ''), ' -Purchase', ''), '-Sales', ''), '-Purchase', ''), ' - Sales', ''), ' - Purchase', '')))
+                                  + '%'
+                              OR LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(iv.FirmName, ' -Sales', ''), ' -Purchase', ''), '-Sales', ''), '-Purchase', ''), ' - Sales', ''), ' - Purchase', '')))
+                                 LIKE '%' + LTRIM(RTRIM(BuyerName)) + '%'
+                          )
+                      )
+                  )
+            )
+            """;
+    }
+
+    private static int ParseTopN(string message, int defaultN)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\btop\s+(\d{1,2})\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success && int.TryParse(m.Groups[1].Value, out var n))
+            return Math.Clamp(n, 1, 50);
+        return Math.Clamp(defaultN, 1, 50);
+    }
+
+    /// <summary>
+    /// Indian FY: Apr 1 of start year → Apr 1 of next year (exclusive end).
+    /// Parses "2024-25", "2024-2025", "FY 24-25", "financial year 2024-25".
+    /// </summary>
+    private static (DateTime Start, DateTime EndExclusive, string Label) ParseIndianFinancialYear(string message)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:fy|f\.y\.|financial\s+year)?\s*(20\d{2})\s*[-–/]\s*(\d{2}|\d{4})\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success
+            && int.TryParse(m.Groups[1].Value, out var startYear))
+        {
+            var endRaw = m.Groups[2].Value;
+            int endYear;
+            if (endRaw.Length == 4 && int.TryParse(endRaw, out var ey4))
+                endYear = ey4;
+            else if (endRaw.Length == 2 && int.TryParse(endRaw, out var ey2))
+                endYear = (startYear / 100) * 100 + ey2;
+            else
+                endYear = startYear + 1;
+
+            if (endYear <= startYear)
+                endYear = startYear + 1;
+
+            var start = new DateTime(startYear, 4, 1);
+            var endEx = new DateTime(endYear, 4, 1);
+            var label = $"{startYear}-{(endYear % 100):D2}";
+            return (start, endEx, label);
+        }
+
+        // Default: current Indian FY from local date
+        var today = DateTime.Today;
+        var fyStartYear = today.Month >= 4 ? today.Year : today.Year - 1;
+        var defStart = new DateTime(fyStartYear, 4, 1);
+        var defEnd = new DateTime(fyStartYear + 1, 4, 1);
+        return (defStart, defEnd, $"{fyStartYear}-{(fyStartYear + 1) % 100:D2}");
+    }
+
+    /// <summary>
+    /// Hint for FactoryInfo.GroupName / Name LIKE when user says a company or group.
+    /// </summary>
+    private static string? ResolveFactoryGroupHint(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (m.Contains("plastene india") || (m.Contains("plastene") && m.Contains("india")))
+            return "Plastene India";
+        if (m.Contains("polyfilms") || m.Contains("ppl"))
+            return "Plastene Polyfilms";
+        if (m.Contains("bulkpack") || m.Contains("hcp"))
+            return "HCP Plastene";
+        if (m.Contains("oswal"))
+            return "Oswal";
+        if ((m.Contains("k.p") || m.Contains("kp ")) && m.Contains("woven"))
+            return "K.P. WOVEN";
+        if (System.Text.RegularExpressions.Regex.IsMatch(m, @"\bkp\b") && m.Contains("woven"))
+            return "K.P. WOVEN";
+
+        // "in <name> group" / "for <name> group"
+        var g = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:in|for|at|of)\s+([A-Za-z0-9 .&'-]{3,60}?)\s+group\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (g.Success)
+        {
+            var name = g.Groups[1].Value.Trim();
+            // strip trailing "limited" noise for broader LIKE
+            name = System.Text.RegularExpressions.Regex.Replace(
+                name,
+                @"\s+(limited|ltd\.?|pvt\.?|private)?\s*$",
+                "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+            if (name.Length >= 3)
+                return name;
+        }
+
+        return null;
+    }
+
     private static bool TryBuildCreditNoteCompanyPartySql(string message, out string sql)
     {
         sql = "";
@@ -1800,6 +3074,50 @@ public class ChatOrchestratorService
 
     private static string EscapeSqlLiteral(string value) => value.Replace("'", "''");
 
+    private static List<RetrievedTableDto> BuildTablesUsed(
+        IReadOnlyList<RetrievedSchemaChunk> chunks,
+        string sql,
+        string? warning)
+    {
+        var list = chunks.Select(c => new RetrievedTableDto
+        {
+            ObjectName = c.ObjectName,
+            Domain = c.Domain ?? "",
+            Score = Math.Round(c.Score, 4)
+        }).ToList();
+
+        if (warning != null
+            && warning.Contains("export customers", StringComparison.OrdinalIgnoreCase))
+        {
+            void Ensure(string name, string domain)
+            {
+                if (list.Any(t => t.ObjectName.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                    return;
+                list.Insert(0, new RetrievedTableDto { ObjectName = name, Domain = domain, Score = 1 });
+            }
+
+            Ensure("vw_Salesvoucher", "Sales");
+            if (sql.Contains("FactoryInfo", StringComparison.OrdinalIgnoreCase))
+                Ensure("FactoryInfo", "Ledger / company master");
+        }
+
+        if (warning != null
+            && warning.Contains("ledger outstanding", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!list.Any(t => t.ObjectName.Equals("LedgerMaster", StringComparison.OrdinalIgnoreCase)))
+            {
+                list.Insert(0, new RetrievedTableDto
+                {
+                    ObjectName = "LedgerMaster",
+                    Domain = "Ledger",
+                    Score = 1
+                });
+            }
+        }
+
+        return list;
+    }
+
     private static string BuildSchemaBlock(IReadOnlyList<RetrievedSchemaChunk> chunks)
     {
         var sb = new StringBuilder();
@@ -1812,10 +3130,126 @@ public class ChatOrchestratorService
         return sb.ToString();
     }
 
-    private async Task<List<Dictionary<string, object?>>> ExecuteReadOnlyAsync(
+    private async Task<(int? TotalCount, bool Truncated)> ResolveListCardinalityAsync(
         string sql,
+        List<Dictionary<string, object?>> rows,
+        bool hitCap,
         CancellationToken ct)
     {
+        if (LooksLikeCountOnlyQuery(sql))
+        {
+            var n = TryReadFirstInt(rows);
+            return (n ?? rows.Count, false);
+        }
+
+        if (!TryBuildCountWrapperSql(sql, out var countSql))
+            return (null, hitCap);
+
+        try
+        {
+            var countRows = await ExecuteReadOnlyAsync(countSql, ct, maxRows: 1);
+            var total = TryReadFirstInt(countRows);
+            if (!total.HasValue)
+                return (null, hitCap);
+            return (total, total.Value > rows.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Companion COUNT query failed");
+            return (null, hitCap);
+        }
+    }
+
+    private static bool LooksLikeCountOnlyQuery(string sql)
+    {
+        var trimmed = sql.TrimStart();
+        // SELECT [TOP n] COUNT(...) ... without other projected detail columns is a count answer
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            trimmed,
+            @"^(WITH\b[\s\S]+?\bSELECT|SELECT)\s+(?:TOP\s+\d+\s+)?COUNT\s*\(",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
+
+    private static bool TryBuildCountWrapperSql(string sql, out string countSql)
+    {
+        countSql = "";
+        if (string.IsNullOrWhiteSpace(sql) || LooksLikeCountOnlyQuery(sql))
+            return false;
+
+        var cleaned = StripLeadingTop(sql);
+        cleaned = System.Text.RegularExpressions.Regex.Replace(
+            cleaned,
+            @"\s+ORDER\s+BY\s+[\s\S]+$",
+            "",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim().TrimEnd(';');
+
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return false;
+
+        countSql = $"SELECT COUNT(*) AS TotalCount FROM (\n{cleaned}\n) AS _cap_count";
+        return true;
+    }
+
+    private static string StripLeadingTop(string sql)
+    {
+        var trimmed = sql.Trim();
+        var m = System.Text.RegularExpressions.Regex.Match(
+            trimmed,
+            @"\bSELECT\s+TOP\s+\d+\s+",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success)
+            return trimmed;
+        return string.Concat(trimmed.AsSpan(0, m.Index), "SELECT ", trimmed.AsSpan(m.Index + m.Length));
+    }
+
+    private static int? TryReadFirstInt(List<Dictionary<string, object?>> rows)
+    {
+        if (rows.Count == 0)
+            return null;
+        var first = rows[0].Values.FirstOrDefault();
+        if (first == null)
+            return null;
+        try
+        {
+            return Convert.ToInt32(first);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static byte[] BuildCsvBytes(List<Dictionary<string, object?>> rows)
+    {
+        var sb = new StringBuilder();
+        sb.Append('\uFEFF'); // Excel-friendly UTF-8 BOM
+        if (rows.Count == 0)
+            return Encoding.UTF8.GetBytes(sb.ToString());
+
+        var columns = rows[0].Keys.ToList();
+        static string Esc(object? v)
+        {
+            var s = v == null
+                ? ""
+                : Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture) ?? "";
+            if (s.IndexOfAny(new[] { '"', ',', '\n', '\r' }) >= 0)
+                return "\"" + s.Replace("\"", "\"\"") + "\"";
+            return s;
+        }
+
+        sb.AppendLine(string.Join(",", columns.Select(c => Esc(c))));
+        foreach (var row in rows)
+            sb.AppendLine(string.Join(",", columns.Select(c => Esc(row.TryGetValue(c, out var val) ? val : null))));
+
+        return Encoding.UTF8.GetBytes(sb.ToString());
+    }
+
+    private async Task<List<Dictionary<string, object?>>> ExecuteReadOnlyAsync(
+        string sql,
+        CancellationToken ct,
+        int? maxRows = null)
+    {
+        var stopAfter = (maxRows ?? MaxReturnRows) + 1;
         await using var connection = _database.CreateConnection();
         using var cmd = connection.CreateCommand();
         cmd.CommandText = sql;
@@ -1838,7 +3272,7 @@ public class ChatOrchestratorService
                 row[name] = value;
             }
             list.Add(row);
-            if (list.Count >= MaxReturnRows + 1)
+            if (list.Count >= stopAfter)
                 break;
         }
 

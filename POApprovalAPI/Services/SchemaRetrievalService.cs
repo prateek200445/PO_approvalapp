@@ -37,8 +37,11 @@ public class SchemaRetrievalService
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            CreateNoWindow = true
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
         };
+        psi.Environment["PYTHONIOENCODING"] = "utf-8";
         psi.ArgumentList.Add(script);
         psi.ArgumentList.Add(question);
         psi.ArgumentList.Add("--k");

@@ -68,7 +68,8 @@ def main() -> int:
             }
         )
 
-    print(json.dumps({"query": args.query, "k": k, "results": results}, ensure_ascii=False))
+    # ensure_ascii=True: escape ₹ etc. so Windows cp1252 stdout pipes never crash
+    print(json.dumps({"query": args.query, "k": k, "results": results}, ensure_ascii=True))
     return 0
 
 

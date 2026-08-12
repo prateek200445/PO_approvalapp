@@ -42,4 +42,35 @@ public class ChatController : ControllerBase
             return StatusCode(500, new { message = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Re-run the chat SQL without TOP (up to export cap) and return CSV.
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody] ChatExportRequest request, CancellationToken ct)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.Sql))
+            return BadRequest(new { message = "Sql is required." });
+
+        try
+        {
+            var result = await _chat.ExportCsvAsync(request.Sql, ct);
+            Response.Headers["X-Row-Count"] = result.RowCount.ToString();
+            Response.Headers["X-Truncated"] = result.Truncated ? "true" : "false";
+            Response.Headers["X-Total-Count"] = result.TotalCount?.ToString() ?? "";
+            return File(result.CsvBytes, "text/csv; charset=utf-8", result.FileName);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
 }

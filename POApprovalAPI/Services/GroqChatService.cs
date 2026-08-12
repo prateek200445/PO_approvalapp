@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace POApprovalAPI.Services;
 
-public class GroqChatService
+public class GroqChatService : IChatCompletionService
 {
     private readonly HttpClient _http;
     private readonly ILogger<GroqChatService> _logger;
@@ -31,12 +31,12 @@ public class GroqChatService
             ?? "https://api.groq.com/openai/v1").TrimEnd('/');
         _model = Environment.GetEnvironmentVariable("GROQ_MODEL")
             ?? config["Groq:Model"]
-            ?? "openai/gpt-oss-120b";
+            ?? "llama-3.3-70b-versatile";
         _maxTokens = int.TryParse(
             Environment.GetEnvironmentVariable("GROQ_MAX_TOKENS") ?? config["Groq:MaxTokens"],
             out var mt)
             ? mt
-            : 1024;
+            : 4096;
 
         if (string.IsNullOrWhiteSpace(apiKey))
             throw new InvalidOperationException("GROQ_API_KEY is not configured.");
@@ -76,11 +76,27 @@ public class GroqChatService
             if (response.IsSuccessStatusCode)
             {
                 using var doc = JsonDocument.Parse(raw);
-                var text = doc.RootElement
-                    .GetProperty("choices")[0]
-                    .GetProperty("message")
-                    .GetProperty("content")
-                    .GetString();
+                var choice = doc.RootElement.GetProperty("choices")[0];
+                var message = choice.GetProperty("message");
+                var text = message.TryGetProperty("content", out var contentEl)
+                    ? contentEl.GetString()
+                    : null;
+
+                // Reasoning models (e.g. openai/gpt-oss-*) may burn max_tokens on
+                // "reasoning" and leave content empty when finish_reason is "length".
+                if (string.IsNullOrWhiteSpace(text)
+                    && message.TryGetProperty("reasoning", out var reasoningEl))
+                {
+                    var reasoning = reasoningEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(reasoning))
+                    {
+                        _logger.LogWarning(
+                            "Groq content empty (finish={Finish}); falling back to reasoning text",
+                            choice.TryGetProperty("finish_reason", out var fr) ? fr.GetString() : "?");
+                        text = reasoning;
+                    }
+                }
+
                 return text?.Trim() ?? "";
             }
 

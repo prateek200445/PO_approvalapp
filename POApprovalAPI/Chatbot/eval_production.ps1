@@ -35,8 +35,8 @@ $cases = @(
   },
   @{
     id = "smallbag"
-    message = "Small bag cutting and stitching production for Oswal Extrusion Limited"
-    checks = @("sql_has:SmallBagProductionEntry", "sql_has:Oswal", "rows_gt:0")
+    message = "Small bag cutting and stitching production for Plastene India Limited (Unit -II)"
+    checks = @("sql_has:SmallBagProductionEntry", "sql_has:Plastene", "rows_gt:0")
   }
 )
 
