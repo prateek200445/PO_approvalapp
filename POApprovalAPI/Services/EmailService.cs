@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Mail;
+using POApprovalAPI.Models;
 
 namespace POApprovalAPI.Services;
 
@@ -15,13 +16,25 @@ public class EmailService
     /// <summary>
     /// Queues email in the background so approve/reject is not blocked by SMTP.
     /// </summary>
-    public Task SendMail(string to, string subject, string body)
+    public Task SendMail(
+        string to,
+        string subject,
+        string body,
+        IReadOnlyList<EmailAttachmentData>? attachments = null)
     {
-        _ = SendMailCoreAsync(to, subject, body);
+        var clonedAttachments = attachments?
+            .Select(a => new EmailAttachmentData(a.FileName, a.ContentType, a.Bytes.ToArray()))
+            .ToList();
+
+        _ = SendMailCoreAsync(to, subject, body, clonedAttachments);
         return Task.CompletedTask;
     }
 
-    private async Task SendMailCoreAsync(string to, string subject, string body)
+    private async Task SendMailCoreAsync(
+        string to,
+        string subject,
+        string body,
+        IReadOnlyList<EmailAttachmentData>? attachments)
     {
         try
         {
@@ -53,6 +66,7 @@ public class EmailService
             Console.WriteLine($"From      : {username}");
             Console.WriteLine($"To        : {to}");
             Console.WriteLine($"Subject   : {subject}");
+            Console.WriteLine($"Attach    : {attachments?.Count ?? 0}");
             Console.WriteLine("=================================");
 
             using var client = new SmtpClient(host)
@@ -60,10 +74,22 @@ public class EmailService
                 Port = port,
                 EnableSsl = true,
                 Timeout = 8000,
-                Credentials = new NetworkCredential(username, password)
+                Credentials = new NetworkCredential(username, password),
             };
 
             using var message = new MailMessage(username, to, subject, body);
+
+            if (attachments != null)
+            {
+                foreach (var file in attachments)
+                {
+                    var stream = new MemoryStream(file.Bytes);
+                    var attachment = new Attachment(stream, file.FileName);
+                    if (!string.IsNullOrWhiteSpace(file.ContentType))
+                        attachment.ContentType = new System.Net.Mime.ContentType(file.ContentType);
+                    message.Attachments.Add(attachment);
+                }
+            }
 
             Console.WriteLine("STARTING EMAIL SEND...");
             await client.SendMailAsync(message);

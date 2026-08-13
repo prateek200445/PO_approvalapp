@@ -231,19 +231,17 @@ public async Task<IActionResult> ApproveBulk([FromBody] PoBulkApproveRequest req
 
 
 [HttpPost("reject/{transId}")]
-public async Task<IActionResult> Reject(
-    int transId,
-    [FromBody] dynamic data)
+[Consumes("application/json", "multipart/form-data")]
+public async Task<IActionResult> Reject(int transId)
 {
+    var remarks = await RejectRequestHelper.ReadRemarksAsync(Request);
+    var attachmentFile = RejectRequestHelper.GetOptionalAttachment(Request);
+    var (attachment, attachError) = await RejectRequestHelper.ReadOptionalAttachmentAsync(attachmentFile);
+    if (attachError != null)
+        return BadRequest(new { error = attachError });
+
     using var connection = _database.CreateConnection();
 
-    string remarks = "";
-
-if (data is JsonElement json &&
-    json.TryGetProperty("remarks", out JsonElement remarksElement))
-{
-    remarks = remarksElement.GetString() ?? "";
-}
     string table = "ApprovePO";
 
 var po = await connection.QueryFirstOrDefaultAsync(
@@ -292,7 +290,8 @@ if (po == null)
         $"Rejected By: {po.ApprovalName}\n" +
         $"Remarks: {remarks}\n\n" +
         $"Regards,\n" +
-        $"{po.ApprovalName}"
+        $"{po.ApprovalName}",
+        attachment != null ? [attachment] : null
     );
 }
 

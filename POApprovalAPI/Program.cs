@@ -19,6 +19,9 @@ if (!string.IsNullOrEmpty(dbPassword))
     loginConnection = $"{loginConnection}Password={dbPassword};";
 }
 
+if (!string.IsNullOrEmpty(emailPassword))
+    builder.Configuration["EmailSettings:Password"] = emailPassword;
+
 // Override connection strings in configuration
 builder.Configuration["ConnectionStrings:DefaultConnection"] = defaultConnection;
 builder.Configuration["ConnectionStrings:LoginEntryConnection"] = loginConnection;

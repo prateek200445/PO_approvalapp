@@ -28,6 +28,7 @@ function WorkOrderDetails() {
   const queryClient = useQueryClient();
 
   const [remarks, setRemarks] = useState("");
+  const [rejectAttachment, setRejectAttachment] = useState<File | null>(null);
   const [confirm, setConfirm] = useState<null | "approve" | "reject">(null);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
@@ -43,6 +44,7 @@ function WorkOrderDetails() {
 
   useEffect(() => {
     setRemarks("");
+    setRejectAttachment(null);
     setConfirm(null);
   }, [poNo]);
 
@@ -323,26 +325,27 @@ if (!po || po.length === 0) {
         return;
       }
       
+      const form = new FormData();
+      form.append("remarks", remarks.trim());
+      if (rejectAttachment) form.append("attachment", rejectAttachment);
+
       const response = await fetch(
         getApiUrl(`/api/WorkOrder/reject/${transId}`),
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            remarks: remarks,
-          }),
+          body: form,
         }
       );
       
       if (!response.ok) {
-        throw new Error("Failed to reject work order");
+        const err = await response.json().catch(() => null);
+        throw new Error((err as { error?: string } | null)?.error ?? "Failed to reject work order");
       }
 
       toast.success("Work Order rejected successfully");
       
       setConfirm(null);
+      setRejectAttachment(null);
 
       const nextWoNo = resolveNextAfterApproval(poNo, queryClient, {
         kind: "workorder",
@@ -682,6 +685,16 @@ if (!po || po.length === 0) {
             </p>
             {!remarks.trim() && (
               <p className="mt-2 text-xs font-medium text-destructive">Remarks are required to reject.</p>
+            )}
+            <label className="mt-4 block text-sm font-medium">Attachment (optional)</label>
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+              className="mt-1 w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium"
+              onChange={(e) => setRejectAttachment(e.target.files?.[0] ?? null)}
+            />
+            {rejectAttachment && (
+              <p className="mt-1 text-xs text-muted-foreground truncate">{rejectAttachment.name}</p>
             )}
             <div className="mt-5 flex gap-2">
               <button onClick={() => setConfirm(null)} className="h-10 flex-1 rounded-md border border-input bg-surface text-sm font-medium hover:bg-secondary">Cancel</button>
