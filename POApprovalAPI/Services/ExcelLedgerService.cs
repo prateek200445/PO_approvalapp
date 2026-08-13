@@ -82,6 +82,65 @@ public class ExcelLedgerService
         return result;
     }
 
+    /// <summary>
+    /// Reconcile two already-parsed entry lists (e.g. bill-wise rows from SQL).
+    /// </summary>
+    public ComparisonResultDto CompareEntries(
+        List<LedgerEntryDto> entriesA,
+        List<LedgerEntryDto> entriesB,
+        string companyNameA,
+        string companyNameB,
+        LedgerMatchOptions? options = null)
+    {
+        options ??= new LedgerMatchOptions();
+        var result = Reconcile(entriesA, entriesB, options);
+        result.CompanyNameA = string.IsNullOrWhiteSpace(companyNameA) ? "Company A" : companyNameA.Trim();
+        result.CompanyNameB = string.IsNullOrWhiteSpace(companyNameB) ? "Company B" : companyNameB.Trim();
+        return result;
+    }
+
+    /// <summary>
+    /// Reads the dominant company name from a type-1 ledger Excel (Company column).
+    /// </summary>
+    public string ExtractCompanyName(Stream stream, LedgerColumnMapping mapping)
+    {
+        using var workbook = new XLWorkbook(stream);
+        var sheet = ResolveSheet(workbook, mapping.SheetName, workbook.Worksheets.Select(w => w.Name).ToList());
+        var headerRow = mapping.HeaderRow <= 0 ? DetectHeaderRow(sheet) : mapping.HeaderRow;
+        var headers = ReadHeaders(sheet, headerRow);
+        var colIndex = BuildColumnIndex(headers);
+
+        var companyHeader = mapping.Company;
+        if (string.IsNullOrWhiteSpace(companyHeader))
+            companyHeader = SuggestMapping(headers).Company;
+        if (string.IsNullOrWhiteSpace(companyHeader))
+            throw new InvalidOperationException(
+                "Company column was not found. Map the Company column on the uploaded ledger.");
+
+        var companyCol = ResolveColumn(colIndex, companyHeader);
+        var lastRow = sheet.LastRowUsed()?.RowNumber() ?? headerRow;
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        for (var r = headerRow + 1; r <= lastRow; r++)
+        {
+            var row = sheet.Row(r);
+            if (IsEmptyRow(row, headers.Count)) continue;
+            var name = NormalizeText(row.Cell(companyCol).GetFormattedString());
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            counts[name] = counts.TryGetValue(name, out var n) ? n + 1 : 1;
+        }
+
+        var best = counts
+            .OrderByDescending(kv => kv.Value)
+            .Select(kv => kv.Key)
+            .FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(best))
+            throw new InvalidOperationException("No company name values found in the Company column.");
+
+        return best;
+    }
+
     public byte[] BuildExport(ComparisonResultDto result)
     {
         var nameA = string.IsNullOrWhiteSpace(result.CompanyNameA) ? "Company A" : result.CompanyNameA.Trim();
@@ -353,8 +412,9 @@ public class ExcelLedgerService
         var groupsA = BuildBillGroups(entriesA);
         var groupsB = BuildBillGroups(entriesB);
         var usedBillKeysB = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var deferredGroupsA = new List<BillGroup>();
 
-        // Bill groups: many↔many / many↔one by exact BillNo + BillDate, compare summed amounts
+        // Pass 1: Bill groups by exact BillNo+BillDate, then related BillNo
         foreach (var ga in groupsA.Values)
         {
             if (groupsB.TryGetValue(ga.Key, out var gb))
@@ -376,17 +436,35 @@ public class ExcelLedgerService
                 continue;
             }
 
-            MarkUsed(usedA, ga.Entries);
-            // One-sided bill that nets to ~0 is settled internally — omit from results
             if (IsZeroNetBill(ga, options))
+            {
+                MarkUsed(usedA, ga.Entries);
                 continue;
+            }
 
+            deferredGroupsA.Add(ga);
+        }
+
+        // Pass 2: Same Bill Date + amount for groups that did not match on Bill No
+        foreach (var ga in deferredGroupsA)
+        {
+            var byDate = FindBestBillDateGroupCandidate(ga, groupsB, usedBillKeysB, options);
+            if (byDate != null)
+            {
+                usedBillKeysB.Add(byDate.Key);
+                MarkUsed(usedA, ga.Entries);
+                MarkUsed(usedB, byDate.Entries);
+                results.Add(BuildBillGroupPair(ga, byDate, options, BillGroupMatchLabel(ga, byDate)));
+                continue;
+            }
+
+            MarkUsed(usedA, ga.Entries);
             results.Add(new ComparisonPairDto
             {
                 Id = Guid.NewGuid().ToString("N"),
                 Status = "MissingInB",
                 MatchKind = "bill-group",
-                Message = "No bill group with a matching Bill No found in File B",
+                Message = "No matching Bill No or Bill Date found in File B",
                 EntryA = ga.ToSummary(),
                 EntriesA = ga.Entries.ToList(),
             });
@@ -403,18 +481,46 @@ public class ExcelLedgerService
                 Id = Guid.NewGuid().ToString("N"),
                 Status = "MissingInA",
                 MatchKind = "bill-group",
-                Message = "No bill group with a matching Bill No found in File A",
+                Message = "No matching Bill No or Bill Date found in File A",
                 EntryB = gb.Value.ToSummary(),
                 EntriesB = gb.Value.Entries.ToList(),
             });
         }
 
-        // Row-level voucher-date fallback for rows without Bill No
+        // Pass 3: Row-level Bill Date, then Voucher Date for leftovers
         var remainingA = entriesA.Where(e => !usedA.Contains(e.RowIndex)).ToList();
         var remainingB = entriesB.Where(e => !usedB.Contains(e.RowIndex)).ToList();
 
         foreach (var a in remainingA)
         {
+            var billDateOpposite = remainingB
+                .Where(b => !usedB.Contains(b.RowIndex))
+                .Where(b => BillDatesMatch(a, b, options))
+                .Where(b => OppositeSignedAmounts(a, b, options.AmountTolerance))
+                .ToList();
+
+            if (billDateOpposite.Count > 0)
+            {
+                var best = RankByOppositeAmount(a, billDateOpposite).First();
+                usedB.Add(best.RowIndex);
+                results.Add(BuildRowPairByBillDate(a, best, options, matched: true));
+                continue;
+            }
+
+            var billDateSame = remainingB
+                .Where(b => !usedB.Contains(b.RowIndex))
+                .Where(b => BillDatesMatch(a, b, options))
+                .ToList();
+
+            if (billDateSame.Count > 0)
+            {
+                var best = RankByOppositeAmount(a, billDateSame).First();
+                usedB.Add(best.RowIndex);
+                var matched = OppositeSignedAmounts(a, best, options.AmountTolerance);
+                results.Add(BuildRowPairByBillDate(a, best, options, matched));
+                continue;
+            }
+
             var voucherMatches = remainingB
                 .Where(b => !usedB.Contains(b.RowIndex))
                 .Where(b => CanUseVoucherDateFallback(a, b))
@@ -528,7 +634,9 @@ public class ExcelLedgerService
 
             var candidate = missA
                 .Where(b => b.EntryB != null && !consumedB.Contains(b.Id))
-                .Where(b => BillNumbersLookRelated(a.EntryA!.BillNo, b.EntryB!.BillNo))
+                .Where(b =>
+                    BillNumbersLookRelated(a.EntryA!.BillNo, b.EntryB!.BillNo) ||
+                    BillDatesMatch(a.EntryA!, b.EntryB!, options))
                 .OrderBy(b => AmountGap(a.EntryA!, b.EntryB!))
                 .ThenBy(b => DateDiff(a.EntryA!.BillDate ?? a.EntryA.Date, b.EntryB!.BillDate ?? b.EntryB.Date))
                 .FirstOrDefault();
@@ -543,7 +651,9 @@ public class ExcelLedgerService
             var entryB = candidate.EntryB!;
             var gap = AmountGap(entryA, entryB);
             var matched = OppositeSignedAmounts(entryA, entryB, tolerance);
-            var billLabel = BillMatchLabel(entryA.BillNo, entryB.BillNo);
+            var billLabel = BillNumbersLookRelated(entryA.BillNo, entryB.BillNo)
+                ? BillMatchLabel(entryA.BillNo, entryB.BillNo)
+                : RowBillDateMatchLabel(entryA, entryB);
 
             extra.Add(new ComparisonPairDto
             {
@@ -614,14 +724,36 @@ public class ExcelLedgerService
             .FirstOrDefault();
     }
 
-    private static ComparisonPairDto BuildBillGroupPair(BillGroup a, BillGroup b, LedgerMatchOptions options)
+    private static BillGroup? FindBestBillDateGroupCandidate(
+        BillGroup ga,
+        Dictionary<string, BillGroup> groupsB,
+        HashSet<string> usedBillKeysB,
+        LedgerMatchOptions options)
+    {
+        if (!ga.BillDate.HasValue)
+            return null;
+
+        var tolerance = BillAmountTolerance(options);
+        var summaryA = ga.ToSummary();
+
+        return groupsB
+            .Where(kv => !usedBillKeysB.Contains(kv.Key))
+            .Where(kv => kv.Value.BillDate.HasValue)
+            .Where(kv => DatesMatch(ga.BillDate, kv.Value.BillDate, options.DateToleranceDays))
+            .Select(kv => kv.Value)
+            .OrderByDescending(g => OppositeSignedAmounts(summaryA, g.ToSummary(), tolerance))
+            .ThenBy(g => Math.Abs(Math.Abs(ga.SignedTotal) - Math.Abs(g.SignedTotal)))
+            .FirstOrDefault();
+    }
+
+    private static ComparisonPairDto BuildBillGroupPair(BillGroup a, BillGroup b, LedgerMatchOptions options, string? matchLabel = null)
     {
         var tolerance = BillAmountTolerance(options);
         var summaryA = a.ToSummary();
         var summaryB = b.ToSummary();
         var gap = Math.Abs(Math.Abs(a.SignedTotal) - Math.Abs(b.SignedTotal));
         var lines = $"{a.Entries.Count} ↔ {b.Entries.Count} lines";
-        var billLabel = BillMatchLabel(a.BillNo, b.BillNo);
+        var billLabel = matchLabel ?? BillMatchLabel(a.BillNo, b.BillNo);
 
         // Both sides net to ~0 under the same Bill No → matched (settled bills)
         if (IsZeroNetBill(a, options) && IsZeroNetBill(b, options))
@@ -684,6 +816,45 @@ public class ExcelLedgerService
 
     private static bool IsZeroNetBill(BillGroup group, LedgerMatchOptions options) =>
         Math.Abs(group.SignedTotal) <= BillAmountTolerance(options);
+
+    private static ComparisonPairDto BuildRowPairByBillDate(
+        LedgerEntryDto a,
+        LedgerEntryDto b,
+        LedgerMatchOptions options,
+        bool matched)
+    {
+        var label = RowBillDateMatchLabel(a, b);
+        if (matched && OppositeSignedAmounts(a, b, options.AmountTolerance))
+        {
+            return new ComparisonPairDto
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Status = "Matched",
+                MatchKind = "row",
+                Message = $"{label}: {a.Side} {a.Amount:N2} reconciles with {b.Side} {b.Amount:N2}",
+                EntryA = a,
+                EntryB = b,
+                EntriesA = [a],
+                EntriesB = [b],
+            };
+        }
+
+        var reason = SameSign(a, b)
+            ? "same Bill Date but amounts are not opposite signs"
+            : $"same Bill Date but amounts differ by {AmountGap(a, b):N2}";
+        return new ComparisonPairDto
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Status = "PotentialMatch",
+            MatchKind = "row",
+            Message = $"Potential mismatch: {label} — {reason}",
+            Difference = AmountGap(a, b),
+            EntryA = a,
+            EntryB = b,
+            EntriesA = [a],
+            EntriesB = [b],
+        };
+    }
 
     private static ComparisonPairDto BuildRowPair(LedgerEntryDto a, LedgerEntryDto b, LedgerMatchOptions options, bool matched)
     {
@@ -850,6 +1021,30 @@ public class ExcelLedgerService
     /// </summary>
     private static bool CanUseVoucherDateFallback(LedgerEntryDto a, LedgerEntryDto b) =>
         !HasBillNo(a) || !HasBillNo(b);
+
+    private static bool BillDatesMatch(LedgerEntryDto a, LedgerEntryDto b, LedgerMatchOptions options)
+    {
+        var dateA = a.BillDate ?? a.Date;
+        var dateB = b.BillDate ?? b.Date;
+        return DatesMatch(dateA, dateB, options.DateToleranceDays);
+    }
+
+    private static string BillGroupMatchLabel(BillGroup a, BillGroup b)
+    {
+        if (BillNumbersLookRelated(a.BillNo, b.BillNo))
+            return BillMatchLabel(a.BillNo, b.BillNo);
+        return RowBillDateMatchLabel(a.ToSummary(), b.ToSummary());
+    }
+
+    private static string RowBillDateMatchLabel(LedgerEntryDto a, LedgerEntryDto b)
+    {
+        var dateStr = FormatDate(a.BillDate ?? a.Date);
+        var billA = string.IsNullOrWhiteSpace(a.BillNo) ? "—" : a.BillNo.Trim();
+        var billB = string.IsNullOrWhiteSpace(b.BillNo) ? "—" : b.BillNo.Trim();
+        if (string.Equals(NormalizeKey(billA), NormalizeKey(billB), StringComparison.OrdinalIgnoreCase))
+            return $"Same Bill Date {dateStr} (Bill No {billA})";
+        return $"Same Bill Date {dateStr} ({billA} ↔ {billB})";
+    }
 
     private static bool SameBillNo(LedgerEntryDto a, LedgerEntryDto b) =>
         HasBillNo(a) && HasBillNo(b) &&

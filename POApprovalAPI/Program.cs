@@ -47,6 +47,7 @@ builder.Services.AddScoped<WorkOrderApprovalService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<SalesDashboardService>();
 builder.Services.AddScoped<ExcelLedgerService>();
+builder.Services.AddScoped<BillWiseTransactionService>();
 builder.Services.AddScoped<LedgerSummaryService>();
 
 builder.Services.AddCors(options =>

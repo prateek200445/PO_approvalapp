@@ -18,11 +18,13 @@ import {
   ChevronDown,
   ChevronUp,
   X,
+  Check,
 } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector } from "recharts";
 import { toast } from "sonner";
 import { getApiUrl } from "@/lib/api-config";
 import { cn } from "@/lib/utils";
+import { useDebounce } from "@/hooks/useDebounce";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   defaultMatchOptions,
@@ -43,6 +45,7 @@ export const Route = createFileRoute("/_app/reconciliation")({
 
 type Step = 1 | 2 | 3;
 type StatusFilter = "issues" | "all" | "missing" | "other" | ComparisonStatus;
+type CompareMode = "excel" | "db";
 
 type FileSide = {
   file: File | null;
@@ -105,6 +108,9 @@ function ReconciliationPage() {
     loading: false,
   });
   const [options, setOptions] = useState<LedgerMatchOptions>(defaultMatchOptions);
+  const [compareMode, setCompareMode] = useState<CompareMode>("db");
+  const [companyA, setCompanyA] = useState("");
+  const [companyB, setCompanyB] = useState("");
   const [comparing, setComparing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<ComparisonResult | null>(null);
@@ -213,6 +219,13 @@ function ReconciliationPage() {
   }
 
   function validateMappings(): string | null {
+    if (compareMode === "db") {
+      if (!companyA.trim() || !companyB.trim()) return "Select both companies.";
+      if (companyA.trim().toLowerCase() === companyB.trim().toLowerCase()) {
+        return "Pick two different companies.";
+      }
+      return null;
+    }
     for (const [label, side] of [
       ["File A", sideA],
       ["File B", sideB],
@@ -226,6 +239,25 @@ function ReconciliationPage() {
     return null;
   }
 
+  function applyDbResult(data: unknown) {
+    setResult(normalizeResult(data));
+    setStep(3);
+    setStatusFilter("Matched");
+    setSelected(null);
+    setCurrentPage(1);
+    requestAnimationFrame(() => {
+      const scrollTop = () => {
+        window.scrollTo({ top: 0, behavior: "instant" });
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+        const mainContent = document.getElementById("main-content");
+        if (mainContent) mainContent.scrollTop = 0;
+      };
+      scrollTop();
+      setTimeout(scrollTop, 50);
+    });
+  }
+
   async function runCompare() {
     const error = validateMappings();
     if (error) {
@@ -234,26 +266,28 @@ function ReconciliationPage() {
     }
     setComparing(true);
     try {
+      if (compareMode === "db") {
+        const res = await fetch(getApiUrl("/api/bill-wise/compare"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            companyA: companyA.trim(),
+            companyB: companyB.trim(),
+            options,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || "Comparison failed");
+        applyDbResult(data);
+        toast.success("Bill-wise comparison complete");
+        return;
+      }
+
       const form = buildCompareForm();
       const res = await fetch(getApiUrl("/api/excel/compare"), { method: "POST", body: form });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Comparison failed");
-      setResult(normalizeResult(data));
-      setStep(3);
-      setStatusFilter("Matched");
-      setSelected(null);
-      setCurrentPage(1);
-      requestAnimationFrame(() => {
-        const scrollTop = () => {
-          window.scrollTo({ top: 0, behavior: "instant" });
-          document.documentElement.scrollTop = 0;
-          document.body.scrollTop = 0;
-          const mainContent = document.getElementById("main-content");
-          if (mainContent) mainContent.scrollTop = 0;
-        };
-        scrollTop();
-        setTimeout(scrollTop, 50);
-      });
+      applyDbResult(data);
       toast.success("Comparison complete");
     } catch (err: any) {
       toast.error(err.message || "Comparison failed");
@@ -379,8 +413,8 @@ function ReconciliationPage() {
           cmp = text(pairSideLabel(a, "B")).localeCompare(text(pairSideLabel(b, "B")));
           break;
         case "amountA": {
-          const av = amount(a.entryA);
-          const bv = amount(b.entryA);
+          const av = amount(pairDisplayEntry(a, "A"));
+          const bv = amount(pairDisplayEntry(b, "A"));
           if (av == null && bv == null) cmp = 0;
           else if (av == null) cmp = 1;
           else if (bv == null) cmp = -1;
@@ -388,8 +422,8 @@ function ReconciliationPage() {
           break;
         }
         case "amountB": {
-          const av = amount(a.entryB);
-          const bv = amount(b.entryB);
+          const av = amount(pairDisplayEntry(a, "B"));
+          const bv = amount(pairDisplayEntry(b, "B"));
           if (av == null && bv == null) cmp = 0;
           else if (av == null) cmp = 1;
           else if (bv == null) cmp = -1;
@@ -657,53 +691,143 @@ function ReconciliationPage() {
         )}
       </div>
 
-      <StepIndicator step={step} />
+      <StepIndicator step={step} dbMode={compareMode === "db"} />
 
       {step === 1 && (
         <div className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <UploadCard
-              label="Company A ledger"
-              side={sideA}
-              onFile={(f) => previewFile("A", f)}
-              onClear={() => setSideA({ file: null, preview: null, mapping: emptyMapping(), loading: false })}
-            />
-            <UploadCard
-              label="Company B ledger"
-              side={sideB}
-              onFile={(f) => previewFile("B", f)}
-              onClear={() => setSideB({ file: null, preview: null, mapping: emptyMapping(), loading: false })}
-            />
+          <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+            <h2 className="text-sm font-semibold">Compare mode</h2>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setCompareMode("db")}
+                className={cn(
+                  "rounded-md border px-3 py-2 text-left text-sm transition-colors",
+                  compareMode === "db"
+                    ? "border-primary bg-primary/10 font-semibold text-foreground"
+                    : "border-input bg-surface hover:bg-secondary",
+                )}
+              >
+                <div>Database bill-wise</div>
+                <div className="mt-0.5 text-xs font-normal text-muted-foreground">
+                  Pick Company + Ledger from ERP (no Excel needed)
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCompareMode("excel")}
+                className={cn(
+                  "rounded-md border px-3 py-2 text-left text-sm transition-colors",
+                  compareMode === "excel"
+                    ? "border-primary bg-primary/10 font-semibold text-foreground"
+                    : "border-input bg-surface hover:bg-secondary",
+                )}
+              >
+                <div>Excel row compare</div>
+                <div className="mt-0.5 text-xs font-normal text-muted-foreground">
+                  Upload two ledgers and map columns
+                </div>
+              </button>
+            </div>
           </div>
-          <div className="flex justify-end">
-            <button
-              type="button"
-              disabled={!sideA.preview || !sideB.preview}
-              onClick={() => setStep(2)}
-              className="inline-flex h-11 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto"
-            >
-              Continue to mapping
-            </button>
-          </div>
+
+          {compareMode === "db" ? (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+                <h2 className="text-sm font-semibold">Select two companies</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Type to search, then click a result. Ledgers are matched automatically from ERP.
+                </p>
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <CompanyCombobox
+                    label="Company A"
+                    value={companyA}
+                    onChange={setCompanyA}
+                  />
+                  <CompanyCombobox
+                    label="Company B"
+                    value={companyB}
+                    onChange={setCompanyB}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  disabled={!companyA.trim() || !companyB.trim()}
+                  onClick={() => setStep(2)}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto"
+                >
+                  Continue to match rules
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <UploadCard
+                  label="Company A ledger"
+                  side={sideA}
+                  onFile={(f) => previewFile("A", f)}
+                  onClear={() => setSideA({ file: null, preview: null, mapping: emptyMapping(), loading: false })}
+                />
+                <UploadCard
+                  label="Company B ledger"
+                  side={sideB}
+                  onFile={(f) => previewFile("B", f)}
+                  onClear={() => setSideB({ file: null, preview: null, mapping: emptyMapping(), loading: false })}
+                />
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  disabled={!sideA.preview || !sideB.preview}
+                  onClick={() => setStep(2)}
+                  className="inline-flex h-11 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto"
+                >
+                  Continue to mapping
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {step === 2 && (
         <div className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <MappingCard
-              title="File A mapping"
-              side={sideA}
-              onChange={(mapping) => setSideA((p) => ({ ...p, mapping }))}
-              onSheetOrHeaderChange={(mapping) => refreshPreview("A", mapping)}
-            />
-            <MappingCard
-              title="File B mapping"
-              side={sideB}
-              onChange={(mapping) => setSideB((p) => ({ ...p, mapping }))}
-              onSheetOrHeaderChange={(mapping) => refreshPreview("B", mapping)}
-            />
-          </div>
+          {compareMode === "db" ? (
+            <div className="rounded-xl border border-border bg-card p-4 shadow-sm text-sm">
+              <div className="font-semibold">Companies</div>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2 text-xs text-muted-foreground">
+                <div>
+                  <span className="font-medium text-foreground">A:</span> {companyA}
+                </div>
+                <div>
+                  <span className="font-medium text-foreground">B:</span> {companyB}
+                </div>
+              </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Matching party ledgers on each side will be resolved automatically when you compare.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <MappingCard
+                title="File A mapping"
+                side={sideA}
+                dbMode={false}
+                onChange={(mapping) => setSideA((p) => ({ ...p, mapping }))}
+                onSheetOrHeaderChange={(mapping) => refreshPreview("A", mapping)}
+              />
+              <MappingCard
+                title="File B mapping"
+                side={sideB}
+                dbMode={false}
+                onChange={(mapping) => setSideB((p) => ({ ...p, mapping }))}
+                onSheetOrHeaderChange={(mapping) => refreshPreview("B", mapping)}
+              />
+            </div>
+          )}
 
           <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
             <h2 className="text-sm font-semibold">Match rules</h2>
@@ -755,7 +879,7 @@ function ReconciliationPage() {
               className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {comparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowLeftRight className="h-4 w-4" />}
-              Compare ledgers
+              {compareMode === "db" ? "Load bill-wise & compare" : "Compare ledgers"}
             </button>
           </div>
         </div>
@@ -1074,28 +1198,28 @@ function ReconciliationPage() {
                         </td>
                         <td className="px-5 py-2.5 text-center break-words">
                           <div className="leading-snug">{pairSideLabel(row, "A")}</div>
-                          {row.matchKind === "bill-group" && (row.entriesA?.length ?? 0) > 1 && (
+                          {row.matchKind === "bill-group" && pairDisplayLineCount(row, "A") > 1 && (
                             <div className="mt-0.5 text-[11px] text-muted-foreground">
-                              {row.entriesA!.length} lines
+                              {pairDisplayLineCount(row, "A")} lines
                             </div>
                           )}
                         </td>
                         <td className="px-5 py-2.5">
                           <div className="flex justify-center">
-                            <AmountSideCell entry={row.entryA} />
+                            <AmountSideCell entry={pairDisplayEntry(row, "A")} />
                           </div>
                         </td>
                         <td className="px-5 py-2.5 text-center break-words">
                           <div className="leading-snug">{pairSideLabel(row, "B")}</div>
-                          {row.matchKind === "bill-group" && (row.entriesB?.length ?? 0) > 1 && (
+                          {row.matchKind === "bill-group" && pairDisplayLineCount(row, "B") > 1 && (
                             <div className="mt-0.5 text-[11px] text-muted-foreground">
-                              {row.entriesB!.length} lines
+                              {pairDisplayLineCount(row, "B")} lines
                             </div>
                           )}
                         </td>
                         <td className="px-5 py-2.5">
                           <div className="flex justify-center">
-                            <AmountSideCell entry={row.entryB} />
+                            <AmountSideCell entry={pairDisplayEntry(row, "B")} />
                           </div>
                         </td>
                         <td className="px-5 py-2.5 text-center whitespace-nowrap tabular-nums">
@@ -1256,10 +1380,193 @@ function SortableTh({
   );
 }
 
-function StepIndicator({ step }: { step: Step }) {
+function CompanyCombobox({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [text, setText] = useState(value);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [options, setOptions] = useState<string[]>([]);
+  const [active, setActive] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const debounced = useDebounce(text, 280);
+
+  useEffect(() => {
+    setText(value);
+  }, [value]);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  useEffect(() => {
+    const q = debounced.trim();
+    if (q.length < 1) {
+      setOptions([]);
+      setLoading(false);
+      return;
+    }
+    // Don't re-query when the field already shows a committed selection.
+    if (value && q === value.trim()) {
+      setOptions([]);
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(
+          getApiUrl(`/api/bill-wise/companies?q=${encodeURIComponent(q)}&take=40`),
+        );
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || "Search failed");
+        if (!cancelled) {
+          setOptions(Array.isArray(data) ? data.map(String) : []);
+          setActive(0);
+        }
+      } catch {
+        if (!cancelled) setOptions([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [debounced, value]);
+
+  function pick(name: string) {
+    onChange(name);
+    setText(name);
+    setOpen(false);
+    setOptions([]);
+  }
+
+  function clear() {
+    onChange("");
+    setText("");
+    setOptions([]);
+    setOpen(true);
+  }
+
+  const showList = open && (loading || options.length > 0 || debounced.trim().length >= 1);
+
+  return (
+    <div ref={rootRef} className="relative flex flex-col gap-1 text-sm">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={text}
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={showList}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          placeholder="Type company name…"
+          onFocus={() => setOpen(true)}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (value) onChange("");
+            setOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (!showList || options.length === 0) {
+              if (e.key === "Escape") setOpen(false);
+              return;
+            }
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setActive((i) => Math.min(i + 1, options.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActive((i) => Math.max(i - 1, 0));
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              const choice = options[active];
+              if (choice) pick(choice);
+            } else if (e.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+          className="h-11 w-full rounded-md border border-input bg-surface py-2 pl-9 pr-10 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+        />
+        {text ? (
+          <button
+            type="button"
+            aria-label="Clear"
+            onClick={clear}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : null}
+      </div>
+
+      {value ? (
+        <div className="inline-flex items-center gap-1 text-[11px] text-success">
+          <Check className="h-3 w-3" />
+          Selected
+        </div>
+      ) : (
+        <span className="text-[11px] text-muted-foreground">Start typing — results appear below</span>
+      )}
+
+      {showList && (
+        <ul
+          id={listId}
+          role="listbox"
+          className="absolute left-0 right-0 top-[calc(100%-0.25rem)] z-30 mt-1 max-h-56 overflow-auto rounded-md border border-border bg-card py-1 shadow-lg"
+        >
+          {loading && (
+            <li className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Searching…
+            </li>
+          )}
+          {!loading && options.length === 0 && debounced.trim().length >= 1 && (
+            <li className="px-3 py-2 text-xs text-muted-foreground">No companies found</li>
+          )}
+          {!loading &&
+            options.map((o, i) => (
+              <li key={o} role="option" aria-selected={i === active}>
+                <button
+                  type="button"
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => pick(o)}
+                  className={cn(
+                    "flex w-full items-center px-3 py-2 text-left text-sm",
+                    i === active ? "bg-primary/10 text-foreground" : "hover:bg-secondary",
+                  )}
+                >
+                  {o}
+                </button>
+              </li>
+            ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function StepIndicator({ step, dbMode = false }: { step: Step; dbMode?: boolean }) {
   const items = [
-    { n: 1 as Step, label: "Upload" },
-    { n: 2 as Step, label: "Map" },
+    { n: 1 as Step, label: dbMode ? "Select" : "Upload" },
+    { n: 2 as Step, label: dbMode ? "Rules" : "Map" },
     { n: 3 as Step, label: "Results" },
   ];
   return (
@@ -1344,20 +1651,22 @@ function UploadCard({
 function MappingCard({
   title,
   side,
+  dbMode = false,
   onChange,
   onSheetOrHeaderChange,
 }: {
   title: string;
   side: FileSide;
+  dbMode?: boolean;
   onChange: (m: LedgerColumnMapping) => void;
   onSheetOrHeaderChange: (m: LedgerColumnMapping) => void;
 }) {
   if (!side.preview) return null;
   const headers = side.preview.headers;
   const fields: { key: keyof LedgerColumnMapping; label: string; required?: boolean; amount?: boolean }[] = [
-    { key: "company", label: "Company Name" },
-    { key: "date", label: "Voucher Date", required: true },
-    { key: "amount", label: "Amount (signed)", required: true, amount: true },
+    { key: "company", label: "Company Name", required: dbMode },
+    { key: "date", label: "Voucher Date", required: !dbMode },
+    { key: "amount", label: "Amount (signed)", required: !dbMode, amount: true },
     { key: "billNo", label: "Bill No" },
     { key: "billDate", label: "Bill Date" },
     { key: "particulars", label: "Ledger Name / Particulars" },
@@ -1437,7 +1746,9 @@ function MappingCard({
         ))}
       </div>
       <p className="mt-3 text-[11px] text-muted-foreground">
-        Prefer signed Amount (− debit / + credit). Legacy Debit/Credit columns are optional when Amount is mapped.
+        {dbMode
+          ? "For DB bill-wise mode, Company Name is enough — BillNo / BillDate / Amount come from SQL."
+          : "Prefer signed Amount (− debit / + credit). Legacy Debit/Credit columns are optional when Amount is mapped."}
       </p>
     </div>
   );
@@ -2084,20 +2395,37 @@ function DetailSheet({
   const isBillGroup = pair.matchKind === "bill-group";
   const entriesA = pair.entriesA?.length ? pair.entriesA : pair.entryA ? [pair.entryA] : [];
   const entriesB = pair.entriesB?.length ? pair.entriesB : pair.entryB ? [pair.entryB] : [];
+  const hasBothSides = Boolean(pair.entryA && pair.entryB);
+  const displayEntriesA = hasBothSides ? entriesB : entriesA;
+  const displayEntriesB = hasBothSides ? entriesA : entriesB;
   const [selectedA, setSelectedA] = useState<number[]>([]);
   const [selectedB, setSelectedB] = useState<number[]>([]);
   const canManual = pair.status === "PotentialMatch" || pair.status === "AmountMismatch";
 
   useEffect(() => {
-    setSelectedA(entriesA.map((e) => e.rowIndex));
-    setSelectedB(entriesB.map((e) => e.rowIndex));
-  }, [pair.id]);
+    const bookA = pair.entriesA?.length ? pair.entriesA : pair.entryA ? [pair.entryA] : [];
+    const bookB = pair.entriesB?.length ? pair.entriesB : pair.entryB ? [pair.entryB] : [];
+    const both = Boolean(pair.entryA && pair.entryB);
+    setSelectedA((both ? bookB : bookA).map((e) => e.rowIndex));
+    setSelectedB((both ? bookA : bookB).map((e) => e.rowIndex));
+  }, [pair.id, pair.entriesA, pair.entriesB, pair.entryA, pair.entryB]);
 
-  const selectedTotalA = sumSignedAmount(entriesA.filter((e) => selectedA.includes(e.rowIndex)));
-  const selectedTotalB = sumSignedAmount(entriesB.filter((e) => selectedB.includes(e.rowIndex)));
+  const bookSelectedA = entriesA.filter((e) =>
+    (hasBothSides ? selectedB : selectedA).includes(e.rowIndex),
+  );
+  const bookSelectedB = entriesB.filter((e) =>
+    (hasBothSides ? selectedA : selectedB).includes(e.rowIndex),
+  );
+  const selectedTotalA = sumSignedAmount(bookSelectedA);
+  const selectedTotalB = sumSignedAmount(bookSelectedB);
+  const selectedTotalDisplayA = sumSignedAmount(displayEntriesA.filter((e) => selectedA.includes(e.rowIndex)));
+  const selectedTotalDisplayB = sumSignedAmount(displayEntriesB.filter((e) => selectedB.includes(e.rowIndex)));
   const diff = Math.abs(Math.abs(selectedTotalA) - Math.abs(selectedTotalB));
   const canConfirm =
     canManual && selectedA.length > 0 && selectedB.length > 0 && canManualMatchTotals(selectedTotalA, selectedTotalB);
+
+  const displayA = pairDisplayEntry(pair, "A");
+  const displayB = pairDisplayEntry(pair, "B");
 
   const fields: { label: string; a: string; b: string }[] = isBillGroup
     ? [
@@ -2113,18 +2441,18 @@ function DetailSheet({
         },
         {
           label: "Lines",
-          a: entriesA.length ? String(entriesA.length) : "—",
-          b: entriesB.length ? String(entriesB.length) : "—",
+          a: pairDisplayLineCount(pair, "A") ? String(pairDisplayLineCount(pair, "A")) : "—",
+          b: pairDisplayLineCount(pair, "B") ? String(pairDisplayLineCount(pair, "B")) : "—",
         },
         {
           label: "Bill total",
-          a: pair.entryA ? formatSigned(pair.entryA.signedAmount ?? pair.entryA.amount, pair.entryA.side) : "—",
-          b: pair.entryB ? formatSigned(pair.entryB.signedAmount ?? pair.entryB.amount, pair.entryB.side) : "—",
+          a: displayA ? formatSigned(displayA.signedAmount ?? displayA.amount, displayA.side) : "—",
+          b: displayB ? formatSigned(displayB.signedAmount ?? displayB.amount, displayB.side) : "—",
         },
         {
           label: "Side",
-          a: pair.entryA?.side || "—",
-          b: pair.entryB?.side || "—",
+          a: displayA?.side || "—",
+          b: displayB?.side || "—",
         },
       ]
     : [
@@ -2150,18 +2478,18 @@ function DetailSheet({
         },
         {
           label: "Ledger",
-          a: pair.entryA?.particulars || "—",
-          b: pair.entryB?.particulars || "—",
+          a: displayA?.particulars || "—",
+          b: displayB?.particulars || "—",
         },
         {
           label: "Amount",
-          a: pair.entryA ? formatSigned(pair.entryA.signedAmount ?? pair.entryA.amount, pair.entryA.side) : "—",
-          b: pair.entryB ? formatSigned(pair.entryB.signedAmount ?? pair.entryB.amount, pair.entryB.side) : "—",
+          a: displayA ? formatSigned(displayA.signedAmount ?? displayA.amount, displayA.side) : "—",
+          b: displayB ? formatSigned(displayB.signedAmount ?? displayB.amount, displayB.side) : "—",
         },
         {
           label: "Side",
-          a: pair.entryA?.side || "—",
-          b: pair.entryB?.side || "—",
+          a: displayA?.side || "—",
+          b: displayB?.side || "—",
         },
       ];
 
@@ -2236,7 +2564,7 @@ function DetailSheet({
             </table>
           </div>
 
-          {(isBillGroup || entriesA.length > 1 || entriesB.length > 1) && (
+          {(isBillGroup || displayEntriesA.length > 1 || displayEntriesB.length > 1) && (
             <div className="space-y-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Line breakdown
@@ -2244,7 +2572,7 @@ function DetailSheet({
               <div className="grid gap-3 md:grid-cols-2">
                 <LineList
                   title={companyNameA}
-                  entries={entriesA}
+                  entries={displayEntriesA}
                   selectable={canManual}
                   selected={selectedA}
                   onToggle={(rowIndex) =>
@@ -2255,7 +2583,7 @@ function DetailSheet({
                 />
                 <LineList
                   title={companyNameB}
-                  entries={entriesB}
+                  entries={displayEntriesB}
                   selectable={canManual}
                   selected={selectedB}
                   onToggle={(rowIndex) =>
@@ -2275,10 +2603,10 @@ function DetailSheet({
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm tabular-nums">
                 <span>
-                  A selected: <b>{formatSigned(selectedTotalA)}</b>
+                  {companyNameA} selected: <b>{formatSigned(selectedTotalDisplayA)}</b>
                 </span>
                 <span>
-                  B selected: <b>{formatSigned(selectedTotalB)}</b>
+                  {companyNameB} selected: <b>{formatSigned(selectedTotalDisplayB)}</b>
                 </span>
                 <span>
                   Diff:{" "}
@@ -2291,7 +2619,13 @@ function DetailSheet({
                 <button
                   type="button"
                   disabled={!canConfirm}
-                  onClick={() => onManualMatch(pair.id, selectedA, selectedB)}
+                  onClick={() =>
+                    onManualMatch(
+                      pair.id,
+                      bookSelectedA.map((e) => e.rowIndex),
+                      bookSelectedB.map((e) => e.rowIndex),
+                    )
+                  }
                   className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
                 >
                   Manually match selected
@@ -2397,15 +2731,39 @@ function pairListTitle(row: ComparisonPair) {
   if (row.matchKind === "bill-group") {
     return row.entryA?.billNo || row.entryB?.billNo || "Bill group";
   }
-  return row.entryA?.particulars || row.entryB?.particulars || row.message;
+  const labelA = pairSideLabel(row, "A");
+  const labelB = pairSideLabel(row, "B");
+  if (labelA !== "—" && labelB !== "—") return `${labelA} ↔ ${labelB}`;
+  return labelA !== "—" ? labelA : labelB !== "—" ? labelB : row.message;
+}
+
+function pairDisplayEntries(row: ComparisonPair, column: "A" | "B"): LedgerEntry[] {
+  const entriesA = row.entriesA?.length ? row.entriesA : row.entryA ? [row.entryA] : [];
+  const entriesB = row.entriesB?.length ? row.entriesB : row.entryB ? [row.entryB] : [];
+  const hasBoth = row.entryA && row.entryB;
+  if (column === "A") return hasBoth ? entriesB : entriesA;
+  return hasBoth ? entriesA : entriesB;
+}
+
+/** Each column shows that company's ledger name + amount (swap book-side entries when both exist). */
+function pairDisplayEntry(row: ComparisonPair, column: "A" | "B"): LedgerEntry | null | undefined {
+  const hasBoth = row.entryA && row.entryB;
+  if (column === "A") return hasBoth ? row.entryB : row.entryA;
+  return hasBoth ? row.entryA : row.entryB;
+}
+
+function pairDisplayLineCount(row: ComparisonPair, column: "A" | "B"): number {
+  if (row.matchKind !== "bill-group") return 0;
+  const hasBoth = row.entryA && row.entryB;
+  if (column === "A") return hasBoth ? row.entriesB?.length ?? 0 : row.entriesA?.length ?? 0;
+  return hasBoth ? row.entriesA?.length ?? 0 : row.entriesB?.length ?? 0;
 }
 
 function pairSideLabel(row: ComparisonPair, side: "A" | "B") {
-  const entry = side === "A" ? row.entryA : row.entryB;
+  const entry = pairDisplayEntry(row, side);
   if (!entry) return "—";
   if (row.matchKind === "bill-group") {
-    const count = side === "A" ? row.entriesA?.length ?? 0 : row.entriesB?.length ?? 0;
-    if (count > 1) return "Bill total";
+    if (pairDisplayLineCount(row, side) > 1) return "Bill total";
     return entry.particulars || entry.billNo || "—";
   }
   return entry.particulars || "—";

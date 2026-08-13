@@ -10,14 +10,16 @@ namespace POApprovalAPI.Controllers;
 public class ExcelController : ControllerBase
 {
     private readonly ExcelLedgerService _excel;
+    private readonly BillWiseTransactionService _billWise;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public ExcelController(ExcelLedgerService excel)
+    public ExcelController(ExcelLedgerService excel, BillWiseTransactionService billWise)
     {
         _excel = excel;
+        _billWise = billWise;
     }
 
     [HttpPost("preview")]
@@ -74,6 +76,51 @@ public class ExcelController : ControllerBase
             msB.Position = 0;
 
             var result = _excel.Compare(msA, fileA.FileName, msB, fileB.FileName, mapA, mapB, matchOptions);
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Extract company names from two uploaded type-1 ledgers, load mirrored bill-wise
+    /// rows from vw_BillWiseTransactionWithOnAccount, then run the same recon engine.
+    /// </summary>
+    [HttpPost("compare-from-db")]
+    [RequestSizeLimit(60_000_000)]
+    public async Task<IActionResult> CompareFromDb(
+        IFormFile fileA,
+        IFormFile fileB,
+        [FromForm] string mappingA,
+        [FromForm] string mappingB,
+        [FromForm] string? options = null,
+        [FromForm] string? companyA = null,
+        [FromForm] string? companyB = null)
+    {
+        try
+        {
+            ValidateExcel(fileA);
+            ValidateExcel(fileB);
+
+            var mapA = DeserializeOrThrow<LedgerColumnMapping>(mappingA, "mappingA");
+            var mapB = DeserializeOrThrow<LedgerColumnMapping>(mappingB, "mappingB");
+            var matchOptions = string.IsNullOrWhiteSpace(options)
+                ? new LedgerMatchOptions()
+                : DeserializeOrThrow<LedgerMatchOptions>(options, "options");
+
+            await using var streamA = fileA.OpenReadStream();
+            await using var streamB = fileB.OpenReadStream();
+            using var msA = new MemoryStream();
+            using var msB = new MemoryStream();
+            await streamA.CopyToAsync(msA);
+            await streamB.CopyToAsync(msB);
+            msA.Position = 0;
+            msB.Position = 0;
+
+            var result = await _billWise.CompareFromUploadedLedgersAsync(
+                msA, mapA, msB, mapB, matchOptions, companyA, companyB);
             return Ok(result);
         }
         catch (Exception ex)
