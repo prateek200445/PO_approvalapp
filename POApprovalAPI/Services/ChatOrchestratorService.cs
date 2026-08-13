@@ -79,7 +79,9 @@ public partial class ChatOrchestratorService
             - Job work: formal orders prefer Vw_EditJOBWorkOrder (PurchaseCode JRO/JWO; sparse). Live qty at job work: VW_JobWork_EBD_DTL (filter companyname/ItemCode). Receipts: VW_RECJOBWORK_EBD_DTL (MRNo like JBIN-SE). Returnable job-work sends also Vw_ReturnGatePass Purpose LIKE '%Job Work%'. Do not join JOBWORKORDER to PurchasePayment. Always TOP 50.
             - Sales invoices: prefer vw_Salesvoucher (InvNo, BuyerName, BillAMount, InvType, CompanyName). Lines: SalesVoucherItem on CompanyName+InvNo (ITEMCODE, ActualQty, Rate, Amount). List: vw_SalesInvList. Taxes: SalesVoucherTax. MIS qty: VW_SALES_EBD_DTL. Bracket [Company Address]/[Company GST] on vw_Salesvoucher. Sales credit notes: CreditNote. Always TOP 50.
             - Top export customers / export sales ranking: ALWAYS vw_Salesvoucher (NOT despatch). Filter InvType LIKE '%Export%', Indian FY on InvDate (FY 2024-25 = 2024-04-01 to <2025-04-01), GROUP BY BuyerName, ORDER BY SUM(BillAMount) DESC, TOP N. For '<company> group' use CompanyName IN (SELECT Name FROM FactoryInfo WHERE GroupName LIKE '%hint%' OR Name LIKE '%hint%'). When user says exclude inter-company / inter unit / group companies: also NOT EXISTS buyer matching FactoryInfo.Name for that same group (do not count sister companies as export customers). BillAMount spelling. Always TOP N (default 5).
-            - Country-wise sales: ALWAYS prefer vw_Countrywise_sales (GroupName = company legal name e.g. Plastene India Limited, Country, Amount, InvYear as yy-yy e.g. 25-26). Do NOT use vw_Salesvoucher Destination or Domestic/Export CASE split for country-wise questions. Related: vw_Countrywise_sales_basic_value, vw_Countrywise_sales_dashboard (+ DebitNote, Value). For invoice-level detail use vw_Salesvoucher.
+            - Country-wise sales / sales by country: ALWAYS vw_Countrywise_sales_dashboard (NOT vw_Salesvoucher). Columns: Country, Value (Amount-DebitNote), InvYear (short label 25-26), GroupName. Filter InvYear = '25-26' for FY 2025-26. Filter company via GroupName IN (SELECT DISTINCT GroupName FROM FactoryInfo WHERE Name = legal company). NEVER use vw_Salesvoucher.Destination for country — Destination is port/city/state (Gujarat, Ahmedabad), not country. GROUP BY Country, SUM(CAST(Value AS float)), ORDER BY total DESC, TOP 50.
+            - Total sales / sales by product group for FY: ALWAYS vw_Sales_EBIDTA (same as Sales Dashboard, excl. InterGroup='Intergroup'). Total: SUM(Amount), SUM(netwt). By group: GROUP BY Groupname; by sub-group: GROUP BY Groupname, SubGroupName. Filter CompanyName and invdate for Indian FY (2025-04-01 to 2026-03-31 for FY 25-26). Total purchase: vw_Purchase_EBIDTA with same rules.
+            - Ledger count: COUNT(*) FROM LedgerMaster WHERE CompanyName = company; when user says under/in a group (e.g. Sundry Debtors) also filter LedgerMaster.Under LIKE '%group%'. Ledger/account groups list: SELECT DISTINCT Under FROM LedgerMaster (never LedgerGroupMaster).
             - Despatch/packing: roll history vw_MISrolldespatch; FIBC bails FIBCDespatch; yarn MIS_YarnDespatch; small bag SmallBagBailForDespatch; rolls waiting vw_RollforDespatch. ALWAYS filter CompanyName/Companyname or InvNo/PartyName/date + TOP 50 (million-row tables). Prefer view over MISRollforDespatch table.
             - Production: factory daily vw_FactoryProduction (companyname, Particulars, TapeProduction/Fabric/SmallBag); tape plant vw_daily_tape_prod_New (bracket [Loom Dept]/[FIBC Dept]); loom rolls vw_LoomProductionENtry (MUST filter CompanyName/Sysdate/LoomNo + TOP 50 — ~716k; skip stale vw_Loom_Prod_Mtr); FIBC bags VW_FIBCBagwiseProduction (not _New); MIS qty VW_PRODUCTION_EBD_DTL; WIP vw_WIPReport; small bags SmallBagProductionEntry (Cutting/Stitching — live data mainly Plastene/HCP units, NOT Oswal; Oswal uses Tape/Fabric/WEBBING in vw_FactoryProduction). Filter EBD/WIP/loom + TOP 50. Not despatch / not ApproveWorkOrder.
             - Prefer TOP 50 for detail lists. COUNT aggregates need no TOP.
@@ -120,24 +122,79 @@ public partial class ChatOrchestratorService
         string sql;
         string? columnRepairHint = null;
 
-        // Governed: top export customers by FY / company group — skip LLM SQL
-        if (TryBuildTopExportCustomersSql(request.Message, out var topExportSql, out var topExportWarning))
+        // Governed: pending PO approval (portal queue) — highest priority; skip LLM/PR confusion
+        if (TryBuildPendingPoApprovalSql(request.Message, "", out var earlyPendingPoSql, out var earlyPendingPoWarn))
+        {
+            _logger.LogInformation("Using governed pending PO SQL (early path)");
+            sql = earlyPendingPoSql;
+            warning = earlyPendingPoWarn;
+        }
+        // Governed: country-wise sales (Sales Dashboard source) — before export-customer ranking
+        else if (TryBuildCountryWiseSalesSql(request.Message, out var countryWiseSql, out var countryWiseWarning))
+        {
+            _logger.LogInformation("Using governed country-wise sales SQL");
+            sql = countryWiseSql;
+            warning = countryWiseWarning;
+        }
+        else if (TryBuildSalesTotalsSql(request.Message, out var salesTotalsSql, out var salesTotalsWarning))
+        {
+            _logger.LogInformation("Using governed sales totals SQL");
+            sql = salesTotalsSql;
+            warning = salesTotalsWarning;
+        }
+        else if (TryBuildSalesByGroupSql(request.Message, out var salesByGroupSql, out var salesByGroupWarning))
+        {
+            _logger.LogInformation("Using governed sales-by-group SQL");
+            sql = salesByGroupSql;
+            warning = salesByGroupWarning;
+        }
+        else if (TryBuildExportSalesInvoiceListSql(request.Message, out var exportInvSql, out var exportInvWarn))
+        {
+            _logger.LogInformation("Using governed export sales invoice list SQL");
+            sql = exportInvSql;
+            warning = exportInvWarn;
+        }
+        else if (TryBuildInterUnitSalesSql(request.Message, out var interUnitSql, out var interUnitWarn))
+        {
+            _logger.LogInformation("Using governed inter-unit sales SQL");
+            sql = interUnitSql;
+            warning = interUnitWarn;
+        }
+        else if (TryBuildPurchaseTotalsSql(request.Message, out var purchaseTotalsSql, out var purchaseTotalsWarning))
+        {
+            _logger.LogInformation("Using governed purchase totals SQL");
+            sql = purchaseTotalsSql;
+            warning = purchaseTotalsWarning;
+        }
+        else if (TryBuildLedgerCountSql(request.Message, out var ledgerCountSql, out var ledgerCountWarning))
+        {
+            _logger.LogInformation("Using governed ledger count SQL");
+            sql = ledgerCountSql;
+            warning = ledgerCountWarning;
+        }
+        else if (TryBuildLedgerGroupsSql(request.Message, out var ledgerGroupsSql, out var ledgerGroupsWarning))
+        {
+            _logger.LogInformation("Using governed ledger groups SQL");
+            sql = ledgerGroupsSql;
+            warning = ledgerGroupsWarning;
+        }
+        else if (TryBuildTopExportCustomersSql(request.Message, out var topExportSql, out var topExportWarning))
         {
             _logger.LogInformation("Using governed top-export-customers SQL");
             sql = topExportSql;
             warning = topExportWarning;
-        }
-        else if (TryBuildCountryWiseSalesSql(request.Message, out var countrySalesSql, out var countrySalesWarning))
-        {
-            _logger.LogInformation("Using governed country-wise sales SQL");
-            sql = countrySalesSql;
-            warning = countrySalesWarning;
         }
         else if (TryBuildLedgerOutstandingSql(request.Message, out var ledgerOstSql, out var ledgerOstWarning))
         {
             _logger.LogInformation("Using governed ledger-outstanding SQL");
             sql = ledgerOstSql;
             warning = ledgerOstWarning;
+        }
+        else if (TryBuildStockInHandSql(request.Message, out var stockInHandSql, out var stockInHandWarn))
+        {
+            _logger.LogInformation("Using governed stock-in-hand SQL");
+            sql = stockInHandSql;
+            warning = stockInHandWarn;
         }
         else if (TryBuildGovernedDomainSql(request.Message, out var govSql, out var govWarning))
         {
@@ -150,11 +207,12 @@ public partial class ChatOrchestratorService
             var sqlRaw = await _llm.CompleteAsync(sqlSystem, sqlUser, ct);
             sql = ApplySqlPostProcess(sqlRaw, request.Message, out columnRepairHint);
 
-            if (TryBuildPendingWorkOrderSql(request.Message, sql, out var pendingWoSql, out var pendingWoWarning))
+            if (TryBuildCountryWiseSalesSql(request.Message, out var countryRewriteSql, out var countryRewriteWarn)
+                && ShouldRewriteToCountryWiseSales(sql))
             {
-                _logger.LogInformation("Rewriting pending WO query ({Mode})", pendingWoWarning);
-                sql = pendingWoSql;
-                warning = pendingWoWarning;
+                _logger.LogInformation("Rewriting LLM SQL to governed country-wise sales query");
+                sql = countryRewriteSql;
+                warning = countryRewriteWarn;
                 columnRepairHint = null;
             }
             else if (TryBuildPendingPoApprovalSql(request.Message, sql, out var pendingPoSql, out var pendingPoWarning))
@@ -163,6 +221,27 @@ public partial class ChatOrchestratorService
                 sql = pendingPoSql;
                 warning = pendingPoWarning;
                 columnRepairHint = null; // governed SQL is catalog-safe
+            }
+            else if (TryBuildStockInHandSql(request.Message, out var stockRewriteSql, out var stockRewriteWarn))
+            {
+                _logger.LogInformation("Rewriting stock-in-hand query ({Mode})", stockRewriteWarn);
+                sql = stockRewriteSql;
+                warning = stockRewriteWarn;
+                columnRepairHint = null;
+            }
+            else if (TryBuildExportSalesInvoiceListSql(request.Message, out var exportInvRewriteSql, out var exportInvRewriteWarn))
+            {
+                _logger.LogInformation("Rewriting export sales invoice query ({Mode})", exportInvRewriteWarn);
+                sql = exportInvRewriteSql;
+                warning = exportInvRewriteWarn;
+                columnRepairHint = null;
+            }
+            else if (TryBuildPendingWorkOrderSql(request.Message, sql, out var pendingWoSql, out var pendingWoWarning))
+            {
+                _logger.LogInformation("Rewriting pending WO query ({Mode})", pendingWoWarning);
+                sql = pendingWoSql;
+                warning = pendingWoWarning;
+                columnRepairHint = null;
             }
             else if (TryBuildLedgerOutstandingSql(request.Message, out var pendingLedgerSql, out var pendingLedgerWarn))
             {
@@ -194,16 +273,16 @@ public partial class ChatOrchestratorService
                 """;
             var sqlRaw = await _llm.CompleteAsync(sqlSystem, colRepairUser, ct);
             sql = ApplySqlPostProcess(sqlRaw, request.Message, out columnRepairHint);
-            if (TryBuildTopExportCustomersSql(request.Message, out var colTopExport, out var colTopExportWarn))
+            if (TryBuildCountryWiseSalesSql(request.Message, out var colCountryWise, out var colCountryWiseWarn))
+            {
+                sql = colCountryWise;
+                warning = colCountryWiseWarn;
+                columnRepairHint = null;
+            }
+            else if (TryBuildTopExportCustomersSql(request.Message, out var colTopExport, out var colTopExportWarn))
             {
                 sql = colTopExport;
                 warning = colTopExportWarn;
-                columnRepairHint = null;
-            }
-            else if (TryBuildCountryWiseSalesSql(request.Message, out var colCountrySales, out var colCountrySalesWarn))
-            {
-                sql = colCountrySales;
-                warning = colCountrySalesWarn;
                 columnRepairHint = null;
             }
             else if (TryBuildLedgerOutstandingSql(request.Message, out var colLedgerOst, out var colLedgerOstWarn))
@@ -253,24 +332,6 @@ public partial class ChatOrchestratorService
                 catch (Exception retryEx)
                 {
                     _logger.LogWarning(retryEx, "Governed top-export-customers rewrite also failed");
-                }
-            }
-
-            if (!recovered
-                && TryBuildCountryWiseSalesSql(request.Message, out var timeoutCountrySql, out var timeoutCountryWarn)
-                && !string.Equals(timeoutCountrySql, sql, StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    _logger.LogWarning(ex, "SQL failed; retrying governed country-wise sales rewrite");
-                    sql = timeoutCountrySql;
-                    rows = await ExecuteReadOnlyAsync(sql, ct);
-                    warning = timeoutCountryWarn;
-                    recovered = true;
-                }
-                catch (Exception retryEx)
-                {
-                    _logger.LogWarning(retryEx, "Governed country-wise sales rewrite also failed");
                 }
             }
 
@@ -403,11 +464,6 @@ public partial class ChatOrchestratorService
                 sql = repairExportSql;
                 warning = repairExportWarn;
             }
-            else if (TryBuildCountryWiseSalesSql(request.Message, out var repairCountrySql, out var repairCountryWarn))
-            {
-                sql = repairCountrySql;
-                warning = repairCountryWarn;
-            }
             else if (TryBuildLedgerOutstandingSql(request.Message, out var repairLedgerSql, out var repairLedgerWarn))
             {
                 sql = repairLedgerSql;
@@ -446,18 +502,53 @@ public partial class ChatOrchestratorService
             }
         }
 
+        // Safety net: LLM or wrong-table SQL must not answer pending PO questions with 0 rows.
+        if (LooksLikePendingPoQuestion(request.Message)
+            && ShouldForcePendingPoGovernedRewrite(sql, rows.Count)
+            && TryBuildPendingPoApprovalSql(request.Message, sql, out var forcedPendingPoSql, out var forcedPendingPoWarn))
+        {
+            _logger.LogWarning(
+                "Forcing governed pending PO rewrite (prior SQL used wrong tables or returned empty)");
+            sql = forcedPendingPoSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = forcedPendingPoWarn;
+        }
+
+        // Safety net: exact ItemName match on stock queries often returns 0 — use LIKE filters.
+        if (LooksLikeStockInHandQuestion(request.Message)
+            && ShouldForceStockInHandGovernedRewrite(sql, rows.Count)
+            && TryBuildStockInHandSql(request.Message, out var forcedStockSql, out var forcedStockWarn))
+        {
+            _logger.LogWarning(
+                "Forcing governed stock-in-hand rewrite (exact ItemName or wrong table returned empty)");
+            sql = forcedStockSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = forcedStockWarn;
+        }
+
+        if (ShouldForceExportSalesInvoiceRewrite(request.Message, sql, rows.Count)
+            && TryBuildExportSalesInvoiceListSql(request.Message, out var forcedExportInvSql, out var forcedExportInvWarn))
+        {
+            _logger.LogWarning(
+                "Forcing governed export sales invoice rewrite (POAllocation/wrong table or empty export list)");
+            sql = forcedExportInvSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = forcedExportInvWarn;
+        }
+
+        if (LooksLikeLedgerCountQuestion(request.Message)
+            && LedgerCountSqlMissingUnderFilter(request.Message, sql)
+            && TryBuildLedgerCountSql(request.Message, out var forcedLedgerCountSql, out var forcedLedgerCountWarn))
+        {
+            _logger.LogWarning("Forcing governed ledger count with LedgerMaster.Under group filter");
+            sql = forcedLedgerCountSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = forcedLedgerCountWarn;
+        }
+
         if (warning is null)
         {
-        if (LooksLikeCountryWiseSalesQuestion(request.Message)
-            && ShouldRewriteToCountryWiseSalesView(request.Message, sql)
-            && TryBuildCountryWiseSalesSql(request.Message, out var countryRewriteSql, out var countryRewriteWarn))
-        {
-            _logger.LogWarning("Rewriting to governed vw_Countrywise_sales country-wise query");
-            sql = countryRewriteSql;
-            rows = await ExecuteReadOnlyAsync(sql, ct);
-            warning = countryRewriteWarn;
-        }
-        else if (rows.Count == 0 && sql.Contains("LedgerGroupMaster", StringComparison.OrdinalIgnoreCase))
+        if (rows.Count == 0 && sql.Contains("LedgerGroupMaster", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning("Empty LedgerGroupMaster result; rewriting to LedgerMaster.Under");
             sql = """
@@ -733,6 +824,26 @@ public partial class ChatOrchestratorService
             sql = creditSql;
             rows = await ExecuteReadOnlyAsync(sql, ct);
             warning = "Rewrote credit-note filters: CompanyName=our company, PartyName=customer (governed; fixed swapped/polyfilms-Purchase mistake).";
+        }
+        else if (rows.Count == 0
+                 && LooksLikeCountryWiseSalesQuestion(request.Message)
+                 && TryBuildCountryWiseSalesSql(request.Message, out var emptyCountrySql, out var emptyCountryWarn)
+                 && !string.Equals(emptyCountrySql, sql, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("Empty country-wise sales result; retrying governed SQL");
+            sql = emptyCountrySql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = emptyCountryWarn;
+        }
+        else if (rows.Count == 0
+                 && LooksLikeCountryWiseSalesQuestion(request.Message)
+                 && sql.Contains("GroupName", StringComparison.OrdinalIgnoreCase)
+                 && TryBuildCountryWiseSalesFallbackSql(request.Message, out var fallbackCountrySql, out var fallbackCountryWarn))
+        {
+            _logger.LogWarning("Empty country-wise GroupName filter; falling back to GroupName LIKE");
+            sql = fallbackCountrySql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = fallbackCountryWarn;
         }
         else if (rows.Count == 0
                  && LooksLikeTopExportCustomersQuestion(request.Message)
@@ -1755,12 +1866,18 @@ public partial class ChatOrchestratorService
 
         var vendorIntent = LooksLikePendingPoVendorIntent(message, sql);
         var minAmount = TryExtractAmountThreshold(message);
+        var isCount = LooksLikePendingPoCountQuestion(message);
 
         // Pending set first (small), then join header/lines — never scan full Vw_PurchaseOrder.
         const string pendingUnion = """
             SELECT PoNo, PODate, ApprovalName, status FROM ApprovePO WHERE status = 'Pending'
             UNION ALL
             SELECT PoNo, PODate, ApprovalName, status FROM ApprovePOHOD WHERE status = 'Pending'
+            """;
+        const string pendingUnionDistinct = """
+            SELECT PoNo FROM ApprovePO WHERE status = 'Pending'
+            UNION ALL
+            SELECT PoNo FROM ApprovePOHOD WHERE status = 'Pending'
             """;
 
         if (vendorIntent)
@@ -1773,34 +1890,50 @@ public partial class ChatOrchestratorService
                 ? $"AND ISNULL(pp.TotalAmount, 0) > {amt.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
                 : "";
 
-            rewritten = $"""
-                SELECT TOP 50
-                    a.PoNo AS PurchaseCode,
-                    MAX(v.FirmName) AS FirmName,
-                    pp.CompanyName,
-                    pp.TotalAmount,
-                    pp.Currency,
-                    MAX(a.PODate) AS PODate,
-                    MAX(a.ApprovalName) AS ApprovalName,
-                    MAX(a.status) AS status
-                FROM (
-                    {pendingUnion}
-                ) a
-                INNER JOIN PurchasePayment pp ON a.PoNo = pp.PurchaseCode
-                INNER JOIN Vw_PurchaseOrder v ON a.PoNo = v.PurchaseCode
-                WHERE v.FirmName LIKE '%{EscapeSqlLiteral(vendorFrag)}%'
-                  {amountFilter}
-                GROUP BY a.PoNo, pp.CompanyName, pp.TotalAmount, pp.Currency
-                ORDER BY MAX(a.PODate) DESC
-                """;
-            warning =
-                $"Rewrote pending PO query for vendor FirmName LIKE '%{vendorFrag}%' (start from pending approvals; avoid full Vw_PurchaseOrder scan).";
+            if (isCount)
+            {
+                rewritten = $"""
+                    SELECT COUNT(DISTINCT a.PoNo) AS PendingPOCount
+                    FROM (
+                        {pendingUnionDistinct}
+                    ) a
+                    INNER JOIN PurchasePayment pp ON a.PoNo = pp.PurchaseCode
+                    INNER JOIN Vw_PurchaseOrder v ON a.PoNo = v.PurchaseCode
+                    WHERE v.FirmName LIKE '%{EscapeSqlLiteral(vendorFrag)}%'
+                      {amountFilter}
+                    """;
+                warning =
+                    $"Governed pending PO COUNT for vendor FirmName LIKE '%{vendorFrag}%' (ApprovePO + ApprovePOHOD).";
+            }
+            else
+            {
+                rewritten = $"""
+                    SELECT TOP 50
+                        a.PoNo AS PurchaseCode,
+                        MAX(v.FirmName) AS FirmName,
+                        pp.CompanyName,
+                        pp.TotalAmount,
+                        pp.Currency,
+                        MAX(a.PODate) AS PODate,
+                        MAX(a.ApprovalName) AS ApprovalName,
+                        MAX(a.status) AS status
+                    FROM (
+                        {pendingUnion}
+                    ) a
+                    INNER JOIN PurchasePayment pp ON a.PoNo = pp.PurchaseCode
+                    INNER JOIN Vw_PurchaseOrder v ON a.PoNo = v.PurchaseCode
+                    WHERE v.FirmName LIKE '%{EscapeSqlLiteral(vendorFrag)}%'
+                      {amountFilter}
+                    GROUP BY a.PoNo, pp.CompanyName, pp.TotalAmount, pp.Currency
+                    ORDER BY MAX(a.PODate) DESC
+                    """;
+                warning =
+                    $"Governed pending PO list for vendor FirmName LIKE '%{vendorFrag}%' (ApprovePO + ApprovePOHOD).";
+            }
             return true;
         }
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "")
-                      ?? TryExtractSqlCompanyNameLiteral(sql);
+        var company = ResolvePendingPoCompany(message, sql);
 
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(company))
@@ -1810,27 +1943,90 @@ public partial class ChatOrchestratorService
 
         var where = filters.Count > 0 ? "WHERE " + string.Join(" AND ", filters) : "";
 
-        rewritten = $"""
-            SELECT TOP 50
-                pp.PurchaseCode,
-                pp.CompanyName,
-                pp.TotalAmount,
-                pp.Currency,
-                MAX(a.PODate) AS PODate,
-                MAX(a.ApprovalName) AS ApprovalName,
-                MAX(a.status) AS status
-            FROM PurchasePayment pp
-            INNER JOIN (
-                {pendingUnion}
-            ) a ON pp.PurchaseCode = a.PoNo
-            {where}
-            GROUP BY pp.PurchaseCode, pp.CompanyName, pp.TotalAmount, pp.Currency
-            ORDER BY MAX(a.PODate) DESC
-            """;
-        warning = string.IsNullOrWhiteSpace(company)
-            ? "Rewrote pending PO query to join ApprovePO/ApprovePOHOD (deduped; PurchasePayment has no PurchaseDate)."
-            : $"Rewrote pending PO query for buyer CompanyName = '{company}' (deduped; not vendor FirmName).";
+        if (isCount)
+        {
+            rewritten = $"""
+                SELECT COUNT(DISTINCT a.PoNo) AS PendingPOCount
+                FROM (
+                    {pendingUnionDistinct}
+                ) a
+                INNER JOIN PurchasePayment pp ON a.PoNo = pp.PurchaseCode
+                {where}
+                """;
+            warning = string.IsNullOrWhiteSpace(company)
+                ? "Governed pending PO COUNT via ApprovePO + ApprovePOHOD + PurchasePayment."
+                : $"Governed pending PO COUNT for buyer CompanyName = '{company}' (ApprovePO + ApprovePOHOD).";
+        }
+        else
+        {
+            rewritten = $"""
+                SELECT TOP 50
+                    pp.PurchaseCode,
+                    pp.CompanyName,
+                    pp.TotalAmount,
+                    pp.Currency,
+                    MAX(a.PODate) AS PODate,
+                    MAX(a.ApprovalName) AS ApprovalName,
+                    MAX(a.status) AS status
+                FROM PurchasePayment pp
+                INNER JOIN (
+                    {pendingUnion}
+                ) a ON pp.PurchaseCode = a.PoNo
+                {where}
+                GROUP BY pp.PurchaseCode, pp.CompanyName, pp.TotalAmount, pp.Currency
+                ORDER BY MAX(a.PODate) DESC
+                """;
+            warning = string.IsNullOrWhiteSpace(company)
+                ? "Governed pending PO list via ApprovePO + ApprovePOHOD + PurchasePayment."
+                : $"Governed pending PO list for buyer CompanyName = '{company}' (ApprovePO + ApprovePOHOD).";
+        }
         return true;
+    }
+
+    private static string? ResolvePendingPoCompany(string message, string sql) =>
+        ResolveOutwardCompanyAlias(message)
+        ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "")
+        ?? TryExtractSqlCompanyNameLiteral(sql);
+
+    private static bool LooksLikePendingPoCountQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        return m.Contains("how many")
+               || m.StartsWith("number of")
+               || (m.Contains("count") && (m.Contains("po") || m.Contains("purchase order")));
+    }
+
+    private static bool IsGovernedPendingPoSql(string sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql)) return false;
+        var hasPendingQueue = sql.Contains("ApprovePO", StringComparison.OrdinalIgnoreCase)
+                              || sql.Contains("ApprovePOHOD", StringComparison.OrdinalIgnoreCase);
+        if (!hasPendingQueue) return false;
+
+        if (sql.Contains("PurchasePayment", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Vendor pending PO path joins Vw_PurchaseOrder from pending union
+        return sql.Contains("Vw_PurchaseOrder", StringComparison.OrdinalIgnoreCase)
+               && sql.Contains("FirmName", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldForcePendingPoGovernedRewrite(string sql, int rowCount)
+    {
+        if (IsGovernedPendingPoSql(sql))
+            return rowCount == 0;
+
+        if (rowCount == 0)
+            return true;
+
+        // Wrong tables that often appear when LLM confuses PR / allocation with PO approval
+        if (sql.Contains("Vw_PurchaseReq", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (sql.Contains("POAllocation", StringComparison.OrdinalIgnoreCase)
+            && !sql.Contains("ApprovePO", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return !IsGovernedPendingPoSql(sql);
     }
 
     private static bool LooksLikePendingPoVendorIntent(string message, string sql)
@@ -2713,6 +2909,152 @@ public partial class ChatOrchestratorService
         return false;
     }
 
+    private static bool LooksLikeCountryWiseSalesQuestion(string message)
+    {
+        if (LooksLikeTopExportCustomersQuestion(message))
+            return false;
+
+        var m = message.ToLowerInvariant();
+        if (!m.Contains("country"))
+            return false;
+
+        if (m.Contains("country wise") || m.Contains("country-wise") || m.Contains("countrywise"))
+            return true;
+        if (m.Contains("by country") || m.Contains("sales by country") || m.Contains("country breakdown"))
+            return true;
+        if (m.Contains("wise") && (m.Contains("sales") || m.Contains("sale")))
+            return true;
+
+        return false;
+    }
+
+    private static bool ShouldRewriteToCountryWiseSales(string sql)
+    {
+        if (sql.Contains("vw_Countrywise_sales_dashboard", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return sql.Contains("Destination", StringComparison.OrdinalIgnoreCase)
+               || (sql.Contains("vw_Salesvoucher", StringComparison.OrdinalIgnoreCase)
+                   && sql.Contains("Country", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ToInvYearShortLabel(int fyStartYear) =>
+        $"{fyStartYear % 100:D2}-{(fyStartYear + 1) % 100:D2}";
+
+    private static bool TryBuildCountryWiseSalesSql(
+        string message,
+        out string sql,
+        out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeCountryWiseSalesQuestion(message))
+            return false;
+
+        var topN = ParseTopN(message, defaultN: 50);
+        var (fyStart, _, fyLabel) = ParseIndianFinancialYear(message);
+        var invYear = ToInvYearShortLabel(fyStart.Year);
+        var invYearLit = EscapeSqlLiteral(invYear);
+
+        var groupHint = ResolveFactoryGroupHint(message);
+        var companyExact = ResolveOutwardCompanyAlias(message)
+                           ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+
+        var isAll = message.Contains("all companies", StringComparison.OrdinalIgnoreCase)
+                    || message.Contains("all company", StringComparison.OrdinalIgnoreCase);
+
+        string companyFilter;
+        string companyNote;
+        if (isAll)
+        {
+            companyFilter = "";
+            companyNote = "all companies";
+        }
+        else if (!string.IsNullOrWhiteSpace(companyExact))
+        {
+            var companyLit = EscapeSqlLiteral(companyExact);
+            companyFilter = $"""
+                AND GroupName IN (
+                    SELECT DISTINCT LTRIM(RTRIM(GroupName))
+                    FROM FactoryInfo
+                    WHERE Name = '{companyLit}'
+                      AND ISNULL(LTRIM(RTRIM(GroupName)), '') <> ''
+                )
+                """;
+            companyNote = companyExact;
+        }
+        else if (!string.IsNullOrWhiteSpace(groupHint))
+        {
+            var hint = EscapeSqlLiteral(groupHint);
+            companyFilter = $"AND GroupName LIKE '%{hint}%'";
+            companyNote = $"GroupName LIKE '%{groupHint}%'";
+        }
+        else
+        {
+            return false;
+        }
+
+        sql = $"""
+            SELECT TOP {topN}
+                Country,
+                SUM(CAST(Value AS float)) AS SalesAmount
+            FROM vw_Countrywise_sales_dashboard
+            WHERE InvYear = '{invYearLit}'
+              {companyFilter}
+            GROUP BY Country
+            ORDER BY SUM(CAST(Value AS float)) DESC
+            """;
+
+        warning =
+            $"Governed country-wise sales on vw_Countrywise_sales_dashboard for FY {invYear} (InvYear={invYear}, calendar {fyLabel}), company={companyNote}, SUM(Value) excl. intercompany.";
+        return true;
+    }
+
+    private static bool TryBuildCountryWiseSalesFallbackSql(
+        string message,
+        out string sql,
+        out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeCountryWiseSalesQuestion(message))
+            return false;
+
+        var groupHint = ResolveFactoryGroupHint(message);
+        var companyExact = ResolveOutwardCompanyAlias(message)
+                           ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var likeHint = groupHint
+                       ?? (companyExact is not null
+                           ? System.Text.RegularExpressions.Regex.Replace(
+                               companyExact,
+                               @"\s+(Limited|Ltd\.?|Pvt\.?|Private).*$",
+                               "",
+                               System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim()
+                           : null);
+        if (string.IsNullOrWhiteSpace(likeHint))
+            return false;
+
+        var topN = ParseTopN(message, defaultN: 50);
+        var (fyStart, _, fyLabel) = ParseIndianFinancialYear(message);
+        var invYear = EscapeSqlLiteral(ToInvYearShortLabel(fyStart.Year));
+        var hint = EscapeSqlLiteral(likeHint);
+
+        sql = $"""
+            SELECT TOP {topN}
+                Country,
+                SUM(CAST(Value AS float)) AS SalesAmount
+            FROM vw_Countrywise_sales_dashboard
+            WHERE InvYear = '{invYear}'
+              AND GroupName LIKE '%{hint}%'
+            GROUP BY Country
+            ORDER BY SUM(CAST(Value AS float)) DESC
+            """;
+
+        warning =
+            $"Governed country-wise sales fallback: GroupName LIKE '%{likeHint}%' for FY {ToInvYearShortLabel(fyStart.Year)} ({fyLabel}).";
+        return true;
+    }
+
     private static bool LooksLikeTopExportCustomersQuestion(string message)
     {
         var m = message.ToLowerInvariant();
@@ -2725,110 +3067,6 @@ public partial class ChatOrchestratorService
                || m.Contains("biggest")
                || m.Contains("ranking")
                || m.Contains("rank");
-    }
-
-    private static bool LooksLikeCountryWiseSalesQuestion(string message)
-    {
-        var m = message.ToLowerInvariant();
-        if (!m.Contains("country")) return false;
-        if (!m.Contains("sales") && !m.Contains("sale") && !m.Contains("revenue") && !m.Contains("turnover"))
-            return false;
-        return m.Contains("country wise")
-               || m.Contains("country-wise")
-               || m.Contains("by country")
-               || m.Contains("wise sales")
-               || m.Contains("country breakdown")
-               || m.Contains("sales by country");
-    }
-
-    private static bool ShouldRewriteToCountryWiseSalesView(string message, string sql)
-    {
-        if (!LooksLikeCountryWiseSalesQuestion(message))
-            return false;
-        if (sql.Contains("vw_Countrywise_sales", StringComparison.OrdinalIgnoreCase))
-            return false;
-        return true;
-    }
-
-    /// <summary>Catalog InvYear uses yy-yy (e.g. 25-26); ParseIndianFinancialYear label is 2025-26.</summary>
-    private static string FormatInvYearForCountryWiseView(string fyLabel)
-    {
-        var m = System.Text.RegularExpressions.Regex.Match(
-            fyLabel,
-            @"^(?:20)?(\d{2})-(\d{2})$");
-        if (m.Success)
-            return $"{m.Groups[1].Value}-{m.Groups[2].Value}";
-
-        var shortInMessage = System.Text.RegularExpressions.Regex.Match(
-            fyLabel,
-            @"(\d{2})-(\d{2})");
-        if (shortInMessage.Success)
-            return $"{shortInMessage.Groups[1].Value}-{shortInMessage.Groups[2].Value}";
-
-        return fyLabel;
-    }
-
-    private static bool TryBuildCountryWiseSalesSql(
-        string message,
-        out string sql,
-        out string warning)
-    {
-        sql = "";
-        warning = "";
-        if (!LooksLikeCountryWiseSalesQuestion(message))
-            return false;
-
-        var wantsGroup = message.Contains("group", StringComparison.OrdinalIgnoreCase);
-        var groupHint = ResolveFactoryGroupHint(message);
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
-
-        string companyFilter;
-        string companyNote;
-        if (wantsGroup && !string.IsNullOrWhiteSpace(groupHint))
-        {
-            var hint = EscapeSqlLiteral(groupHint);
-            companyFilter = $"""
-                GroupName IN (
-                    SELECT Name FROM FactoryInfo
-                    WHERE GroupName LIKE '%{hint}%'
-                       OR Name LIKE '%{hint}%'
-                )
-                """;
-            companyNote = $"FactoryInfo group/name LIKE '%{groupHint}%'";
-        }
-        else if (!string.IsNullOrWhiteSpace(company))
-        {
-            companyFilter = $"GroupName = '{EscapeSqlLiteral(company)}'";
-            companyNote = company;
-        }
-        else if (!string.IsNullOrWhiteSpace(groupHint))
-        {
-            var hint = EscapeSqlLiteral(groupHint);
-            companyFilter = $"GroupName LIKE '%{hint}%'";
-            companyNote = $"GroupName LIKE '%{groupHint}%'";
-        }
-        else
-        {
-            return false;
-        }
-
-        var (_, _, fyLabel) = ParseIndianFinancialYear(message);
-        var invYear = FormatInvYearForCountryWiseView(fyLabel);
-
-        sql = $"""
-            SELECT TOP 50
-                Country,
-                Amount AS TotalSalesAmount
-            FROM vw_Countrywise_sales
-            WHERE {companyFilter}
-              AND InvYear = '{EscapeSqlLiteral(invYear)}'
-            ORDER BY Amount DESC
-            """;
-
-        warning =
-            $"Governed country-wise sales on vw_Countrywise_sales for InvYear={invYear}, company={companyNote} (GroupName column = legal company name; Amount pre-aggregated per country).";
-        return true;
     }
 
     private static bool TryBuildTopExportCustomersSql(
@@ -3058,47 +3296,48 @@ public partial class ChatOrchestratorService
     /// </summary>
     private static (DateTime Start, DateTime EndExclusive, string Label) ParseIndianFinancialYear(string message)
     {
-        var shortFy = System.Text.RegularExpressions.Regex.Match(
-            message,
-            @"\b(?:fy|f\.y\.|financial\s+year)\s*(?:is\s*)?(\d{2})\s*[-–/]\s*(\d{2})\b",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        if (shortFy.Success
-            && int.TryParse(shortFy.Groups[1].Value, out var shortStartYy)
-            && int.TryParse(shortFy.Groups[2].Value, out var shortEndYy))
-        {
-            var parsedStartYear = shortStartYy >= 50 ? 1900 + shortStartYy : 2000 + shortStartYy;
-            var parsedEndYear = shortEndYy >= 50 ? 1900 + shortEndYy : 2000 + shortEndYy;
-            if (parsedEndYear <= parsedStartYear)
-                parsedEndYear = parsedStartYear + 1;
-            var start = new DateTime(parsedStartYear, 4, 1);
-            var endEx = new DateTime(parsedEndYear, 4, 1);
-            var label = $"{parsedStartYear}-{(parsedEndYear % 100):D2}";
-            return (start, endEx, label);
-        }
-
         var m = System.Text.RegularExpressions.Regex.Match(
             message,
             @"\b(?:fy|f\.y\.|financial\s+year)?\s*(20\d{2})\s*[-–/]\s*(\d{2}|\d{4})\b",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (m.Success
-            && int.TryParse(m.Groups[1].Value, out var fullStartYear))
+            && int.TryParse(m.Groups[1].Value, out var startYear))
         {
             var endRaw = m.Groups[2].Value;
-            int fullEndYear;
-            if (endRaw.Length == 4 && int.TryParse(endRaw, out var endYearFourDigit))
-                fullEndYear = endYearFourDigit;
-            else if (endRaw.Length == 2 && int.TryParse(endRaw, out var endYearTwoDigit))
-                fullEndYear = (fullStartYear / 100) * 100 + endYearTwoDigit;
+            int endYear;
+            if (endRaw.Length == 4 && int.TryParse(endRaw, out var ey4))
+                endYear = ey4;
+            else if (endRaw.Length == 2 && int.TryParse(endRaw, out var ey2))
+                endYear = (startYear / 100) * 100 + ey2;
             else
-                fullEndYear = fullStartYear + 1;
+                endYear = startYear + 1;
 
-            if (fullEndYear <= fullStartYear)
-                fullEndYear = fullStartYear + 1;
+            if (endYear <= startYear)
+                endYear = startYear + 1;
 
-            var start = new DateTime(fullStartYear, 4, 1);
-            var endEx = new DateTime(fullEndYear, 4, 1);
-            var label = $"{fullStartYear}-{(fullEndYear % 100):D2}";
+            var start = new DateTime(startYear, 4, 1);
+            var endEx = new DateTime(endYear, 4, 1);
+            var label = $"{startYear}-{(endYear % 100):D2}";
             return (start, endEx, label);
+        }
+
+        var mShort = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:fy|f\.y\.|financial\s+year|last\s+financial\s+year)?\s*(\d{2})\s*[-–/]\s*(\d{2})\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (mShort.Success
+            && int.TryParse(mShort.Groups[1].Value, out var yyStart)
+            && int.TryParse(mShort.Groups[2].Value, out var yyEnd))
+        {
+            var shortStartYear = 2000 + yyStart;
+            var shortEndYear = yyEnd > yyStart ? 2000 + yyEnd : shortStartYear + 1;
+            if (shortEndYear <= shortStartYear)
+                shortEndYear = shortStartYear + 1;
+
+            var shortStart = new DateTime(shortStartYear, 4, 1);
+            var shortEndEx = new DateTime(shortEndYear, 4, 1);
+            var shortLabel = $"{shortStartYear}-{(shortEndYear % 100):D2}";
+            return (shortStart, shortEndEx, shortLabel);
         }
 
         // Default: current Indian FY from local date
@@ -3236,6 +3475,14 @@ public partial class ChatOrchestratorService
                 return rest.Trim();
         }
 
+        // "... for Oswal Extrusion Limited?" / "... at Plastene Polyfilms Limited"
+        var forCompany = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:for|at)\s+(?:the\s+)?([A-Za-z0-9][A-Za-z0-9 .,&\-()']*?(?:Limited|Ltd|Pvt|Private)(?:\s*\([^)]+\))?)\s*[?.!]?\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (forCompany.Success)
+            return forCompany.Groups[1].Value.Trim().TrimEnd('?', '.', '!');
+
         return null;
     }
 
@@ -3252,6 +3499,50 @@ public partial class ChatOrchestratorService
             Domain = c.Domain ?? "",
             Score = Math.Round(c.Score, 4)
         }).ToList();
+
+        if (warning != null
+            && warning.Contains("export sales invoice", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!list.Any(t => t.ObjectName.Equals("vw_Salesvoucher", StringComparison.OrdinalIgnoreCase)))
+            {
+                list.Insert(0, new RetrievedTableDto
+                {
+                    ObjectName = "vw_Salesvoucher",
+                    Domain = "Sales",
+                    Score = 1
+                });
+            }
+        }
+
+        if (warning != null
+            && warning.Contains("stock-in-hand", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!list.Any(t => t.ObjectName.Equals("vw_itemwiseStock", StringComparison.OrdinalIgnoreCase)))
+            {
+                list.Insert(0, new RetrievedTableDto
+                {
+                    ObjectName = "vw_itemwiseStock",
+                    Domain = "Warehouse / stock",
+                    Score = 1
+                });
+            }
+        }
+
+        if (warning != null
+            && warning.Contains("pending PO", StringComparison.OrdinalIgnoreCase))
+        {
+            void EnsurePendingPo(string name, string domain)
+            {
+                if (list.Any(t => t.ObjectName.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                    return;
+                list.Insert(0, new RetrievedTableDto { ObjectName = name, Domain = domain, Score = 1 });
+            }
+
+            EnsurePendingPo("ApprovePO", "PO");
+            EnsurePendingPo("ApprovePOHOD", "PO");
+            if (sql.Contains("PurchasePayment", StringComparison.OrdinalIgnoreCase))
+                EnsurePendingPo("PurchasePayment", "PO");
+        }
 
         if (warning != null
             && warning.Contains("export customers", StringComparison.OrdinalIgnoreCase))

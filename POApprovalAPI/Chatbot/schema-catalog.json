@@ -1,6 +1,6 @@
 {
-  "version": "2.4.2",
-  "createdFor": "NL-to-SQL chatbot — prior domains + Sales + Despatch + Production",
+  "version": "2.5.0",
+  "createdFor": "NL-to-SQL chatbot — Phase 1: country-wise + EBIDTA sales/purchase totals + eval coverage",
   "database": {
     "server": "103.240.33.122,5115",
     "name": "MaterialProcessing",
@@ -35,7 +35,9 @@
     "GOVERNANCE (Vendor rates): Historical/vendor-item rates use VendorRate (~921k; preferred detailed) and Vw_VendorItem (~14.5M; slim ItemCode/FirmName/Rate/NegoRate/itemdesc). ALWAYS filter by FirmName and/or ItemCode (or SubCode) and ALWAYS TOP 50 — never SELECT without a selective WHERE. Prefer VendorRate for Rate/NegoRate/PaymentTerm/Discount/taxes; Vw_VendorItem when only itemdesc + rate list needed. For rates on a specific quotation/PO prefer Vw_Quotation (PurchaseCode/FirmName). VendorRate.FirmName joins Vendor.FirmName; ItemCode joins ItemInfo.itemcode; SubCode often joins ItemInfo.code (indent line). Example: Bright Rubber has recent VendorRate rows; WIP00013 has multiple vendors on VendorRate.",
     "GOVERNANCE (Gate pass): Returnable gate pass (RGP) — prefer Vw_ReturnGatePass / ReturnGatePass (GatePassNo like CO/yy-yy/GP/n; CompName NOT CompanyName; ActualPartyName/PurposePartyName; ItemCode, Qty, Purpose). Non-returnable (NRGP) — prefer Vw_NonReturnGatePass / NonReturnGatePass (GatePassNo like CO/yy-yy/NGP/n; PartyName; CompName). Inward against returnable: InwdReturnGatePass (InwGatePassNo; GatePassNo links to ReturnGatePass when set). Pending returns: vw_returngatepasspending (ReturnQty, InwardQty, PendingQty — filter PendingQty > 0). Company column is CompName on all gate-pass objects. ItemCode joins ItemInfo.itemcode. Always TOP 50.",
     "GOVERNANCE (Job work): Formal job-work orders are sparse (~7 headers / ~12 lines) — prefer Vw_EditJOBWorkOrder or Vw_JOBWORKORDER (PurchaseCode like PIL/JRO/... or PIL2/JWO/...; FirmName, ItemCode, JobWorkCharges, GatePassNo on edit view). Do NOT expect join to PurchasePayment/ApproveWorkOrder (0 matches live). Live MIS quantities: VW_JobWork_EBD_DTL (material at/sent job work by ItemCode, companyname) and VW_RECJOBWORK_EBD_DTL (received from job work with MRNo e.g. JBIN-SE). Prefer detail (_DTL) views over summary EBD. Returnable job-work movements also appear on Vw_ReturnGatePass WHERE Purpose LIKE '%Job Work%'. Skip empty Vw_StoreOutwardjobworkorder and tiny ApproveJOBWORKORDER. Always TOP 50; filter companyname/CompanyName and/or ItemCode on EBD views.",
-    "GOVERNANCE (Sales): Sales invoices/vouchers — prefer vw_Salesvoucher (header: InvNo, InvDate, BuyerName, BillAMount, CompanyName, InvType, TypeofInvoice, currency) or SalesVoucher. Line items: SalesVoucherItem (join CompanyName+InvNo; ITEMCODE, ItemName, ActualQty, Rate, Amount, HSNCODE). Compact list: vw_SalesInvList (Invno, DespatchDate, BuyerName, OrgInvno). Tax lines: SalesVoucherTax (TaxledgerName, Amount; CreditNoteNumber links sales credit notes). MIS item sales: VW_SALES_EBD_DTL (itemcode, qTY, InvNo, companyname). BuyerName is the customer. InvType values include Sales, Export Sales, Commercial Export Sales, Sales InterUnit, Job Invoice, etc. Top export customers: GROUP BY BuyerName, SUM(BillAMount), InvType LIKE '%Export%', Indian FY on InvDate (FY 2024-25 = 2024-04-01 to <2025-04-01); for company groups use FactoryInfo.GroupName/Name. Country-wise sales (portal MIS): ALWAYS prefer vw_Countrywise_sales — columns GroupName (legal company name NOT FactoryInfo group), Country, Amount (pre-aggregated), InvYear (yy-yy e.g. 25-26 for FY 2025-26). Related vw_Countrywise_sales_basic_value, vw_Countrywise_sales_dashboard. NEVER answer country-wise with vw_Salesvoucher Domestic vs Export CASE only. Spaced columns on vw_Salesvoucher must be bracket-quoted e.g. [Company Address], [Company GST]. Sales credit notes remain CreditNote/vw_creditnote. Physical despatch/packing uses Despatch domain objects (not invoice headers alone). Always TOP 50.",
+    "GOVERNANCE (Sales): Sales invoices/vouchers — prefer vw_Salesvoucher (header: InvNo, InvDate, BuyerName, BillAMount, CompanyName, InvType, TypeofInvoice, currency) or SalesVoucher. Line items: SalesVoucherItem (join CompanyName+InvNo; ITEMCODE, ItemName, ActualQty, Rate, Amount, HSNCODE). Compact list: vw_SalesInvList (Invno, DespatchDate, BuyerName, OrgInvno). Tax lines: SalesVoucherTax (TaxledgerName, Amount; CreditNoteNumber links sales credit notes). MIS item sales: VW_SALES_EBD_DTL (itemcode, qTY, InvNo, companyname). BuyerName is the customer. InvType values include Sales, Export Sales, Commercial Export Sales, Sales InterUnit, Job Invoice, etc. Top export customers: GROUP BY BuyerName, SUM(BillAMount), InvType LIKE '%Export%', Indian FY on InvDate (FY 2024-25 = 2024-04-01 to <2025-04-01); for company groups use FactoryInfo.GroupName/Name. Spaced columns on vw_Salesvoucher must be bracket-quoted e.g. [Company Address], [Company GST]. Sales credit notes remain CreditNote/vw_creditnote. Physical despatch/packing uses Despatch domain objects (not invoice headers alone). Always TOP 50.",
+    "GOVERNANCE (Country-wise sales): For 'country wise sales' / 'sales by country' / 'export sales by country' for a company and Indian FY — ALWAYS prefer vw_Countrywise_sales_dashboard (Country, Value, InvYear, GroupName). Value = Amount - DebitNote; intercompany already excluded in view. Filter InvYear = short FY label e.g. '25-26' for FY 2025-26 (NOT InvDate range on vw_Salesvoucher). Filter company via GroupName IN (SELECT DISTINCT GroupName FROM FactoryInfo WHERE Name = full legal company name) — same as Sales Dashboard; NOT CompanyName on vw_Salesvoucher. NEVER use vw_Salesvoucher.Destination for country — Destination is port/city/district (Gujarat, Ahmedabad, KACHCHH), not country. GROUP BY Country, SUM(CAST(Value AS float)), ORDER BY SalesAmount DESC, TOP 50.",
+    "GOVERNANCE (Sales/Purchase EBIDTA): Total sales and sales-by-group/subgroup for FY — prefer vw_Sales_EBIDTA (CompanyName, invdate, Groupname, SubGroupName, Amount, netwt, InterGroup). Same basis as Sales Dashboard SP_Sales_EBIDTA. ALWAYS filter InterGroup <> 'Intergroup'. Total sales: SUM(Amount), SUM(netwt) for CompanyName + invdate FY range. By group: GROUP BY Groupname; by sub-group: GROUP BY Groupname, SubGroupName. Total purchase: vw_Purchase_EBIDTA with same IC filter and invdate FY range. NEVER use vw_Salesvoucher.BillAMount for dashboard-style totals.",
     "GOVERNANCE (Despatch): Physical despatch/packing — ALWAYS filter CompanyName/Companyname and/or InvNo/Invno and/or PartyName/Partyname and/or date (sysdate/SysDate) and ALWAYS TOP 50 (tables are 200k–1.1M+). Roll despatch: prefer vw_MISrolldespatch (RollNO, Quality, NetWt, Companyname, Partyname, Invno, sysdate, PONO, PACKINGLISTNO on underlying MISRollforDespatch — prefer the view; do not also query MISRollforDespatch). FIBC bail despatch: FIBCDespatch (BailNo, Qty, Wt, InvNo, PACKINGLISTNO, PartyName, vVehicleNo). Yarn: MIS_YarnDespatch. Small bag bails: SmallBagBailForDespatch. Rolls waiting to despatch (no invoice yet): vw_RollforDespatch. Needle-loom rolls: MISNeedleRollforDespatch. Partyname/PartyName is customer/consignee. Link to sales invoice when InvNo matches vw_Salesvoucher.InvNo (formats vary — may need OrgInvno from vw_SalesInvList). Skip unused packing-list views that timeout.",
     "GOVERNANCE (Production): Factory daily summary — prefer vw_FactoryProduction (companyname, Sysdate, Particulars e.g. Tape/Fabric/Small Bag/WEBBING, TapeProduction, Loom, Fabric, SmallBag, Wastage). Tape plant daily — vw_daily_tape_prod_New (CompanyName, date, Opening, Production, Closing; bracket spaced cols [Total Production], [Loom Dept], [FIBC Dept], [Wastage Dept]). Loom roll production — prefer vw_LoomProductionENtry (CompanyName, Sysdate, LoomNo, RollNo, Quality, NetWt, Metre, Partyname) — ~716k MUST filter CompanyName and/or Sysdate/LoomNo/RollNo + TOP 50. FIBC bag production — prefer VW_FIBCBagwiseProduction (NOT stale VW_FIBCBagwiseProduction_New which ends 2016); BagPCS, BagWt, TYPEOFBAG, TeamNO, PartyName, PONO. Item/plant MIS qty — VW_PRODUCTION_EBD_DTL (itemcode, Qty, PlantName, companyname, sysdate) — filter company/item/date + TOP 50. WIP by item/dept — vw_WIPReport (ItemCode, Qty, Consumption, Deptt, CompanyName, Date). Small-bag line — SmallBagProductionEntry (Cutting, Stitching, BagPcs, PartyName) — live data is mainly Plastene India / HCP Plastene units (~8k rows); Oswal Extrusion Limited has NO SmallBagProductionEntry rows (Oswal production is Tape/Fabric/WEBBING via vw_FactoryProduction and FIBC via VW_FIBCBagwiseProduction). Skip stale vw_Loom_Prod_Mtr / vw_daily_loom_Meter_Rep (last ~2023), empty/timeout vw_totalproductionconsumption / Vw_Prod_WIPLoom, dailyProductionReport/DailyTotalProduction (no company), huge raw MISLOOMProductionEntryNew / misneedleloomproductionentry / Prod_Cutting_InOut / TapePlantConsumption / stockJournalProd. Production ≠ despatch and ≠ ApproveWorkOrder. Always TOP 50."
   ],
@@ -2316,41 +2318,6 @@
       "embeddingText": "View VW_RECJOBWORK_EBD_DTL. Domain: Job work. Receipts from job work (~17k) — CompanyName, ITEMCODE, ITEMNAME, MRNo (JBIN-SE...), Qty, GroupName, sysdate. Filter CompanyName/ITEMCODE + TOP 50. Sent/at job work: VW_JobWork_EBD_DTL. Formal job-work orders: Vw_EditJOBWorkOrder. NOT pending WO approval (ApproveWorkOrder). Synonyms: job work receipt, received from job work, JBIN. Always TOP 50."
     },
     {
-      "id": "vw_Countrywise_sales",
-      "objectName": "vw_Countrywise_sales",
-      "schema": "dbo",
-      "objectType": "VIEW",
-      "domain": "Sales",
-      "purpose": "Preferred portal MIS view for country-wise sales totals. Pre-aggregated by company, country, and Indian FY. Use for 'country wise sales', 'sales by country', 'country breakdown'. Do NOT rebuild from vw_Salesvoucher with Domestic/Export CASE.",
-      "primaryKeyHint": "GroupName + Country + InvYear",
-      "statusColumn": null,
-      "columns": [
-        { "name": "GroupName", "dataType": "varchar", "nullable": true, "meaning": "Legal company name e.g. Plastene India Limited, Oswal Extrusion Limited — NOT FactoryInfo.GroupName field; filter with = or IN (SELECT Name FROM FactoryInfo ...) for groups" },
-        { "name": "Country", "dataType": "varchar", "nullable": true, "meaning": "Destination country e.g. INDIA, USA, UNITED ARAB EMIRATES" },
-        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Sales amount for this company+country+FY (already aggregated — do not SUM unless combining rows)" },
-        { "name": "InvYear", "dataType": "varchar", "nullable": true, "meaning": "Indian financial year as yy-yy e.g. 25-26 for FY 2025-26, 24-25 for FY 2024-25" }
-      ],
-      "joins": [
-        { "to": "FactoryInfo", "on": "vw_Countrywise_sales.GroupName = FactoryInfo.Name", "note": "GroupName column holds company legal name" },
-        { "to": "vw_Countrywise_sales_basic_value", "on": "same shape; basic value variant" },
-        { "to": "vw_Countrywise_sales_dashboard", "on": "adds DebitNote and Value columns for dashboard" }
-      ],
-      "synonyms": [
-        "country wise sales",
-        "country-wise sales",
-        "sales by country",
-        "country breakdown",
-        "vw_Countrywise_sales",
-        "countrywise sales"
-      ],
-      "exampleQuestions": [
-        "Country wise sales of Plastene India Limited for financial year 25-26",
-        "Sales by country for Oswal Extrusion Limited FY 24-25",
-        "Which countries does Plastene India export to this year?"
-      ],
-      "embeddingText": "View vw_Countrywise_sales. Domain: Sales. PREFERRED for country-wise sales — GroupName (legal company name e.g. Plastene India Limited), Country (INDIA, USA, UAE...), Amount (pre-aggregated total), InvYear (yy-yy e.g. 25-26 = FY 2025-26). Filter GroupName = company and InvYear = '25-26'. Related: vw_Countrywise_sales_basic_value, vw_Countrywise_sales_dashboard (DebitNote, Value). NEVER use vw_Salesvoucher Domestic/Export CASE for country-wise. Top export customers still use vw_Salesvoucher BuyerName. Synonyms: country wise sales, sales by country, country breakdown. Always TOP 50."
-    },
-    {
       "id": "vw_Salesvoucher",
       "objectName": "vw_Salesvoucher",
       "schema": "dbo",
@@ -2523,6 +2490,108 @@
         "Sales voucher tax rows linked to a credit note"
       ],
       "embeddingText": "Table SalesVoucherTax. Domain: Sales. Tax lines on invoices — CompanyName, InvNo, TaxledgerName, Rate, Amount, PartyName, CreditNoteNumber. Join vw_Salesvoucher on CompanyName+InvNo. Synonyms: sales tax, invoice GST lines. Always TOP 50."
+    },
+    {
+      "id": "vw_Countrywise_sales_dashboard",
+      "objectName": "vw_Countrywise_sales_dashboard",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Sales",
+      "purpose": "Preferred source for country-wise export sales totals (same as Sales Dashboard chart). FY-aggregated rows with Country, Value (= Amount - DebitNote), InvYear (short label e.g. 25-26), GroupName (FactoryInfo company group). Intercompany sales already excluded in view. NOT day-level — filter InvYear not InvDate.",
+      "primaryKeyHint": "Country + InvYear + GroupName (aggregated grain)",
+      "statusColumn": null,
+      "columns": [
+        { "name": "Country", "dataType": "varchar", "nullable": true, "meaning": "Customer/export country name (USA, UAE, etc.) — NOT Indian state/city" },
+        { "name": "Value", "dataType": "float", "nullable": true, "meaning": "Sales value = Amount - DebitNote; use SUM(CAST(Value AS float))" },
+        { "name": "InvYear", "dataType": "varchar", "nullable": true, "meaning": "Indian FY short label e.g. 25-26 for Apr 2025–Mar 2026" },
+        { "name": "GroupName", "dataType": "varchar", "nullable": true, "meaning": "Company group from FactoryInfo; filter via subquery on FactoryInfo.Name for a specific company" }
+      ],
+      "joins": [
+        { "to": "FactoryInfo", "on": "vw_Countrywise_sales_dashboard.GroupName = FactoryInfo.GroupName", "note": "Resolve company to GroupName via FactoryInfo.Name" }
+      ],
+      "synonyms": [
+        "country wise sales",
+        "sales by country",
+        "countrywise sales",
+        "export sales by country",
+        "country breakdown sales",
+        "vw_Countrywise_sales_dashboard"
+      ],
+      "exampleQuestions": [
+        "Country wise sales of Plastene India Limited for FY 25-26",
+        "Sales by country for Oswal Extrusion Limited financial year 2025-26",
+        "Top export countries for Plastene Polyfilms Limited FY 24-25"
+      ],
+      "embeddingText": "View vw_Countrywise_sales_dashboard. Domain: Sales / country-wise export sales. Preferred for country wise sales questions — Country (real country names), Value (Amount minus DebitNote), InvYear (short FY like 25-26), GroupName (company group). Filter company: GroupName IN (SELECT DISTINCT GroupName FROM FactoryInfo WHERE Name = legal company name). Filter FY: InvYear = 25-26. NEVER use vw_Salesvoucher.Destination for country — that is port/city/district. GROUP BY Country, SUM(Value), ORDER BY total DESC. Same source as Sales Dashboard country chart. Intercompany excluded."
+    },
+    {
+      "id": "vw_Sales_EBIDTA",
+      "objectName": "vw_Sales_EBIDTA",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Sales",
+      "purpose": "Sales Dashboard EBIDTA source for total sales, quantity, and sales by product group/sub-group. Excludes intercompany when InterGroup <> 'Intergroup'. Filter CompanyName and invdate for Indian FY.",
+      "primaryKeyHint": "CompanyName + invdate + Groupname + SubGroupName grain",
+      "statusColumn": "InterGroup",
+      "statusNotes": "InterGroup = 'Intergroup' rows are inter-company; exclude for external sales totals.",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Selling company" },
+        { "name": "invdate", "dataType": "datetime", "nullable": true, "meaning": "Invoice/transaction date for FY filtering" },
+        { "name": "Groupname", "dataType": "varchar", "nullable": true, "meaning": "Product group" },
+        { "name": "SubGroupName", "dataType": "varchar", "nullable": true, "meaning": "Product sub-group" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Sales amount (use SUM for totals)" },
+        { "name": "netwt", "dataType": "float", "nullable": true, "meaning": "Quantity in kg (SUM for total qty)" },
+        { "name": "InterGroup", "dataType": "varchar", "nullable": true, "meaning": "Filter <> Intergroup for external sales" }
+      ],
+      "joins": [
+        { "to": "FactoryInfo", "on": "vw_Sales_EBIDTA.CompanyName = FactoryInfo.Name" }
+      ],
+      "synonyms": [
+        "total sales",
+        "sales by group",
+        "sales dashboard",
+        "sales EBIDTA",
+        "product group sales",
+        "vw_Sales_EBIDTA"
+      ],
+      "exampleQuestions": [
+        "Total sales for Plastene India Limited FY 25-26",
+        "Sales by product group for Oswal Extrusion Limited financial year 2025-26"
+      ],
+      "embeddingText": "View vw_Sales_EBIDTA. Domain: Sales dashboard totals. Total sales and sales by group/sub-group — CompanyName, invdate, Groupname, SubGroupName, Amount, netwt, InterGroup. Filter InterGroup <> Intergroup. FY filter on invdate. SUM(Amount) for total sales; GROUP BY Groupname for group breakdown. Same as Sales Dashboard. NOT vw_Salesvoucher for totals."
+    },
+    {
+      "id": "vw_Purchase_EBIDTA",
+      "objectName": "vw_Purchase_EBIDTA",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Payment",
+      "purpose": "Purchase Dashboard EBIDTA source for total purchase and purchase by group. Excludes intercompany when InterGroup <> 'Intergroup'.",
+      "primaryKeyHint": "CompanyName + invdate + Groupname + SubGroupName grain",
+      "statusColumn": "InterGroup",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "invdate", "dataType": "datetime", "nullable": true, "meaning": "Date for FY filter" },
+        { "name": "Groupname", "dataType": "varchar", "nullable": true, "meaning": "Purchase group" },
+        { "name": "SubGroupName", "dataType": "varchar", "nullable": true, "meaning": "Purchase sub-group" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Purchase amount" },
+        { "name": "netwt", "dataType": "float", "nullable": true, "meaning": "Quantity" },
+        { "name": "InterGroup", "dataType": "varchar", "nullable": true, "meaning": "Exclude Intergroup for external purchase totals" }
+      ],
+      "joins": [
+        { "to": "FactoryInfo", "on": "vw_Purchase_EBIDTA.CompanyName = FactoryInfo.Name" }
+      ],
+      "synonyms": [
+        "total purchase",
+        "purchase by group",
+        "purchase EBIDTA",
+        "vw_Purchase_EBIDTA"
+      ],
+      "exampleQuestions": [
+        "Total purchase for Oswal Extrusion Limited FY 25-26",
+        "Purchase by group for Plastene Polyfilms Limited"
+      ],
+      "embeddingText": "View vw_Purchase_EBIDTA. Domain: Purchase dashboard totals. Total purchase and purchase by group — CompanyName, invdate, Groupname, SubGroupName, Amount, netwt, InterGroup. Filter InterGroup <> Intergroup. SUM(Amount) for total purchase. Same as Purchase Dashboard."
     },
     {
       "id": "VW_SALES_EBD_DTL",
@@ -3217,12 +3286,12 @@
       "verifiedOn": "live counts 2026-08-11"
     },
     {
-      "fact": "vw_Countrywise_sales: portal country-wise sales MIS — GroupName (legal company name), Country, Amount, InvYear (yy-yy e.g. 25-26). Plastene India Limited FY 25-26 includes INDIA ~4.47B, USA ~262M, UAE ~234M. Related vw_Countrywise_sales_basic_value, vw_Countrywise_sales_dashboard. Prefer over vw_Salesvoucher for country-wise questions.",
-      "verifiedOn": "live counts 2026-08-13"
-    },
-    {
       "fact": "SalesVoucher/vw_Salesvoucher ~104k headers; SalesVoucherItem ~195k. Join CompanyName+InvNo. InvType includes Sales, Export Sales, Commercial Export Sales, Sales InterUnit, Job Invoice. Oswal ~4155 invoices. PPL InvNo 468 has WIP00004 etc. vw_SalesInvList ~99k with DespatchDate. Physical despatch in Despatch domain.",
       "verifiedOn": "live counts/joins 2026-08-11"
+    },
+    {
+      "fact": "Country-wise sales: vw_Countrywise_sales_dashboard — Country, Value (Amount-DebitNote), InvYear (25-26), GroupName. Same as Sales Dashboard. NEVER vw_Salesvoucher.Destination for country (that is city/state/port). Company filter via FactoryInfo.GroupName from FactoryInfo.Name.",
+      "verifiedOn": "SalesDashboardService 2026-08-13"
     },
     {
       "fact": "Despatch: vw_MISrolldespatch ~1.16M (prefer over MISRollforDespatch); FIBCDespatch ~1.02M; MIS_YarnDespatch ~219k; SmallBagBailForDespatch ~266k; vw_RollforDespatch ~384k (no Invno). Always filter company/inv/party/date + TOP 50. Oswal rolls on MIS view ~81k.",
@@ -3238,7 +3307,7 @@
     "recommendedBackend": "fastembed (ONNX) via build_embeddings.py; sentence-transformers fallback",
     "outputFile": "schema-embeddings.json",
     "textField": "embeddingText",
-    "chunkCount": 69,
+    "chunkCount": 71,
     "retrieveTopK": "3-8"
   }
 }

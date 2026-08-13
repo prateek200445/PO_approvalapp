@@ -4,6 +4,11 @@ $ErrorActionPreference = "Stop"
 
 $cases = @(
   @{
+    id = "hdpe_granules_oswal"
+    message = "What is the current stock of HDPE granules at Oswal Extrusion?"
+    checks = @("sql_has:vw_itemwiseStock|WareHouse", "sql_has:LIKE", "sql_has:HDPE|granul", "sql_has:Oswal", "sql_has:StkInHand", "rows_gt:0", "governed_warning")
+  },
+  @{
     id = "stock_item_wip00013"
     message = "What is stock in hand for item WIP00013 at Oswal Extrusion Limited by warehouse?"
     checks = @("sql_has:WareHouse|vw_itemwiseStock|vw_inventoryitemwarehouse", "sql_has:WIP00013", "sql_has:Oswal", "sql_has:StkInHand", "rows_gt:0")

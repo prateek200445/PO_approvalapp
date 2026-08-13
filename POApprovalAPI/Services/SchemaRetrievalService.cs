@@ -30,9 +30,12 @@ public class SchemaRetrievalService
         if (!File.Exists(script))
             throw new InvalidOperationException($"Missing retrieve script at {script}");
 
+        var python = ResolvePython();
+        _logger.LogDebug("Schema RAG using Python at {Python}", python);
+
         var psi = new ProcessStartInfo
         {
-            FileName = ResolvePython(),
+            FileName = python,
             WorkingDirectory = _chatbotDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -100,34 +103,116 @@ public class SchemaRetrievalService
         return results;
     }
 
+    private static string? _cachedPython;
+
     private static string ResolvePython()
     {
-        var candidates = new[] { "python", "py" };
-        foreach (var c in candidates)
+        if (!string.IsNullOrEmpty(_cachedPython))
+            return _cachedPython;
+
+        foreach (var candidate in EnumeratePythonCandidates())
         {
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = c,
-                    Arguments = "--version",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                };
-                using var p = Process.Start(psi);
-                if (p == null) continue;
-                p.WaitForExit(3000);
-                if (p.ExitCode == 0) return c;
-            }
-            catch
-            {
-                // try next
-            }
+            if (!TryValidatePython(candidate, out var resolved))
+                continue;
+
+            _cachedPython = resolved;
+            return resolved;
         }
 
         throw new InvalidOperationException(
-            "Python was not found on PATH. Install Python and fastembed to enable schema RAG.");
+            "Python was not found. Install Python 3.12+ and fastembed, or set CHATBOT_PYTHON to the full path of python.exe.");
+    }
+
+    private static IEnumerable<string> EnumeratePythonCandidates()
+    {
+        foreach (var key in new[] { "CHATBOT_PYTHON", "PYTHON_PATH", "PYTHON_EXECUTABLE" })
+        {
+            var fromEnv = Environment.GetEnvironmentVariable(key);
+            if (!string.IsNullOrWhiteSpace(fromEnv))
+                yield return fromEnv.Trim();
+        }
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        foreach (var versionDir in new[] { "Python313", "Python312", "Python311", "Python310" })
+        {
+            yield return Path.Combine(localAppData, "Programs", "Python", versionDir, "python.exe");
+        }
+
+        foreach (var name in new[] { "python", "py" })
+        {
+            foreach (var onPath in FindExecutablesOnPath(name))
+                yield return onPath;
+        }
+    }
+
+    private static IEnumerable<string> FindExecutablesOnPath(string command)
+    {
+        var pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrWhiteSpace(pathEnv))
+            yield break;
+
+        var fileName = OperatingSystem.IsWindows() ? $"{command}.exe" : command;
+        foreach (var dir in pathEnv.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmed = dir.Trim();
+            if (trimmed.Length == 0)
+                continue;
+
+            var fullPath = Path.Combine(trimmed, fileName);
+            if (File.Exists(fullPath))
+                yield return fullPath;
+        }
+    }
+
+    private static bool IsWindowsAppsStub(string path) =>
+        path.Contains("WindowsApps", StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryValidatePython(string candidate, out string resolved)
+    {
+        resolved = candidate.Trim().Trim('"');
+        if (string.IsNullOrWhiteSpace(resolved))
+            return false;
+
+        if (IsWindowsAppsStub(resolved))
+            return false;
+
+        // Allow bare command names only when not a WindowsApps stub.
+        if (!resolved.Contains(Path.DirectorySeparatorChar)
+            && !resolved.Contains('/')
+            && !resolved.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            if (IsWindowsAppsStub(resolved))
+                return false;
+        }
+        else if (!File.Exists(resolved))
+        {
+            return false;
+        }
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = resolved,
+                Arguments = "--version",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var p = Process.Start(psi);
+            if (p == null)
+                return false;
+
+            p.WaitForExit(5000);
+            if (p.ExitCode != 0)
+                return false;
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

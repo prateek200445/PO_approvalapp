@@ -13,6 +13,12 @@ public partial class ChatOrchestratorService
         out string warning)
     {
         // Specific intents before generic pending PO / WO rewrites (those also match broad "pending PO" text).
+        if (TryBuildCountryWiseSalesSql(message, out sql, out warning)) return true;
+        if (TryBuildSalesTotalsSql(message, out sql, out warning)) return true;
+        if (TryBuildSalesByGroupSql(message, out sql, out warning)) return true;
+        if (TryBuildPurchaseTotalsSql(message, out sql, out warning)) return true;
+        if (TryBuildLedgerCountSql(message, out sql, out warning)) return true;
+        if (TryBuildLedgerGroupsSql(message, out sql, out warning)) return true;
         if (TryBuildPoQueueCompareSql(message, out sql, out warning)) return true;
         if (TryBuildRejectedPoSql(message, out sql, out warning)) return true;
         if (TryBuildRejectedBillPaymentSql(message, out sql, out warning)) return true;
@@ -21,8 +27,10 @@ public partial class ChatOrchestratorService
         if (TryBuildHighValuePoSql(message, out sql, out warning)) return true;
         if (TryBuildSalesInvoiceTaxSql(message, out sql, out warning)) return true;
         if (TryBuildAboveMaxStockSql(message, out sql, out warning)) return true;
+        if (TryBuildStockInHandSql(message, out sql, out warning)) return true;
         if (TryBuildStoreIssueByDeptSql(message, out sql, out warning)) return true;
         if (TryBuildInterUnitSalesSql(message, out sql, out warning)) return true;
+        if (TryBuildExportSalesInvoiceListSql(message, out sql, out warning)) return true;
         if (TryBuildRollsWaitingDespatchSql(message, out sql, out warning)) return true;
         if (TryBuildWebbingProductionSql(message, out sql, out warning)) return true;
         if (TryBuildLoomProductionByQualitySql(message, out sql, out warning)) return true;
@@ -44,7 +52,7 @@ public partial class ChatOrchestratorService
         warning = "";
         var m = message.ToLowerInvariant();
         if (!m.Contains("reject")) return false;
-        if (!m.Contains("po") && !m.Contains("purchase order")) return false;
+        if (!ContainsPoIntent(message)) return false;
 
         var days = 30;
         var dayMatch = Regex.Match(m, @"\blast\s+(\d{1,3})\s+days?\b");
@@ -78,7 +86,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("pending")) return false;
         if (!(m.Contains("compare") || m.Contains("vs") || m.Contains("versus"))) return false;
         if (!m.Contains("hod") && !m.Contains("standard")) return false;
-        if (!m.Contains("po") && !m.Contains("purchase order")) return false;
+        if (!ContainsPoIntent(message)) return false;
 
         sql = """
             SELECT 'Standard' AS Queue, COUNT(*) AS PendingCount
@@ -327,7 +335,7 @@ public partial class ChatOrchestratorService
         sql = "";
         warning = "";
         var m = message.ToLowerInvariant();
-        if (!m.Contains("po") && !m.Contains("purchase order")) return false;
+        if (!ContainsPoIntent(message)) return false;
         if (!(m.Contains("currency") || m.Contains("delivery") || m.Contains("payment term"))) return false;
 
         var company = ResolveOutwardCompanyAlias(message)
@@ -370,7 +378,7 @@ public partial class ChatOrchestratorService
         sql = "";
         warning = "";
         var m = message.ToLowerInvariant();
-        if (!m.Contains("purchase order") && !Regex.IsMatch(m, @"\bpos?\b")) return false;
+        if (!ContainsPoIntent(message) && !m.Contains("purchase order")) return false;
         if (!(m.Contains("high-value") || m.Contains("high value")
               || m.Contains("descending") || m.Contains("largest") || m.Contains("high-value")))
             return false;
@@ -511,6 +519,92 @@ public partial class ChatOrchestratorService
             """;
         warning = $"Governed inter-unit sales invoices on vw_Salesvoucher for {company}.";
         return true;
+    }
+
+    private static bool TryBuildExportSalesInvoiceListSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeExportSalesInvoiceListQuestion(message))
+            return false;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        if (string.IsNullOrWhiteSpace(company))
+            return false;
+
+        var companyLit = EscapeSqlLiteral(company);
+        var dateFilter = "";
+        var periodNote = "all dates";
+
+        if (MessageRequestsSalesDateFilter(message))
+        {
+            var (start, end, label) = TryParseRelativePeriod(message);
+            dateFilter = $"""
+                
+                  AND InvDate >= '{start:yyyy-MM-dd}'
+                  AND InvDate < '{end:yyyy-MM-dd}'
+                """;
+            periodNote = label;
+        }
+
+        sql = $"""
+            SELECT TOP 50
+                InvNo,
+                InvDate,
+                BuyerName,
+                BillAMount,
+                InvType,
+                CompanyName,
+                currency
+            FROM vw_Salesvoucher
+            WHERE CompanyName = '{companyLit}'
+              AND InvType LIKE '%Export%'{dateFilter}
+            ORDER BY InvDate DESC
+            """;
+        warning =
+            $"Governed export sales invoice list on vw_Salesvoucher for {company} ({periodNote}), InvType LIKE '%Export%'.";
+        return true;
+    }
+
+    private static bool LooksLikeExportSalesInvoiceListQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (!m.Contains("export")) return false;
+        if (!m.Contains("invoice") && !m.Contains("sales")) return false;
+        if (m.Contains("inter-unit") || m.Contains("inter unit") || m.Contains("interunit")) return false;
+
+        // Top export customer ranking — different governed query
+        if (m.Contains("customer") || m.Contains("buyer") || m.Contains("client"))
+        {
+            if (m.Contains("top") || m.Contains("rank") || m.Contains("largest") || m.Contains("highest"))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool MessageRequestsSalesDateFilter(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (m.Contains("this month") || m.Contains("last month") || m.Contains("last 30"))
+            return true;
+        return Regex.IsMatch(
+            m,
+            @"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{4})\b",
+            RegexOptions.IgnoreCase);
+    }
+
+    private static bool IsGovernedExportSalesInvoiceSql(string sql) =>
+        sql.Contains("vw_Salesvoucher", StringComparison.OrdinalIgnoreCase)
+        && sql.Contains("InvType", StringComparison.OrdinalIgnoreCase)
+        && sql.Contains("Export", StringComparison.OrdinalIgnoreCase);
+
+    private static bool ShouldForceExportSalesInvoiceRewrite(string message, string sql, int rowCount)
+    {
+        if (!LooksLikeExportSalesInvoiceListQuestion(message)) return false;
+        if (sql.Contains("POAllocation", StringComparison.OrdinalIgnoreCase)) return true;
+        return !IsGovernedExportSalesInvoiceSql(sql);
     }
 
     private static bool TryBuildSalesInvoiceTaxSql(string message, out string sql, out string warning)
@@ -703,11 +797,36 @@ public partial class ChatOrchestratorService
         sql = "";
         warning = "";
         var m = message.ToLowerInvariant();
-        if (!m.Contains("allocation") && !m.Contains("authority") && !m.Contains("limit"))
+        if (!ContainsAllocationLimitIntent(message)) return false;
+        if (!ContainsPoIntent(message)) return false;
+        if (m.Contains("export") || m.Contains("sales invoice") || m.Contains("invoice"))
             return false;
-        if (!m.Contains("po") && !m.Contains("purchase order")) return false;
 
-        var user = TryExtractPersonName(message, "username", "user", "for");
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var user = TryExtractPoAllocationUsername(message);
+
+        if (!string.IsNullOrWhiteSpace(company) && string.IsNullOrWhiteSpace(user))
+        {
+            sql = $"""
+                SELECT TOP 50
+                    username,
+                    CompanyName,
+                    POAmount,
+                    ItemAmount,
+                    PartyAmount,
+                    Deptt,
+                    authority,
+                    NewVendor,
+                    NewItem
+                FROM POAllocation
+                WHERE CompanyName = '{EscapeSqlLiteral(company)}'
+                ORDER BY POAmount DESC, username
+                """;
+            warning = $"Governed PO allocation limits on POAllocation for CompanyName = '{company}'.";
+            return true;
+        }
+
         if (string.IsNullOrWhiteSpace(user)) return false;
 
         sql = $"""
@@ -728,6 +847,17 @@ public partial class ChatOrchestratorService
         warning = $"Governed PO allocation limits on POAllocation for username LIKE '%{user}%'.";
         return true;
     }
+
+    private static string? TryExtractPoAllocationUsername(string message) =>
+        TryExtractPersonName(message, "username", "user", "for user", "for approver");
+
+    /// <summary>Word-boundary PO intent — avoids matching "po" inside "export".</summary>
+    private static bool ContainsPoIntent(string message) =>
+        Regex.IsMatch(message, @"\b(?:pos?|purchase orders?)\b", RegexOptions.IgnoreCase);
+
+    /// <summary>Allocation/limit intent — avoids matching "limit" inside "Limited".</summary>
+    private static bool ContainsAllocationLimitIntent(string message) =>
+        Regex.IsMatch(message, @"\b(?:allocation|authority|(?:approval )?limits?)\b", RegexOptions.IgnoreCase);
 
     private static string? TryExtractDepartmentFragment(string message)
     {
@@ -906,5 +1036,475 @@ public partial class ChatOrchestratorService
             """;
         warning = $"Governed above-max stock via vw_inventoryitemwarehouse_all + WareHouse max levels for {company}.";
         return true;
+    }
+
+    private static bool LooksLikeSalesTotalsQuestion(string message)
+    {
+        if (LooksLikeCountryWiseSalesQuestion(message))
+            return false;
+        if (LooksLikeSalesByGroupQuestion(message))
+            return false;
+
+        var m = message.ToLowerInvariant();
+        if (!m.Contains("sales") && !m.Contains("sale"))
+            return false;
+
+        return m.Contains("total sales")
+               || m.Contains("sales total")
+               || m.Contains("how much sales")
+               || m.Contains("grand total")
+               || (m.Contains("total") && m.Contains("amount") && m.Contains("sales"))
+               || (m.Contains("sales") && m.Contains("fy") && m.Contains("total"));
+    }
+
+    private static bool LooksLikeSalesByGroupQuestion(string message)
+    {
+        if (LooksLikeCountryWiseSalesQuestion(message))
+            return false;
+
+        var m = message.ToLowerInvariant();
+        if (!m.Contains("sales") && !m.Contains("sale"))
+            return false;
+
+        return m.Contains("by group")
+               || m.Contains("group wise")
+               || m.Contains("group-wise")
+               || m.Contains("product group")
+               || m.Contains("sub group")
+               || m.Contains("subgroup")
+               || (m.Contains("group") && m.Contains("breakdown"));
+    }
+
+    private static bool LooksLikePurchaseTotalsQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (!m.Contains("purchase"))
+            return false;
+
+        return m.Contains("total purchase")
+               || m.Contains("purchase total")
+               || m.Contains("how much purchase")
+               || (m.Contains("total") && m.Contains("amount") && m.Contains("purchase"));
+    }
+
+    private static bool LooksLikeLedgerCountQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        return (m.Contains("how many") || m.Contains("count") || m.Contains("number of"))
+               && m.Contains("ledger");
+    }
+
+    private static bool TryBuildSalesTotalsSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeSalesTotalsQuestion(message))
+            return false;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        if (string.IsNullOrWhiteSpace(company))
+            return false;
+
+        var (fyStart, fyEndExclusive, fyLabel) = ParseIndianFinancialYear(message);
+        var startLit = fyStart.ToString("yyyy-MM-dd");
+        var endLit = fyEndExclusive.AddDays(-1).ToString("yyyy-MM-dd");
+        var companyLit = EscapeSqlLiteral(company);
+
+        sql = $"""
+            SELECT
+                ROUND(SUM(Amount), 0) AS TotalSales,
+                ROUND(SUM(netwt), 0) AS TotalQuantity
+            FROM vw_Sales_EBIDTA
+            WHERE CompanyName = '{companyLit}'
+              AND invdate >= '{startLit}'
+              AND invdate <= '{endLit}'
+              AND InterGroup <> 'Intergroup'
+            """;
+
+        warning =
+            $"Governed total sales on vw_Sales_EBIDTA for {company} FY {fyLabel} ({startLit} to {endLit}), excl. intercompany.";
+        return true;
+    }
+
+    private static bool TryBuildSalesByGroupSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeSalesByGroupQuestion(message))
+            return false;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        if (string.IsNullOrWhiteSpace(company))
+            return false;
+
+        var (fyStart, fyEndExclusive, fyLabel) = ParseIndianFinancialYear(message);
+        var startLit = fyStart.ToString("yyyy-MM-dd");
+        var endLit = fyEndExclusive.AddDays(-1).ToString("yyyy-MM-dd");
+        var companyLit = EscapeSqlLiteral(company);
+        var wantsSubGroup = message.Contains("sub group", StringComparison.OrdinalIgnoreCase)
+                            || message.Contains("subgroup", StringComparison.OrdinalIgnoreCase);
+
+        if (wantsSubGroup)
+        {
+            sql = $"""
+                SELECT TOP 50
+                    Groupname,
+                    SubGroupName,
+                    ROUND(SUM(Amount), 0) AS SalesAmount,
+                    ROUND(SUM(netwt), 0) AS Quantity
+                FROM vw_Sales_EBIDTA
+                WHERE CompanyName = '{companyLit}'
+                  AND invdate >= '{startLit}'
+                  AND invdate <= '{endLit}'
+                  AND InterGroup <> 'Intergroup'
+                  AND ISNULL(Groupname, '') <> ''
+                  AND ISNULL(SubGroupName, '') <> ''
+                GROUP BY Groupname, SubGroupName
+                ORDER BY SUM(Amount) DESC
+                """;
+            warning =
+                $"Governed sales by sub-group on vw_Sales_EBIDTA for {company} FY {fyLabel}, excl. intercompany.";
+        }
+        else
+        {
+            sql = $"""
+                SELECT TOP 50
+                    Groupname,
+                    ROUND(SUM(Amount), 0) AS SalesAmount,
+                    ROUND(SUM(netwt), 0) AS Quantity
+                FROM vw_Sales_EBIDTA
+                WHERE CompanyName = '{companyLit}'
+                  AND invdate >= '{startLit}'
+                  AND invdate <= '{endLit}'
+                  AND InterGroup <> 'Intergroup'
+                  AND ISNULL(Groupname, '') <> ''
+                GROUP BY Groupname
+                ORDER BY SUM(Amount) DESC
+                """;
+            warning =
+                $"Governed sales by group on vw_Sales_EBIDTA for {company} FY {fyLabel}, excl. intercompany.";
+        }
+
+        return true;
+    }
+
+    private static bool TryBuildPurchaseTotalsSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikePurchaseTotalsQuestion(message))
+            return false;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        if (string.IsNullOrWhiteSpace(company))
+            return false;
+
+        var (fyStart, fyEndExclusive, fyLabel) = ParseIndianFinancialYear(message);
+        var startLit = fyStart.ToString("yyyy-MM-dd");
+        var endLit = fyEndExclusive.AddDays(-1).ToString("yyyy-MM-dd");
+        var companyLit = EscapeSqlLiteral(company);
+
+        sql = $"""
+            SELECT
+                ROUND(SUM(Amount), 0) AS TotalPurchase,
+                ROUND(SUM(netwt), 0) AS TotalQuantity
+            FROM vw_Purchase_EBIDTA
+            WHERE CompanyName = '{companyLit}'
+              AND invdate >= '{startLit}'
+              AND invdate <= '{endLit}'
+              AND InterGroup <> 'Intergroup'
+            """;
+
+        warning =
+            $"Governed total purchase on vw_Purchase_EBIDTA for {company} FY {fyLabel} ({startLit} to {endLit}), excl. intercompany.";
+        return true;
+    }
+
+    private static bool TryBuildLedgerCountSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeLedgerCountQuestion(message))
+            return false;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        if (string.IsNullOrWhiteSpace(company))
+            return false;
+
+        var underGroup = TryExtractLedgerUnderGroup(message);
+        var underFilter = string.IsNullOrWhiteSpace(underGroup)
+            ? ""
+            : $"  AND Under LIKE '%{EscapeSqlLiteral(underGroup)}%'\n";
+
+        sql = $"""
+            SELECT COUNT(*) AS LedgerCount
+            FROM LedgerMaster
+            WHERE CompanyName = '{EscapeSqlLiteral(company)}'
+              AND ISNULL(LedgerName, '') <> ''
+            {underFilter}
+            """;
+        warning = string.IsNullOrWhiteSpace(underGroup)
+            ? $"Governed ledger count on LedgerMaster for {company}."
+            : $"Governed ledger count on LedgerMaster for {company} under group '{underGroup}' (LedgerMaster.Under).";
+        return true;
+    }
+
+    /// <summary>Extract parent ledger group from "under Sundry Debtors for company" phrasing.</summary>
+    private static string? TryExtractLedgerUnderGroup(string message)
+    {
+        string[] patterns =
+        [
+            @"\bunder\s+(.+?)\s+for\s+",
+            @"\bunder\s+(.+?)\s+at\s+",
+            @"\bunder\s+(?:the\s+)?(.+?)(?:\?|$|\.)",
+            @"\bin\s+(?:the\s+)?(.+?)\s+(?:ledger\s+)?group\b",
+            @"\b(?:ledger|account)s?\s+(?:in|under)\s+(.+?)\s+for\s+"
+        ];
+
+        foreach (var pattern in patterns)
+        {
+            var m = Regex.Match(message, pattern, RegexOptions.IgnoreCase);
+            if (!m.Success) continue;
+
+            var frag = m.Groups[1].Value.Trim().TrimEnd('?', '.', ',', ';');
+            if (frag.Length < 3) continue;
+            if (ResolveOutwardCompanyAlias(frag) is not null) continue;
+            if (CanonicalizeCompanyName(frag) is not null
+                && (frag.Contains("Limited", StringComparison.OrdinalIgnoreCase)
+                    || frag.Contains("Ltd", StringComparison.OrdinalIgnoreCase)))
+                continue;
+            return frag;
+        }
+
+        return null;
+    }
+
+    private static bool LedgerCountSqlMissingUnderFilter(string message, string sql)
+    {
+        if (TryExtractLedgerUnderGroup(message) is null) return false;
+        return !sql.Contains("Under", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryBuildLedgerGroupsSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeLedgerGroupQuestion(message))
+            return false;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+
+        if (string.IsNullOrWhiteSpace(company))
+        {
+            sql = """
+                SELECT DISTINCT TOP 50 Under AS GroupName
+                FROM LedgerMaster
+                WHERE ISNULL(Under, '') <> ''
+                ORDER BY Under
+                """;
+            warning = "Governed ledger/account groups: DISTINCT LedgerMaster.Under (all companies).";
+        }
+        else
+        {
+            sql = $"""
+                SELECT DISTINCT TOP 50 Under AS GroupName
+                FROM LedgerMaster
+                WHERE CompanyName = '{EscapeSqlLiteral(company)}'
+                  AND ISNULL(Under, '') <> ''
+                ORDER BY Under
+                """;
+            warning = $"Governed ledger/account groups: DISTINCT LedgerMaster.Under for {company}.";
+        }
+
+        return true;
+    }
+
+    private static bool TryBuildStockInHandSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeStockInHandQuestion(message))
+            return false;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        if (string.IsNullOrWhiteSpace(company))
+            return false;
+
+        var itemCode = TryExtractStockItemCode(message);
+        var itemNameFrag = TryExtractStockItemNameFragment(message);
+        if (string.IsNullOrWhiteSpace(itemCode) && string.IsNullOrWhiteSpace(itemNameFrag))
+            return false;
+
+        var filters = new List<string> { $"CompanyName = '{EscapeSqlLiteral(company)}'" };
+
+        if (!string.IsNullOrWhiteSpace(itemCode))
+        {
+            var code = EscapeSqlLiteral(itemCode);
+            filters.Add($"(ItemCode = '{code}' OR ItemCode LIKE '{code}%')");
+        }
+        else if (!string.IsNullOrWhiteSpace(itemNameFrag))
+        {
+            filters.Add(BuildStockItemNameLikeFilter(itemNameFrag));
+        }
+
+        if (TryExtractStockWarehouseFragment(message) is { } whFrag)
+            filters.Add($"(Warehousename LIKE '%{EscapeSqlLiteral(whFrag)}%' OR WareHouseName LIKE '%{EscapeSqlLiteral(whFrag)}%')");
+
+        var where = string.Join(" AND ", filters);
+
+        sql = $"""
+            SELECT TOP 50
+                Warehousename,
+                ItemCode,
+                ItemName,
+                StkInHand,
+                CompanyName
+            FROM vw_itemwiseStock
+            WHERE {where}
+            ORDER BY StkInHand DESC
+            """;
+        warning = string.IsNullOrWhiteSpace(itemCode)
+            ? $"Governed stock-in-hand on vw_itemwiseStock for {company} with ItemName LIKE filters (not exact match)."
+            : $"Governed stock-in-hand on vw_itemwiseStock for {company} item {itemCode}.";
+        return true;
+    }
+
+    private static bool LooksLikeStockInHandQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (LooksLikeAboveMaxStockQuestion(message)) return false;
+        if (m.Contains("reorder") || m.Contains("below minimum") || m.Contains("below min")) return false;
+        if (m.Contains("list warehouse") || m.Contains("list of warehouse") || m.Contains("list warehouses")
+            || m.Contains("list godown") || m.Contains("godown list")) return false;
+        if (m.Contains("top stock") && m.Contains("by stock")) return false;
+        if (m.Contains("stock by group") || m.Contains("by group")) return false;
+        if (m.Contains("issue slip") || m.Contains("material issued")) return false;
+
+        var hasStockIntent = m.Contains("stock in hand")
+                             || m.Contains("current stock")
+                             || m.Contains("stock of")
+                             || m.Contains("stock for")
+                             || (m.Contains("stock") && (m.Contains("how much") || m.Contains("what is")))
+                             || (m.Contains("inventory") && (m.Contains("how much") || m.Contains("what is")));
+
+        if (!hasStockIntent) return false;
+
+        return TryExtractStockItemCode(message) is not null
+               || TryExtractStockItemNameFragment(message) is not null;
+    }
+
+    private static string? TryExtractStockItemCode(string message)
+    {
+        var m = Regex.Match(message, @"\b([A-Z]{2,6}\d{3,10})\b");
+        return m.Success ? m.Groups[1].Value : null;
+    }
+
+    private static string? TryExtractStockItemNameFragment(string message)
+    {
+        string[] patterns =
+        [
+            @"\b(?:current\s+)?stock\s+of\s+(.+?)\s+(?:at|for|in)\s+",
+            @"\bstock\s+in\s+hand\s+for\s+(?:item\s+)?(.+?)\s+(?:at|for|in|by)\s+",
+            @"\bhow\s+much\s+stock\s+(?:of\s+)?(.+?)\s+(?:at|for|in)\s+",
+            @"\bstock\s+for\s+(.+?)\s+(?:at|in)\s+",
+            @"\bstock\s+of\s+(.+?)\s*\??\s*$"
+        ];
+
+        foreach (var pattern in patterns)
+        {
+            var m = Regex.Match(message, pattern, RegexOptions.IgnoreCase);
+            if (!m.Success) continue;
+
+            var frag = m.Groups[1].Value.Trim().TrimEnd('.', ',', ';', '?', '!');
+            if (frag.Length < 2) continue;
+            if (Regex.IsMatch(frag, @"^[A-Z]{2,6}\d+$")) continue;
+            if (ResolveOutwardCompanyAlias(frag) is not null) continue;
+            if (frag.Contains("Limited", StringComparison.OrdinalIgnoreCase)
+                || frag.Contains("Ltd", StringComparison.OrdinalIgnoreCase))
+                continue;
+            return frag;
+        }
+
+        return null;
+    }
+
+    private static string? TryExtractStockWarehouseFragment(string message)
+    {
+        var m = Regex.Match(
+            message,
+            @"\bin\s+(?:the\s+)?(.+?)\s+(?:godown|warehouse)\b",
+            RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var frag = m.Groups[1].Value.Trim();
+            if (frag.Length >= 3) return frag;
+        }
+
+        m = Regex.Match(
+            message,
+            @"\b(?:godown|warehouse)\s+(?:named\s+)?(.+?)(?:\?|$|\s+for\s+)",
+            RegexOptions.IgnoreCase);
+        return m.Success && m.Groups[1].Value.Trim().Length >= 3
+            ? m.Groups[1].Value.Trim().TrimEnd('.', '?')
+            : null;
+    }
+
+    private static string BuildStockItemNameLikeFilter(string itemFragment)
+    {
+        var stop = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "the", "for", "and", "item", "stock", "current", "at", "in", "of", "a", "an"
+        };
+
+        var words = Regex.Split(itemFragment.Trim(), @"\s+")
+            .Select(w => w.Trim().TrimEnd('.', ',', ';', '?', '!'))
+            .Where(w => w.Length >= 2 && !stop.Contains(w))
+            .Select(NormalizeStockItemWordForLike)
+            .Where(w => w.Length >= 2)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (words.Count == 0)
+            return $"ItemName LIKE '%{EscapeSqlLiteral(itemFragment.Trim())}%'";
+
+        return string.Join(" AND ", words.Select(w => $"ItemName LIKE '%{EscapeSqlLiteral(w)}%'"));
+    }
+
+    private static string NormalizeStockItemWordForLike(string word)
+    {
+        var w = word.ToLowerInvariant();
+        if (w.StartsWith("granul")) return "granul";
+        if (w.StartsWith("polymer")) return "polym";
+        if (w.EndsWith('s') && w.Length > 4) w = w[..^1];
+        return w;
+    }
+
+    private static bool IsGovernedStockInHandSql(string sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql)) return false;
+        var hasStockTable = sql.Contains("vw_itemwiseStock", StringComparison.OrdinalIgnoreCase)
+                            || (sql.Contains("WareHouse", StringComparison.OrdinalIgnoreCase)
+                                && sql.Contains("StkInHand", StringComparison.OrdinalIgnoreCase));
+        if (!hasStockTable) return false;
+        if (Regex.IsMatch(sql, @"\bItemCode\s*=", RegexOptions.IgnoreCase)) return true;
+        return sql.Contains("LIKE", StringComparison.OrdinalIgnoreCase)
+               && sql.Contains("ItemName", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldForceStockInHandGovernedRewrite(string sql, int rowCount)
+    {
+        if (IsGovernedStockInHandSql(sql) && rowCount > 0) return false;
+        if (rowCount == 0) return true;
+        if (Regex.IsMatch(sql, @"\bItemName\s*=\s*'", RegexOptions.IgnoreCase)) return true;
+        if (sql.Contains("FactoryInfo", StringComparison.OrdinalIgnoreCase)
+            && !sql.Contains("vw_itemwiseStock", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return !IsGovernedStockInHandSql(sql);
     }
 }
