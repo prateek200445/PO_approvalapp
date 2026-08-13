@@ -392,7 +392,7 @@ function PendingList() {
                         <div className="min-w-0">
                           <div className="font-semibold">{p.PoNo}</div>
                           <div className="mt-0.5 truncate text-sm text-muted-foreground">
-                            {p.ApprovalName}
+                            {p.FirmName || p.ApprovalName}
                           </div>
                         </div>
                         <StatusBadge status={p.Status} />
@@ -421,7 +421,7 @@ function PendingList() {
                   <div className="min-w-0">
                     <div className="font-semibold">{p.PoNo}</div>
                     <div className="mt-0.5 truncate text-sm text-muted-foreground">
-                      {p.ApprovalName}
+                      {p.FirmName || p.ApprovalName}
                     </div>
                   </div>
                   <StatusBadge status={p.Status} />
