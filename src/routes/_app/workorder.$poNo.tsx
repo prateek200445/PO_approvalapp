@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SkeletonCard, SkeletonSection, SkeletonTable, SkeletonWorkflow } from "@/components/SkeletonLoader";
 import { ApprovalDetailNav } from "@/components/ApprovalDetailNav";
 import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
+import { invalidateApprovalCaches, resolveNextAfterApproval } from "@/lib/approval-after-action";
 
 export const Route = createFileRoute("/_app/workorder/$poNo")({
  head: ({ params }) => ({
@@ -284,21 +285,12 @@ if (!po || po.length === 0) {
 
     toast.success("Work Order approved successfully");
 
-    const cachedLists = queryClient.getQueriesData({ queryKey: ["workorder-list"] });
-    let nextWoNo: string | null = null;
-    for (const [, data] of cachedLists) {
-      if (Array.isArray(data)) {
-        const next = data.find((w: any) => w.PoNo !== poNo);
-        if (next?.PoNo) {
-          nextWoNo = next.PoNo;
-          break;
-        }
-      }
-    }
-
-    void queryClient.invalidateQueries({ queryKey: ["workorder-list"] });
-    void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-    void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+    const nextWoNo = resolveNextAfterApproval(poNo, queryClient, {
+      kind: "workorder",
+      listQueryKey: "workorder-list",
+      extractId: (row) => (row.PoNo as string | undefined) ?? undefined,
+    });
+    invalidateApprovalCaches(queryClient, "workorder-list");
 
     if (nextWoNo) {
       navigate({ to: "/workorder/$poNo", params: { poNo: nextWoNo } });
@@ -352,21 +344,12 @@ if (!po || po.length === 0) {
       
       setConfirm(null);
 
-      const cachedLists = queryClient.getQueriesData({ queryKey: ["workorder-list"] });
-      let nextWoNo: string | null = null;
-      for (const [, data] of cachedLists) {
-        if (Array.isArray(data)) {
-          const next = data.find((w: any) => w.PoNo !== poNo);
-          if (next?.PoNo) {
-            nextWoNo = next.PoNo;
-            break;
-          }
-        }
-      }
-
-      void queryClient.invalidateQueries({ queryKey: ["workorder-list"] });
-      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-      void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+      const nextWoNo = resolveNextAfterApproval(poNo, queryClient, {
+        kind: "workorder",
+        listQueryKey: "workorder-list",
+        extractId: (row) => (row.PoNo as string | undefined) ?? undefined,
+      });
+      invalidateApprovalCaches(queryClient, "workorder-list");
 
       if (nextWoNo) {
         navigate({ to: "/workorder/$poNo", params: { poNo: nextWoNo } });

@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SkeletonCard, SkeletonSection, SkeletonTable, SkeletonWorkflow } from "@/components/SkeletonLoader";
 import { ApprovalDetailNav } from "@/components/ApprovalDetailNav";
 import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
+import { invalidateApprovalCaches, resolveNextAfterApproval } from "@/lib/approval-after-action";
 
 export const Route = createFileRoute("/_app/po/$poNo")({
   head: ({ params }) => ({ meta: [{ title: `${params.poNo} — PO Details` }] }),
@@ -264,22 +265,12 @@ function PODetails() {
       
       toast.success("PO approved successfully");
 
-      // Navigate immediately using cached list; refresh caches in background
-      const cachedLists = queryClient.getQueriesData({ queryKey: ["pending-list"] });
-      let nextPoNo: string | null = null;
-      for (const [, data] of cachedLists) {
-        if (Array.isArray(data)) {
-          const next = data.find((p: any) => p.PoNo !== poNo);
-          if (next?.PoNo) {
-            nextPoNo = next.PoNo;
-            break;
-          }
-        }
-      }
-
-      void queryClient.invalidateQueries({ queryKey: ["pending-list"] });
-      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-      void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+      const nextPoNo = resolveNextAfterApproval(poNo, queryClient, {
+        kind: "po",
+        listQueryKey: "pending-list",
+        extractId: (row) => (row.PoNo as string | undefined) ?? undefined,
+      });
+      invalidateApprovalCaches(queryClient, "pending-list");
 
       if (nextPoNo) {
         navigate({ to: "/po/$poNo", params: { poNo: nextPoNo } });
@@ -333,21 +324,12 @@ function PODetails() {
       
       setConfirm(null);
 
-      const cachedLists = queryClient.getQueriesData({ queryKey: ["pending-list"] });
-      let nextPoNo: string | null = null;
-      for (const [, data] of cachedLists) {
-        if (Array.isArray(data)) {
-          const next = data.find((p: any) => p.PoNo !== poNo);
-          if (next?.PoNo) {
-            nextPoNo = next.PoNo;
-            break;
-          }
-        }
-      }
-
-      void queryClient.invalidateQueries({ queryKey: ["pending-list"] });
-      void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-      void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+      const nextPoNo = resolveNextAfterApproval(poNo, queryClient, {
+        kind: "po",
+        listQueryKey: "pending-list",
+        extractId: (row) => (row.PoNo as string | undefined) ?? undefined,
+      });
+      invalidateApprovalCaches(queryClient, "pending-list");
 
       if (nextPoNo) {
         navigate({ to: "/po/$poNo", params: { poNo: nextPoNo } });

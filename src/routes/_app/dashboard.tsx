@@ -60,8 +60,9 @@ function Dashboard() {
     enabled: !!user?.username && typeof window !== 'undefined', // Only fetch on client
   });
 
-  // Get top 5 pending
-  const pending = Array.isArray(pendingData) ? pendingData.slice(0, 5) : [];
+  // Get top 5 pending for display; full list for prev/next navigation
+  const pendingAll = Array.isArray(pendingData) ? pendingData : [];
+  const pending = pendingAll.slice(0, 5);
 
 
 
@@ -150,7 +151,7 @@ function Dashboard() {
                   <Link
                     to="/po/$poNo"
                     params={{ poNo: p.PoNo }}
-                    onClick={() => setApprovalListNav("po", pending.map((row) => row.PoNo))}
+                    onClick={() => setApprovalListNav("po", pendingAll.map((row) => row.PoNo))}
                     className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-secondary/40"
                   >
                     <div className="min-w-0">

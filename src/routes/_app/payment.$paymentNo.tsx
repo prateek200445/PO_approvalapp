@@ -10,6 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SkeletonCard, SkeletonSection } from "@/components/SkeletonLoader";
 import { ApprovalDetailNav } from "@/components/ApprovalDetailNav";
 import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
+import { invalidateApprovalCaches, resolveNextAfterApproval } from "@/lib/approval-after-action";
 
 export const Route = createFileRoute("/_app/payment/$paymentNo")({
  head: ({ params }) => ({
@@ -129,21 +130,13 @@ if (!payment) {
 
     toast.success("Payment approved successfully");
 
-    const cachedLists = queryClient.getQueriesData({ queryKey: ["payment-list"] });
-    let nextPaymentNo: string | null = null;
-    for (const [, data] of cachedLists) {
-      if (Array.isArray(data)) {
-        const next = data.find((p: any) => (p.paymentNo ?? p.PaymentNo) !== paymentNo);
-        if (next) {
-          nextPaymentNo = next.paymentNo ?? next.PaymentNo ?? null;
-          break;
-        }
-      }
-    }
-
-    void queryClient.invalidateQueries({ queryKey: ["payment-list"] });
-    void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-    void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+    const nextPaymentNo = resolveNextAfterApproval(paymentNo, queryClient, {
+      kind: "payment",
+      listQueryKey: "payment-list",
+      extractId: (row) =>
+        (row.paymentNo as string | undefined) ?? (row.PaymentNo as string | undefined) ?? undefined,
+    });
+    invalidateApprovalCaches(queryClient, "payment-list");
 
     if (nextPaymentNo) {
       navigate({ to: "/payment/$paymentNo", params: { paymentNo: nextPaymentNo } });
@@ -193,21 +186,13 @@ if (!payment) {
 
     setConfirm(null);
 
-    const cachedLists = queryClient.getQueriesData({ queryKey: ["payment-list"] });
-    let nextPaymentNo: string | null = null;
-    for (const [, data] of cachedLists) {
-      if (Array.isArray(data)) {
-        const next = data.find((p: any) => (p.paymentNo ?? p.PaymentNo) !== paymentNo);
-        if (next) {
-          nextPaymentNo = next.paymentNo ?? next.PaymentNo ?? null;
-          break;
-        }
-      }
-    }
-
-    void queryClient.invalidateQueries({ queryKey: ["payment-list"] });
-    void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-    void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
+    const nextPaymentNo = resolveNextAfterApproval(paymentNo, queryClient, {
+      kind: "payment",
+      listQueryKey: "payment-list",
+      extractId: (row) =>
+        (row.paymentNo as string | undefined) ?? (row.PaymentNo as string | undefined) ?? undefined,
+    });
+    invalidateApprovalCaches(queryClient, "payment-list");
 
     if (nextPaymentNo) {
       navigate({ to: "/payment/$paymentNo", params: { paymentNo: nextPaymentNo } });

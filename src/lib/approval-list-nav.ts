@@ -37,6 +37,18 @@ export function getApprovalListNeighbors(
   };
 }
 
+/** Remove current item from session nav and return the next id in list order (sync, no network). */
+export function consumeApprovalListNav(kind: ApprovalListKind, currentId: string): string | null {
+  const ids = getApprovalListNav(kind);
+  if (!ids.includes(currentId)) return null;
+  const { next } = getApprovalListNeighbors(currentId, ids);
+  setApprovalListNav(
+    kind,
+    ids.filter((id) => id !== currentId),
+  );
+  return next;
+}
+
 /** @deprecated use setApprovalListNav('po', ...) */
 export function setPoApprovalNav(poNos: string[]) {
   setApprovalListNav("po", poNos);
