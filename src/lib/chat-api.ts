@@ -1,6 +1,13 @@
 import { getApiUrl } from "@/lib/api-config";
+import { isChatMockEnabled } from "@/lib/chat-mock-config";
+import {
+  getMockChatResponse,
+  getMockExportRows,
+  mockChatDelayMs,
+} from "@/lib/chat-mocks";
 import type { ChatHistoryItem } from "@/lib/chat-helpers";
 import type { ChatApiResponse, ChatMessage, ChatTableUsed } from "@/lib/chat-types";
+import { downloadCsv } from "@/lib/chat-helpers";
 
 const SESSION_KEY = "po-chat-session";
 const HISTORY_KEY = "po-chat-history";
@@ -36,6 +43,11 @@ export function normalizeChatResponse(data: Record<string, unknown>): ChatApiRes
 }
 
 export async function sendChatMessage(message: string): Promise<ChatApiResponse> {
+  if (isChatMockEnabled()) {
+    await new Promise((r) => setTimeout(r, mockChatDelayMs()));
+    return getMockChatResponse(message);
+  }
+
   const response = await fetch(getApiUrl("/api/chat"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -54,6 +66,20 @@ export async function sendChatMessage(message: string): Promise<ChatApiResponse>
 
 /** Download full result set for the chat SQL (strips TOP; server caps at 5k). */
 export async function exportChatCsv(sql: string, filename?: string): Promise<{ truncated: boolean; rowCount: number }> {
+  if (isChatMockEnabled()) {
+    await new Promise((r) => setTimeout(r, 400));
+    const rows = getMockExportRows(sql);
+    if (rows.length === 0) {
+      throw new Error("No rows to export (mock)");
+    }
+    downloadCsv(rows, filename);
+    const scenarioTruncated = sql.includes("reorder-list") || sql.includes("pending-po-table");
+    return {
+      rowCount: scenarioTruncated ? 108 : rows.length,
+      truncated: scenarioTruncated,
+    };
+  }
+
   const response = await fetch(getApiUrl("/api/chat/export"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },

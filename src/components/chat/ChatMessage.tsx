@@ -1,4 +1,5 @@
 import { ChatResultCard } from "@/components/chat/ChatResultCard";
+import { FormattedAnswer } from "@/components/chat/FormattedAnswer";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 import { AlertCircle, Bot, Sparkles, User } from "lucide-react";
@@ -72,8 +73,10 @@ export function ChatMessageBubble({
           >
             {message.pending ? (
               <TypingIndicator />
-            ) : (
+            ) : isError ? (
               <p className="whitespace-pre-wrap">{message.content}</p>
+            ) : (
+              <FormattedAnswer text={message.content} />
             )}
           </div>
         )}

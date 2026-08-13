@@ -31,12 +31,12 @@ public class GroqChatService : IChatCompletionService
             ?? "https://api.groq.com/openai/v1").TrimEnd('/');
         _model = Environment.GetEnvironmentVariable("GROQ_MODEL")
             ?? config["Groq:Model"]
-            ?? "llama-3.3-70b-versatile";
+            ?? "openai/gpt-oss-120b";
         _maxTokens = int.TryParse(
             Environment.GetEnvironmentVariable("GROQ_MAX_TOKENS") ?? config["Groq:MaxTokens"],
             out var mt)
             ? mt
-            : 4096;
+            : 8192;
 
         if (string.IsNullOrWhiteSpace(apiKey))
             throw new InvalidOperationException("GROQ_API_KEY is not configured.");

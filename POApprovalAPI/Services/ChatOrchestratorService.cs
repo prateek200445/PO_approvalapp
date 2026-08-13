@@ -79,6 +79,7 @@ public partial class ChatOrchestratorService
             - Job work: formal orders prefer Vw_EditJOBWorkOrder (PurchaseCode JRO/JWO; sparse). Live qty at job work: VW_JobWork_EBD_DTL (filter companyname/ItemCode). Receipts: VW_RECJOBWORK_EBD_DTL (MRNo like JBIN-SE). Returnable job-work sends also Vw_ReturnGatePass Purpose LIKE '%Job Work%'. Do not join JOBWORKORDER to PurchasePayment. Always TOP 50.
             - Sales invoices: prefer vw_Salesvoucher (InvNo, BuyerName, BillAMount, InvType, CompanyName). Lines: SalesVoucherItem on CompanyName+InvNo (ITEMCODE, ActualQty, Rate, Amount). List: vw_SalesInvList. Taxes: SalesVoucherTax. MIS qty: VW_SALES_EBD_DTL. Bracket [Company Address]/[Company GST] on vw_Salesvoucher. Sales credit notes: CreditNote. Always TOP 50.
             - Top export customers / export sales ranking: ALWAYS vw_Salesvoucher (NOT despatch). Filter InvType LIKE '%Export%', Indian FY on InvDate (FY 2024-25 = 2024-04-01 to <2025-04-01), GROUP BY BuyerName, ORDER BY SUM(BillAMount) DESC, TOP N. For '<company> group' use CompanyName IN (SELECT Name FROM FactoryInfo WHERE GroupName LIKE '%hint%' OR Name LIKE '%hint%'). When user says exclude inter-company / inter unit / group companies: also NOT EXISTS buyer matching FactoryInfo.Name for that same group (do not count sister companies as export customers). BillAMount spelling. Always TOP N (default 5).
+            - Country-wise sales: ALWAYS prefer vw_Countrywise_sales (GroupName = company legal name e.g. Plastene India Limited, Country, Amount, InvYear as yy-yy e.g. 25-26). Do NOT use vw_Salesvoucher Destination or Domestic/Export CASE split for country-wise questions. Related: vw_Countrywise_sales_basic_value, vw_Countrywise_sales_dashboard (+ DebitNote, Value). For invoice-level detail use vw_Salesvoucher.
             - Despatch/packing: roll history vw_MISrolldespatch; FIBC bails FIBCDespatch; yarn MIS_YarnDespatch; small bag SmallBagBailForDespatch; rolls waiting vw_RollforDespatch. ALWAYS filter CompanyName/Companyname or InvNo/PartyName/date + TOP 50 (million-row tables). Prefer view over MISRollforDespatch table.
             - Production: factory daily vw_FactoryProduction (companyname, Particulars, TapeProduction/Fabric/SmallBag); tape plant vw_daily_tape_prod_New (bracket [Loom Dept]/[FIBC Dept]); loom rolls vw_LoomProductionENtry (MUST filter CompanyName/Sysdate/LoomNo + TOP 50 — ~716k; skip stale vw_Loom_Prod_Mtr); FIBC bags VW_FIBCBagwiseProduction (not _New); MIS qty VW_PRODUCTION_EBD_DTL; WIP vw_WIPReport; small bags SmallBagProductionEntry (Cutting/Stitching — live data mainly Plastene/HCP units, NOT Oswal; Oswal uses Tape/Fabric/WEBBING in vw_FactoryProduction). Filter EBD/WIP/loom + TOP 50. Not despatch / not ApproveWorkOrder.
             - Prefer TOP 50 for detail lists. COUNT aggregates need no TOP.
@@ -125,6 +126,12 @@ public partial class ChatOrchestratorService
             _logger.LogInformation("Using governed top-export-customers SQL");
             sql = topExportSql;
             warning = topExportWarning;
+        }
+        else if (TryBuildCountryWiseSalesSql(request.Message, out var countrySalesSql, out var countrySalesWarning))
+        {
+            _logger.LogInformation("Using governed country-wise sales SQL");
+            sql = countrySalesSql;
+            warning = countrySalesWarning;
         }
         else if (TryBuildLedgerOutstandingSql(request.Message, out var ledgerOstSql, out var ledgerOstWarning))
         {
@@ -193,6 +200,12 @@ public partial class ChatOrchestratorService
                 warning = colTopExportWarn;
                 columnRepairHint = null;
             }
+            else if (TryBuildCountryWiseSalesSql(request.Message, out var colCountrySales, out var colCountrySalesWarn))
+            {
+                sql = colCountrySales;
+                warning = colCountrySalesWarn;
+                columnRepairHint = null;
+            }
             else if (TryBuildLedgerOutstandingSql(request.Message, out var colLedgerOst, out var colLedgerOstWarn))
             {
                 sql = colLedgerOst;
@@ -240,6 +253,24 @@ public partial class ChatOrchestratorService
                 catch (Exception retryEx)
                 {
                     _logger.LogWarning(retryEx, "Governed top-export-customers rewrite also failed");
+                }
+            }
+
+            if (!recovered
+                && TryBuildCountryWiseSalesSql(request.Message, out var timeoutCountrySql, out var timeoutCountryWarn)
+                && !string.Equals(timeoutCountrySql, sql, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    _logger.LogWarning(ex, "SQL failed; retrying governed country-wise sales rewrite");
+                    sql = timeoutCountrySql;
+                    rows = await ExecuteReadOnlyAsync(sql, ct);
+                    warning = timeoutCountryWarn;
+                    recovered = true;
+                }
+                catch (Exception retryEx)
+                {
+                    _logger.LogWarning(retryEx, "Governed country-wise sales rewrite also failed");
                 }
             }
 
@@ -372,6 +403,11 @@ public partial class ChatOrchestratorService
                 sql = repairExportSql;
                 warning = repairExportWarn;
             }
+            else if (TryBuildCountryWiseSalesSql(request.Message, out var repairCountrySql, out var repairCountryWarn))
+            {
+                sql = repairCountrySql;
+                warning = repairCountryWarn;
+            }
             else if (TryBuildLedgerOutstandingSql(request.Message, out var repairLedgerSql, out var repairLedgerWarn))
             {
                 sql = repairLedgerSql;
@@ -412,7 +448,16 @@ public partial class ChatOrchestratorService
 
         if (warning is null)
         {
-        if (rows.Count == 0 && sql.Contains("LedgerGroupMaster", StringComparison.OrdinalIgnoreCase))
+        if (LooksLikeCountryWiseSalesQuestion(request.Message)
+            && ShouldRewriteToCountryWiseSalesView(request.Message, sql)
+            && TryBuildCountryWiseSalesSql(request.Message, out var countryRewriteSql, out var countryRewriteWarn))
+        {
+            _logger.LogWarning("Rewriting to governed vw_Countrywise_sales country-wise query");
+            sql = countryRewriteSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = countryRewriteWarn;
+        }
+        else if (rows.Count == 0 && sql.Contains("LedgerGroupMaster", StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning("Empty LedgerGroupMaster result; rewriting to LedgerMaster.Under");
             sql = """
@@ -2682,6 +2727,110 @@ public partial class ChatOrchestratorService
                || m.Contains("rank");
     }
 
+    private static bool LooksLikeCountryWiseSalesQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (!m.Contains("country")) return false;
+        if (!m.Contains("sales") && !m.Contains("sale") && !m.Contains("revenue") && !m.Contains("turnover"))
+            return false;
+        return m.Contains("country wise")
+               || m.Contains("country-wise")
+               || m.Contains("by country")
+               || m.Contains("wise sales")
+               || m.Contains("country breakdown")
+               || m.Contains("sales by country");
+    }
+
+    private static bool ShouldRewriteToCountryWiseSalesView(string message, string sql)
+    {
+        if (!LooksLikeCountryWiseSalesQuestion(message))
+            return false;
+        if (sql.Contains("vw_Countrywise_sales", StringComparison.OrdinalIgnoreCase))
+            return false;
+        return true;
+    }
+
+    /// <summary>Catalog InvYear uses yy-yy (e.g. 25-26); ParseIndianFinancialYear label is 2025-26.</summary>
+    private static string FormatInvYearForCountryWiseView(string fyLabel)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(
+            fyLabel,
+            @"^(?:20)?(\d{2})-(\d{2})$");
+        if (m.Success)
+            return $"{m.Groups[1].Value}-{m.Groups[2].Value}";
+
+        var shortInMessage = System.Text.RegularExpressions.Regex.Match(
+            fyLabel,
+            @"(\d{2})-(\d{2})");
+        if (shortInMessage.Success)
+            return $"{shortInMessage.Groups[1].Value}-{shortInMessage.Groups[2].Value}";
+
+        return fyLabel;
+    }
+
+    private static bool TryBuildCountryWiseSalesSql(
+        string message,
+        out string sql,
+        out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeCountryWiseSalesQuestion(message))
+            return false;
+
+        var wantsGroup = message.Contains("group", StringComparison.OrdinalIgnoreCase);
+        var groupHint = ResolveFactoryGroupHint(message);
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+
+        string companyFilter;
+        string companyNote;
+        if (wantsGroup && !string.IsNullOrWhiteSpace(groupHint))
+        {
+            var hint = EscapeSqlLiteral(groupHint);
+            companyFilter = $"""
+                GroupName IN (
+                    SELECT Name FROM FactoryInfo
+                    WHERE GroupName LIKE '%{hint}%'
+                       OR Name LIKE '%{hint}%'
+                )
+                """;
+            companyNote = $"FactoryInfo group/name LIKE '%{groupHint}%'";
+        }
+        else if (!string.IsNullOrWhiteSpace(company))
+        {
+            companyFilter = $"GroupName = '{EscapeSqlLiteral(company)}'";
+            companyNote = company;
+        }
+        else if (!string.IsNullOrWhiteSpace(groupHint))
+        {
+            var hint = EscapeSqlLiteral(groupHint);
+            companyFilter = $"GroupName LIKE '%{hint}%'";
+            companyNote = $"GroupName LIKE '%{groupHint}%'";
+        }
+        else
+        {
+            return false;
+        }
+
+        var (_, _, fyLabel) = ParseIndianFinancialYear(message);
+        var invYear = FormatInvYearForCountryWiseView(fyLabel);
+
+        sql = $"""
+            SELECT TOP 50
+                Country,
+                Amount AS TotalSalesAmount
+            FROM vw_Countrywise_sales
+            WHERE {companyFilter}
+              AND InvYear = '{EscapeSqlLiteral(invYear)}'
+            ORDER BY Amount DESC
+            """;
+
+        warning =
+            $"Governed country-wise sales on vw_Countrywise_sales for InvYear={invYear}, company={companyNote} (GroupName column = legal company name; Amount pre-aggregated per country).";
+        return true;
+    }
+
     private static bool TryBuildTopExportCustomersSql(
         string message,
         out string sql,
@@ -2909,28 +3058,46 @@ public partial class ChatOrchestratorService
     /// </summary>
     private static (DateTime Start, DateTime EndExclusive, string Label) ParseIndianFinancialYear(string message)
     {
+        var shortFy = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:fy|f\.y\.|financial\s+year)\s*(?:is\s*)?(\d{2})\s*[-–/]\s*(\d{2})\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (shortFy.Success
+            && int.TryParse(shortFy.Groups[1].Value, out var shortStartYy)
+            && int.TryParse(shortFy.Groups[2].Value, out var shortEndYy))
+        {
+            var parsedStartYear = shortStartYy >= 50 ? 1900 + shortStartYy : 2000 + shortStartYy;
+            var parsedEndYear = shortEndYy >= 50 ? 1900 + shortEndYy : 2000 + shortEndYy;
+            if (parsedEndYear <= parsedStartYear)
+                parsedEndYear = parsedStartYear + 1;
+            var start = new DateTime(parsedStartYear, 4, 1);
+            var endEx = new DateTime(parsedEndYear, 4, 1);
+            var label = $"{parsedStartYear}-{(parsedEndYear % 100):D2}";
+            return (start, endEx, label);
+        }
+
         var m = System.Text.RegularExpressions.Regex.Match(
             message,
             @"\b(?:fy|f\.y\.|financial\s+year)?\s*(20\d{2})\s*[-–/]\s*(\d{2}|\d{4})\b",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (m.Success
-            && int.TryParse(m.Groups[1].Value, out var startYear))
+            && int.TryParse(m.Groups[1].Value, out var fullStartYear))
         {
             var endRaw = m.Groups[2].Value;
-            int endYear;
-            if (endRaw.Length == 4 && int.TryParse(endRaw, out var ey4))
-                endYear = ey4;
-            else if (endRaw.Length == 2 && int.TryParse(endRaw, out var ey2))
-                endYear = (startYear / 100) * 100 + ey2;
+            int fullEndYear;
+            if (endRaw.Length == 4 && int.TryParse(endRaw, out var endYearFourDigit))
+                fullEndYear = endYearFourDigit;
+            else if (endRaw.Length == 2 && int.TryParse(endRaw, out var endYearTwoDigit))
+                fullEndYear = (fullStartYear / 100) * 100 + endYearTwoDigit;
             else
-                endYear = startYear + 1;
+                fullEndYear = fullStartYear + 1;
 
-            if (endYear <= startYear)
-                endYear = startYear + 1;
+            if (fullEndYear <= fullStartYear)
+                fullEndYear = fullStartYear + 1;
 
-            var start = new DateTime(startYear, 4, 1);
-            var endEx = new DateTime(endYear, 4, 1);
-            var label = $"{startYear}-{(endYear % 100):D2}";
+            var start = new DateTime(fullStartYear, 4, 1);
+            var endEx = new DateTime(fullEndYear, 4, 1);
+            var label = $"{fullStartYear}-{(fullEndYear % 100):D2}";
             return (start, endEx, label);
         }
 

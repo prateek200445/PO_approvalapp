@@ -22,10 +22,25 @@ import {
   saveChatSession,
   sendChatMessage,
 } from "@/lib/chat-api";
+import {
+  isChatMockEnabled,
+  isMockToggleAllowed,
+  toggleChatMockEnabled,
+} from "@/lib/chat-mock-config";
+import { getMockExamplePrompts, MOCK_SCENARIOS } from "@/lib/chat-mocks";
 import type { ChatHistoryItem } from "@/lib/chat-helpers";
 import { groupHistoryByDay } from "@/lib/chat-helpers";
 import type { ChatApiResponse, ChatMessage } from "@/lib/chat-types";
-import { ArrowLeft, MessageSquarePlus, Moon, PanelLeft, PanelRight, Sun } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  ArrowLeft,
+  FlaskConical,
+  MessageSquarePlus,
+  Moon,
+  PanelLeft,
+  PanelRight,
+  Sun,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
@@ -40,6 +55,9 @@ export function ChatAssistant() {
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [history, setHistory] = useState<ChatHistoryItem[]>([]);
+  const [mockMode, setMockMode] = useState(() =>
+    typeof window !== "undefined" ? isChatMockEnabled() : false,
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hydrated = useRef(false);
@@ -245,6 +263,14 @@ export function ChatAssistant() {
               >
                 Beta
               </Badge>
+              {mockMode && (
+                <Badge
+                  variant="secondary"
+                  className="shrink-0 border-amber-500/30 bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300"
+                >
+                  Mock data
+                </Badge>
+              )}
             </div>
             <p className="hidden truncate text-xs text-muted-foreground sm:block">
               POs · stock · ledgers · production
@@ -271,6 +297,29 @@ export function ChatAssistant() {
           >
             {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
+          {isMockToggleAllowed() && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const next = toggleChatMockEnabled();
+                setMockMode(next);
+                toast.success(
+                  next ? "Mock mode on — no API key needed" : "Mock mode off — using live API",
+                );
+              }}
+              className={cn(
+                "gap-1.5 border-border/60 bg-card/50 backdrop-blur-sm",
+                mockMode &&
+                  "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200",
+              )}
+              title="Toggle mock responses for UI testing"
+            >
+              <FlaskConical className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">{mockMode ? "Mock on" : "Mock off"}</span>
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -316,6 +365,7 @@ export function ChatAssistant() {
                 <EmptyState
                   firstName={firstName}
                   onSelect={handlePromptSelect}
+                  mockMode={mockMode}
                 />
               )}
 
@@ -395,23 +445,41 @@ export function ChatAssistant() {
 function EmptyState({
   firstName,
   onSelect,
+  mockMode,
 }: {
   firstName: string;
   onSelect: (prompt: string) => void;
+  mockMode: boolean;
 }) {
-  const examples = [
-    "How many ledgers does Oswal Extrusion Limited have?",
-    "Recent pending purchase orders",
-    "Stock in hand at Oswal Extrusion Limited",
-    "FIBC bag production for Oswal Extrusion Limited",
-  ];
+  const examples = mockMode
+    ? getMockExamplePrompts()
+    : [
+        "How many ledgers does Oswal Extrusion Limited have?",
+        "Recent pending purchase orders",
+        "Stock in hand at Oswal Extrusion Limited",
+        "FIBC bag production for Oswal Extrusion Limited",
+      ];
 
   return (
     <div className="pt-4 md:pt-8">
       <AssistantGreeting firstName={firstName} />
 
+      {mockMode && (
+        <div className="mb-6 rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
+          <p className="font-medium">Mock mode is on</p>
+          <p className="mt-1 text-xs leading-relaxed text-amber-800/90 dark:text-amber-200/80">
+            Responses are simulated — no API or LLM key required. Click any example below
+            to preview card layouts ({MOCK_SCENARIOS.length} scenarios). Type{" "}
+            <code className="rounded bg-black/10 px-1 py-0.5 font-mono text-[11px]">
+              mock:empty-result
+            </code>{" "}
+            for a specific scenario.
+          </p>
+        </div>
+      )}
+
       <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        Try asking
+        {mockMode ? "Mock examples" : "Try asking"}
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
         {examples.map((ex) => (

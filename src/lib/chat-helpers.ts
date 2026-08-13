@@ -1,7 +1,10 @@
 import type { ChatApiResponse, ChatTableUsed } from "@/lib/chat-types";
 import { SUGGESTED_PROMPTS } from "@/lib/chat-types";
 
-export function formatCell(value: unknown): string {
+import { formatCell as formatCellRich } from "@/lib/result-card-format";
+
+export function formatCell(value: unknown, column?: string): string {
+  if (column) return formatCellRich(value, column);
   if (value == null) return "—";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
