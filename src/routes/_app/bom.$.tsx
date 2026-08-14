@@ -1,10 +1,26 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Download, ExternalLink, Loader2, Mail, Send } from "lucide-react";
+import {
+  ArrowLeft,
+  Download,
+  ExternalLink,
+  FileText,
+  Loader2,
+  Mail,
+  Package,
+  Ruler,
+  Send,
+} from "lucide-react";
 import { toast } from "sonner";
+import { BomFieldLabel, BomPageShell, BomPanel, BomStat } from "@/components/bom/bom-ui";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { bomPdfUrl, fetchBomCustomer, fetchBomDetail, sendBomEmail } from "@/lib/bom-api";
 import { formatBomDate, formatDimension, type BomDetailResult } from "@/lib/bom-types";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/bom/$")({
   head: ({ params }) => ({
@@ -24,9 +40,29 @@ function decodeBomQtnParam(value: string): string {
 function MetaItem({ label, value }: { label: string; value?: string | number | null }) {
   if (value == null || value === "" || value === "—") return null;
   return (
-    <div>
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="font-medium">{value}</dd>
+    <div className="rounded-lg border border-border/50 bg-muted/15 px-3 py-2">
+      <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 text-sm font-medium leading-snug">{value}</dd>
+    </div>
+  );
+}
+
+function SummaryGroup({
+  title,
+  icon: Icon,
+  children,
+}: {
+  title: string;
+  icon: React.ComponentType<{ className?: string }>;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <Icon className="h-3.5 w-3.5" />
+        {title}
+      </div>
+      <div className="grid gap-2">{children}</div>
     </div>
   );
 }
@@ -43,24 +79,32 @@ function BomDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-[40vh] items-center justify-center gap-2 text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin" />
-        Loading BOM…
-      </div>
+      <BomPageShell>
+        <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin text-amber-600" />
+          <p className="text-sm">Loading BOM…</p>
+        </div>
+      </BomPageShell>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="mx-auto max-w-3xl space-y-4 p-6">
-        <Link to="/bom" className="inline-flex items-center gap-2 text-sm text-primary hover:underline">
+      <BomPageShell>
+        <Link
+          to="/bom"
+          className="mb-6 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+        >
           <ArrowLeft className="h-4 w-4" />
           Back to report
         </Link>
-        <p className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-destructive">
-          {error instanceof Error ? error.message : "BOM not found."}
-        </p>
-      </div>
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6 text-center">
+          <p className="font-medium text-destructive">{error instanceof Error ? error.message : "BOM not found."}</p>
+          <Button variant="outline" className="mt-4" asChild>
+            <Link to="/bom">Return to list</Link>
+          </Button>
+        </div>
+      </BomPageShell>
     );
   }
 
@@ -101,7 +145,7 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
           .join("; ");
         if (suggested) setTo((current) => current || suggested);
       } catch {
-        // Customer master email is optional
+        // optional
       } finally {
         if (!cancelled) setCustomerEmailsLoaded(true);
       }
@@ -136,66 +180,106 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
     }
   }
 
+  const safeFileName = qtnNo.replace(/[/\\?%*:|"<>]/g, "-");
+  const cleanInstruction = header.instruction?.replace(/<\/?b>/g, "").replace(/<>/g, "") ?? "";
+
   return (
-    <div className="mx-auto max-w-7xl space-y-6 p-4 pb-24 md:p-6 md:pb-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link to="/bom" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-4 w-4" />
-          Back to report
-        </Link>
-        <div className="flex flex-wrap items-center gap-2">
-          <a
-            href={pdfUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted"
-          >
-            <ExternalLink className="h-4 w-4" />
-            Open PDF
-          </a>
-          <a
-            href={pdfUrl}
-            download={`${qtnNo.replace(/[/\\?%*:|"<>]/g, "-")}.pdf`}
-            className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted"
-          >
-            <Download className="h-4 w-4" />
-            Download PDF
-          </a>
+    <BomPageShell>
+      <div className="sticky top-0 z-20 -mx-4 mb-5 border-b border-border/60 bg-background/85 px-4 py-3 backdrop-blur-md md:-mx-6 md:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <Button variant="ghost" size="sm" className="shrink-0" asChild>
+              <Link to="/bom">
+                <ArrowLeft className="h-4 w-4" />
+                Back
+              </Link>
+            </Button>
+            <div className="min-w-0 border-l border-border/60 pl-3">
+              <p className="truncate font-mono text-sm font-semibold">{header.qtnNo}</p>
+              <p className="truncate text-xs text-muted-foreground">{header.partyName}</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <a href={pdfUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="h-4 w-4" />
+                Open PDF
+              </a>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <a href={pdfUrl} download={`${safeFileName}.pdf`}>
+                <Download className="h-4 w-4" />
+                Download
+              </a>
+            </Button>
+          </div>
         </div>
       </div>
 
-      <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
-        <div className="border-b px-4 py-3">
-          <h1 className="text-lg font-semibold">Bill of Material — {header.qtnNo}</h1>
-          <p className="text-sm text-muted-foreground">{header.partyName}</p>
-        </div>
-        <iframe
-          title={`BOM PDF ${header.qtnNo}`}
-          src={pdfUrl}
-          className="h-[min(80vh,980px)] w-full bg-white"
-        />
-      </section>
+      {/* PDF + compact summary sidebar */}
+      <div className="mb-5 grid gap-5 lg:grid-cols-[1fr_280px]">
+        <BomPanel
+          title="PDF preview"
+          subtitle="Generated from ERP BOM data"
+          headerRight={
+            <Badge variant="secondary" className="font-normal">
+              QuestPDF
+            </Badge>
+          }
+        >
+          <iframe
+            title={`BOM PDF ${header.qtnNo}`}
+            src={pdfUrl}
+            className="h-[min(80vh,980px)] w-full bg-white"
+          />
+        </BomPanel>
 
-      <section className="rounded-xl border bg-card p-5 shadow-sm">
-        <div className="flex items-center gap-2">
-          <Mail className="h-5 w-5 text-primary" />
+        <BomPanel title="Quick summary" className="h-fit lg:sticky lg:top-[4.5rem]">
+          <div className="space-y-4 p-4">
+            <div className="grid grid-cols-2 gap-2">
+              <BomStat label="Date" value={formatBomDate(header.date)} />
+              <BomStat label="User" value={header.user || "—"} />
+            </div>
+            <SummaryGroup title="Bag" icon={Package}>
+              <BomStat label="Bag type" value={header.bagType || "—"} />
+              <BomStat label="SWL / Qty" value={
+                [header.swl, header.qty && `${header.qty}${header.qtyUnit ? ` ${header.qtyUnit}` : ""}`]
+                  .filter(Boolean)
+                  .join(" · ") || "—"
+              } />
+            </SummaryGroup>
+            <SummaryGroup title="Size" icon={Ruler}>
+              <BomStat
+                label="L × W × H"
+                value={`${formatDimension(header.sizeL, header.sizeW, header.sizeH)}${header.sizeType ? ` ${header.sizeType}` : ""}`}
+              />
+            </SummaryGroup>
+            <SummaryGroup title="Refs" icon={FileText}>
+              <BomStat label="Ref no." value={header.refNo || "—"} />
+              <BomStat label="PO no." value={header.poNos || header.poNo || "—"} />
+            </SummaryGroup>
+          </div>
+        </BomPanel>
+      </div>
+
+      {/* Email — full width, original layout */}
+      <BomPanel className="mb-5">
+        <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3.5 md:px-5">
+          <Mail className="h-5 w-5 text-amber-600" />
           <div>
-            <h2 className="text-base font-semibold">Email BOM</h2>
+            <h2 className="text-sm font-semibold">Email BOM</h2>
             <p className="text-xs text-muted-foreground">
-              Sends QuestPDF attachment to any address you enter. Separate multiple emails with comma or semicolon.
+              Sends QuestPDF attachment. Separate multiple emails with comma or semicolon.
             </p>
           </div>
         </div>
-
-        <form onSubmit={(e) => void handleSendEmail(e)} className="mt-4 grid gap-4 md:grid-cols-2">
-          <label className="space-y-1 text-sm md:col-span-2">
-            <span className="font-medium text-muted-foreground">To *</span>
-            <input
-              type="text"
+        <form onSubmit={(e) => void handleSendEmail(e)} className="grid gap-4 p-4 md:grid-cols-2 md:p-5">
+          <label className="space-y-1.5 md:col-span-2">
+            <BomFieldLabel>To *</BomFieldLabel>
+            <Input
               value={to}
               onChange={(e) => setTo(e.target.value)}
               placeholder="customer@example.com; another@example.com"
-              className="w-full rounded-md border bg-background px-3 py-2"
               required
             />
             {!customerEmailsLoaded ? (
@@ -203,62 +287,38 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
             ) : null}
           </label>
 
-          <label className="space-y-1 text-sm">
-            <span className="font-medium text-muted-foreground">Cc</span>
-            <input
-              type="text"
-              value={cc}
-              onChange={(e) => setCc(e.target.value)}
-              className="w-full rounded-md border bg-background px-3 py-2"
-            />
+          <label className="space-y-1.5">
+            <BomFieldLabel>Cc</BomFieldLabel>
+            <Input value={cc} onChange={(e) => setCc(e.target.value)} />
           </label>
 
-          <label className="space-y-1 text-sm">
-            <span className="font-medium text-muted-foreground">Bcc</span>
-            <input
-              type="text"
-              value={bcc}
-              onChange={(e) => setBcc(e.target.value)}
-              className="w-full rounded-md border bg-background px-3 py-2"
-            />
+          <label className="space-y-1.5">
+            <BomFieldLabel>Bcc</BomFieldLabel>
+            <Input value={bcc} onChange={(e) => setBcc(e.target.value)} />
           </label>
 
-          <label className="space-y-1 text-sm md:col-span-2">
-            <span className="font-medium text-muted-foreground">Subject</span>
-            <input
-              type="text"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              className="w-full rounded-md border bg-background px-3 py-2"
-            />
+          <label className="space-y-1.5 md:col-span-2">
+            <BomFieldLabel>Subject</BomFieldLabel>
+            <Input value={subject} onChange={(e) => setSubject(e.target.value)} />
           </label>
 
-          <label className="space-y-1 text-sm md:col-span-2">
-            <span className="font-medium text-muted-foreground">Message</span>
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              rows={4}
-              className="w-full rounded-md border bg-background px-3 py-2"
-            />
+          <label className="space-y-1.5 md:col-span-2">
+            <BomFieldLabel>Message</BomFieldLabel>
+            <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} className="resize-y" />
           </label>
 
           <div className="md:col-span-2">
-            <button
-              type="submit"
-              disabled={sending}
-              className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-            >
+            <Button type="submit" disabled={sending}>
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               Send email with PDF
-            </button>
+            </Button>
           </div>
         </form>
-      </section>
+      </BomPanel>
 
-      <section className="rounded-xl border bg-card p-5 shadow-sm">
-        <h2 className="text-base font-semibold">BOM summary</h2>
-        <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+      {/* Full BOM summary — restored grid layout */}
+      <BomPanel title="BOM summary" className="mb-5">
+        <dl className="grid gap-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4 md:p-5">
           <MetaItem label="Date" value={formatBomDate(header.date)} />
           <MetaItem label="User" value={header.user} />
           <MetaItem label="Ref no." value={header.refNo} />
@@ -281,7 +341,7 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
           <MetaItem label="Bottom / DS" value={header.bottomType} />
           <MetaItem label="Loop" value={header.loopSpec} />
           <MetaItem label="Liner" value={header.linerSpec} />
-          <MetaItem label="Doc pouch" value={header.doc !== "N/A" ? header.doc : ""} />
+          <MetaItem label="Doc pouch" value={header.doc !== "N/A" ? header.doc : undefined} />
           <MetaItem label="Total kg / bag" value={header.totalKg ?? undefined} />
           <MetaItem label="PO no." value={header.poNos || header.poNo} />
           <MetaItem label="Drop loop" value={header.isDropLoop} />
@@ -290,62 +350,76 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
         </dl>
 
         {header.printingRemarks ? (
-          <p className="mt-4 rounded-md bg-muted/50 p-3 text-sm">
+          <p className="mx-4 mb-4 rounded-lg bg-muted/40 p-3 text-sm md:mx-5">
             <span className="font-medium">Printing remarks: </span>
             {header.printingRemarks}
           </p>
         ) : null}
 
-        {header.instruction ? (
-          <p className="mt-4 rounded-md bg-muted/50 p-3 text-sm whitespace-pre-wrap">
-            <span className="font-medium">Instructions: </span>
-            {header.instruction.replace(/<\/?b>/g, "").replace(/<>/g, "")}
-          </p>
+        {cleanInstruction ? (
+          <div className="mx-4 mb-5 rounded-lg border border-border/60 bg-muted/20 p-4 md:mx-5">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Instructions</p>
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">{cleanInstruction}</p>
+          </div>
         ) : null}
-      </section>
+      </BomPanel>
 
-      <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
-        <div className="border-b px-4 py-3">
-          <h2 className="font-semibold">Components</h2>
-          <p className="text-xs text-muted-foreground">
-            {lines.length} component(s) · order matches ERP save sequence
-          </p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2">Component</th>
-                <th className="px-3 py-2">GSM</th>
-                <th className="px-3 py-2">Lami</th>
-                <th className="px-3 py-2">Color</th>
-                <th className="px-3 py-2">Fabric</th>
-                <th className="px-3 py-2">Cut size</th>
-                <th className="px-3 py-2 text-right">Order mtr</th>
-                <th className="px-3 py-2 text-right">Kg / bag</th>
-                <th className="px-3 py-2">GPM</th>
-                <th className="px-3 py-2">Remarks</th>
+      {/* Components — improved table, full width */}
+      <BomPanel
+        title="Components"
+        subtitle={`${lines.length} component(s) · order matches ERP save sequence`}
+      >
+        <div className="max-h-[70vh] overflow-auto">
+          <table className="min-w-full border-separate border-spacing-0 text-sm">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-muted/80 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground backdrop-blur-sm">
+                <th className="border-b border-border/60 px-4 py-3">#</th>
+                <th className="border-b border-border/60 px-4 py-3">Component</th>
+                <th className="border-b border-border/60 px-3 py-3">GSM</th>
+                <th className="border-b border-border/60 px-3 py-3">Lami</th>
+                <th className="border-b border-border/60 px-3 py-3">Color</th>
+                <th className="border-b border-border/60 px-3 py-3">Fabric</th>
+                <th className="border-b border-border/60 px-3 py-3">Cut size</th>
+                <th className="border-b border-border/60 px-3 py-3 text-right">Order mtr</th>
+                <th className="border-b border-border/60 px-3 py-3 text-right">Kg / bag</th>
+                <th className="border-b border-border/60 px-3 py-3">GPM</th>
+                <th className="border-b border-border/60 px-4 py-3 min-w-[200px]">Remarks</th>
               </tr>
             </thead>
             <tbody>
-              {lines.map((line) => (
-                <tr key={`${line.sortOrder}-${line.heading}`} className="border-b">
-                  <td className="px-3 py-2 font-medium">{line.heading}</td>
-                  <td className="px-3 py-2">{line.gsm || "—"}</td>
-                  <td className="px-3 py-2">{line.lami || "—"}</td>
-                  <td className="px-3 py-2">{line.color || "—"}</td>
-                  <td className="px-3 py-2">{line.fabricSize || "—"}</td>
-                  <td className="px-3 py-2">{line.cutSize || "—"}</td>
-                  <td className="px-3 py-2 text-right">{line.totalMtr ?? "—"}</td>
-                  <td className="px-3 py-2 text-right">{line.totalKg ?? "—"}</td>
-                  <td className="px-3 py-2">{line.gpm || "—"}</td>
-                  <td className="max-w-[260px] px-3 py-2">{line.remarks || "—"}</td>
+              {lines.map((line, index) => (
+                <tr
+                  key={`${line.sortOrder}-${line.heading}`}
+                  className={cn(
+                    "transition-colors hover:bg-amber-500/[0.04]",
+                    index % 2 === 1 && "bg-muted/10",
+                  )}
+                >
+                  <td className="border-b border-border/40 px-4 py-2.5 tabular-nums text-muted-foreground">
+                    {index + 1}
+                  </td>
+                  <td className="border-b border-border/40 px-4 py-2.5 font-medium text-foreground">
+                    {line.heading}
+                  </td>
+                  <td className="border-b border-border/40 px-3 py-2.5 text-muted-foreground">{line.gsm || "—"}</td>
+                  <td className="border-b border-border/40 px-3 py-2.5 text-muted-foreground">{line.lami || "—"}</td>
+                  <td className="border-b border-border/40 px-3 py-2.5 text-muted-foreground">{line.color || "—"}</td>
+                  <td className="border-b border-border/40 px-3 py-2.5 text-muted-foreground">{line.fabricSize || "—"}</td>
+                  <td className="border-b border-border/40 px-3 py-2.5 text-muted-foreground">{line.cutSize || "—"}</td>
+                  <td className="border-b border-border/40 px-3 py-2.5 text-right tabular-nums">
+                    {line.totalMtr ?? "—"}
+                  </td>
+                  <td className="border-b border-border/40 px-3 py-2.5 text-right tabular-nums">
+                    {line.totalKg ?? "—"}
+                  </td>
+                  <td className="border-b border-border/40 px-3 py-2.5 text-muted-foreground">{line.gpm || "—"}</td>
+                  <td className="border-b border-border/40 px-4 py-2.5 text-muted-foreground">{line.remarks || "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      </section>
-    </div>
+      </BomPanel>
+    </BomPageShell>
   );
 }
