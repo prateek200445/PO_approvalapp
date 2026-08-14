@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { SkeletonCard, SkeletonSection, SkeletonTable, SkeletonWorkflow } from "@/components/SkeletonLoader";
 import { ApprovalDetailNav } from "@/components/ApprovalDetailNav";
+import { DmsAttachmentsSection } from "@/components/DmsAttachmentsSection";
 import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
 import { invalidateApprovalCaches, resolveNextAfterApproval } from "@/lib/approval-after-action";
 
@@ -559,6 +560,8 @@ function PODetails() {
               </div>
             )}
           </Section>
+
+          <DmsAttachmentsSection purchaseCode={poNo} kind="PO" />
 
           {/* Section D: Remarks */}
           <Section title="Remarks">
