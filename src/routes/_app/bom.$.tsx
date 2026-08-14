@@ -3,8 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
-  Download,
-  ExternalLink,
   FileText,
   Loader2,
   Mail,
@@ -14,6 +12,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { BomFieldLabel, BomPageShell, BomPanel, BomStat } from "@/components/bom/bom-ui";
+import { PdfJsViewer } from "@/components/PdfJsViewer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -172,7 +171,7 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
         subject: subject.trim() || undefined,
         body: body.trim() || undefined,
       });
-      toast.success("BOM email sent with PDF attachment.");
+      toast.success("BOM email is being sent. It may take a minute to arrive.");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to send email.");
     } finally {
@@ -199,20 +198,6 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
               <p className="truncate text-xs text-muted-foreground">{header.partyName}</p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" asChild>
-              <a href={pdfUrl} target="_blank" rel="noreferrer">
-                <ExternalLink className="h-4 w-4" />
-                Open PDF
-              </a>
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <a href={pdfUrl} download={`${safeFileName}.pdf`}>
-                <Download className="h-4 w-4" />
-                Download
-              </a>
-            </Button>
-          </div>
         </div>
       </div>
 
@@ -227,10 +212,10 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
             </Badge>
           }
         >
-          <iframe
-            title={`BOM PDF ${header.qtnNo}`}
-            src={pdfUrl}
-            className="h-[min(80vh,980px)] w-full bg-white"
+          <PdfJsViewer
+            pdfUrl={pdfUrl}
+            downloadFileName={`${safeFileName}.pdf`}
+            minHeightClass="min-h-[400px] max-h-[min(80vh,980px)]"
           />
         </BomPanel>
 

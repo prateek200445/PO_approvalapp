@@ -1,8 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
-using POApprovalAPI.Documents;
 using POApprovalAPI.Models;
 using POApprovalAPI.Services;
-using QuestPDF.Fluent;
 
 namespace POApprovalAPI.Controllers;
 
@@ -11,12 +9,12 @@ namespace POApprovalAPI.Controllers;
 public class BomController : ControllerBase
 {
     private readonly BomService _service;
-    private readonly EmailService _emailService;
+    private readonly BomEmailBackgroundService _emailQueue;
 
-    public BomController(BomService service, EmailService emailService)
+    public BomController(BomService service, BomEmailBackgroundService emailQueue)
     {
         _service = service;
-        _emailService = emailService;
+        _emailQueue = emailQueue;
     }
 
     [HttpPost("email")]
@@ -29,28 +27,13 @@ public class BomController : ControllerBase
             if (string.IsNullOrWhiteSpace(request.To))
                 return BadRequest(new { message = "Recipient email (To) is required." });
 
-            var model = await _service.BuildPdfModelAsync(request.FilePoNo);
-            if (model is null)
+            var exists = await _service.BomExistsAsync(request.FilePoNo);
+            if (!exists)
                 return NotFound(new { message = "BOM not found for this quotation number." });
 
-            var pdfBytes = new BillOfMaterialDocument(model).GeneratePdf();
-            var fileName = $"{SanitizeFileName(model.QtnNo)}.pdf";
-            var subject = string.IsNullOrWhiteSpace(request.Subject)
-                ? $"BOM - {model.QtnNo} - {model.PartyName}"
-                : request.Subject.Trim();
-            var body = string.IsNullOrWhiteSpace(request.Body)
-                ? "Please find attached Bill of Material (BOM) PDF."
-                : request.Body.Trim();
+            _emailQueue.QueueSend(request);
 
-            await _emailService.SendMailAndWaitAsync(
-                request.To.Trim(),
-                subject,
-                body,
-                [new EmailAttachmentData(fileName, "application/pdf", pdfBytes)],
-                cc: request.Cc?.Trim(),
-                bcc: request.Bcc?.Trim());
-
-            return Ok(new { message = "BOM email sent successfully." });
+            return Ok(new { message = "BOM email is being sent. It may take a minute to arrive." });
         }
         catch (InvalidOperationException ex)
         {
@@ -68,6 +51,19 @@ public class BomController : ControllerBase
         try
         {
             return Ok(await _service.GetPartyMappingAsync());
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("parties")]
+    public async Task<IActionResult> GetPartyNames()
+    {
+        try
+        {
+            return Ok(await _service.GetPartyNamesAsync());
         }
         catch (Exception ex)
         {
@@ -172,12 +168,5 @@ public class BomController : ControllerBase
         {
             return StatusCode(500, new { message = ex.Message });
         }
-    }
-
-    private static string SanitizeFileName(string value)
-    {
-        var invalid = Path.GetInvalidFileNameChars();
-        var cleaned = new string(value.Select(ch => invalid.Contains(ch) ? '-' : ch).ToArray());
-        return string.IsNullOrWhiteSpace(cleaned) ? "BOM" : cleaned;
     }
 }

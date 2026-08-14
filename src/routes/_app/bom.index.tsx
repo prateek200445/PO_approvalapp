@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowDown,
   ArrowUp,
@@ -24,7 +25,7 @@ import { DatePickerField } from "@/components/DatePickerField";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchBomCustomers, fetchBomUsers, searchBom } from "@/lib/bom-api";
+import { fetchBomPartyNames, fetchBomUsers, searchBom } from "@/lib/bom-api";
 import {
   defaultBomDateFrom,
   formatBomDate,
@@ -32,7 +33,6 @@ import {
   toInputDate,
   type BomListItem,
   type BomSearchResult,
-  type BomCustomerOption,
 } from "@/lib/bom-types";
 import { cn } from "@/lib/utils";
 
@@ -52,59 +52,31 @@ function normalizeDateRange(from: string, to: string): { from: string; to: strin
 
 function BomReportPage() {
   const navigate = useNavigate();
-  const [customers, setCustomers] = useState<BomCustomerOption[]>([]);
-  const [users, setUsers] = useState<string[]>([]);
   const [partyName, setPartyName] = useState("");
   const [userName, setUserName] = useState("");
   const [dateFrom, setDateFrom] = useState(defaultBomDateFrom());
   const [dateTo, setDateTo] = useState(toInputDate(new Date()));
   const [searchText, setSearchText] = useState("");
   const [page, setPage] = useState(1);
-  const [loadingParties, setLoadingParties] = useState(true);
-  const [loadingUsers, setLoadingUsers] = useState(true);
   const [loading, setLoading] = useState(false);
   const [dateSortDesc, setDateSortDesc] = useState(true);
   const [result, setResult] = useState<BomSearchResult | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoadingUsers(true);
-      try {
-        const userRows = await fetchBomUsers();
-        if (!cancelled) setUsers(userRows);
-      } catch (err: unknown) {
-        if (!cancelled) toast.error(err instanceof Error ? err.message : "Failed to load users");
-      } finally {
-        if (!cancelled) setLoadingUsers(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: partyNames = [], isLoading: loadingParties } = useQuery({
+    queryKey: ["bom-parties"],
+    queryFn: fetchBomPartyNames,
+    staleTime: 1000 * 60 * 60 * 6,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoadingParties(true);
-      try {
-        const customerRows = await fetchBomCustomers();
-        if (!cancelled) setCustomers(customerRows.filter((c) => c.companyName));
-      } catch (err: unknown) {
-        if (!cancelled) toast.error(err instanceof Error ? err.message : "Failed to load parties");
-      } finally {
-        if (!cancelled) setLoadingParties(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { data: users = [], isLoading: loadingUsers } = useQuery({
+    queryKey: ["bom-users"],
+    queryFn: fetchBomUsers,
+    staleTime: 1000 * 60 * 60 * 6,
+  });
 
   const partyOptions = useMemo(
-    () => customers.map((c) => ({ value: c.companyName, label: c.companyName })),
-    [customers],
+    () => partyNames.map((name) => ({ value: name, label: name })),
+    [partyNames],
   );
 
   const userOptions = useMemo(

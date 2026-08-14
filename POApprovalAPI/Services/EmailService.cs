@@ -20,9 +20,11 @@ public class EmailService
         string to,
         string subject,
         string body,
-        IReadOnlyList<EmailAttachmentData>? attachments = null)
+        IReadOnlyList<EmailAttachmentData>? attachments = null,
+        string? cc = null,
+        string? bcc = null)
     {
-        return SendMailAsync(to, subject, body, attachments, wait: false);
+        return SendMailAsync(to, subject, body, attachments, wait: false, cc: cc, bcc: bcc);
     }
 
     /// <summary>
@@ -130,7 +132,7 @@ public class EmailService
             {
                 Port = port,
                 EnableSsl = true,
-                Timeout = 8000,
+                Timeout = 60000,
                 Credentials = new NetworkCredential(username, password),
             };
 

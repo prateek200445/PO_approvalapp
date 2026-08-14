@@ -74,6 +74,8 @@ builder.Services.AddScoped<ExcelLedgerService>();
 builder.Services.AddScoped<BillWiseTransactionService>();
 builder.Services.AddScoped<LedgerSummaryService>();
 builder.Services.AddScoped<BomService>();
+builder.Services.AddSingleton<BomEmailBackgroundService>();
+builder.Services.AddHostedService<BomCacheWarmupService>();
 
 builder.Services.AddCors(options =>
 {

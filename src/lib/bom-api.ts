@@ -18,6 +18,11 @@ async function parseJson<T>(res: Response): Promise<T> {
   return data as T;
 }
 
+export async function fetchBomPartyNames(): Promise<string[]> {
+  const res = await fetch(getApiUrl("/api/bom/parties"));
+  return parseJson<string[]>(res);
+}
+
 export async function fetchBomCustomers(): Promise<BomCustomerOption[]> {
   const res = await fetch(getApiUrl("/api/bom/customers"));
   const data = await parseJson<Array<Record<string, unknown>>>(res);

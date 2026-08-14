@@ -7,8 +7,10 @@ namespace POApprovalAPI.Services;
 public class BomService
 {
     private const int MaxPageSize = 100;
-    private const string PartyMappingCacheKey = "bom:party-mapping:v1";
-    private static readonly TimeSpan PartyMappingCacheTtl = TimeSpan.FromMinutes(30);
+    private const string PartyMappingCacheKey = "bom:party-mapping:v2";
+    private const string UsersCacheKey = "bom:users:v1";
+    private static readonly TimeSpan PartyMappingCacheTtl = TimeSpan.FromHours(6);
+    private static readonly TimeSpan UsersCacheTtl = TimeSpan.FromHours(6);
 
     private readonly DatabaseService _database;
     private readonly IMemoryCache _cache;
@@ -22,7 +24,20 @@ public class BomService
     public async Task<IReadOnlyList<BomCustomerOption>> GetCustomersAsync()
     {
         var entry = await GetPartyMappingEntryAsync();
-        return MapGroupsToCustomerOptions(entry.Mapping, entry.RawCustomers);
+        return entry.MappedCustomers;
+    }
+
+    public async Task<IReadOnlyList<string>> GetPartyNamesAsync()
+    {
+        var entry = await GetPartyMappingEntryAsync();
+        return entry.PartyNames;
+    }
+
+    public async Task WarmCachesAsync(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        await GetPartyMappingEntryAsync();
+        await GetUsersAsync();
     }
 
     public async Task<IReadOnlyList<BomPartyGroup>> GetPartyMappingAsync()
@@ -64,7 +79,9 @@ public class BomService
 
     private sealed record PartyMappingCacheEntry(
         BomPartyMappingIndex Mapping,
-        IReadOnlyList<BomCustomerOption> RawCustomers);
+        IReadOnlyList<BomCustomerOption> RawCustomers,
+        IReadOnlyList<BomCustomerOption> MappedCustomers,
+        IReadOnlyList<string> PartyNames);
 
     private async Task<PartyMappingCacheEntry> GetPartyMappingEntryAsync()
     {
@@ -73,7 +90,15 @@ public class BomService
 
         var raw = await FetchRawCustomersAsync();
         var mapping = BomPartyMappingService.Build(raw);
-        var entry = new PartyMappingCacheEntry(mapping, raw);
+        var mappedCustomers = MapGroupsToCustomerOptions(mapping, raw);
+        var partyNames = mappedCustomers
+            .Select(c => c.CompanyName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var entry = new PartyMappingCacheEntry(mapping, raw, mappedCustomers, partyNames);
         _cache.Set(PartyMappingCacheKey, entry, PartyMappingCacheTtl);
         return entry;
     }
@@ -86,8 +111,22 @@ public class BomService
 
     private async Task<IReadOnlyList<BomCustomerOption>> FetchRawCustomersAsync()
     {
-        using var connection = _database.CreateProductionConnection();
+        var mastersTask = FetchMasterCustomersAsync();
+        var bomOnlyTask = FetchBomOnlyCustomersAsync();
+        await Task.WhenAll(mastersTask, bomOnlyTask);
 
+        var masters = await mastersTask;
+        var bomOnly = await bomOnlyTask;
+
+        return masters
+            .Concat(bomOnly)
+            .OrderBy(c => c.CompanyName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private async Task<IReadOnlyList<BomCustomerOption>> FetchMasterCustomersAsync()
+    {
+        using var connection = _database.CreateProductionConnection();
         var rows = await connection.QueryAsync<BomCustomerOption>(@"
 SELECT
     cm.CompanyName,
@@ -98,10 +137,14 @@ SELECT
     cm.Country,
     CAST(1 AS bit) AS FromMaster
 FROM CompanyMaster cm WITH (NOLOCK)
-WHERE ISNULL(cm.CompanyName, '') <> ''
+WHERE ISNULL(cm.CompanyName, '') <> ''");
+        return rows.ToList();
+    }
 
-UNION
-
+    private async Task<IReadOnlyList<BomCustomerOption>> FetchBomOnlyCustomersAsync()
+    {
+        using var connection = _database.CreateProductionConnection();
+        var rows = await connection.QueryAsync<BomCustomerOption>(@"
 SELECT DISTINCT
     b.Customer AS CompanyName,
     NULL AS Email,
@@ -111,29 +154,27 @@ SELECT DISTINCT
     NULL AS Country,
     CAST(0 AS bit) AS FromMaster
 FROM BOM1 b WITH (NOLOCK)
+LEFT JOIN CompanyMaster cm WITH (NOLOCK) ON cm.CompanyName = b.Customer
 WHERE ISNULL(b.Customer, '') <> ''
-  AND NOT EXISTS (
-        SELECT 1
-        FROM CompanyMaster cm2 WITH (NOLOCK)
-        WHERE cm2.CompanyName = b.Customer
-  )
-
-ORDER BY CompanyName");
-
+  AND cm.CompanyName IS NULL");
         return rows.ToList();
     }
 
     public async Task<IReadOnlyList<string>> GetUsersAsync()
     {
+        if (_cache.TryGetValue(UsersCacheKey, out IReadOnlyList<string>? cachedUsers) && cachedUsers is not null)
+            return cachedUsers;
+
         using var connection = _database.CreateProductionConnection();
 
-        var users = await connection.QueryAsync<string>(@"
+        var users = (await connection.QueryAsync<string>(@"
 SELECT DISTINCT UserName
 FROM BOM1 WITH (NOLOCK)
 WHERE ISNULL(UserName, '') <> ''
-ORDER BY UserName");
+ORDER BY UserName")).ToList();
 
-        return users.ToList();
+        _cache.Set(UsersCacheKey, users, UsersCacheTtl);
+        return users;
     }
 
     public async Task<BomSearchResult> SearchAsync(BomSearchRequest request)
@@ -257,6 +298,21 @@ OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY", parameters)).ToList();
             Lines = model.Lines.Select(MapLine).ToList(),
             ReportLines = Array.Empty<BomReportLine>(),
         };
+    }
+
+    public async Task<bool> BomExistsAsync(string filePoNo)
+    {
+        if (string.IsNullOrWhiteSpace(filePoNo))
+            return false;
+
+        using var connection = _database.CreateProductionConnection();
+        return await connection.ExecuteScalarAsync<int>(@"
+SELECT CASE WHEN EXISTS (
+    SELECT 1
+    FROM BOM1 WITH (NOLOCK)
+    WHERE FilePONo = @FilePoNo
+      AND ISNULL(SrNo, '') <> 'temp'
+) THEN 1 ELSE 0 END", new { FilePoNo = filePoNo.Trim() }) == 1;
     }
 
     public async Task<BomPdfModel?> BuildPdfModelAsync(string filePoNo)
@@ -449,6 +505,9 @@ WHERE CompanyName = @CompanyName", new
             State = request.State ?? "",
             Country = request.Country ?? "",
         });
+
+        if (affected > 0)
+            _cache.Remove(PartyMappingCacheKey);
 
         return affected > 0;
     }
