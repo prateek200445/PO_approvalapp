@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { bomPdfUrl, fetchBomCustomer, fetchBomDetail, sendBomEmail } from "@/lib/bom-api";
+import { bomPdfUrl, fetchBomCustomer, fetchBomDetail, sendBomEmail, waitForBomEmailResult } from "@/lib/bom-api";
 import { formatBomDate, formatDimension, type BomDetailResult } from "@/lib/bom-types";
 import { cn } from "@/lib/utils";
 
@@ -163,7 +163,7 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
 
     setSending(true);
     try {
-      await sendBomEmail({
+      const { jobId } = await sendBomEmail({
         filePoNo: qtnNo,
         to: to.trim(),
         cc: cc.trim() || undefined,
@@ -171,6 +171,24 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
         subject: subject.trim() || undefined,
         body: body.trim() || undefined,
       });
+
+      if (jobId) {
+        toast.message("Sending BOM email…", { description: "Generating PDF and delivering via SMTP." });
+        const result = await waitForBomEmailResult(jobId);
+        if (result?.state === "sent") {
+          toast.success("BOM email sent successfully.");
+          return;
+        }
+        if (result?.state === "failed") {
+          toast.error(result.error || "BOM email failed on the server.");
+          return;
+        }
+        toast.message("BOM email is still processing.", {
+          description: "It may arrive in your inbox shortly. Check spam if nothing in 2–3 minutes.",
+        });
+        return;
+      }
+
       toast.success("BOM email is being sent. It may take a minute to arrive.");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to send email.");

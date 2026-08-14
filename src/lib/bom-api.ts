@@ -108,7 +108,7 @@ export async function fetchBomCustomer(companyName: string): Promise<BomCustomer
   };
 }
 
-export async function sendBomEmail(request: BomSendEmailRequest): Promise<void> {
+export async function sendBomEmail(request: BomSendEmailRequest): Promise<{ jobId?: string }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 15000);
 
@@ -127,16 +127,49 @@ export async function sendBomEmail(request: BomSendEmailRequest): Promise<void> 
       signal: controller.signal,
       keepalive: true,
     });
-    await parseJson(res);
+    const data = await parseJson<{ jobId?: string; message?: string }>(res);
+    return { jobId: data.jobId };
   } catch (err: unknown) {
     if (err instanceof Error && err.name === "AbortError") {
-      // Request may still complete server-side after the client gave up waiting.
-      return;
+      return {};
     }
     throw err;
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+export type BomEmailJobStatus = {
+  jobId: string;
+  filePoNo: string;
+  to: string;
+  state: "queued" | "loading_bom" | "building_pdf" | "sending" | "sent" | "failed" | string;
+  error?: string | null;
+  queuedAt: string;
+  completedAt?: string | null;
+};
+
+export async function fetchBomEmailStatus(jobId: string): Promise<BomEmailJobStatus | null> {
+  const res = await fetch(getApiUrl(`/api/bom/email-status/${encodeURIComponent(jobId)}`));
+  if (res.status === 404) return null;
+  return parseJson<BomEmailJobStatus>(res);
+}
+
+export async function waitForBomEmailResult(
+  jobId: string,
+  opts?: { timeoutMs?: number; intervalMs?: number },
+): Promise<BomEmailJobStatus | null> {
+  const timeoutMs = opts?.timeoutMs ?? 120_000;
+  const intervalMs = opts?.intervalMs ?? 3_000;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const status = await fetchBomEmailStatus(jobId);
+    if (!status) return null;
+    if (status.state === "sent" || status.state === "failed") return status;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return null;
 }
 
 export function bomPdfUrl(qtnNo: string): string {

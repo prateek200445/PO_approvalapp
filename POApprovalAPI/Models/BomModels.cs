@@ -137,6 +137,17 @@ public sealed class BomSendEmailRequest
     public string? Body { get; set; }
 }
 
+public sealed class BomEmailJobStatus
+{
+    public string JobId { get; set; } = "";
+    public string FilePoNo { get; set; } = "";
+    public string To { get; set; } = "";
+    public string State { get; set; } = "queued";
+    public string? Error { get; set; }
+    public DateTime QueuedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+}
+
 public sealed class BomReportLine
 {
     public string Heading { get; set; } = "";

@@ -27,10 +27,15 @@ public class BomController : ControllerBase
             if (string.IsNullOrWhiteSpace(request.To))
                 return BadRequest(new { message = "Recipient email (To) is required." });
 
-            if (!_emailQueue.TryQueueSend(request))
+            var jobId = _emailQueue.TryQueueSend(request);
+            if (jobId is null)
                 return StatusCode(503, new { message = "Email queue is busy. Please try again." });
 
-            return Accepted(new { message = "BOM email is being sent. It may take a minute to arrive." });
+            return Accepted(new
+            {
+                jobId,
+                message = "BOM email is being sent. It may take a minute to arrive.",
+            });
         }
         catch (InvalidOperationException ex)
         {
@@ -40,6 +45,15 @@ public class BomController : ControllerBase
         {
             return StatusCode(500, new { message = ex.Message });
         }
+    }
+
+    [HttpGet("email-status/{jobId}")]
+    public IActionResult GetEmailStatus(string jobId)
+    {
+        var status = _emailQueue.GetJobStatus(jobId);
+        if (status is null)
+            return NotFound(new { message = "Email job not found (expired or invalid id)." });
+        return Ok(status);
     }
 
     [HttpGet("party-mapping")]
@@ -179,6 +193,7 @@ public class BomController : ControllerBase
             || first.Equals("customers", StringComparison.OrdinalIgnoreCase)
             || first.Equals("party-mapping", StringComparison.OrdinalIgnoreCase)
             || first.Equals("search", StringComparison.OrdinalIgnoreCase)
-            || first.Equals("email", StringComparison.OrdinalIgnoreCase);
+            || first.Equals("email", StringComparison.OrdinalIgnoreCase)
+            || first.Equals("email-status", StringComparison.OrdinalIgnoreCase);
     }
 }
