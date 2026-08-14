@@ -10,6 +10,7 @@ import {
   CreditCard,
   BookOpen,
   BarChart3,
+  Layers,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
@@ -72,6 +73,12 @@ export function AppShell() {
       icon: BookOpen,
       label: "Ledgers",
       match: (p: string) => p.startsWith("/ledgers") || p.startsWith("/ledger-summary") || p.startsWith("/reconciliation"),
+    },
+    {
+      to: "/bom",
+      icon: Layers,
+      label: "BOM",
+      match: (p: string) => p.startsWith("/bom"),
     },
     { to: "/profile", icon: User, label: "Profile", match: (p: string) => p.startsWith("/profile") },
   ];

@@ -32,6 +32,16 @@ namespace POApprovalAPI.Services
             return connection;
         }
 
+        public SqlConnection CreateProductionConnection()
+        {
+            var connection = new SqlConnection(
+                _configuration.GetConnectionString("ProductionConnection")
+            );
+
+            connection.Open();
+            return connection;
+        }
+
         /// <summary>
         /// Safely closes and disposes a connection, returning it to the connection pool
         /// </summary>

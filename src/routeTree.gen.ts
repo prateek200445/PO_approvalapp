@@ -22,10 +22,14 @@ import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summa
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
+import { Route as AppBomRouteImport } from './routes/_app/bom'
+import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
 import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
 import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
 import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
 import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
+import { Route as AppBomCustomersRouteImport } from './routes/_app/bom.customers'
+import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -91,6 +95,16 @@ const AppDashboardRoute = AppDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBomRoute = AppBomRouteImport.update({
+  id: '/bom',
+  path: '/bom',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBomIndexRoute = AppBomIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppBomRoute,
+} as any)
 const AppWorkorderPoNoRoute = AppWorkorderPoNoRouteImport.update({
   id: '/workorder/$poNo',
   path: '/workorder/$poNo',
@@ -111,9 +125,20 @@ const AppIndentIndentNoRoute = AppIndentIndentNoRouteImport.update({
   path: '/indent/$indentNo',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBomCustomersRoute = AppBomCustomersRouteImport.update({
+  id: '/customers',
+  path: '/customers',
+  getParentRoute: () => AppBomRoute,
+} as any)
+const AppBomSplatRoute = AppBomSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
+  getParentRoute: () => AppBomRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/bom': typeof AppBomRouteWithChildren
   '/dashboard': typeof AppDashboardRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
@@ -125,10 +150,13 @@ export interface FileRoutesByFullPath {
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
+  '/bom/$': typeof AppBomSplatRoute
+  '/bom/customers': typeof AppBomCustomersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
+  '/bom/': typeof AppBomIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -143,15 +171,19 @@ export interface FileRoutesByTo {
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
+  '/bom/$': typeof AppBomSplatRoute
+  '/bom/customers': typeof AppBomCustomersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
+  '/bom': typeof AppBomIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
+  '/_app/bom': typeof AppBomRouteWithChildren
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/history': typeof AppHistoryRoute
   '/_app/indents': typeof AppIndentsRoute
@@ -163,15 +195,19 @@ export interface FileRoutesById {
   '/_app/reconciliation': typeof AppReconciliationRoute
   '/_app/sales-dashboard': typeof AppSalesDashboardRoute
   '/_app/workorders': typeof AppWorkordersRoute
+  '/_app/bom/$': typeof AppBomSplatRoute
+  '/_app/bom/customers': typeof AppBomCustomersRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/_app/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/_app/po/$poNo': typeof AppPoPoNoRoute
   '/_app/workorder/$poNo': typeof AppWorkorderPoNoRoute
+  '/_app/bom/': typeof AppBomIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/bom'
     | '/dashboard'
     | '/history'
     | '/indents'
@@ -183,10 +219,13 @@ export interface FileRouteTypes {
     | '/reconciliation'
     | '/sales-dashboard'
     | '/workorders'
+    | '/bom/$'
+    | '/bom/customers'
     | '/indent/$indentNo'
     | '/payment/$paymentNo'
     | '/po/$poNo'
     | '/workorder/$poNo'
+    | '/bom/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -201,14 +240,18 @@ export interface FileRouteTypes {
     | '/reconciliation'
     | '/sales-dashboard'
     | '/workorders'
+    | '/bom/$'
+    | '/bom/customers'
     | '/indent/$indentNo'
     | '/payment/$paymentNo'
     | '/po/$poNo'
     | '/workorder/$poNo'
+    | '/bom'
   id:
     | '__root__'
     | '/'
     | '/_app'
+    | '/_app/bom'
     | '/_app/dashboard'
     | '/_app/history'
     | '/_app/indents'
@@ -220,10 +263,13 @@ export interface FileRouteTypes {
     | '/_app/reconciliation'
     | '/_app/sales-dashboard'
     | '/_app/workorders'
+    | '/_app/bom/$'
+    | '/_app/bom/customers'
     | '/_app/indent/$indentNo'
     | '/_app/payment/$paymentNo'
     | '/_app/po/$poNo'
     | '/_app/workorder/$poNo'
+    | '/_app/bom/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -324,6 +370,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/bom': {
+      id: '/_app/bom'
+      path: '/bom'
+      fullPath: '/bom'
+      preLoaderRoute: typeof AppBomRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/bom/': {
+      id: '/_app/bom/'
+      path: '/'
+      fullPath: '/bom/'
+      preLoaderRoute: typeof AppBomIndexRouteImport
+      parentRoute: typeof AppBomRoute
+    }
     '/_app/workorder/$poNo': {
       id: '/_app/workorder/$poNo'
       path: '/workorder/$poNo'
@@ -352,10 +412,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndentIndentNoRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/bom/customers': {
+      id: '/_app/bom/customers'
+      path: '/customers'
+      fullPath: '/bom/customers'
+      preLoaderRoute: typeof AppBomCustomersRouteImport
+      parentRoute: typeof AppBomRoute
+    }
+    '/_app/bom/$': {
+      id: '/_app/bom/$'
+      path: '/$'
+      fullPath: '/bom/$'
+      preLoaderRoute: typeof AppBomSplatRouteImport
+      parentRoute: typeof AppBomRoute
+    }
   }
 }
 
+interface AppBomRouteChildren {
+  AppBomSplatRoute: typeof AppBomSplatRoute
+  AppBomCustomersRoute: typeof AppBomCustomersRoute
+  AppBomIndexRoute: typeof AppBomIndexRoute
+}
+
+const AppBomRouteChildren: AppBomRouteChildren = {
+  AppBomSplatRoute: AppBomSplatRoute,
+  AppBomCustomersRoute: AppBomCustomersRoute,
+  AppBomIndexRoute: AppBomIndexRoute,
+}
+
+const AppBomRouteWithChildren =
+  AppBomRoute._addFileChildren(AppBomRouteChildren)
+
 interface AppRouteChildren {
+  AppBomRoute: typeof AppBomRouteWithChildren
   AppDashboardRoute: typeof AppDashboardRoute
   AppHistoryRoute: typeof AppHistoryRoute
   AppIndentsRoute: typeof AppIndentsRoute
@@ -374,6 +464,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppBomRoute: AppBomRouteWithChildren,
   AppDashboardRoute: AppDashboardRoute,
   AppHistoryRoute: AppHistoryRoute,
   AppIndentsRoute: AppIndentsRoute,

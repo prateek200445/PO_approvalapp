@@ -22,19 +22,70 @@ public class EmailService
         string body,
         IReadOnlyList<EmailAttachmentData>? attachments = null)
     {
+        return SendMailAsync(to, subject, body, attachments, wait: false);
+    }
+
+    /// <summary>
+    /// Sends email and waits for SMTP completion (for user-initiated actions like BOM share).
+    /// </summary>
+    public Task SendMailAndWaitAsync(
+        string to,
+        string subject,
+        string body,
+        IReadOnlyList<EmailAttachmentData>? attachments = null,
+        string? cc = null,
+        string? bcc = null)
+    {
+        return SendMailAsync(to, subject, body, attachments, wait: true, cc: cc, bcc: bcc);
+    }
+
+    private Task SendMailAsync(
+        string to,
+        string subject,
+        string body,
+        IReadOnlyList<EmailAttachmentData>? attachments,
+        bool wait,
+        string? cc = null,
+        string? bcc = null)
+    {
         var clonedAttachments = attachments?
             .Select(a => new EmailAttachmentData(a.FileName, a.ContentType, a.Bytes.ToArray()))
             .ToList();
 
-        _ = SendMailCoreAsync(to, subject, body, clonedAttachments);
+        if (wait)
+            return SendMailCoreAsync(to, subject, body, clonedAttachments, cc, bcc, throwOnError: true);
+
+        _ = SendMailInBackgroundAsync(to, subject, body, clonedAttachments, cc, bcc);
         return Task.CompletedTask;
+    }
+
+    private async Task SendMailInBackgroundAsync(
+        string to,
+        string subject,
+        string body,
+        IReadOnlyList<EmailAttachmentData>? attachments,
+        string? cc,
+        string? bcc)
+    {
+        try
+        {
+            await SendMailCoreAsync(to, subject, body, attachments, cc, bcc, throwOnError: false);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("EMAIL ERROR (non-fatal):");
+            Console.WriteLine(ex.Message);
+        }
     }
 
     private async Task SendMailCoreAsync(
         string to,
         string subject,
         string body,
-        IReadOnlyList<EmailAttachmentData>? attachments)
+        IReadOnlyList<EmailAttachmentData>? attachments,
+        string? cc = null,
+        string? bcc = null,
+        bool throwOnError = false)
     {
         try
         {
@@ -48,12 +99,16 @@ public class EmailService
                 string.IsNullOrWhiteSpace(to))
             {
                 Console.WriteLine("EMAIL SKIPPED: missing host/username/to");
+                if (throwOnError)
+                    throw new InvalidOperationException("Email is not configured or recipient is missing.");
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(password))
             {
                 Console.WriteLine("EMAIL SKIPPED: EmailSettings:Password is not configured");
+                if (throwOnError)
+                    throw new InvalidOperationException("Email password is not configured on the server.");
                 return;
             }
 
@@ -65,6 +120,8 @@ public class EmailService
             Console.WriteLine($"SMTP Port : {port}");
             Console.WriteLine($"From      : {username}");
             Console.WriteLine($"To        : {to}");
+            if (!string.IsNullOrWhiteSpace(cc)) Console.WriteLine($"Cc        : {cc}");
+            if (!string.IsNullOrWhiteSpace(bcc)) Console.WriteLine($"Bcc       : {bcc}");
             Console.WriteLine($"Subject   : {subject}");
             Console.WriteLine($"Attach    : {attachments?.Count ?? 0}");
             Console.WriteLine("=================================");
@@ -77,7 +134,24 @@ public class EmailService
                 Credentials = new NetworkCredential(username, password),
             };
 
-            using var message = new MailMessage(username, to, subject, body);
+            using var message = new MailMessage
+            {
+                From = new MailAddress(username),
+                Subject = subject,
+                Body = body,
+            };
+
+            AddAddresses(message.To, to);
+            AddAddresses(message.CC, cc);
+            AddAddresses(message.Bcc, bcc);
+
+            if (message.To.Count == 0)
+            {
+                if (throwOnError)
+                    throw new InvalidOperationException("At least one valid recipient email is required.");
+                Console.WriteLine("EMAIL SKIPPED: no valid To addresses");
+                return;
+            }
 
             if (attachments != null)
             {
@@ -97,9 +171,24 @@ public class EmailService
         }
         catch (Exception ex)
         {
-            Console.WriteLine("EMAIL ERROR (non-fatal):");
+            Console.WriteLine("EMAIL ERROR:");
             Console.WriteLine(ex.Message);
             Console.WriteLine(ex.StackTrace);
+            if (throwOnError)
+                throw;
+        }
+    }
+
+    private static void AddAddresses(MailAddressCollection collection, string? addresses)
+    {
+        if (string.IsNullOrWhiteSpace(addresses))
+            return;
+
+        foreach (var part in addresses.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (string.IsNullOrWhiteSpace(part))
+                continue;
+            collection.Add(part);
         }
     }
 }
