@@ -26,80 +26,53 @@ public sealed class DmsRemoteFileService
 
     public async Task<Stream?> TryGetFileStreamAsync(int fileId, CancellationToken ct = default)
     {
-        if (_cache.TryGetValue(WorkingUrlCacheKey, out string? cachedUrl) && !string.IsNullOrWhiteSpace(cachedUrl))
-        {
-            var cachedHit = await FetchAsync(cachedUrl, fileId, quickProbe: false, ct);
-            if (cachedHit is not null)
-                return cachedHit;
-
-            _cache.Remove(WorkingUrlCacheKey);
-            _logger.LogWarning("Cached DMS URL {ServiceUrl} failed; rediscovering", cachedUrl);
-        }
-
-        var urls = GetServiceUrls().ToList();
+        var urls = GetOrderedServiceUrls().ToList();
         if (urls.Count == 0)
             return null;
 
-        if (urls.Count == 1)
-            return await TryAndRememberAsync(urls[0], fileId, quickProbe: false, ct);
-
-        return await RaceUrlsAsync(urls, fileId, ct);
-    }
-
-    private async Task<Stream?> RaceUrlsAsync(IReadOnlyList<string> urls, int fileId, CancellationToken ct)
-    {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var winner = new TaskCompletionSource<(Stream Stream, string Url)>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        var tasks = urls.Select(url => Task.Run(async () =>
+        foreach (var serviceUrl in urls)
         {
+            ct.ThrowIfCancellationRequested();
+
             try
             {
-                var stream = await FetchAsync(url, fileId, quickProbe: true, linked.Token);
+                var stream = await Task.Run(() => FetchFile(serviceUrl, fileId), ct);
                 if (stream is null)
-                    return;
+                    continue;
 
-                if (winner.TrySetResult((stream, url)))
-                    await linked.CancelAsync();
-                else
-                    await stream.DisposeAsync();
-            }
-            catch (OperationCanceledException) when (linked.IsCancellationRequested)
-            {
-                // Another endpoint won the race.
+                RememberWorkingUrl(serviceUrl);
+                return stream;
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "DMS remote GetFile failed at {ServiceUrl} for file {FileId}", url, fileId);
+                _logger.LogDebug(ex, "DMS remote GetFile failed at {ServiceUrl} for file {FileId}", serviceUrl, fileId);
             }
-        }, linked.Token)).ToArray();
-
-        var completed = await Task.WhenAny(winner.Task, Task.WhenAll(tasks));
-        if (completed == winner.Task && winner.Task.IsCompletedSuccessfully)
-        {
-            var (stream, url) = winner.Task.Result;
-            RememberWorkingUrl(url);
-            return stream;
         }
 
         return null;
     }
 
-    private async Task<Stream?> TryAndRememberAsync(string url, int fileId, bool quickProbe, CancellationToken ct)
-    {
-        var stream = await FetchAsync(url, fileId, quickProbe, ct);
-        if (stream is not null)
-            RememberWorkingUrl(url);
-        return stream;
-    }
-
     private void RememberWorkingUrl(string url) =>
         _cache.Set(WorkingUrlCacheKey, url, WorkingUrlTtl);
 
-    private Task<Stream?> FetchAsync(string serviceUrl, int fileId, bool quickProbe, CancellationToken ct) =>
-        Task.Run(() => FetchFile(serviceUrl, fileId, quickProbe), ct);
+    private IEnumerable<string> GetOrderedServiceUrls()
+    {
+        var all = GetServiceUrls().ToList();
+        if (_cache.TryGetValue(WorkingUrlCacheKey, out string? cachedUrl) &&
+            !string.IsNullOrWhiteSpace(cachedUrl) &&
+            all.Contains(cachedUrl, StringComparer.OrdinalIgnoreCase))
+        {
+            yield return cachedUrl;
+            foreach (var url in all.Where(u => !string.Equals(u, cachedUrl, StringComparison.OrdinalIgnoreCase)))
+                yield return url;
+            yield break;
+        }
 
-    private Stream? FetchFile(string serviceUrl, int fileId, bool quickProbe)
+        foreach (var url in all)
+            yield return url;
+    }
+
+    private Stream? FetchFile(string serviceUrl, int fileId)
     {
         IDMSService? client = null;
         Stream? remoteStream = null;
@@ -149,9 +122,9 @@ public sealed class DmsRemoteFileService
             MaxReceivedMessageSize = int.MaxValue,
             MaxBufferSize = int.MaxValue,
             TransferMode = TransferMode.Streamed,
-            OpenTimeout = TimeSpan.FromSeconds(5),
-            SendTimeout = TimeSpan.FromSeconds(20),
-            ReceiveTimeout = TimeSpan.FromSeconds(60)
+            OpenTimeout = TimeSpan.FromSeconds(4),
+            SendTimeout = TimeSpan.FromSeconds(15),
+            ReceiveTimeout = TimeSpan.FromSeconds(30)
         };
 
         return new ChannelFactory<IDMSService>(binding, new EndpointAddress(serviceUrl));
