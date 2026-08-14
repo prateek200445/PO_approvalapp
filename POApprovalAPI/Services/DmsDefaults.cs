@@ -14,6 +14,5 @@ internal static class DmsDefaults
         "http://180.211.107.118/DMSService/DMSService.svc",
         "http://103.240.33.122/NEWDMSService/DMSService.svc",
         "http://103.240.33.122/DMSService/DMSService.svc",
-        "http://desktop-ijn98i2/DMSService/DMSService.svc",
     ];
 }
