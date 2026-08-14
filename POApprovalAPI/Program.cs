@@ -75,6 +75,7 @@ builder.Services.AddScoped<BillWiseTransactionService>();
 builder.Services.AddScoped<LedgerSummaryService>();
 builder.Services.AddScoped<BomService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();
 
 builder.Services.AddCors(options =>

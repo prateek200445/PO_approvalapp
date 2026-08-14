@@ -18,7 +18,7 @@ public class BomController : ControllerBase
     }
 
     [HttpPost("email")]
-    public async Task<IActionResult> SendEmail([FromBody] BomSendEmailRequest request)
+    public IActionResult SendEmail([FromBody] BomSendEmailRequest request)
     {
         try
         {
@@ -27,13 +27,10 @@ public class BomController : ControllerBase
             if (string.IsNullOrWhiteSpace(request.To))
                 return BadRequest(new { message = "Recipient email (To) is required." });
 
-            var exists = await _service.BomExistsAsync(request.FilePoNo);
-            if (!exists)
-                return NotFound(new { message = "BOM not found for this quotation number." });
+            if (!_emailQueue.TryQueueSend(request))
+                return StatusCode(503, new { message = "Email queue is busy. Please try again." });
 
-            _emailQueue.QueueSend(request);
-
-            return Ok(new { message = "BOM email is being sent. It may take a minute to arrive." });
+            return Accepted(new { message = "BOM email is being sent. It may take a minute to arrive." });
         }
         catch (InvalidOperationException ex)
         {
@@ -155,6 +152,9 @@ public class BomController : ControllerBase
     {
         try
         {
+            if (IsReservedBomRoute(filePoNo))
+                return NotFound(new { message = "BOM not found for this quotation number." });
+
             var detail = await _service.GetDetailAsync(Uri.UnescapeDataString(filePoNo));
             if (detail is null)
                 return NotFound(new { message = "BOM not found for this quotation number." });
@@ -168,5 +168,17 @@ public class BomController : ControllerBase
         {
             return StatusCode(500, new { message = ex.Message });
         }
+    }
+
+    private static bool IsReservedBomRoute(string filePoNo)
+    {
+        var first = filePoNo.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() ?? filePoNo;
+        return first.Equals("parties", StringComparison.OrdinalIgnoreCase)
+            || first.Equals("users", StringComparison.OrdinalIgnoreCase)
+            || first.Equals("customers", StringComparison.OrdinalIgnoreCase)
+            || first.Equals("party-mapping", StringComparison.OrdinalIgnoreCase)
+            || first.Equals("search", StringComparison.OrdinalIgnoreCase)
+            || first.Equals("email", StringComparison.OrdinalIgnoreCase);
     }
 }

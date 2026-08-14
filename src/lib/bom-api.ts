@@ -19,8 +19,21 @@ async function parseJson<T>(res: Response): Promise<T> {
 }
 
 export async function fetchBomPartyNames(): Promise<string[]> {
-  const res = await fetch(getApiUrl("/api/bom/parties"));
-  return parseJson<string[]>(res);
+  const partiesRes = await fetch(getApiUrl("/api/bom/parties"));
+  if (partiesRes.ok) {
+    const names = (await partiesRes.json()) as unknown;
+    if (Array.isArray(names) && names.length > 0 && names.every((n) => typeof n === "string")) {
+      return names;
+    }
+  }
+
+  // Older live API has no /parties route — "parties" hits GET /api/bom/{qtn} and 404s.
+  const mappingRes = await fetch(getApiUrl("/api/bom/party-mapping"));
+  const groups = await parseJson<Array<Record<string, unknown>>>(mappingRes);
+  const names = groups
+    .map((g) => String(g.displayName ?? g.DisplayName ?? "").trim())
+    .filter(Boolean);
+  return [...new Set(names)].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
 }
 
 export async function fetchBomCustomers(): Promise<BomCustomerOption[]> {
@@ -96,19 +109,34 @@ export async function fetchBomCustomer(companyName: string): Promise<BomCustomer
 }
 
 export async function sendBomEmail(request: BomSendEmailRequest): Promise<void> {
-  const res = await fetch(getApiUrl("/api/bom/email"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      filePoNo: request.filePoNo,
-      to: request.to,
-      cc: request.cc || undefined,
-      bcc: request.bcc || undefined,
-      subject: request.subject || undefined,
-      body: request.body || undefined,
-    }),
-  });
-  await parseJson(res);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const res = await fetch(getApiUrl("/api/bom/email"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        filePoNo: request.filePoNo,
+        to: request.to,
+        cc: request.cc || undefined,
+        bcc: request.bcc || undefined,
+        subject: request.subject || undefined,
+        body: request.body || undefined,
+      }),
+      signal: controller.signal,
+      keepalive: true,
+    });
+    await parseJson(res);
+  } catch (err: unknown) {
+    if (err instanceof Error && err.name === "AbortError") {
+      // Request may still complete server-side after the client gave up waiting.
+      return;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export function bomPdfUrl(qtnNo: string): string {

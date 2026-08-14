@@ -62,10 +62,11 @@ function BomReportPage() {
   const [dateSortDesc, setDateSortDesc] = useState(true);
   const [result, setResult] = useState<BomSearchResult | null>(null);
 
-  const { data: partyNames = [], isLoading: loadingParties } = useQuery({
+  const { data: partyNames = [], isLoading: loadingParties, isError: partiesError } = useQuery({
     queryKey: ["bom-parties"],
     queryFn: fetchBomPartyNames,
     staleTime: 1000 * 60 * 60 * 6,
+    retry: 1,
   });
 
   const { data: users = [], isLoading: loadingUsers } = useQuery({
@@ -192,7 +193,9 @@ function BomReportPage() {
                 placeholder={loadingParties ? "Loading…" : "All parties"}
                 emptyOptionLabel="All parties"
                 searchPlaceholder="Search party…"
-                emptyText={loadingParties ? "Loading…" : "No parties found"}
+                emptyText={
+                  loadingParties ? "Loading…" : partiesError ? "Could not load parties" : "No parties found"
+                }
               />
             </label>
 

@@ -7,6 +7,7 @@ namespace POApprovalAPI.Services;
 public class BomService
 {
     private const int MaxPageSize = 100;
+    private const int BomCommandTimeoutSeconds = 120;
     private const string PartyMappingCacheKey = "bom:party-mapping:v2";
     private const string UsersCacheKey = "bom:users:v1";
     private static readonly TimeSpan PartyMappingCacheTtl = TimeSpan.FromHours(6);
@@ -312,7 +313,7 @@ SELECT CASE WHEN EXISTS (
     FROM BOM1 WITH (NOLOCK)
     WHERE FilePONo = @FilePoNo
       AND ISNULL(SrNo, '') <> 'temp'
-) THEN 1 ELSE 0 END", new { FilePoNo = filePoNo.Trim() }) == 1;
+) THEN 1 ELSE 0 END", new { FilePoNo = filePoNo.Trim() }, commandTimeout: BomCommandTimeoutSeconds) == 1;
     }
 
     public async Task<BomPdfModel?> BuildPdfModelAsync(string filePoNo)
@@ -374,7 +375,7 @@ SELECT TOP 1
 FROM BOM1 b WITH (NOLOCK)
 WHERE b.FilePONo = @FilePoNo
   AND ISNULL(b.SrNo, '') <> 'temp'
-ORDER BY b.SysDate DESC", new { FilePoNo = trimmed });
+ORDER BY b.SysDate DESC", new { FilePoNo = trimmed }, commandTimeout: BomCommandTimeoutSeconds);
 
         if (headerRow is null)
             return null;
@@ -397,7 +398,7 @@ SELECT
     b.Remarks
 FROM BOM b WITH (NOLOCK)
 WHERE b.PONo = @FilePoNo
-ORDER BY b.TransId", new { FilePoNo = trimmed })).ToList();
+ORDER BY b.TransId", new { FilePoNo = trimmed }, commandTimeout: BomCommandTimeoutSeconds)).ToList();
 
         return new BomPdfModel
         {
