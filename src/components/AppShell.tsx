@@ -94,7 +94,7 @@ export function AppShell() {
   ];
 
   return (
-    <div className="min-h-screen bg-background pb-20 md:pb-0">
+    <div className="min-h-screen overflow-x-hidden bg-background pb-20 md:pb-0">
       <header className="sticky top-0 z-30 border-b border-border bg-surface/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 md:px-6">
           <Link to="/dashboard" className="flex items-center gap-2.5">
@@ -177,7 +177,7 @@ export function AppShell() {
         </div>
       </header>
 
-      <main className="w-full px-4 py-5 md:mx-auto md:max-w-7xl md:px-6 md:py-8" id="main-content">
+      <main className="w-full min-w-0 max-w-full overflow-x-hidden px-4 py-5 md:mx-auto md:max-w-7xl md:px-6 md:py-8" id="main-content">
         <Outlet />
       </main>
 

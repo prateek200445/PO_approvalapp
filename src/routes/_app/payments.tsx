@@ -10,6 +10,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { SkeletonPendingList } from "@/components/SkeletonLoader";
 import { toast } from "sonner";
 import { setApprovalListNav } from "@/lib/approval-list-nav";
+import { formatShortDate } from "@/lib/utils";
 
 const MAX_BULK = 50;
 
@@ -214,9 +215,9 @@ function PendingList() {
   }
 
   return (
-    <div className={`space-y-5 ${selectMode && selected.size > 0 ? "pb-24 md:pb-0" : ""}`}>
-      <div className="flex items-end justify-between gap-3">
-        <div>
+    <div className={`w-full min-w-0 max-w-full overflow-x-hidden space-y-5 ${selectMode && selected.size > 0 ? "pb-24 md:pb-0" : ""}`}>
+      <div className="flex min-w-0 items-end justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
             Payment Approvals
           </h1>
@@ -225,7 +226,7 @@ function PendingList() {
             {totalPages > 1 && `(Page ${currentPage} of ${totalPages})`}
           </p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {selectMode && selected.size > 0 && (
             <button
               type="button"
@@ -312,8 +313,8 @@ function PendingList() {
           />
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex flex-wrap gap-1 flex-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
             {amount && (
               <button
                 onClick={() => setAmount("")}
@@ -349,7 +350,7 @@ function PendingList() {
       </div>
 
       {/* Mobile cards */}
-      <div className="grid gap-3 md:hidden">
+      <div className="grid w-full min-w-0 max-w-full gap-3 md:hidden">
         {isLoading ? (
           <SkeletonPendingList />
         ) : filtered.length === 0 ? (
@@ -367,7 +368,7 @@ function PendingList() {
                   type="button"
                   disabled={!canSelect}
                   onClick={() => canSelect && toggleOne(paymentNo)}
-                  className={`block w-full text-left rounded-xl border bg-card p-4 shadow-sm ${
+                  className={`block w-full min-w-0 max-w-full text-left rounded-xl border bg-card p-4 shadow-sm ${
                     isChecked ? "border-primary ring-1 ring-primary/30" : "border-border"
                   } ${!canSelect ? "opacity-50" : ""}`}
                 >
@@ -380,20 +381,20 @@ function PendingList() {
                       tabIndex={-1}
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="font-semibold">{p.paymentNo}</div>
+                      <div className="flex min-w-0 items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-semibold">{p.paymentNo}</div>
                           <div className="mt-0.5 truncate text-sm text-muted-foreground">
                             {p.VendorName}
                           </div>
                         </div>
                         <StatusBadge status="Pending" />
                       </div>
-                      <div className="mt-3 flex items-end justify-between">
-                        <div className="text-xs text-muted-foreground">
-                          {new Date(p.paymentDate).toLocaleDateString()}
+                      <div className="mt-3 flex min-w-0 items-end justify-between gap-2">
+                        <div className="min-w-0 truncate text-xs text-muted-foreground">
+                          {formatShortDate(p.paymentDate)}
                         </div>
-                        <div className="text-base font-semibold tabular-nums">
+                        <div className="shrink-0 text-base font-semibold tabular-nums">
                           {formatINR(p.paymentAmount || 0)}
                         </div>
                       </div>
@@ -416,22 +417,22 @@ function PendingList() {
                       .filter(Boolean),
                   )
                 }
-                className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
+                className="block w-full min-w-0 max-w-full rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-semibold">{p.paymentNo}</div>
+                <div className="flex min-w-0 items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-semibold">{p.paymentNo}</div>
                     <div className="mt-0.5 truncate text-sm text-muted-foreground">
                       {p.VendorName}
                     </div>
                   </div>
                   <StatusBadge status="Pending" />
                 </div>
-                <div className="mt-3 flex items-end justify-between">
-                  <div className="text-xs text-muted-foreground">
-                    {new Date(p.paymentDate).toLocaleDateString()}
+                <div className="mt-3 flex min-w-0 items-end justify-between gap-2">
+                  <div className="min-w-0 truncate text-xs text-muted-foreground">
+                    {formatShortDate(p.paymentDate)}
                   </div>
-                  <div className="text-base font-semibold tabular-nums">
+                  <div className="shrink-0 text-base font-semibold tabular-nums">
                     {formatINR(p.paymentAmount || 0)}
                   </div>
                 </div>

@@ -145,7 +145,7 @@ public sealed class DmsRemoteFileService
             Environment.GetEnvironmentVariable("DMS_SERVICE_URL"),
             _configuration["Dms:ServiceUrl"],
             ..(_configuration.GetSection("Dms:ServiceUrls").Get<string[]>() ?? Array.Empty<string>()),
-            ..DmsDefaults.ServiceUrls,
+            DmsDefaults.ServiceUrl,
         ];
 
         foreach (var url in candidates)

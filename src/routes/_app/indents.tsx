@@ -6,6 +6,7 @@ import { Search, ArrowUpDown, Filter, X } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 import { setApprovalListNav } from "@/lib/approval-list-nav";
+import { formatShortDate } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/indents")({
   head: () => ({ meta: [{ title: "Pending Indents — Approval Portal" }] }),
@@ -82,9 +83,9 @@ function PendingList() {
   }
 };
   return (
-    <div className="space-y-5">
-      <div className="flex items-end justify-between gap-3">
-        <div>
+    <div className="w-full min-w-0 max-w-full overflow-x-hidden space-y-5">
+      <div className="flex min-w-0 items-end justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Indent Approvals</h1>
           <p className="mt-1 text-sm text-muted-foreground">{filtered.length} result{filtered.length !== 1 ? "s" : ""}</p>
         </div>
@@ -141,7 +142,7 @@ function PendingList() {
         </div>
 
         {/* Active Filters + Filter Button Row */}
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           {/* Active Filter Chips */}
           <div className="flex flex-wrap gap-1 flex-1">
             {status !== "All" && (
@@ -181,41 +182,38 @@ function PendingList() {
       </div>
 
       {/* Mobile cards */}
-      <div className="grid gap-3 md:hidden">
+      <div className="grid w-full min-w-0 max-w-full gap-3 md:hidden">
         {filtered.map((p) => (
           <Link
-           key={p.IndentNo}
-to="/indent/$indentNo"
-params={{ indentNo: p.IndentNo }}
-onClick={() =>
-  setApprovalListNav(
-    "indent",
-    filtered.map((row) => row.IndentNo).filter(Boolean),
-  )
-}
-            className="block rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
+            key={p.IndentNo}
+            to="/indent/$indentNo"
+            params={{ indentNo: p.IndentNo }}
+            onClick={() =>
+              setApprovalListNav(
+                "indent",
+                filtered.map((row) => row.IndentNo).filter(Boolean),
+              )
+            }
+            className="block w-full min-w-0 max-w-full rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
           >
-           <div className="flex items-start gap-3">
-  <input
-    type="checkbox"
-    checked={selectedIndents.includes(p.IndentNo)}
-    onClick={(e) => e.preventDefault()}
-    onChange={() => toggleIndent(p.IndentNo)}
-  />
-
-  <div className="min-w-0">
-    <div className="font-semibold">{p.IndentNo}</div>
-    <div className="mt-0.5 truncate text-sm text-muted-foreground">
-      {p.TotalItems} Items
-    </div>
-  </div>
-</div>
-
-<div className="mt-3 flex items-end justify-between">
-  <div className="text-xs text-muted-foreground">
-    {p.IndentDate}
-  </div>
-</div>
+            <div className="flex min-w-0 items-start gap-3">
+              <input
+                type="checkbox"
+                checked={selectedIndents.includes(p.IndentNo)}
+                onClick={(e) => e.preventDefault()}
+                onChange={() => toggleIndent(p.IndentNo)}
+                className="mt-1 shrink-0"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-semibold">{p.IndentNo}</div>
+                <div className="mt-0.5 truncate text-sm text-muted-foreground">
+                  {p.TotalItems} Items
+                </div>
+                <div className="mt-3 truncate text-xs text-muted-foreground">
+                  {formatShortDate(p.IndentDate)}
+                </div>
+              </div>
+            </div>
           </Link>
         ))}
         {filtered.length === 0 && <EmptyState />}
