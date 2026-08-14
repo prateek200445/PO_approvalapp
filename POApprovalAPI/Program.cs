@@ -48,6 +48,10 @@ builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<PoApprovalService>();
 builder.Services.AddScoped<WorkOrderApprovalService>();
 builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient(nameof(DmsRemoteFileService), client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(90);
+});
 builder.Services.AddScoped<DmsAttachmentService>();
 builder.Services.AddScoped<DmsRemoteFileService>();
 builder.Services.AddScoped<SalesDashboardService>();

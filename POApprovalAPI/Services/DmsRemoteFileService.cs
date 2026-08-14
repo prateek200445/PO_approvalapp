@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.ServiceModel;
+using System.Text;
+using System.Xml.Linq;
 using Microsoft.Extensions.Caching.Memory;
 
 namespace POApprovalAPI.Services;
@@ -12,15 +14,18 @@ public sealed class DmsRemoteFileService
 
     private readonly IConfiguration _configuration;
     private readonly IMemoryCache _cache;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<DmsRemoteFileService> _logger;
 
     public DmsRemoteFileService(
         IConfiguration configuration,
         IMemoryCache cache,
+        IHttpClientFactory httpClientFactory,
         ILogger<DmsRemoteFileService> logger)
     {
         _configuration = configuration;
         _cache = cache;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -34,22 +39,98 @@ public sealed class DmsRemoteFileService
         {
             ct.ThrowIfCancellationRequested();
 
-            try
+            var stream = await TryGetFileViaSoapAsync(serviceUrl, fileId, ct);
+            if (stream is not null)
             {
-                var stream = await Task.Run(() => FetchFile(serviceUrl, fileId), ct);
-                if (stream is null)
-                    continue;
-
                 RememberWorkingUrl(serviceUrl);
                 return stream;
             }
-            catch (Exception ex)
+
+            stream = await Task.Run(() => FetchFileViaWcf(serviceUrl, fileId), ct);
+            if (stream is not null)
             {
-                _logger.LogDebug(ex, "DMS remote GetFile failed at {ServiceUrl} for file {FileId}", serviceUrl, fileId);
+                RememberWorkingUrl(serviceUrl);
+                return stream;
             }
         }
 
         return null;
+    }
+
+    private async Task<Stream?> TryGetFileViaSoapAsync(string serviceUrl, int fileId, CancellationToken ct)
+    {
+        try
+        {
+            var envelope = $"""
+                <?xml version="1.0" encoding="utf-8"?>
+                <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
+                  <s:Body>
+                    <GetFile xmlns="http://tempuri.org/">
+                      <id>{fileId}</id>
+                    </GetFile>
+                  </s:Body>
+                </s:Envelope>
+                """;
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, serviceUrl);
+            request.Content = new StringContent(envelope, Encoding.UTF8, "text/xml");
+            request.Headers.TryAddWithoutValidation("SOAPAction", "\"http://tempuri.org/IDMSService/GetFile\"");
+
+            var client = _httpClientFactory.CreateClient(nameof(DmsRemoteFileService));
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug(
+                    "DMS SOAP GetFile HTTP {StatusCode} at {ServiceUrl} for file {FileId}",
+                    (int)response.StatusCode, serviceUrl, fileId);
+                return null;
+            }
+
+            var xml = await response.Content.ReadAsStringAsync(ct);
+            var base64 = ExtractSoapBase64Result(xml);
+            if (string.IsNullOrWhiteSpace(base64))
+                return null;
+
+            var bytes = Convert.FromBase64String(base64);
+            if (bytes.Length == 0)
+                return null;
+
+            _logger.LogInformation(
+                "DMS SOAP GetFile via {ServiceUrl} file {FileId} ({Bytes} bytes)",
+                serviceUrl, fileId, bytes.Length);
+            return new MemoryStream(bytes);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "DMS SOAP GetFile failed at {ServiceUrl} for file {FileId}", serviceUrl, fileId);
+            return null;
+        }
+    }
+
+    internal static string? ExtractSoapBase64Result(string xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+            return null;
+
+        try
+        {
+            var doc = XDocument.Parse(xml);
+            var result = doc.Descendants()
+                .FirstOrDefault(x => x.Name.LocalName == "GetFileResult")
+                ?.Value;
+            return string.IsNullOrWhiteSpace(result) ? null : result.Trim();
+        }
+        catch
+        {
+            const string startTag = "<GetFileResult>";
+            const string endTag = "</GetFileResult>";
+            var start = xml.IndexOf(startTag, StringComparison.OrdinalIgnoreCase);
+            var end = xml.IndexOf(endTag, StringComparison.OrdinalIgnoreCase);
+            if (start < 0 || end <= start)
+                return null;
+
+            return xml[(start + startTag.Length)..end].Trim();
+        }
     }
 
     private void RememberWorkingUrl(string url) =>
@@ -72,7 +153,7 @@ public sealed class DmsRemoteFileService
             yield return url;
     }
 
-    private Stream? FetchFile(string serviceUrl, int fileId)
+    private Stream? FetchFileViaWcf(string serviceUrl, int fileId)
     {
         IDMSService? client = null;
         Stream? remoteStream = null;
@@ -95,7 +176,7 @@ public sealed class DmsRemoteFileService
 
             buffer.Position = 0;
             _logger.LogInformation(
-                "DMS GetFile via {ServiceUrl} file {FileId} ({Bytes} bytes)",
+                "DMS WCF GetFile via {ServiceUrl} file {FileId} ({Bytes} bytes)",
                 serviceUrl, fileId, buffer.Length);
             return buffer;
         }
@@ -121,10 +202,9 @@ public sealed class DmsRemoteFileService
         {
             MaxReceivedMessageSize = int.MaxValue,
             MaxBufferSize = int.MaxValue,
-            TransferMode = TransferMode.Streamed,
-            OpenTimeout = TimeSpan.FromSeconds(4),
-            SendTimeout = TimeSpan.FromSeconds(15),
-            ReceiveTimeout = TimeSpan.FromSeconds(30)
+            OpenTimeout = TimeSpan.FromSeconds(8),
+            SendTimeout = TimeSpan.FromSeconds(30),
+            ReceiveTimeout = TimeSpan.FromSeconds(60)
         };
 
         return new ChannelFactory<IDMSService>(binding, new EndpointAddress(serviceUrl));
@@ -145,6 +225,7 @@ public sealed class DmsRemoteFileService
             Environment.GetEnvironmentVariable("DMS_SERVICE_URL"),
             _configuration["Dms:ServiceUrl"],
             ..(_configuration.GetSection("Dms:ServiceUrls").Get<string[]>() ?? Array.Empty<string>()),
+            ..DmsDefaults.ServiceUrls,
             DmsDefaults.ServiceUrl,
         ];
 
