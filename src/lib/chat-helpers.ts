@@ -44,19 +44,21 @@ export function getFollowUpPrompts(response: ChatApiResponse): string[] {
   if (domains.has("warehouse") || domains.has("warehousestock") || objectNames.includes("warehouse")) {
     preferredCategories.push("Stock");
   }
+  if (
+    domains.has("storeoutward") ||
+    objectNames.includes("storeoutwards") ||
+    objectNames.includes("iteminwardoutward")
+  ) {
+    preferredCategories.push("Movement");
+  }
   if (domains.has("ledger") || objectNames.includes("ledgermaster") || objectNames.includes("factoryinfo")) {
     preferredCategories.push("Ledgers");
   }
   if (domains.has("production") || objectNames.includes("production")) {
-    preferredCategories.push("Production");
+    preferredCategories.push("Production & Sales");
   }
-  if (
-    domains.has("mrn") ||
-    domains.has("vendor") ||
-    objectNames.includes("vendor") ||
-    objectNames.includes("storeinward")
-  ) {
-    preferredCategories.push("MRN & Vendors");
+  if (domains.has("sales") || objectNames.includes("sales")) {
+    preferredCategories.push("Production & Sales");
   }
 
   const picks: string[] = [];

@@ -42,6 +42,26 @@ $cases = @(
     id = "messy_oswal_outward"
     message = "oswal extrusion how much stock issued outward today by item"
     checks = @("sql_has:vw_ItemInwardOutward|StoreOutwards", "sql_has:Oswal", "rows_gt:0")
+  },
+  @{
+    id = "daily_outward_qty_today_catalog"
+    message = "For Oswal Extrusion Limited show items with outward qty today"
+    checks = @("sql_has:vw_ItemInwardOutward", "sql_has:Outward", "sql_not:TOP 1", "rows_gt:0")
+  },
+  @{
+    id = "daily_inward_qty_today"
+    message = "For Oswal Extrusion Limited show items with inward qty today"
+    checks = @("sql_has:vw_ItemInwardOutward", "sql_has:Inward", "sql_not:TOP 1", "rows_gt:0")
+  },
+  @{
+    id = "daily_both_movement"
+    message = "Daily stock movement for Oswal Extrusion Limited"
+    checks = @("sql_has:vw_ItemInwardOutward", "sql_has:Inward", "sql_has:Outward", "rows_gt:0")
+  },
+  @{
+    id = "singular_recent_item_only"
+    message = "What item was on the most recent store outward at Oswal Extrusion Limited"
+    checks = @("sql_has:StoreOutwards", "sql_has:TOP 1", "rows_gt:0")
   }
 )
 

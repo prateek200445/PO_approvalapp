@@ -395,4 +395,45 @@
       transform: translateY(0) scale(1);
     }
   }
+
+  /* Data Assistant header — traveling blue highlight across title */
+  .assistant-title-shimmer {
+    background-image: linear-gradient(
+      105deg,
+      var(--color-foreground) 0%,
+      var(--color-foreground) 36%,
+      color-mix(in oklch, var(--color-primary) 88%, white) 46%,
+      var(--color-primary) 50%,
+      color-mix(in oklch, var(--color-primary) 88%, white) 54%,
+      var(--color-foreground) 64%,
+      var(--color-foreground) 100%
+    );
+    background-size: 220% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: assistant-title-shimmer 2.2s linear infinite;
+  }
+
+  @keyframes assistant-title-shimmer {
+    0% {
+      background-position: 100% center;
+    }
+    100% {
+      background-position: 0% center;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .assistant-title-shimmer {
+      animation: none;
+      background-size: 100% 100%;
+      background-image: linear-gradient(
+        105deg,
+        var(--color-foreground) 0%,
+        var(--color-foreground) 55%,
+        var(--color-primary) 100%
+      );
+    }
+  }
 }

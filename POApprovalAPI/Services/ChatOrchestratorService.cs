@@ -772,6 +772,15 @@ public partial class ChatOrchestratorService
             rows = await ExecuteReadOnlyAsync(sql, ct);
             warning = "Rewrote empty calendar-today outward filter to latest available business date for that company (governed).";
         }
+        else if (TryBuildDailyInwardOutwardSql(request.Message, out var dailyIoSql, out var dailyIoWarn)
+                 && ShouldRewriteToDailyInwardOutward(sql, request.Message))
+        {
+            _logger.LogWarning(
+                "Wrong singular StoreOutwards TOP 1 for plural/today inward-outward question; rewriting to vw_ItemInwardOutward");
+            sql = dailyIoSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = dailyIoWarn;
+        }
         else if (TryExtractDebitOrCreditNoteNumber(request.Message) is { } noteNum
                  && ShouldRewriteDebitCreditNoteByNumber(noteNum, sql, rows))
         {

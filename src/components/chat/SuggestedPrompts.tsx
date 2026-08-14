@@ -27,7 +27,8 @@ export function SuggestedPrompts({
             key={prompt}
             type="button"
             onClick={() => onSelect(prompt)}
-            className="shrink-0 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary/30 hover:bg-primary/5"
+            title={prompt}
+            className="shrink-0 rounded-full border border-border/60 bg-card/80 px-3.5 py-2 text-xs font-medium text-foreground shadow-sm transition-all hover:border-primary/35 hover:bg-primary/8 hover:shadow-md active:scale-[0.98]"
           >
             {prompt.length > 42 ? `${prompt.slice(0, 42)}…` : prompt}
           </button>
@@ -43,24 +44,25 @@ export function SuggestedPrompts({
     <aside className={cn("flex flex-col gap-5", className)}>
       <div>
         <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          <Sparkles className="h-3.5 w-3.5" />
-          Suggested
+          <Sparkles className="h-3.5 w-3.5 text-primary/70" />
+          Suggested · tap to ask
         </div>
         <div className="space-y-4">
           {SUGGESTED_PROMPTS.map((group) => (
             <div key={group.category}>
-              <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">
+              <p className="mb-2 text-[11px] font-semibold text-muted-foreground/90">
                 {group.category}
               </p>
-              <div className="space-y-1">
+              <div className="flex flex-col gap-1.5">
                 {group.prompts.map((prompt) => (
                   <button
                     key={prompt}
                     type="button"
                     onClick={() => onSelect(prompt)}
-                    className="w-full rounded-lg border border-transparent px-2.5 py-2 text-left text-xs leading-snug text-foreground/90 transition-all hover:border-border/60 hover:bg-card/80 hover:text-foreground hover:shadow-sm"
+                    title={prompt}
+                    className="group w-full rounded-full border border-border/50 bg-card/70 px-3 py-2 text-left text-[11px] leading-snug text-foreground/85 shadow-sm transition-all hover:border-primary/35 hover:bg-primary/8 hover:text-foreground hover:shadow-md active:scale-[0.99] dark:bg-card/50 dark:hover:bg-primary/10"
                   >
-                    {prompt}
+                    <span className="line-clamp-2 group-hover:text-foreground">{prompt}</span>
                   </button>
                 ))}
               </div>

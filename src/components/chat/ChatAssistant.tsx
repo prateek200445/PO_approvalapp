@@ -34,11 +34,13 @@ import type { ChatApiResponse, ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
+  Bot,
   FlaskConical,
   MessageSquarePlus,
   Moon,
   PanelLeft,
   PanelRight,
+  Sparkles,
   Sun,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -252,29 +254,39 @@ export function ChatAssistant() {
           >
             <ArrowLeft className="h-4 w-4" />
           </Link>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h1 className="truncate text-base font-semibold tracking-tight md:text-lg">
-                Data Assistant
-              </h1>
-              <Badge
-                variant="secondary"
-                className="shrink-0 border-primary/20 bg-primary/10 text-[10px] text-primary"
-              >
-                Beta
-              </Badge>
-              {mockMode && (
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-primary to-violet-600 shadow-lg shadow-primary/30 ring-1 ring-white/10">
+              <Bot className="h-5 w-5 text-primary-foreground" strokeWidth={2.25} />
+              <span
+                className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-background"
+                aria-hidden
+              />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <h1 className="assistant-title-shimmer truncate text-base font-bold tracking-tight md:text-lg">
+                  Data Assistant
+                </h1>
                 <Badge
                   variant="secondary"
-                  className="shrink-0 border-amber-500/30 bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300"
+                  className="shrink-0 gap-1 border-primary/25 bg-primary/10 px-1.5 py-0 text-[10px] font-semibold text-primary"
                 >
-                  Mock data
+                  <Sparkles className="h-2.5 w-2.5" />
+                  Beta
                 </Badge>
-              )}
+                {mockMode && (
+                  <Badge
+                    variant="secondary"
+                    className="shrink-0 border-amber-500/30 bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300"
+                  >
+                    Mock data
+                  </Badge>
+                )}
+              </div>
+              <p className="hidden truncate text-[11px] text-muted-foreground sm:block">
+                ERP copilot · POs · stock · ledgers · production
+              </p>
             </div>
-            <p className="hidden truncate text-xs text-muted-foreground sm:block">
-              POs · stock · ledgers · production
-            </p>
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -454,10 +466,10 @@ function EmptyState({
   const examples = mockMode
     ? getMockExamplePrompts()
     : [
+        "How many purchase orders are pending approval?",
+        "What is stock in hand for item WIP00013 at Oswal Extrusion Limited?",
+        "For Oswal Extrusion Limited show items with outward qty today",
         "How many ledgers does Oswal Extrusion Limited have?",
-        "Recent pending purchase orders",
-        "Stock in hand at Oswal Extrusion Limited",
-        "FIBC bag production for Oswal Extrusion Limited",
       ];
 
   return (

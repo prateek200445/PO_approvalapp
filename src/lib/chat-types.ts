@@ -28,19 +28,27 @@ export interface ChatMessage {
   pending?: boolean;
 }
 
+/** Governed / eval-backed prompts only — keep in sync with POApprovalAPI/Chatbot/eval_*.ps1 */
 export const SUGGESTED_PROMPTS = [
   {
     category: "Approvals",
     prompts: [
       "How many purchase orders are pending approval?",
-      "Show recent pending bill payments",
+      "List pending bill payments with party name and amount",
     ],
   },
   {
     category: "Stock",
     prompts: [
-      "Stock in hand for item at Oswal Extrusion Limited",
-      "Items below reorder level at Oswal Extrusion Limited",
+      "What is stock in hand for item WIP00013 at Oswal Extrusion Limited?",
+      "List items below reorder level at Oswal Extrusion Limited",
+    ],
+  },
+  {
+    category: "Movement",
+    prompts: [
+      "For Oswal Extrusion Limited show items with outward qty today",
+      "Inward and outward qty for item WIP00013 at Oswal Extrusion Limited",
     ],
   },
   {
@@ -51,17 +59,10 @@ export const SUGGESTED_PROMPTS = [
     ],
   },
   {
-    category: "Production",
+    category: "Production & Sales",
     prompts: [
-      "Recent loom rolls at Oswal Extrusion Limited",
-      "FIBC bag production for Oswal Extrusion Limited",
-    ],
-  },
-  {
-    category: "MRN & Vendors",
-    prompts: [
-      "Recent material receipts for Oswal Extrusion Limited",
-      "Vendor GST and bank details for Chemline",
+      "Recent loom rolls produced at Oswal Extrusion Limited",
+      "Sales by product group for Oswal Extrusion Limited FY 2025-26",
     ],
   },
 ] as const;

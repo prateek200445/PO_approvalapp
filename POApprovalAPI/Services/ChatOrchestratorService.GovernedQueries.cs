@@ -34,6 +34,7 @@ public partial class ChatOrchestratorService
         if (TryBuildRollsWaitingDespatchSql(message, out sql, out warning)) return true;
         if (TryBuildWebbingProductionSql(message, out sql, out warning)) return true;
         if (TryBuildLoomProductionByQualitySql(message, out sql, out warning)) return true;
+        if (TryBuildDailyInwardOutwardSql(message, out sql, out warning)) return true;
         if (TryBuildItemFromRecentOutwardSql(message, out sql, out warning)) return true;
         if (TryBuildPoAllocationSql(message, out sql, out warning)) return true;
         if (TryBuildPendingBillPaymentSql(message, out sql, out warning)) return true;
@@ -751,13 +752,87 @@ public partial class ChatOrchestratorService
         return true;
     }
 
+    private static bool TryBuildDailyInwardOutwardSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeDailyInwardOutwardQuestion(message)) return false;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        if (string.IsNullOrWhiteSpace(company)) return false;
+
+        var m = message.ToLowerInvariant();
+        var hasInward = m.Contains("inward");
+        var hasOutward = m.Contains("outward") || m.Contains("stock issued");
+        var outwardOnly = hasOutward && !hasInward;
+        var inwardOnly = hasInward && !hasOutward;
+        var itemCode = TryExtractStockItemCode(message);
+        var useLatestBusinessDate = m.Contains("today") || m.Contains("daily")
+            || (LooksLikePluralItemsQuestion(message) && itemCode is null);
+
+        string qtyFilter;
+        string orderBy;
+        if (outwardOnly)
+        {
+            qtyFilter = "AND ISNULL(Outwardqty, 0) <> 0";
+            orderBy = "ORDER BY Outwardqty DESC";
+        }
+        else if (inwardOnly)
+        {
+            qtyFilter = "AND ISNULL(InwardQty, 0) <> 0";
+            orderBy = "ORDER BY InwardQty DESC";
+        }
+        else
+        {
+            qtyFilter = "";
+            orderBy = "ORDER BY [Date] DESC, Outwardqty DESC, InwardQty DESC";
+        }
+
+        var topN = itemCode is not null ? 10 : 50;
+        var itemFilter = itemCode is not null
+            ? $"AND ItemCode = '{EscapeSqlLiteral(itemCode)}'"
+            : "";
+        var dateFilter = useLatestBusinessDate
+            ? $"""
+              AND CAST([Date] AS date) = (
+                  SELECT MAX(CAST([Date] AS date)) FROM vw_ItemInwardOutward
+                  WHERE companyname = '{EscapeSqlLiteral(company)}')
+              """
+            : "";
+
+        sql = $"""
+            SELECT TOP {topN} ItemCode, ItemName, InwardQty, Outwardqty, [Date]
+            FROM vw_ItemInwardOutward
+            WHERE companyname = '{EscapeSqlLiteral(company)}'
+              {itemFilter}
+              {dateFilter}
+              {qtyFilter}
+            {orderBy}
+            """;
+
+        var scope = itemCode is not null ? $"item {itemCode}" : "all items";
+        var dayNote = useLatestBusinessDate ? " (latest posted business date when 'today' is asked)" : "";
+        warning =
+            $"Governed daily inward/outward on vw_ItemInwardOutward for {company}, {scope}{dayNote}.";
+        return true;
+    }
+
     private static bool TryBuildItemFromRecentOutwardSql(string message, out string sql, out string warning)
     {
         sql = "";
         warning = "";
         var m = message.ToLowerInvariant();
+        if (LooksLikePluralItemsQuestion(message)) return false;
+        if (LooksLikeDailyInwardOutwardQuestion(message)) return false;
+        if (m.Contains("today")) return false;
+        if (m.Contains("qty") || m.Contains("quantity") || m.Contains("quantities")) return false;
         if (!m.Contains("item") && !m.Contains("hsn") && !m.Contains("description")) return false;
         if (!m.Contains("outward") && !m.Contains("issued") && !m.Contains("store")) return false;
+        if (!LooksLikeSingularItemQuestion(message)
+            && !m.Contains("hsn")
+            && !m.Contains("description"))
+            return false;
 
         var company = ResolveOutwardCompanyAlias(message)
                       ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "")
@@ -1506,5 +1581,55 @@ public partial class ChatOrchestratorService
             && !sql.Contains("vw_itemwiseStock", StringComparison.OrdinalIgnoreCase))
             return true;
         return !IsGovernedStockInHandSql(sql);
+    }
+
+    private static bool LooksLikePluralItemsQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (Regex.IsMatch(m, @"\b(items|materials|products|list\s+all|show\s+all|which\s+items)\b"))
+            return true;
+        return Regex.IsMatch(m, @"\b(list|show|display)\s+(?:the\s+)?(?:all\s+)?items\b");
+    }
+
+    private static bool LooksLikeSingularItemQuestion(string message)
+    {
+        if (TryExtractStockItemCode(message) is not null) return true;
+        var m = message.ToLowerInvariant();
+        if (Regex.IsMatch(m, @"\bfor\s+item\s+[A-Z]{2,6}\d", RegexOptions.IgnoreCase))
+            return true;
+        if (Regex.IsMatch(m, @"\b(latest|most recent|last|recent)\s+item\b"))
+            return true;
+        if (Regex.IsMatch(m, @"\bwhat\s+item\b|\bwhich\s+item\b") && !LooksLikePluralItemsQuestion(message))
+            return true;
+        return false;
+    }
+
+    private static bool LooksLikeDailyInwardOutwardQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (Regex.IsMatch(m, @"\bissue\s+slip\b")) return false;
+        if (m.Contains("issued to") || m.Contains("issue to")) return false;
+        if (m.Contains("monthly")) return false;
+        if (TryParseMonthYear(message) is not null && !m.Contains("today")) return false;
+
+        var hasInward = m.Contains("inward");
+        var hasOutward = m.Contains("outward") || m.Contains("stock issued");
+        var hasBoth = hasInward && hasOutward;
+        var hasQty = m.Contains("qty") || m.Contains("quantity") || m.Contains("quantities");
+        var hasToday = m.Contains("today") || m.Contains("daily");
+        var hasMovementPhrase = m.Contains("stock movement") || m.Contains("inward outward");
+
+        if (hasBoth) return true;
+        if (hasMovementPhrase) return true;
+        if (hasToday && (hasInward || hasOutward)) return true;
+        if ((hasInward || hasOutward) && hasQty && LooksLikePluralItemsQuestion(message)) return true;
+        return (hasInward || hasOutward) && hasQty && m.Contains("today");
+    }
+
+    private static bool ShouldRewriteToDailyInwardOutward(string sql, string message)
+    {
+        if (!LooksLikeDailyInwardOutwardQuestion(message)) return false;
+        return Regex.IsMatch(sql, @"SELECT\s+TOP\s+1\b", RegexOptions.IgnoreCase)
+               && sql.Contains("StoreOutwards", StringComparison.OrdinalIgnoreCase);
     }
 }
