@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { KeyRound, LogOut, Building2, Server, ArrowLeftRight, BookOpen, Phone, Mail } from "lucide-react";
+import { KeyRound, LogOut, Building2, Server, ArrowLeftRight, BookOpen, Phone, Mail, Layers } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { ServerSettingsModal } from "@/components/ServerSettingsModal";
@@ -82,12 +82,24 @@ function Profile() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm md:hidden">
+      <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
         <h2 className="text-sm font-semibold">Tools</h2>
         <div className="mt-4 space-y-2">
           <button
-            onClick={() => navigate({ to: "/ledgers" })}
+            onClick={() => navigate({ to: "/bom" })}
             className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary cursor-pointer"
+          >
+            <div className="flex items-center gap-3">
+              <Layers className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <span className="text-sm font-medium">BOM Report</span>
+                <p className="text-xs text-muted-foreground">Search, view PDFs & email BOMs</p>
+              </div>
+            </div>
+          </button>
+          <button
+            onClick={() => navigate({ to: "/ledgers" })}
+            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary cursor-pointer md:hidden"
           >
             <div className="flex items-center gap-3">
               <BookOpen className="h-5 w-5 text-muted-foreground" />
@@ -99,7 +111,7 @@ function Profile() {
           </button>
           <button
             onClick={() => navigate({ to: "/reconciliation" })}
-            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary cursor-pointer"
+            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary cursor-pointer md:hidden"
           >
             <div className="flex items-center gap-3">
               <ArrowLeftRight className="h-5 w-5 text-muted-foreground" />
