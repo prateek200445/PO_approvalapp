@@ -41,28 +41,43 @@ public sealed class DmsRemoteFileService
         {
             MaxReceivedMessageSize = int.MaxValue,
             MaxBufferSize = int.MaxValue,
-            TransferMode = TransferMode.StreamedResponse,
-            OpenTimeout = TimeSpan.FromSeconds(15),
-            SendTimeout = TimeSpan.FromMinutes(2),
-            ReceiveTimeout = TimeSpan.FromMinutes(2)
+            TransferMode = TransferMode.Streamed,
+            OpenTimeout = TimeSpan.FromSeconds(8),
+            SendTimeout = TimeSpan.FromSeconds(30),
+            ReceiveTimeout = TimeSpan.FromSeconds(90)
         };
 
         ChannelFactory<IDMSService>? factory = null;
         IDMSService? client = null;
+        Stream? remoteStream = null;
 
         try
         {
             factory = new ChannelFactory<IDMSService>(binding, new EndpointAddress(serviceUrl));
             client = factory.CreateChannel();
-            return client.GetFile(fileId);
+            remoteStream = client.GetFile(fileId);
+            if (remoteStream is null)
+                return null;
+
+            var buffer = new MemoryStream();
+            remoteStream.CopyTo(buffer);
+            if (buffer.Length == 0)
+                return null;
+
+            buffer.Position = 0;
+            _logger.LogInformation(
+                "DMS remote GetFile succeeded at {ServiceUrl} for file {FileId} ({Bytes} bytes)",
+                serviceUrl, fileId, buffer.Length);
+            return buffer;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "DMS WCF GetFile failed at {ServiceUrl} for file {FileId}", serviceUrl, fileId);
+            _logger.LogWarning(ex, "DMS WCF GetFile failed at {ServiceUrl} for file {FileId}", serviceUrl, fileId);
             return null;
         }
         finally
         {
+            remoteStream?.Dispose();
             CloseClient(client);
             CloseFactory(factory);
         }
@@ -72,12 +87,15 @@ public sealed class DmsRemoteFileService
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var url in new[]
-                 {
-                     Environment.GetEnvironmentVariable("DMS_SERVICE_URL"),
-                     _configuration["Dms:ServiceUrl"]
-                 }
-                 .Concat(_configuration.GetSection("Dms:ServiceUrls").Get<string[]>() ?? Array.Empty<string>()))
+        IEnumerable<string?> candidates =
+        [
+            Environment.GetEnvironmentVariable("DMS_SERVICE_URL"),
+            _configuration["Dms:ServiceUrl"],
+            ..(_configuration.GetSection("Dms:ServiceUrls").Get<string[]>() ?? Array.Empty<string>()),
+            ..DmsDefaults.ServiceUrls,
+        ];
+
+        foreach (var url in candidates)
         {
             if (string.IsNullOrWhiteSpace(url))
                 continue;

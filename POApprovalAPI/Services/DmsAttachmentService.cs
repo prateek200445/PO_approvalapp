@@ -126,6 +126,9 @@ public sealed class DmsAttachmentService
 
     private IReadOnlyList<string> GetFileLocationRoots()
     {
+        if (!OperatingSystem.IsWindows())
+            return Array.Empty<string>();
+
         var roots = new List<string>();
 
         void AddIfValid(string? path)
@@ -146,6 +149,7 @@ public sealed class DmsAttachmentService
 
         AddIfValid(_configuration["Dms:FileLocation"]);
         AddIfValid(Environment.GetEnvironmentVariable("DMS_FILE_LOCATION"));
+        AddIfValid(DmsDefaults.FileLocation);
 
         var extra = _configuration.GetSection("Dms:AdditionalFileLocations").Get<string[]>();
         if (extra is not null)

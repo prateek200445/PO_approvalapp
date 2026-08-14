@@ -1,7 +1,9 @@
-import { dmsFileDownloadUrl, fetchDmsAttachments, formatFileSize } from "@/lib/dms-api";
+import { downloadDmsFile, fetchDmsAttachments, formatFileSize } from "@/lib/dms-api";
 import type { DmsAttachmentDto } from "@/lib/dms-types";
 import { useQuery } from "@tanstack/react-query";
 import { Download, FileText, Loader2, Paperclip } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 
 interface DmsAttachmentsSectionProps {
   purchaseCode: string;
@@ -64,9 +66,23 @@ export function DmsAttachmentsSection({
 }
 
 function AttachmentRow({ file }: { file: DmsAttachmentDto }) {
+  const [downloading, setDownloading] = useState(false);
   const uploaded = file.uploadedOn
     ? new Date(file.uploadedOn).toLocaleString()
     : null;
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      await downloadDmsFile(file.fileId, file.fileName);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not download attachment.",
+      );
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <li className="flex flex-wrap items-center gap-3 rounded-lg border border-border/60 bg-muted/20 px-3 py-2.5">
@@ -79,15 +95,19 @@ function AttachmentRow({ file }: { file: DmsAttachmentDto }) {
           {uploaded ? ` · ${uploaded}` : ""}
         </p>
       </div>
-      <a
-        href={dmsFileDownloadUrl(file.fileId)}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium hover:bg-accent transition"
+      <button
+        type="button"
+        onClick={handleDownload}
+        disabled={downloading}
+        className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-medium hover:bg-accent transition disabled:opacity-60"
       >
-        <Download className="h-3.5 w-3.5" />
-        Download
-      </a>
+        {downloading ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Download className="h-3.5 w-3.5" />
+        )}
+        {downloading ? "Downloading…" : "Download"}
+      </button>
     </li>
   );
 }
