@@ -19,10 +19,38 @@ public class PdfController : ControllerBase
         };
 
     private readonly DatabaseService _database;
+    private readonly BomService _bomService;
 
-    public PdfController(DatabaseService database)
+    public PdfController(DatabaseService database, BomService bomService)
     {
         _database = database;
+        _bomService = bomService;
+    }
+
+    [HttpGet("bom")]
+    public async Task<IActionResult> GetBomPdf([FromQuery] string filePoNo)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(filePoNo))
+                return BadRequest(new { message = "Quotation number is required." });
+
+            var model = await _bomService.BuildPdfModelAsync(filePoNo);
+            if (model is null)
+                return NotFound(new { message = "BOM not found for this quotation number." });
+
+            var pdfBytes = new BillOfMaterialDocument(model).GeneratePdf();
+            Response.Headers["Content-Disposition"] = "inline";
+            return File(pdfBytes, "application/pdf");
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new
+            {
+                Success = false,
+                Error = ex.ToString()
+            });
+        }
     }
 
     [HttpGet("testdb")]
