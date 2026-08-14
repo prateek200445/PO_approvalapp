@@ -6,11 +6,16 @@ LoadDotEnvFiles();
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Load secrets from environment variables
-var dbPassword = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? "";
-var emailPassword = Environment.GetEnvironmentVariable("EMAIL_PASSWORD") ?? "";
+// Load secrets: env var first, then built-in defaults for Render/production.
+var dbPassword = Environment.GetEnvironmentVariable("DB_PASSWORD");
+if (string.IsNullOrWhiteSpace(dbPassword))
+    dbPassword = AppSecretsDefaults.DbPassword;
 
-// Build connection strings with secrets from environment
+var emailPassword = Environment.GetEnvironmentVariable("EMAIL_PASSWORD");
+if (string.IsNullOrWhiteSpace(emailPassword))
+    emailPassword = AppSecretsDefaults.EmailPassword;
+
+// Build connection strings with secrets
 var defaultConnection = builder.Configuration.GetConnectionString("DefaultConnection");
 var loginConnection = builder.Configuration.GetConnectionString("LoginEntryConnection");
 var productionConnection = builder.Configuration.GetConnectionString("ProductionConnection");
@@ -19,7 +24,8 @@ if (!string.IsNullOrEmpty(dbPassword))
 {
     defaultConnection = $"{defaultConnection}Password={dbPassword};";
     loginConnection = $"{loginConnection}Password={dbPassword};";
-    productionConnection = $"{productionConnection}Password={dbPassword};";
+    if (!string.IsNullOrEmpty(productionConnection))
+        productionConnection = $"{productionConnection}Password={dbPassword};";
 }
 
 if (!string.IsNullOrEmpty(emailPassword))
