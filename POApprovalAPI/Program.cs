@@ -83,6 +83,9 @@ builder.Services.AddHostedService<BomCacheWarmupService>();
 builder.Services.AddHostedService<SalesDashboardCacheWarmupService>();
 builder.Services.AddHostedService<ExportBillOverdueCacheWarmupService>();
 builder.Services.AddScoped<AgeingReportService>();
+builder.Services.AddScoped<LedgerStatementChatService>();
+builder.Services.AddScoped<ErpFinanceReportService>();
+builder.Services.AddScoped<ErpInventoryReportService>();
 
 builder.Services.AddSingleton<SchemaRetrievalService>();
 builder.Services.AddSingleton<SchemaCatalogService>();

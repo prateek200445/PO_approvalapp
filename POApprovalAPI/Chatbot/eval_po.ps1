@@ -58,6 +58,11 @@ $cases = @(
     checks = @("sql_has:POAllocation", "sql_has:jinal", "rows_gt:0")
   },
   @{
+    id = "po_pending_receipt_oswal"
+    message = "Show PO lines pending receipt for Oswal Extrusion Limited"
+    checks = @("sql_has:Vw_PurchaseOrder", "sql_has:PendingQty", "sql_has:Oswal", "governed_warning", "rows_gt:0")
+  },
+  @{
     id = "messy_pending_po"
     message = "any pos pending for oswal extrusion?"
     checks = @("sql_has:Pending", "sql_has:Oswal|PurchasePayment", "rows_gt:0")

@@ -32,7 +32,7 @@ $cases = @(
   @{
     id = "invoice_items_468"
     message = "Show items on sales invoice 468 for Plastene Polyfilms Limited with qty rate amount"
-    checks = @("sql_has:SalesVoucherItem|vw_Salesvoucher", "sql_has:468", "sql_has:Polyfilms|PPL|CompanyName", "rows_gt:0")
+    checks = @("sql_has:SalesVoucherItem|vw_Salesvoucher", "sql_has:468", "sql_has:Polyfilms|PPL|CompanyName", "governed_warning", "rows_gt:0")
   },
   @{
     id = "oswal_export_this_month"

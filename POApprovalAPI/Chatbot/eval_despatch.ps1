@@ -6,12 +6,12 @@ $cases = @(
   @{
     id = "oswal_rolls"
     message = "Show recent roll despatch for Oswal Extrusion Limited with roll no net weight and party"
-    checks = @("sql_has:vw_MISrolldespatch|MISRollforDespatch", "sql_has:Oswal", "sql_has:Companyname|CompanyName", "rows_gt:0")
+    checks = @("sql_has:vw_MISrolldespatch", "sql_has:Oswal", "governed_warning", "rows_gt:0")
   },
   @{
     id = "fibc_despatch"
     message = "FIBC despatch packing list bails for Oswal Extrusion Limited"
-    checks = @("sql_has:FIBCDespatch", "sql_has:Oswal", "rows_gt:0")
+    checks = @("sql_has:FIBCDespatch", "sql_has:Oswal", "governed_warning", "rows_gt:0")
   },
   @{
     id = "yarn_packing"
@@ -38,6 +38,9 @@ function Test-Check([string]$check, $resp) {
     return $false
   }
   if ($check -like "rows_gt:*") { return $rowCount -gt [int]$check.Substring(8) }
+  if ($check -eq "governed_warning") {
+    return -not [string]::IsNullOrWhiteSpace([string]$resp.warning)
+  }
   return $false
 }
 

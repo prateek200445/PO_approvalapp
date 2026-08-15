@@ -14,6 +14,9 @@ public partial class ChatOrchestratorService
     private readonly SqlGuardService _sqlGuard;
     private readonly DatabaseService _database;
     private readonly AgeingReportService _ageingService;
+    private readonly LedgerStatementChatService _ledgerStatementChat;
+    private readonly ErpFinanceReportService _financeReportService;
+    private readonly ErpInventoryReportService _inventoryReportService;
     private readonly ILogger<ChatOrchestratorService> _logger;
 
     private const int MaxReturnRows = 50;
@@ -27,6 +30,9 @@ public partial class ChatOrchestratorService
         SqlGuardService sqlGuard,
         DatabaseService database,
         AgeingReportService ageingService,
+        LedgerStatementChatService ledgerStatementChat,
+        ErpFinanceReportService financeReportService,
+        ErpInventoryReportService inventoryReportService,
         ILogger<ChatOrchestratorService> logger)
     {
         _retrieval = retrieval;
@@ -35,6 +41,9 @@ public partial class ChatOrchestratorService
         _sqlGuard = sqlGuard;
         _database = database;
         _ageingService = ageingService;
+        _ledgerStatementChat = ledgerStatementChat;
+        _financeReportService = financeReportService;
+        _inventoryReportService = inventoryReportService;
         _logger = logger;
     }
 
@@ -85,7 +94,8 @@ public partial class ChatOrchestratorService
             - Country-wise sales / sales by country: ALWAYS vw_Countrywise_sales_dashboard (NOT vw_Salesvoucher). Columns: Country, Value (Amount-DebitNote), InvYear (short label 25-26), GroupName. Filter InvYear = '25-26' for FY 2025-26. Filter company via GroupName IN (SELECT DISTINCT GroupName FROM FactoryInfo WHERE Name = legal company). NEVER use vw_Salesvoucher.Destination for country — Destination is port/city/state (Gujarat, Ahmedabad), not country. GROUP BY Country, SUM(CAST(Value AS float)), ORDER BY total DESC, TOP 50.
             - Total sales / sales by product group for FY: ALWAYS vw_Sales_EBIDTA (same as Sales Dashboard, excl. InterGroup='Intergroup'). Total: SUM(Amount), SUM(netwt). By group: GROUP BY Groupname; by sub-group: GROUP BY Groupname, SubGroupName. Filter CompanyName and invdate for Indian FY (2025-04-01 to 2026-03-31 for FY 25-26). Total purchase: vw_Purchase_EBIDTA with same rules.
             - Ledger count: COUNT(*) FROM LedgerMaster WHERE CompanyName = company; when user says under/in a group (e.g. Sundry Debtors) also filter LedgerMaster.Under LIKE '%group%'. Ledger/account groups list: SELECT DISTINCT Under FROM LedgerMaster (never LedgerGroupMaster).
-            - Debtor/creditor ageing / overdue buckets: handled by ERP stored procedures (sp_Representative_Outstanding_Pivot, sp_Overdue_Ledger) — NOT vw_BillWiseTransaction or LedgerMaster alone. Debtors use G3='Sundry Debtors'; creditors use G3='Trade Creditors' (never 'Sundry Creditors'). Sub-groups: Debtors-Overseas, Debtors-Domestic, Creditors-RM, etc.
+            - Debtor/creditor ageing / overdue buckets: monthly/group pivot and bill-wise overdue use ERP SPs (sp_Representative_Outstanding_Pivot, sp_Overdue_Ledger). Day-bucket ageing (0-30/31-60/61-90/90+) uses governed SELECT on vw_BillWiseTransaction. Debtors use G3='Sundry Debtors'; creditors use G3='Trade Creditors' (never 'Sundry Creditors'). Sub-groups: Debtors-Overseas, Debtors-Domestic, Creditors-RM, etc.
+            - Ledger voucher statement / transaction history for a named party: handled by ERP sp_ac_LedgerSummary_BankRecoDate (portal parity) — NOT vw_LedgerSummary or LedgerMaster alone. Requires company + ledger/party name + date range (defaults to current FY).
             - Despatch/packing: roll history vw_MISrolldespatch; FIBC bails FIBCDespatch; yarn MIS_YarnDespatch; small bag SmallBagBailForDespatch; rolls waiting vw_RollforDespatch. ALWAYS filter CompanyName/Companyname or InvNo/PartyName/date + TOP 50 (million-row tables). Prefer view over MISRollforDespatch table.
             - Production: factory daily vw_FactoryProduction (companyname, Particulars, TapeProduction/Fabric/SmallBag); tape plant vw_daily_tape_prod_New (bracket [Loom Dept]/[FIBC Dept]); loom rolls vw_LoomProductionENtry (MUST filter CompanyName/Sysdate/LoomNo + TOP 50 — ~716k; skip stale vw_Loom_Prod_Mtr); FIBC bags VW_FIBCBagwiseProduction (not _New); MIS qty VW_PRODUCTION_EBD_DTL; WIP vw_WIPReport; small bags SmallBagProductionEntry (Cutting/Stitching — live data mainly Plastene/HCP units, NOT Oswal; Oswal uses Tape/Fabric/WEBBING in vw_FactoryProduction). Filter EBD/WIP/loom + TOP 50. Not despatch / not ApproveWorkOrder.
             - Prefer TOP 50 for detail lists. COUNT aggregates need no TOP.
@@ -126,10 +136,100 @@ public partial class ChatOrchestratorService
         string sql = "";
         string? columnRepairHint = null;
         var usedErpAgeing = false;
+        var usedErpLedgerStatement = false;
+        var usedErpFinance = false;
+        var usedErpInventory = false;
         int? ageingTotalCount = null;
+        int? ledgerStatementTotalCount = null;
+        int? financeTotalCount = null;
+        int? inventoryTotalCount = null;
 
+        // Day-bucket ageing (SELECT on vw_BillWiseTransaction) — before EXEC ageing
+        if (TryBuildPartyAgeingBucketsSql(request.Message, out var partyBucketSql, out var partyBucketWarn))
+        {
+            _logger.LogInformation("Using governed party day-bucket ageing SQL");
+            sql = partyBucketSql;
+            warning = partyBucketWarn;
+        }
+        else if (TryBuildDebtorCreditorAgeingListSql(request.Message, out var listBucketSql, out var listBucketWarn))
+        {
+            _logger.LogInformation("Using governed debtor/creditor day-bucket ageing list SQL");
+            sql = listBucketSql;
+            warning = listBucketWarn;
+        }
+        // ERP inventory/stock ageing — before debtor ageing
+        else if (TryBuildStockAgeingPlan(request.Message, out var stockAgeingPlan))
+        {
+            _logger.LogInformation("Using ERP stock ageing SP {Sp}", stockAgeingPlan.StockAgeingSp);
+            var stockResult = await _financeReportService.ExecuteAsync(stockAgeingPlan, ct);
+            rows = stockResult.Rows;
+            sql = stockResult.SqlDescription;
+            warning = stockResult.Warning;
+            financeTotalCount = stockResult.TotalCount;
+            usedErpFinance = true;
+        }
+        else if (TryBuildGroupOverdueDaysPlan(request.Message, out var groupOverduePlan))
+        {
+            _logger.LogInformation("Using ERP group overdue days SP");
+            var groupResult = await _financeReportService.ExecuteAsync(groupOverduePlan, ct);
+            rows = groupResult.Rows;
+            sql = groupResult.SqlDescription;
+            warning = groupResult.Warning;
+            financeTotalCount = groupResult.TotalCount;
+            usedErpFinance = true;
+        }
+        else if (TryBuildOutstandingAllPlan(request.Message, out var outstandingAllPlan))
+        {
+            _logger.LogInformation("Using ERP sp_OutstandingAll");
+            var outstandingResult = await _financeReportService.ExecuteAsync(outstandingAllPlan, ct);
+            rows = outstandingResult.Rows;
+            sql = outstandingResult.SqlDescription;
+            warning = outstandingResult.Warning;
+            financeTotalCount = outstandingResult.TotalCount;
+            usedErpFinance = true;
+        }
+        else if (TryBuildMsmeOverduePlan(request.Message, out var msmePlan))
+        {
+            _logger.LogInformation("Using ERP MSME overdue SP");
+            var msmeResult = await _financeReportService.ExecuteAsync(msmePlan, ct);
+            rows = msmeResult.Rows;
+            sql = msmeResult.SqlDescription;
+            warning = msmeResult.Warning;
+            financeTotalCount = msmeResult.TotalCount;
+            usedErpFinance = true;
+        }
+        else if (TryBuildSalesDiscountPlan(request.Message, out var discountPlan))
+        {
+            _logger.LogInformation("Using ERP sales discount SP");
+            var discountResult = await _financeReportService.ExecuteAsync(discountPlan, ct);
+            rows = discountResult.Rows;
+            sql = discountResult.SqlDescription;
+            warning = discountResult.Warning;
+            financeTotalCount = discountResult.TotalCount;
+            usedErpFinance = true;
+        }
+        else if (TryBuildExportDebtorsLast3MonthsPlan(request.Message, out var exportDebtorsPlan))
+        {
+            _logger.LogInformation("Using ERP export debtors last 3 months SP");
+            var exportResult = await _financeReportService.ExecuteAsync(exportDebtorsPlan, ct);
+            rows = exportResult.Rows;
+            sql = exportResult.SqlDescription;
+            warning = exportResult.Warning;
+            financeTotalCount = exportResult.TotalCount;
+            usedErpFinance = true;
+        }
+        else if (TryBuildInventoryReportPlan(request.Message, out var inventoryPlan))
+        {
+            _logger.LogInformation("Using ERP inventory/MIS SP mode={Mode}", inventoryPlan.Mode);
+            var inventoryResult = await _inventoryReportService.ExecuteAsync(inventoryPlan, ct);
+            rows = inventoryResult.Rows;
+            sql = inventoryResult.SqlDescription;
+            warning = inventoryResult.Warning;
+            inventoryTotalCount = inventoryResult.TotalCount;
+            usedErpInventory = true;
+        }
         // ERP ageing (portal parity SPs) — before LLM / LedgerMaster-only outstanding
-        if (TryBuildAgeingReportPlan(request.Message, out var ageingPlan))
+        else if (TryBuildAgeingReportPlan(request.Message, out var ageingPlan))
         {
             _logger.LogInformation("Using ERP ageing service (mode={Mode})", ageingPlan.Mode);
             var ageingResult = await _ageingService.ExecuteAsync(ageingPlan, ct);
@@ -139,88 +239,416 @@ public partial class ChatOrchestratorService
             ageingTotalCount = ageingResult.TotalCount;
             usedErpAgeing = true;
         }
+        // ERP ledger statement (portal parity SP) — before LLM
+        else if (TryBuildLedgerStatementPlan(request.Message, out var ledgerPlan))
+        {
+            _logger.LogInformation("Using ERP ledger statement service for {Ledger}", ledgerPlan.LedgerName);
+            var ledgerResult = await _ledgerStatementChat.ExecuteAsync(ledgerPlan, ct);
+            rows = ledgerResult.Rows;
+            sql = ledgerResult.SqlDescription;
+            warning = ledgerResult.Warning;
+            ledgerStatementTotalCount = ledgerResult.TotalCount;
+            usedErpLedgerStatement = true;
+        }
+
+        var skipSqlExecution = usedErpAgeing || usedErpLedgerStatement || usedErpFinance || usedErpInventory;
+        var useLlm = string.IsNullOrWhiteSpace(sql) && !skipSqlExecution;
 
         // Governed: pending PO approval (portal queue) — highest priority; skip LLM/PR confusion
-        if (!usedErpAgeing && TryBuildPendingPoApprovalSql(request.Message, "", out var earlyPendingPoSql, out var earlyPendingPoWarn))
+        if (useLlm && TryBuildPendingPoApprovalSql(request.Message, "", out var earlyPendingPoSql, out var earlyPendingPoWarn))
         {
             _logger.LogInformation("Using governed pending PO SQL (early path)");
             sql = earlyPendingPoSql;
             warning = earlyPendingPoWarn;
         }
+        // Phase 7 — MRN / vendor early paths (stores & procurement daily queries)
+        else if (useLlm && TryBuildMrnPaymentEarlySql(request.Message, out var mrnPaySql, out var mrnPayWarn))
+        {
+            _logger.LogInformation("Using governed MRN payment SQL (early path)");
+            sql = mrnPaySql;
+            warning = mrnPayWarn;
+        }
+        else if (useLlm && TryBuildMrnByBillNoEarlySql(request.Message, out var mrnBillSql, out var mrnBillWarn))
+        {
+            _logger.LogInformation("Using governed MRN-by-bill SQL (early path)");
+            sql = mrnBillSql;
+            warning = mrnBillWarn;
+        }
+        else if (useLlm && TryBuildMrnByMrNoEarlySql(request.Message, out var mrnNoSql, out var mrnNoWarn))
+        {
+            _logger.LogInformation("Using governed MRN-by-MRNo SQL (early path)");
+            sql = mrnNoSql;
+            warning = mrnNoWarn;
+        }
+        else if (useLlm && TryBuildMrnPendingQtyEarlySql(request.Message, out var mrnPendingSql, out var mrnPendingWarn))
+        {
+            _logger.LogInformation("Using governed MRN pending qty SQL (early path)");
+            sql = mrnPendingSql;
+            warning = mrnPendingWarn;
+        }
+        else if (useLlm && TryBuildMrnPartyReceiptsEarlySql(request.Message, out var mrnPartySql, out var mrnPartyWarn))
+        {
+            _logger.LogInformation("Using governed MRN party receipts SQL (early path)");
+            sql = mrnPartySql;
+            warning = mrnPartyWarn;
+        }
+        else if (useLlm && TryBuildVendorProfileEarlySql(request.Message, out var vendorProfSql, out var vendorProfWarn))
+        {
+            _logger.LogInformation("Using governed vendor profile SQL (early path)");
+            sql = vendorProfSql;
+            warning = vendorProfWarn;
+        }
+        else if (useLlm && TryBuildVendorCodeEarlySql(request.Message, out var vendorCodeSql, out var vendorCodeWarn))
+        {
+            _logger.LogInformation("Using governed vendor code SQL (early path)");
+            sql = vendorCodeSql;
+            warning = vendorCodeWarn;
+        }
+        else if (useLlm && TryBuildVendorRateEarlySql(request.Message, out var vendorRateSql, out var vendorRateWarn))
+        {
+            _logger.LogInformation("Using governed vendor rate SQL (early path)");
+            sql = vendorRateSql;
+            warning = vendorRateWarn;
+        }
+        else if (useLlm && TryBuildMsmeVendorListEarlySql(request.Message, out var msmeListSql, out var msmeListWarn))
+        {
+            _logger.LogInformation("Using governed MSME vendor list SQL (early path)");
+            sql = msmeListSql;
+            warning = msmeListWarn;
+        }
+        else if (useLlm && TryBuildInternalVendorEarlySql(request.Message, out var intVendorSql, out var intVendorWarn))
+        {
+            _logger.LogInformation("Using governed internal vendor SQL (early path)");
+            sql = intVendorSql;
+            warning = intVendorWarn;
+        }
         // Governed: country-wise sales (Sales Dashboard source) — before export-customer ranking
-        else if (!usedErpAgeing && TryBuildCountryWiseSalesSql(request.Message, out var countryWiseSql, out var countryWiseWarning))
+        else if (useLlm && TryBuildCountryWiseSalesSql(request.Message, out var countryWiseSql, out var countryWiseWarning))
         {
             _logger.LogInformation("Using governed country-wise sales SQL");
             sql = countryWiseSql;
             warning = countryWiseWarning;
         }
-        else if (!usedErpAgeing && TryBuildSalesTotalsSql(request.Message, out var salesTotalsSql, out var salesTotalsWarning))
+        else if (useLlm && TryBuildSalesTotalsSql(request.Message, out var salesTotalsSql, out var salesTotalsWarning))
         {
             _logger.LogInformation("Using governed sales totals SQL");
             sql = salesTotalsSql;
             warning = salesTotalsWarning;
         }
-        else if (!usedErpAgeing && TryBuildSalesByGroupSql(request.Message, out var salesByGroupSql, out var salesByGroupWarning))
+        else if (useLlm && TryBuildSalesByGroupSql(request.Message, out var salesByGroupSql, out var salesByGroupWarning))
         {
             _logger.LogInformation("Using governed sales-by-group SQL");
             sql = salesByGroupSql;
             warning = salesByGroupWarning;
         }
-        else if (!usedErpAgeing && TryBuildExportSalesInvoiceListSql(request.Message, out var exportInvSql, out var exportInvWarn))
+        else if (useLlm && TryBuildExportSalesInvoiceListSql(request.Message, out var exportInvSql, out var exportInvWarn))
         {
             _logger.LogInformation("Using governed export sales invoice list SQL");
             sql = exportInvSql;
             warning = exportInvWarn;
         }
-        else if (!usedErpAgeing && TryBuildInterUnitSalesSql(request.Message, out var interUnitSql, out var interUnitWarn))
+        else if (useLlm && TryBuildInterUnitSalesSql(request.Message, out var interUnitSql, out var interUnitWarn))
         {
             _logger.LogInformation("Using governed inter-unit sales SQL");
             sql = interUnitSql;
             warning = interUnitWarn;
         }
-        else if (!usedErpAgeing && TryBuildPurchaseTotalsSql(request.Message, out var purchaseTotalsSql, out var purchaseTotalsWarning))
+        else if (useLlm && TryBuildPurchaseTotalsSql(request.Message, out var purchaseTotalsSql, out var purchaseTotalsWarning))
         {
             _logger.LogInformation("Using governed purchase totals SQL");
             sql = purchaseTotalsSql;
             warning = purchaseTotalsWarning;
         }
-        else if (!usedErpAgeing && TryBuildLedgerCountSql(request.Message, out var ledgerCountSql, out var ledgerCountWarning))
+        else if (useLlm && TryBuildLedgerCountSql(request.Message, out var ledgerCountSql, out var ledgerCountWarning))
         {
             _logger.LogInformation("Using governed ledger count SQL");
             sql = ledgerCountSql;
             warning = ledgerCountWarning;
         }
-        else if (!usedErpAgeing && TryBuildLedgerGroupsSql(request.Message, out var ledgerGroupsSql, out var ledgerGroupsWarning))
+        else if (useLlm && TryBuildLedgerGroupsSql(request.Message, out var ledgerGroupsSql, out var ledgerGroupsWarning))
         {
             _logger.LogInformation("Using governed ledger groups SQL");
             sql = ledgerGroupsSql;
             warning = ledgerGroupsWarning;
         }
-        else if (!usedErpAgeing && TryBuildTopExportCustomersSql(request.Message, out var topExportSql, out var topExportWarning))
+        else if (useLlm && TryBuildTopExportCustomersSql(request.Message, out var topExportSql, out var topExportWarning))
         {
             _logger.LogInformation("Using governed top-export-customers SQL");
             sql = topExportSql;
             warning = topExportWarning;
         }
-        else if (!usedErpAgeing && TryBuildLedgerOutstandingSql(request.Message, out var ledgerOstSql, out var ledgerOstWarning))
+        else if (useLlm && TryBuildLedgerOutstandingSql(request.Message, out var ledgerOstSql, out var ledgerOstWarning))
         {
             _logger.LogInformation("Using governed ledger-outstanding SQL");
             sql = ledgerOstSql;
             warning = ledgerOstWarning;
         }
-        else if (!usedErpAgeing && TryBuildStockInHandSql(request.Message, out var stockInHandSql, out var stockInHandWarn))
+        else if (useLlm && TryBuildStockInHandSql(request.Message, out var stockInHandSql, out var stockInHandWarn))
         {
             _logger.LogInformation("Using governed stock-in-hand SQL");
             sql = stockInHandSql;
             warning = stockInHandWarn;
         }
-        else if (!usedErpAgeing && TryBuildGovernedDomainSql(request.Message, out var govSql, out var govWarning))
+        // Governed procurement / quality early paths (before LLM SQL)
+        else if (useLlm && TryBuildFinalQuotationSql(request.Message, out var finalQuoteSql, out var finalQuoteWarn))
+        {
+            _logger.LogInformation("Using governed FinalQuotation SQL");
+            sql = finalQuoteSql;
+            warning = finalQuoteWarn;
+        }
+        else if (useLlm && TryBuildQuotationByPoSql(request.Message, out var quotePoSql, out var quotePoWarn))
+        {
+            _logger.LogInformation("Using governed Vw_Quotation by PO SQL");
+            sql = quotePoSql;
+            warning = quotePoWarn;
+        }
+        else if (useLlm && TryBuildIndentQuotationSql(request.Message, out var indentQuoteSql, out var indentQuoteWarn))
+        {
+            _logger.LogInformation("Using governed Vw_IndentQuotation SQL");
+            sql = indentQuoteSql;
+            warning = indentQuoteWarn;
+        }
+        else if (useLlm && TryBuildSalesInvoiceItemsSql(request.Message, out var invItemsSql, out var invItemsWarn))
+        {
+            _logger.LogInformation("Using governed SalesVoucherItem SQL");
+            sql = invItemsSql;
+            warning = invItemsWarn;
+        }
+        else if (useLlm && TryBuildCreditNoteListSql(request.Message, out var creditListSql, out var creditListWarn))
+        {
+            _logger.LogInformation("Using governed credit note list SQL");
+            sql = creditListSql;
+            warning = creditListWarn;
+        }
+        else if (useLlm && TryBuildDebitNoteListSql(request.Message, out var debitListSql, out var debitListWarn))
+        {
+            _logger.LogInformation("Using governed debit note list SQL");
+            sql = debitListSql;
+            warning = debitListWarn;
+        }
+        else if (useLlm && TryBuildGatePassEarlySql(request.Message, out var gateEarlySql, out var gateEarlyWarn))
+        {
+            _logger.LogInformation("Using governed gate pass early SQL");
+            sql = gateEarlySql;
+            warning = gateEarlyWarn;
+        }
+        else if (useLlm && TryBuildIssueSlipEarlySql(request.Message, out var issueSlipEarlySql, out var issueSlipEarlyWarn))
+        {
+            _logger.LogInformation("Using governed issue slip early SQL");
+            sql = issueSlipEarlySql;
+            warning = issueSlipEarlyWarn;
+        }
+        else if (useLlm && TryBuildTodayOutwardEarlySql(request.Message, out var todayOutSql, out var todayOutWarn))
+        {
+            _logger.LogInformation("Using governed today-outward early SQL");
+            sql = todayOutSql;
+            warning = todayOutWarn;
+        }
+        else if (useLlm && TryBuildJobWorkOrderSql(request.Message, out var jwoSql, out var jwoWarn))
+        {
+            _logger.LogInformation("Using governed job work order SQL");
+            sql = jwoSql;
+            warning = jwoWarn;
+        }
+        else if (useLlm && TryBuildJobWorkEbdSql(request.Message, out var jwEbdSql, out var jwEbdWarn))
+        {
+            _logger.LogInformation("Using governed job work EBD SQL");
+            sql = jwEbdSql;
+            warning = jwEbdWarn;
+        }
+        else if (useLlm && TryBuildJobWorkReceiptSql(request.Message, out var jwRecSql, out var jwRecWarn))
+        {
+            _logger.LogInformation("Using governed job work receipt SQL");
+            sql = jwRecSql;
+            warning = jwRecWarn;
+        }
+        else if (useLlm && TryBuildPoPendingReceiptSql(request.Message, out var poPendingSql, out var poPendingWarn))
+        {
+            _logger.LogInformation("Using governed PO pending receipt SQL");
+            sql = poPendingSql;
+            warning = poPendingWarn;
+        }
+        else if (useLlm && TryBuildFibcBagProductionSql(request.Message, out var fibcProdSql, out var fibcProdWarn))
+        {
+            _logger.LogInformation("Using governed FIBC bag production SQL");
+            sql = fibcProdSql;
+            warning = fibcProdWarn;
+        }
+        else if (useLlm && TryBuildFactoryProductionEarlySql(request.Message, out var factoryProdSql, out var factoryProdWarn))
+        {
+            _logger.LogInformation("Using governed factory production SQL (early path)");
+            sql = factoryProdSql;
+            warning = factoryProdWarn;
+        }
+        else if (useLlm && TryBuildTapePlantEarlySql(request.Message, out var tapePlantSql, out var tapePlantWarn))
+        {
+            _logger.LogInformation("Using governed tape plant production SQL (early path)");
+            sql = tapePlantSql;
+            warning = tapePlantWarn;
+        }
+        else if (useLlm && TryBuildWipReportEarlySql(request.Message, out var wipSql, out var wipWarn))
+        {
+            _logger.LogInformation("Using governed WIP report SQL (early path)");
+            sql = wipSql;
+            warning = wipWarn;
+        }
+        else if (useLlm && TryBuildProductionEbdEarlySql(request.Message, out var prodEbdSql, out var prodEbdWarn))
+        {
+            _logger.LogInformation("Using governed production EBD SQL (early path)");
+            sql = prodEbdSql;
+            warning = prodEbdWarn;
+        }
+        else if (useLlm && TryBuildRollDespatchEarlySql(request.Message, out var rollDespSql, out var rollDespWarn))
+        {
+            _logger.LogInformation("Using governed roll despatch SQL (early path)");
+            sql = rollDespSql;
+            warning = rollDespWarn;
+        }
+        else if (useLlm && TryBuildFibcDespatchEarlySql(request.Message, out var fibcDespSql, out var fibcDespWarn))
+        {
+            _logger.LogInformation("Using governed FIBC despatch SQL (early path)");
+            sql = fibcDespSql;
+            warning = fibcDespWarn;
+        }
+        else if (useLlm && TryBuildYarnDespatchEarlySql(request.Message, out var yarnDespSql, out var yarnDespWarn))
+        {
+            _logger.LogInformation("Using governed yarn despatch SQL (early path)");
+            sql = yarnDespSql;
+            warning = yarnDespWarn;
+        }
+        else if (useLlm && TryBuildSmallBagDespatchEarlySql(request.Message, out var sbDespSql, out var sbDespWarn))
+        {
+            _logger.LogInformation("Using governed small-bag despatch SQL (early path)");
+            sql = sbDespSql;
+            warning = sbDespWarn;
+        }
+        else if (useLlm && TryBuildUserLookupEarlySql(request.Message, out var userLookupSql, out var userLookupWarn))
+        {
+            _logger.LogInformation("Using governed user lookup SQL (early path)");
+            sql = userLookupSql;
+            warning = userLookupWarn;
+        }
+        else if (useLlm && TryBuildIndentItemsEarlySql(request.Message, out var indentItemsSql, out var indentItemsWarn))
+        {
+            _logger.LogInformation("Using governed indent items SQL (early path)");
+            sql = indentItemsSql;
+            warning = indentItemsWarn;
+        }
+        else if (useLlm && TryBuildSalesEbdEarlySql(request.Message, out var salesEbdSql, out var salesEbdWarn))
+        {
+            _logger.LogInformation("Using governed sales EBD SQL (early path)");
+            sql = salesEbdSql;
+            warning = salesEbdWarn;
+        }
+        else if (useLlm && TryBuildExportDebtorsDueSql(request.Message, out var exportDueSql, out var exportDueWarn))
+        {
+            _logger.LogInformation("Using governed export debtors due SQL");
+            sql = exportDueSql;
+            warning = exportDueWarn;
+        }
+        else if (useLlm && TryBuildJobMrnPendingWoSql(request.Message, out var jobMrnSql, out var jobMrnWarn))
+        {
+            _logger.LogInformation("Using governed job MRN pending WO SQL");
+            sql = jobMrnSql;
+            warning = jobMrnWarn;
+        }
+        else if (useLlm && TryBuildPoAmendmentSql(request.Message, out var poAmendSql, out var poAmendWarn))
+        {
+            _logger.LogInformation("Using governed PO amendment SQL");
+            sql = poAmendSql;
+            warning = poAmendWarn;
+        }
+        else if (useLlm && TryBuildBillPaymentDraftSql(request.Message, out var billDraftSql, out var billDraftWarn))
+        {
+            _logger.LogInformation("Using governed bill payment draft SQL");
+            sql = billDraftSql;
+            warning = billDraftWarn;
+        }
+        else if (useLlm && TryBuildPurchaseReqSql(request.Message, out var prSql, out var prWarn))
+        {
+            _logger.LogInformation("Using governed purchase requisition SQL");
+            sql = prSql;
+            warning = prWarn;
+        }
+        else if (useLlm && TryBuildSmallBagProductionSql(request.Message, out var sbProdSql, out var sbProdWarn))
+        {
+            _logger.LogInformation("Using governed small-bag production SQL");
+            sql = sbProdSql;
+            warning = sbProdWarn;
+        }
+        else if (useLlm && TryBuildLedgerGroupingSql(request.Message, out var ledgerGrpSql, out var ledgerGrpWarn))
+        {
+            _logger.LogInformation("Using governed ledger grouping SQL");
+            sql = ledgerGrpSql;
+            warning = ledgerGrpWarn;
+        }
+        else if (useLlm && TryBuildAccountVoucherApprovalSql(request.Message, out var voucherApprSql, out var voucherApprWarn))
+        {
+            _logger.LogInformation("Using governed account voucher approval SQL");
+            sql = voucherApprSql;
+            warning = voucherApprWarn;
+        }
+        else if (useLlm && TryBuildVoucherPartySql(request.Message, out var voucherPartySql, out var voucherPartyWarn))
+        {
+            _logger.LogInformation("Using governed voucher party SQL");
+            sql = voucherPartySql;
+            warning = voucherPartyWarn;
+        }
+        else if (useLlm && TryBuildEditPurchaseOrderSql(request.Message, out var editPoSql, out var editPoWarn))
+        {
+            _logger.LogInformation("Using governed edit PO SQL");
+            sql = editPoSql;
+            warning = editPoWarn;
+        }
+        else if (useLlm && TryBuildImportPoMrnPendingSql(request.Message, out var importPoMrnSql, out var importPoMrnWarn))
+        {
+            _logger.LogInformation("Using governed import PO/MRN pending SQL");
+            sql = importPoMrnSql;
+            warning = importPoMrnWarn;
+        }
+        else if (useLlm && TryBuildPurchaseVoucherSql(request.Message, out var purchaseVoucherSql, out var purchaseVoucherWarn))
+        {
+            _logger.LogInformation("Using governed purchase voucher SQL");
+            sql = purchaseVoucherSql;
+            warning = purchaseVoucherWarn;
+        }
+        else if (useLlm && TryBuildPaymentVoucherSql(request.Message, out var paymentVoucherSql, out var paymentVoucherWarn))
+        {
+            _logger.LogInformation("Using governed payment voucher SQL");
+            sql = paymentVoucherSql;
+            warning = paymentVoucherWarn;
+        }
+        else if (useLlm && TryBuildPaymentReceiptSql(request.Message, out var paymentReceiptSql, out var paymentReceiptWarn))
+        {
+            _logger.LogInformation("Using governed payment receipt SQL");
+            sql = paymentReceiptSql;
+            warning = paymentReceiptWarn;
+        }
+        else if (useLlm && TryBuildAdvanceBillOutstandingSql(request.Message, out var advanceBillSql, out var advanceBillWarn))
+        {
+            _logger.LogInformation("Using governed advance bill outstanding SQL");
+            sql = advanceBillSql;
+            warning = advanceBillWarn;
+        }
+        else if (useLlm && TryBuildDueOverDueSql(request.Message, out var dueOverdueSql, out var dueOverdueWarn))
+        {
+            _logger.LogInformation("Using governed due/overdue summary SQL");
+            sql = dueOverdueSql;
+            warning = dueOverdueWarn;
+        }
+        else if (useLlm && TryBuildDueDateCashFlowSql(request.Message, out var cashFlowSql, out var cashFlowWarn))
+        {
+            _logger.LogInformation("Using governed due-date cash flow SQL");
+            sql = cashFlowSql;
+            warning = cashFlowWarn;
+        }
+        else if (useLlm && TryBuildGovernedDomainSql(request.Message, out var govSql, out var govWarning))
         {
             _logger.LogInformation("Using governed domain SQL");
             sql = govSql;
             warning = govWarning;
         }
-        else if (!usedErpAgeing)
+        else if (useLlm)
         {
             var sqlRaw = await _llm.CompleteAsync(sqlSystem, sqlUser, ct);
             sql = ApplySqlPostProcess(sqlRaw, request.Message, out columnRepairHint);
@@ -271,7 +699,7 @@ public partial class ChatOrchestratorService
         }
 
         // Still-unknown columns after auto-fix → one targeted repair before execute
-        if (!usedErpAgeing && !string.IsNullOrWhiteSpace(columnRepairHint))
+        if (!skipSqlExecution && !string.IsNullOrWhiteSpace(columnRepairHint))
         {
             _logger.LogWarning("Unresolved hallucinated columns; requesting catalog-aware repair");
             var colRepairUser = $"""
@@ -327,7 +755,7 @@ public partial class ChatOrchestratorService
             }
         }
 
-        if (!usedErpAgeing)
+        if (!skipSqlExecution)
         {
         try
         {
@@ -994,8 +1422,12 @@ public partial class ChatOrchestratorService
         if (hitCap)
             rows = rows.Take(MaxReturnRows).ToList();
 
-        var (totalCount, truncated) = usedErpAgeing && ageingTotalCount.HasValue
-            ? (ageingTotalCount, ageingTotalCount.Value > rows.Count)
+        var erpTotalCount = usedErpAgeing ? ageingTotalCount
+            : usedErpLedgerStatement ? ledgerStatementTotalCount
+            : usedErpFinance ? financeTotalCount
+            : null;
+        var (totalCount, truncated) = erpTotalCount.HasValue
+            ? (erpTotalCount, erpTotalCount.Value > rows.Count)
             : await ResolveListCardinalityAsync(sql, rows, hitCap, ct);
 
         var preview = JsonSerializer.Serialize(rows);
@@ -1014,6 +1446,8 @@ public partial class ChatOrchestratorService
             You answer business questions using ONLY the SQL result data provided.
             Be concise and factual. If the result is empty, say so.
             For debtor/creditor ageing results: explain monthly bucket columns (Opening, month names, Total) or bill-wise overdue columns from the ERP ageing report; mention the as-on date from the warning if present.
+            For day-bucket ageing (Bucket_0_30, Bucket_31_60, etc.): summarize each bucket and total outstanding; note age basis is BillDate (VoucherDate fallback).
+            For ledger statement results: summarize opening/closing from the warning; list key vouchers (Date, Particulars, VoucherNo, Debit, Credit, Closing).
             If supplemental context is provided for an empty small-bag query, explain that SmallBagProductionEntry has no rows for that company and summarize what production types (Particulars) the company does have instead — do not invent small-bag figures.
             Do not invent numbers. Mention key figures clearly.
             For payment questions: ignore rows where PaymentNo is null; only null/empty after filtering means no payment.
@@ -1042,7 +1476,9 @@ public partial class ChatOrchestratorService
             Write a short natural-language answer.
             """;
 
-        var answer = await _llm.CompleteAsync(answerSystem, answerUser, ct);
+        var answer = ShouldUseDeterministicAnswer(skipSqlExecution, warning, sql)
+            ? BuildDeterministicAnswer(request.Message, rows, warning, totalCount, truncated)
+            : await _llm.CompleteAsync(answerSystem, answerUser, ct);
 
         if (truncated)
         {
@@ -1145,6 +1581,9 @@ public partial class ChatOrchestratorService
             return false;
 
         if (LooksLikeAgeingQuestion(message))
+            return false;
+
+        if (LooksLikeLedgerStatementQuestion(message))
             return false;
 
         var party = TryExtractLedgerPartyName(message);

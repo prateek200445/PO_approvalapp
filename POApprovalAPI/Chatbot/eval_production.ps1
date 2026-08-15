@@ -6,12 +6,12 @@ $cases = @(
   @{
     id = "factory_daily"
     message = "Factory production for Oswal Extrusion Limited recent days with tape fabric and small bag"
-    checks = @("sql_has:vw_FactoryProduction", "sql_has:Oswal", "rows_gt:0")
+    checks = @("sql_has:vw_FactoryProduction", "sql_has:Oswal", "governed_warning", "rows_gt:0")
   },
   @{
     id = "tape_plant"
     message = "Tape production opening closing and Loom Dept for K.P. WOVEN PRIVATE LIMITED recent"
-    checks = @("sql_has:vw_daily_tape_prod_New", "sql_has:K.P.|KP", "rows_gt:0")
+    checks = @("sql_has:vw_daily_tape_prod_New", "sql_has:K.P.|KP", "governed_warning", "rows_gt:0")
   },
   @{
     id = "loom_rolls"
@@ -31,7 +31,7 @@ $cases = @(
   @{
     id = "wip_item"
     message = "WIP consumption for item WIP00013 at Oswal Extrusion Limited"
-    checks = @("sql_has:vw_WIPReport", "sql_has:WIP00013", "sql_has:Oswal", "rows_gt:0")
+    checks = @("sql_has:vw_WIPReport", "sql_has:WIP00013", "sql_has:Oswal", "governed_warning", "rows_gt:0")
   },
   @{
     id = "smallbag"
@@ -48,6 +48,9 @@ function Test-Check([string]$check, $resp) {
     return $false
   }
   if ($check -like "rows_gt:*") { return $rowCount -gt [int]$check.Substring(8) }
+  if ($check -eq "governed_warning") {
+    return -not [string]::IsNullOrWhiteSpace([string]$resp.warning)
+  }
   return $false
 }
 

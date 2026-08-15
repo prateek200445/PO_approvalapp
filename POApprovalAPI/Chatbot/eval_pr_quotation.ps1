@@ -39,6 +39,11 @@ $cases = @(
     checks = @("sql_has:Vw_Quotation", "sql_has:KPV/SPR/26-27/539", "rows_gt:0", "answer_not_no_data")
   },
   @{
+    id = "final_awarded_vendor"
+    message = "Who was the awarded vendor on PO KPV/SPR/26-27/539?"
+    checks = @("sql_has:FinalQuotation", "sql_has:KPV/SPR/26-27/539", "governed_warning")
+  },
+  @{
     id = "no_empty_approve_quotation"
     message = "List pending quotations from ApproveQuotation"
     checks = @("sql_not_approve_or_rewritten")

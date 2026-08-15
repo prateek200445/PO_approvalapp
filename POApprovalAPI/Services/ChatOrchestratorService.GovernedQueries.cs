@@ -14,6 +14,58 @@ public partial class ChatOrchestratorService
     {
         // Specific intents before generic pending PO / WO rewrites (those also match broad "pending PO" text).
         if (TryBuildCountryWiseSalesSql(message, out sql, out warning)) return true;
+        if (TryBuildMrnPaymentEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildMrnByBillNoEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildMrnByMrNoEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildMrnPendingQtyEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildMrnPartyReceiptsEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildVendorProfileEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildVendorCodeEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildVendorRateEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildMsmeVendorListEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildInternalVendorEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildFinalQuotationSql(message, out sql, out warning)) return true;
+        if (TryBuildQuotationByPoSql(message, out sql, out warning)) return true;
+        if (TryBuildIndentQuotationSql(message, out sql, out warning)) return true;
+        if (TryBuildSalesInvoiceItemsSql(message, out sql, out warning)) return true;
+        if (TryBuildCreditNoteListSql(message, out sql, out warning)) return true;
+        if (TryBuildDebitNoteListSql(message, out sql, out warning)) return true;
+        if (TryBuildGatePassEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildIssueSlipEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildTodayOutwardEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildJobWorkOrderSql(message, out sql, out warning)) return true;
+        if (TryBuildJobWorkEbdSql(message, out sql, out warning)) return true;
+        if (TryBuildJobWorkReceiptSql(message, out sql, out warning)) return true;
+        if (TryBuildPoPendingReceiptSql(message, out sql, out warning)) return true;
+        if (TryBuildFibcBagProductionSql(message, out sql, out warning)) return true;
+        if (TryBuildFactoryProductionEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildTapePlantEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildWipReportEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildProductionEbdEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildRollDespatchEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildFibcDespatchEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildYarnDespatchEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildSmallBagDespatchEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildUserLookupEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildIndentItemsEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildSalesEbdEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildExportDebtorsDueSql(message, out sql, out warning)) return true;
+        if (TryBuildJobMrnPendingWoSql(message, out sql, out warning)) return true;
+        if (TryBuildPoAmendmentSql(message, out sql, out warning)) return true;
+        if (TryBuildBillPaymentDraftSql(message, out sql, out warning)) return true;
+        if (TryBuildPurchaseReqSql(message, out sql, out warning)) return true;
+        if (TryBuildSmallBagProductionSql(message, out sql, out warning)) return true;
+        if (TryBuildLedgerGroupingSql(message, out sql, out warning)) return true;
+        if (TryBuildAccountVoucherApprovalSql(message, out sql, out warning)) return true;
+        if (TryBuildVoucherPartySql(message, out sql, out warning)) return true;
+        if (TryBuildEditPurchaseOrderSql(message, out sql, out warning)) return true;
+        if (TryBuildImportPoMrnPendingSql(message, out sql, out warning)) return true;
+        if (TryBuildPurchaseVoucherSql(message, out sql, out warning)) return true;
+        if (TryBuildPaymentVoucherSql(message, out sql, out warning)) return true;
+        if (TryBuildPaymentReceiptSql(message, out sql, out warning)) return true;
+        if (TryBuildAdvanceBillOutstandingSql(message, out sql, out warning)) return true;
+        if (TryBuildDueOverDueSql(message, out sql, out warning)) return true;
+        if (TryBuildDueDateCashFlowSql(message, out sql, out warning)) return true;
         if (TryBuildSalesTotalsSql(message, out sql, out warning)) return true;
         if (TryBuildSalesByGroupSql(message, out sql, out warning)) return true;
         if (TryBuildPurchaseTotalsSql(message, out sql, out warning)) return true;
@@ -1631,5 +1683,122 @@ public partial class ChatOrchestratorService
         if (!LooksLikeDailyInwardOutwardQuestion(message)) return false;
         return Regex.IsMatch(sql, @"SELECT\s+TOP\s+1\b", RegexOptions.IgnoreCase)
                && sql.Contains("StoreOutwards", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Day-bucket ageing for one party: 0-30 / 31-60 / 61-90 / 90+ on vw_BillWiseTransaction.
+    /// </summary>
+    private static bool TryBuildPartyAgeingBucketsSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeDayBucketAgeing(message) || !LooksLikeAgeingQuestion(message))
+            return false;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        if (string.IsNullOrWhiteSpace(company))
+            return false;
+
+        var party = TryExtractLedgerPartyName(message);
+        if (string.IsNullOrWhiteSpace(party))
+            return false;
+
+        var asOn = TryParseAsOnDate(message) ?? DateTime.Today;
+        var partyLike = EscapeSqlLiteral(party.Trim());
+        var companyLit = EscapeSqlLiteral(company);
+        var asOnLit = asOn.ToString("yyyy-MM-dd");
+
+        ResolveAgeingGroups(message, out _, out _);
+        var underFilter = message.Contains("creditor", StringComparison.OrdinalIgnoreCase)
+                          || message.Contains("vendor", StringComparison.OrdinalIgnoreCase)
+                          || message.Contains("supplier", StringComparison.OrdinalIgnoreCase)
+            ? "Creditors%"
+            : "Debtors%";
+
+        sql = $"""
+            SELECT TOP 1
+                CompanyName,
+                LedgerName,
+                Under,
+                SUM(CASE WHEN AgeDays BETWEEN 0 AND 30 THEN ABS(Amount) ELSE 0 END) AS Bucket_0_30,
+                SUM(CASE WHEN AgeDays BETWEEN 31 AND 60 THEN ABS(Amount) ELSE 0 END) AS Bucket_31_60,
+                SUM(CASE WHEN AgeDays BETWEEN 61 AND 90 THEN ABS(Amount) ELSE 0 END) AS Bucket_61_90,
+                SUM(CASE WHEN AgeDays > 90 THEN ABS(Amount) ELSE 0 END) AS Bucket_90_Plus,
+                SUM(ABS(Amount)) AS TotalOutstanding
+            FROM (
+                SELECT lm.CompanyName, lm.LedgerName, lm.Under,
+                       DATEDIFF(day, ISNULL(b.BillDate, b.VoucherDate), CAST('{asOnLit}' AS date)) AS AgeDays,
+                       b.Amount
+                FROM LedgerMaster lm WITH (NOLOCK)
+                INNER JOIN vw_BillWiseTransaction b WITH (NOLOCK)
+                    ON b.CompanyName = lm.CompanyName AND b.LedgerName = lm.LedgerName
+                WHERE lm.CompanyName = '{companyLit}'
+                  AND lm.LedgerName LIKE '%{partyLike}%'
+                  AND lm.Under LIKE '{underFilter}'
+            ) x
+            GROUP BY CompanyName, LedgerName, Under
+            """;
+
+        warning =
+            $"Governed day-bucket ageing: vw_BillWiseTransaction bill-age buckets for {party} at {company} as on {asOnLit} (BillDate, VoucherDate fallback).";
+        return true;
+    }
+
+    /// <summary>
+    /// Day-bucket ageing list for debtor/creditor group (TOP 50 parties by total outstanding).
+    /// </summary>
+    private static bool TryBuildDebtorCreditorAgeingListSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeDayBucketAgeing(message) || !LooksLikeAgeingQuestion(message))
+            return false;
+
+        if (TryExtractLedgerPartyName(message) is not null)
+            return false;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        if (string.IsNullOrWhiteSpace(company))
+            return false;
+
+        var asOn = TryParseAsOnDate(message) ?? DateTime.Today;
+        var companyLit = EscapeSqlLiteral(company);
+        var asOnLit = asOn.ToString("yyyy-MM-dd");
+
+        var underFilter = message.Contains("creditor", StringComparison.OrdinalIgnoreCase)
+                          || message.Contains("vendor", StringComparison.OrdinalIgnoreCase)
+                          || message.Contains("supplier", StringComparison.OrdinalIgnoreCase)
+            ? "Creditors%"
+            : "Debtors%";
+
+        sql = $"""
+            SELECT TOP {MaxReturnRows}
+                CompanyName,
+                LedgerName,
+                Under,
+                SUM(CASE WHEN AgeDays BETWEEN 0 AND 30 THEN ABS(Amount) ELSE 0 END) AS Bucket_0_30,
+                SUM(CASE WHEN AgeDays BETWEEN 31 AND 60 THEN ABS(Amount) ELSE 0 END) AS Bucket_31_60,
+                SUM(CASE WHEN AgeDays BETWEEN 61 AND 90 THEN ABS(Amount) ELSE 0 END) AS Bucket_61_90,
+                SUM(CASE WHEN AgeDays > 90 THEN ABS(Amount) ELSE 0 END) AS Bucket_90_Plus,
+                SUM(ABS(Amount)) AS TotalOutstanding
+            FROM (
+                SELECT lm.CompanyName, lm.LedgerName, lm.Under,
+                       DATEDIFF(day, ISNULL(b.BillDate, b.VoucherDate), CAST('{asOnLit}' AS date)) AS AgeDays,
+                       b.Amount
+                FROM LedgerMaster lm WITH (NOLOCK)
+                INNER JOIN vw_BillWiseTransaction b WITH (NOLOCK)
+                    ON b.CompanyName = lm.CompanyName AND b.LedgerName = lm.LedgerName
+                WHERE lm.CompanyName = '{companyLit}'
+                  AND lm.Under LIKE '{underFilter}'
+            ) x
+            GROUP BY CompanyName, LedgerName, Under
+            ORDER BY TotalOutstanding DESC
+            """;
+
+        warning =
+            $"Governed day-bucket ageing list: TOP {MaxReturnRows} parties under {underFilter.TrimEnd('%')}% at {company} as on {asOnLit} (vw_BillWiseTransaction).";
+        return true;
     }
 }

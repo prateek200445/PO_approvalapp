@@ -34,10 +34,24 @@ public partial class ChatOrchestratorService
         return hasLedgerContext || TryExtractLedgerPartyName(message) is not null;
     }
 
+    private static bool LooksLikeDayBucketAgeing(string message)
+    {
+        var m = message.ToLowerInvariant();
+        return Regex.IsMatch(m, @"\b0\s*[-–]\s*30\b|\b31\s*[-–]\s*60\b|\b61\s*[-–]\s*90\b|\b90\s*\+|\b90\s+days\b")
+            || m.Contains("day bucket") || m.Contains("days bucket")
+            || m.Contains("age bucket") || m.Contains("bucket wise")
+            || (m.Contains("bucket") && (m.Contains("debtor") || m.Contains("creditor")
+                || m.Contains("ageing") || m.Contains("aging") || m.Contains("overdue")));
+    }
+
     private static bool TryBuildAgeingReportPlan(string message, out AgeingReportPlan plan)
     {
         plan = new AgeingReportPlan();
         if (!LooksLikeAgeingQuestion(message))
+            return false;
+
+        // Day-bucket ageing uses governed SELECT on vw_BillWiseTransaction instead.
+        if (LooksLikeDayBucketAgeing(message))
             return false;
 
         var company = ResolveOutwardCompanyAlias(message)

@@ -6,7 +6,7 @@ $cases = @(
   @{
     id = "bright_rubber_gst"
     message = "What is the GST number and email for vendor Bright Rubber?"
-    checks = @("sql_has:Vendor|vw_VendorListwithBankdtls|vendordata", "sql_has:Bright Rubber", "sql_has:NewGSTNo|GST|Email", "rows_gt:0")
+    checks = @("sql_has:Vendor|vw_VendorListwithBankdtls", "sql_has:Bright Rubber", "sql_has:NewGSTNo|GST|Email", "governed_warning", "rows_gt:0")
   },
   @{
     id = "chemline_bank"
@@ -36,7 +36,7 @@ $cases = @(
   @{
     id = "bright_rubber_rates"
     message = "Show latest item rates from vendor Bright Rubber with Rate and NegoRate"
-    checks = @("sql_has:VendorRate|Vw_VendorItem", "sql_has:Bright Rubber", "sql_has:Rate", "sql_has:TOP|top", "rows_gt:0")
+    checks = @("sql_has:VendorRate", "sql_has:Bright Rubber", "sql_has:Rate", "governed_warning", "rows_gt:0")
   },
   @{
     id = "item_wip00013_vendors"
@@ -58,6 +58,9 @@ function Test-Check([string]$check, $resp) {
   if ($check -eq "answer_not_no_data") {
     if ($rowCount -le 0) { return $false }
     return -not ($answer.ToLowerInvariant() -match 'no (rows|records|data|vendors).*found')
+  }
+  if ($check -eq "governed_warning") {
+    return -not [string]::IsNullOrWhiteSpace([string]$resp.warning)
   }
   return $false
 }

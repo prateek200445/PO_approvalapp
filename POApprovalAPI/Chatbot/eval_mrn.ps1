@@ -10,7 +10,7 @@ $cases = @(
   @{
     id = "rm283_items"
     message = "What all materials came in under receipt RM 283, with quantities?"
-    checks = @("sql_has:Vw_StoreInwards|StoreInwards", "sql_has:RM 283", "rows_gt:0", "answer_not_empty")
+    checks = @("sql_has:Vw_StoreInwards|StoreInwards", "sql_has:RM 283", "governed_warning", "rows_gt:0", "answer_not_empty")
   },
   @{
     id = "rm283_vendor_bill"
@@ -20,7 +20,7 @@ $cases = @(
   @{
     id = "rm269_paid_utr"
     message = "Has receipt RM 269 already been paid? If yes, show the payment number and UTR"
-    checks = @("sql_has:BillPaymentEntry|vw_MRNToBillPayment", "sql_has:RM 269", "rows_gt:0", "has_payment_no", "answer_not_no_payment")
+    checks = @("sql_has:BillPaymentEntry", "sql_has:RM 269", "governed_warning", "rows_gt:0", "has_payment_no", "answer_not_no_payment")
   },
   @{
     id = "rm283_po"
@@ -40,12 +40,12 @@ $cases = @(
   @{
     id = "bill_ppl_d_540"
     message = "Find receipts linked to bill number PPL/D/540"
-    checks = @("sql_has:Vw_StoreInwards|StoreInwardsPayment|vw_MRNList", "sql_has:PPL/D/540", "sql_not_primary_bpe_bill", "rows_gt:0", "answer_not_no_data")
+    checks = @("sql_has:Vw_StoreInwards", "sql_has:PPL/D/540", "governed_warning", "sql_not_primary_bpe_bill", "rows_gt:0", "answer_not_no_data")
   },
   @{
     id = "rm269_payment_amount"
     message = "Was there any payment raised against material receipt RM 269 and for how much?"
-    checks = @("sql_has:BillPaymentEntry|vw_MRNToBillPayment", "sql_has:RM 269", "rows_gt:0", "has_payment_no", "answer_not_no_payment")
+    checks = @("sql_has:BillPaymentEntry", "sql_has:RM 269", "governed_warning", "rows_gt:0", "has_payment_no", "answer_not_no_payment")
   },
   @{
     id = "messy_rm283_items"
@@ -142,6 +142,9 @@ function Test-Check([string]$check, $resp) {
       return $false
     }
     return $true
+  }
+  if ($check -eq "governed_warning") {
+    return -not [string]::IsNullOrWhiteSpace([string]$resp.warning)
   }
   return $false
 }

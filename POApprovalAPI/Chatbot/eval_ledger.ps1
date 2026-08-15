@@ -18,6 +18,21 @@ $cases = @(
     checks = @("sql_has:sp_Overdue_Ledger", "sql_has:Commercial Bag", "rows_gt:0", "governed_warning")
   },
   @{
+    id = "day_bucket_ageing_party"
+    message = "0-30 31-60 61-90 day bucket ageing for customer Commercial Bag Company at Plastene Polyfilms Limited"
+    checks = @("sql_has:vw_BillWiseTransaction", "sql_has:Bucket_0_30", "sql_has:Commercial Bag", "rows_gte:1", "governed_warning")
+  },
+  @{
+    id = "day_bucket_ageing_list"
+    message = "Debtor ageing buckets 0-30 90 days for Plastene India Limited as on today"
+    checks = @("sql_has:vw_BillWiseTransaction", "sql_has:Bucket_0_30", "sql_has:Debtors", "rows_gt:0", "governed_warning")
+  },
+  @{
+    id = "ledger_statement_commercial_bag"
+    message = "Ledger statement for customer Commercial Bag Company at Plastene Polyfilms Limited for FY 25-26"
+    checks = @("sql_has:sp_ac_LedgerSummary_BankRecoDate", "sql_has:Commercial Bag", "rows_gt:0", "governed_warning")
+  },
+  @{
     id = "ledger_count_sundry_debtors_pil"
     message = "How many ledgers are there under Sundry Debtors for Plastene India Limited?"
     checks = @("sql_has:LedgerMaster", "sql_has:COUNT|LedgerCount", "sql_has:Under", "sql_has:Sundry|Debtor", "sql_has:Plastene India", "rows_gte:1", "governed_warning")

@@ -19,6 +19,32 @@ import numpy as np
 EMBEDDINGS_PATH = Path(__file__).with_name("schema-embeddings.json")
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
+# Keyword → domain hints for score boosting (lightweight domain router).
+DOMAIN_HINTS: dict[str, list[str]] = {
+    "PO": ["purchase order", " po ", "pending po", "approve po", "high value po"],
+    "Payment": ["bill payment", "payment approval", "utr", "mrn paid", "payment draft"],
+    "Ledger": ["ledger", "debtor", "creditor", "outstanding", "ageing", "aging", "msme"],
+    "Sales": ["sales invoice", "export customer", "buyer", "credit note", "ebidta", "sales total"],
+    "MRN": ["mrn", "store inward", "material receipt", "goods receipt"],
+    "Stock": ["stock in hand", "warehouse", "godown", "reorder", "inventory", "stk"],
+    "Production": ["loom", "weaving", "webbing", "roll", "production", "small bag", "ebd"],
+    "PR": ["purchase req", "purchase requisition", " pr ", "quotation"],
+    "JobWork": ["job work", "jobwork", "jwo", "jro", "jbin"],
+    "Despatch": ["despatch", "dispatch", "packing list", "shipment"],
+}
+
+
+def boost_domain_scores(query: str, chunks: list, scores: np.ndarray) -> np.ndarray:
+    q = f" {query.lower()} "
+    boosted = scores.copy()
+    for domain, keywords in DOMAIN_HINTS.items():
+        if not any(kw in q for kw in keywords):
+            continue
+        for i, c in enumerate(chunks):
+            if c.get("domain") == domain:
+                boosted[i] += 0.08
+    return boosted
+
 
 def load_chunks():
     data = json.loads(EMBEDDINGS_PATH.read_text(encoding="utf-8"))
@@ -51,6 +77,7 @@ def main() -> int:
     _, chunks, matrix = load_chunks()
     qv = embed_query(args.query)
     scores = matrix @ qv
+    scores = boost_domain_scores(args.query, chunks, scores)
     k = max(1, min(args.k, len(chunks)))
     top = np.argsort(-scores)[:k]
 

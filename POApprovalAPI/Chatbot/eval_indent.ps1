@@ -25,7 +25,7 @@ $cases = @(
   @{
     id = "indent_by_number"
     message = "What items are on indent GPL/20-21/RWM00004?"
-    checks = @("sql_has:Indent|Vw_StoreDeptt|ApproveIndent", "sql_has:GPL/20-21/RWM00004", "rows_gt:0")
+    checks = @("sql_has:Vw_StoreDeptt|ItemInfo", "sql_has:GPL/20-21/RWM00004", "governed_warning", "rows_gt:0")
   },
   @{
     id = "messy_pending_indent"

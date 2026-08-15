@@ -1,6 +1,6 @@
 {
-  "version": "2.5.0",
-  "createdFor": "NL-to-SQL chatbot — Phase 1: country-wise + EBIDTA sales/purchase totals + eval coverage",
+  "version": "3.2.0",
+  "createdFor": "NL-to-SQL chatbot — Phase 7: MRN, vendor, production/despatch, user/indent/sales EBD early paths",
   "database": {
     "server": "103.240.33.122,5115",
     "name": "MaterialProcessing",
@@ -20,7 +20,37 @@
     "COLUMN NAME TRAP: FactoryInfo PAN column is PermanentAccountNo (NOT PANNo). LedgerMaster/CommonLedgerMaster PAN column is PANNo. Never select PANNo from FactoryInfo. FactoryInfo GST preferred column is NewGSTNo (also has GST).",
     "GOVERNANCE: Ledger/account groups are LedgerMaster.Under (use SELECT DISTINCT Under ...). Do NOT use LedgerGroupMaster — that table is empty/unused for user-facing group lists.",
     "GOVERNANCE: LedgerOpeningBalance table is EMPTY (0 rows). For opening/pending balance questions use LedgerMaster.Openingbalance and LedgerMaster.PendingBalance. Never query LedgerOpeningBalance. Named customer/vendor outstanding: LedgerMaster WHERE LedgerName LIKE '%party%' (optional CompanyName = our plant).",
-    "GOVERNANCE (Ledger ageing): Debtor/creditor ageing / overdue buckets use ERP stored procedures sp_Representative_Outstanding_Pivot (party list, monthly buckets) and sp_Overdue_Ledger (single party bill-wise). Debtors: @G3='Sundry Debtors' (sub-groups Debtors-Domestic, Debtors-Overseas, Debtors-Legal Cases). Creditors: @G3='Trade Creditors' NOT 'Sundry Creditors' (sub-groups Creditors-RM, Creditors-Services, etc.). NOT sp_Agingreport_* (inventory item ageing). NOT LedgerMaster.PendingBalance alone for bucket ageing. Bill lines: vw_BillWiseTransaction for reference only.",
+    "GOVERNANCE (Ledger ageing): Monthly/group debtor/creditor ageing uses ERP SPs sp_Representative_Outstanding_Pivot and sp_Overdue_Ledger. Day-bucket ageing (0-30/31-60/61-90/90+) uses governed SELECT on vw_BillWiseTransaction joined to LedgerMaster (BillDate age, VoucherDate fallback). Debtors: @G3='Sundry Debtors' or Under LIKE 'Debtors%'; creditors: @G3='Trade Creditors' or Under LIKE 'Creditors%' (never 'Sundry Creditors'). NOT sp_Agingreport_* (inventory item ageing). NOT LedgerMaster.PendingBalance alone for bucket ageing.",
+    "GOVERNANCE (Ledger statement): Full voucher/transaction history for a named ledger/party uses ERP SP sp_ac_LedgerSummary_BankRecoDate (portal parity) — requires company + LedgerName + date range. NOT vw_LedgerSummary direct SELECT. NOT LedgerMaster for voucher lines. Default date range: current Indian FY if not specified.",
+    "GOVERNANCE (Inventory/stock ageing): Item/raw-material/stock ageing uses ERP SPs sp_Agingreport_SubgroupName (and _90Days, _91to180Days, _181to360Days, etc.) — NOT debtor/creditor ageing SPs. Filter @companyname + optional @subgroupname. NOT sp_Representative_Outstanding_Pivot.",
+    "GOVERNANCE (Group overdue days): Debtor/creditor group overdue with day buckets uses sp_Overdue_Group_Days (@GroupName Sundry Debtors or Trade Creditors, @days default 90). NOT single-party sp_Overdue_Ledger unless party named.",
+    "GOVERNANCE (MSME overdue): MSME vendor/party overdue uses sp_Overdue_Ledger_MSME — requires company + ledger/party name + MSME in question.",
+    "GOVERNANCE (Sales discount): Company sales discount report uses sp_salesdiscount_companyname — NOT vendor VendorRate.",
+    "GOVERNANCE (Purchase vouchers): Purchase invoices/bills (post-PO/MRN accounting) use PurchaseVoucher (SupplierName is vendor, SysDate, StoreInwardNo, BillAMount, VoucherType) — NOT PurchasePayment/PO approval queue. Lines: PurchaseVoucherItem on StoreInwardNo+CompanyName. Filter CompanyName + Indian FY on SysDate. Always TOP 50.",
+    "GOVERNANCE (Payment vouchers): Outgoing payment vouchers use Payment (PaymentNo, PaymentDate, CompanyName, Currency) — NOT BillPaymentEntry approval queue. Incoming receipts: PaymentReceipt (companyname, PaymentDate). Always TOP 50 + FY filter on PaymentDate.",
+    "GOVERNANCE (Advance/due/cash flow): Advance bill outstanding vw_advancebilloutstanding (CompanyName, LedgerName, PendingAmount). Due/overdue rep summary vw_DueOverDue. LC due cash flow Vw_DueDateCashFlow (PaymentDetails, Amount, LcDueDate). SELECT only, TOP 50.",
+    "GOVERNANCE (Outstanding all): Full group outstanding pivot for all parties uses sp_OutstandingAll (@GroupName Sundry Debtors or Trade Creditors, @Months=3). Heavier than sp_Representative_Outstanding_Pivot — use when user says 'all outstanding' / 'outstanding all'. NOT for single party.",
+    "GOVERNANCE (Sales discount customer): Customer-level discount uses sp_salesdiscount_customer (@customername). Company-level uses sp_salesdiscount_companyname.",
+    "GOVERNANCE (Import PO/MRN): Import purchase order vs MRN pending qty uses vw_ImportPurchasewithPOandMRNqty (orderno, BuyerName, BeneficiaryName, poqty, MRNqty, pendingqty). Filter pendingqty > 0; optional BuyerName/BeneficiaryName for company. Also vw_importpomrnpendingqty.",
+    "GOVERNANCE (PO amendments): Pending PO amendments use Vw_AmendmentPurchaseOrder (PurchaseCode, FirmName, PendingQty > 0, CompanyName). PO line edit/details: Vw_EditPurchaseOrder. NOT ApprovePO queue.",
+    "GOVERNANCE (Payment drafts): Draft bill payment requests (pre-approval) use vw_BillPaymentReqDraft — filter CompanyName + TOP 50. NOT BillPaymentEntry approved queue.",
+    "GOVERNANCE (Job MRN pending WO): Job-work MRN vs pending work order uses vw_JobMRN_PendingWO (MRNo, SupplierName, ItemCode, CompanyName).",
+    "GOVERNANCE (PR governed): Pending PRs not ordered: Vw_PurchaseReq WHERE ReqQty > POQty. General PR list: PurchaseReq table. Code is PR number NOT IndentNo.",
+    "GOVERNANCE (Ledger grouping): Ledger hierarchy/expense grouping uses vw_Commonledgergrouping (ledgername, expensehead, expensegrouphead, CompanyName).",
+    "GOVERNANCE (Voucher approval): Pending accounting voucher approvals use AccountVoucherApproval WHERE Status='Pending'. Voucher party mapping: ac_voucher_party joined to FactoryInfo on CompanyId=SrNo; FinancialYear format 25-26.",
+    "GOVERNANCE (Warehouse stock SP): Warehouse stock summary EXEC sp_WarehouseStockSummry; dept stock summary sp_StockSummry_new (@Datefrom, @Date, @Companyname). Plant RM stock: sp_Prod_GetRowMaterialStock_* (Loom, Tape, Lamination, TFO, NeedleLoom). MIS: sp_ac_getMISReportData. Top purchased items: sp_top100_items_valuewise_stores&spares_purchased (no params). Auto stock snapshots: sp_Auto_RollStock, sp_Auto_FIBCStock, sp_Auto_SmallBagStock, SP_Roll_ITEM_Stock, SP_SmallBag_ITEM_Stock. NOT SP_STOCKANALYSIS_RPT_ALL until ERP data fixed.",
+    "GOVERNANCE (Small bag production): Daily small-bag production report vw_DailySmallBagProductionReport (BagSize, OrderQty, bailing, Stitching, Despatch, Sysdate).",
+    "GOVERNANCE (Export debtors due): Export/overseas debtor bills due use AutoMail_Export_Debtors_Due (CompanyName, LedgerName, BillNo, PendingAmount, DueDate) — snapshot table populated by automail job. Last-3-month export sales by buyer: EXEC sp_Export_Debtors_Last3Months @GroupCompany (FactoryInfo.GroupName, filters Debtors-Overseas). Export debtor ageing: use ageing SPs with G4='Debtors-Overseas'. NOT sp_Export_Debtors_Due (automail-only, no result set).",
+    "GOVERNANCE (Stock analysis): Full opening/closing stock analysis uses EXEC SP_STOCKANALYSIS_RPT_ALL (@companyname StringArray, @DATEFROM, @DATEto, @RptType 0=summary/1=item/2=date, @intOp=0). Detail variant SP_STOCKANALYSIS_RPT_DTL. CAUTION: known ERP data/SP bugs — opening snapshots may be stale, closing may not match WareHouse.StkInHand — see STOCK_ANALYSIS_ISSUES_REPORT.md. For simple current stock use WareHouse/vw_itemwiseStock governed paths instead.",
+    "GOVERNANCE (Quotation early): Vendor quotes by PO → Vw_Quotation WHERE PurchaseCode. Indent quotes → Vw_IndentQuotation WHERE Storecode=IndentNo. Awarded vendor → FinalQuotation. Never ApproveQuotation (empty).",
+    "GOVERNANCE (Sales invoice lines): Line items for InvNo → SalesVoucherItem WHERE CompanyName+InvNo (ActualQty, Rate, Amount).",
+    "GOVERNANCE (DN/CN early): Debit notes vw_DebitNote (CompanyName=ours, PartyName=vendor). Credit notes vw_creditnote (CompanyName=ours, PartyName=customer) — never swap.",
+    "GOVERNANCE (PO pending receipt): Domestic PO lines still to receive → Vw_PurchaseOrder PendingQty > 0 (not import PO/MRN view).",
+    "GOVERNANCE (FIBC production): FIBC bag production → VW_FIBCBagwiseProduction (not SmallBagProductionEntry).",
+    "GOVERNANCE (MRN early): MRN lookup by MRNo → Vw_StoreInwards (CompanyName=receiving plant, PartyName=vendor). Payment against MRN → BillPaymentEntry.MRNno (not vw_MRNToBillPayment null PaymentNo). Receipts by bill → Vw_StoreInwards.BillNo. Pending receipt → CompanyName + PendingQty > 0.",
+    "GOVERNANCE (Vendor early): Profile GST/bank/email → Vendor or vw_VendorListwithBankdtls (NewGSTNo not GSTNo). Rates → VendorRate with FirmName/ItemCode filter + TOP 50. MSME list → Vendor.ISMSME. Internal vendors → InternalVendor.",
+    "GOVERNANCE (Production/despatch early): Factory daily → vw_FactoryProduction; tape plant → vw_daily_tape_prod_New; WIP → vw_WIPReport; prod EBD → VW_PRODUCTION_EBD_DTL; roll despatch → vw_MISrolldespatch; FIBC → FIBCDespatch; yarn → MIS_YarnDespatch; small bag bails → SmallBagBailForDespatch.",
+    "GOVERNANCE (User/indent/sales EBD early): User email → loginentry.dbo.LoginRights (Name column, never Password). Indent line items → Vw_StoreDeptt + ItemInfo. MIS sales qty → VW_SALES_EBD_DTL.",
     "MRN / store inward: prefer Vw_StoreInwards or vw_MRNList for user questions. Header key SrNo joins StoreInwardsPayment.SrNo = StoreInwards.SrNo. MRN number is MRNo / MRno. BillPaymentEntry.MRNno joins StoreInwardsPayment.MRNo. Prefer TOP 50 — StoreInwards and WareHouseInwards are large. Skip *_old,*_GPL3,*_delete clones. Columns with spaces in vw_MRNToBillPayment (e.g. [Challan Date], [Basic Amount], [MRN User]) must be bracket-quoted.",
     "GOVERNANCE (MRN): When user says 'for company X' / 'company X' / 'under X Limited' on material receipts, filter CompanyName = X. PartyName/SupplierName is the VENDOR/supplier only — use those when user says vendor, supplier, or party. Do not put the receiving company into PartyName.",
     "COLUMN NAME TRAP (MRN): There is NO column named MRDate anywhere in MRN objects. Vw_StoreInwards / StoreInwardsPayment date columns are BillDate, GateInwardDate, SysDate, ChallanDate — never MRDate. vw_MRNList and BillPaymentEntry use MRNDate (spelled MRNDate, not MRDate). For 'recent' receipts ORDER BY BillDate or GateInwardDate DESC on Vw_StoreInwards.",
@@ -37,7 +67,7 @@
     "GOVERNANCE (Gate pass): Returnable gate pass (RGP) — prefer Vw_ReturnGatePass / ReturnGatePass (GatePassNo like CO/yy-yy/GP/n; CompName NOT CompanyName; ActualPartyName/PurposePartyName; ItemCode, Qty, Purpose). Non-returnable (NRGP) — prefer Vw_NonReturnGatePass / NonReturnGatePass (GatePassNo like CO/yy-yy/NGP/n; PartyName; CompName). Inward against returnable: InwdReturnGatePass (InwGatePassNo; GatePassNo links to ReturnGatePass when set). Pending returns: vw_returngatepasspending (ReturnQty, InwardQty, PendingQty — filter PendingQty > 0). Company column is CompName on all gate-pass objects. ItemCode joins ItemInfo.itemcode. Always TOP 50.",
     "GOVERNANCE (Job work): Formal job-work orders are sparse (~7 headers / ~12 lines) — prefer Vw_EditJOBWorkOrder or Vw_JOBWORKORDER (PurchaseCode like PIL/JRO/... or PIL2/JWO/...; FirmName, ItemCode, JobWorkCharges, GatePassNo on edit view). Do NOT expect join to PurchasePayment/ApproveWorkOrder (0 matches live). Live MIS quantities: VW_JobWork_EBD_DTL (material at/sent job work by ItemCode, companyname) and VW_RECJOBWORK_EBD_DTL (received from job work with MRNo e.g. JBIN-SE). Prefer detail (_DTL) views over summary EBD. Returnable job-work movements also appear on Vw_ReturnGatePass WHERE Purpose LIKE '%Job Work%'. Skip empty Vw_StoreOutwardjobworkorder and tiny ApproveJOBWORKORDER. Always TOP 50; filter companyname/CompanyName and/or ItemCode on EBD views.",
     "GOVERNANCE (Sales): Sales invoices/vouchers — prefer vw_Salesvoucher (header: InvNo, InvDate, BuyerName, BillAMount, CompanyName, InvType, TypeofInvoice, currency) or SalesVoucher. Line items: SalesVoucherItem (join CompanyName+InvNo; ITEMCODE, ItemName, ActualQty, Rate, Amount, HSNCODE). Compact list: vw_SalesInvList (Invno, DespatchDate, BuyerName, OrgInvno). Tax lines: SalesVoucherTax (TaxledgerName, Amount; CreditNoteNumber links sales credit notes). MIS item sales: VW_SALES_EBD_DTL (itemcode, qTY, InvNo, companyname). BuyerName is the customer. InvType values include Sales, Export Sales, Commercial Export Sales, Sales InterUnit, Job Invoice, etc. Top export customers: GROUP BY BuyerName, SUM(BillAMount), InvType LIKE '%Export%', Indian FY on InvDate (FY 2024-25 = 2024-04-01 to <2025-04-01); for company groups use FactoryInfo.GroupName/Name. Spaced columns on vw_Salesvoucher must be bracket-quoted e.g. [Company Address], [Company GST]. Sales credit notes remain CreditNote/vw_creditnote. Physical despatch/packing uses Despatch domain objects (not invoice headers alone). Always TOP 50.",
-    "GOVERNANCE (Country-wise sales): For 'country wise sales' / 'sales by country' / 'export sales by country' for a company and Indian FY — ALWAYS prefer vw_Countrywise_sales_dashboard (Country, Value, InvYear, GroupName). Value = Amount - DebitNote; intercompany already excluded in view. Filter InvYear = short FY label e.g. '25-26' for FY 2025-26 (NOT InvDate range on vw_Salesvoucher). Filter company via GroupName IN (SELECT DISTINCT GroupName FROM FactoryInfo WHERE Name = full legal company name) — same as Sales Dashboard; NOT CompanyName on vw_Salesvoucher. NEVER use vw_Salesvoucher.Destination for country — Destination is port/city/district (Gujarat, Ahmedabad, KACHCHH), not country. GROUP BY Country, SUM(CAST(Value AS float)), ORDER BY SalesAmount DESC, TOP 50.",
+    "GOVERNANCE (Country-wise sales): For 'country wise sales' / 'sales by country' / 'export sales by country' for a company and Indian FY — ALWAYS prefer vw_Countrywise_sales_dashboard (Country, Value, InvYear, GroupName). Value = Amount - DebitNote; intercompany already excluded in view. Filter InvYear = short FY label e.g. '25-26' for FY 2025-26 (NOT InvDate range on vw_Salesvoucher). Filter company via GroupName IN (SELECT DISTINCT GroupName FROM FactoryInfo WHERE Name = full legal company name) — same as Sales Dashboard; NOT CompanyName on vw_Salesvoucher. Related vw_Countrywise_sales (Amount pre-aggregated per country), vw_Countrywise_sales_basic_value. NEVER use vw_Salesvoucher.Destination for country — Destination is port/city/district (Gujarat, Ahmedabad, KACHCHH), not country. GROUP BY Country, SUM(CAST(Value AS float)), ORDER BY SalesAmount DESC, TOP 50.",
     "GOVERNANCE (Sales/Purchase EBIDTA): Total sales and sales-by-group/subgroup for FY — prefer vw_Sales_EBIDTA (CompanyName, invdate, Groupname, SubGroupName, Amount, netwt, InterGroup). Same basis as Sales Dashboard SP_Sales_EBIDTA. ALWAYS filter InterGroup <> 'Intergroup'. Total sales: SUM(Amount), SUM(netwt) for CompanyName + invdate FY range. By group: GROUP BY Groupname; by sub-group: GROUP BY Groupname, SubGroupName. Total purchase: vw_Purchase_EBIDTA with same IC filter and invdate FY range. NEVER use vw_Salesvoucher.BillAMount for dashboard-style totals.",
     "GOVERNANCE (Despatch): Physical despatch/packing — ALWAYS filter CompanyName/Companyname and/or InvNo/Invno and/or PartyName/Partyname and/or date (sysdate/SysDate) and ALWAYS TOP 50 (tables are 200k–1.1M+). Roll despatch: prefer vw_MISrolldespatch (RollNO, Quality, NetWt, Companyname, Partyname, Invno, sysdate, PONO, PACKINGLISTNO on underlying MISRollforDespatch — prefer the view; do not also query MISRollforDespatch). FIBC bail despatch: FIBCDespatch (BailNo, Qty, Wt, InvNo, PACKINGLISTNO, PartyName, vVehicleNo). Yarn: MIS_YarnDespatch. Small bag bails: SmallBagBailForDespatch. Rolls waiting to despatch (no invoice yet): vw_RollforDespatch. Needle-loom rolls: MISNeedleRollforDespatch. Partyname/PartyName is customer/consignee. Link to sales invoice when InvNo matches vw_Salesvoucher.InvNo (formats vary — may need OrgInvno from vw_SalesInvList). Skip unused packing-list views that timeout.",
     "GOVERNANCE (Production): Factory daily summary — prefer vw_FactoryProduction (companyname, Sysdate, Particulars e.g. Tape/Fabric/Small Bag/WEBBING, TapeProduction, Loom, Fabric, SmallBag, Wastage). Tape plant daily — vw_daily_tape_prod_New (CompanyName, date, Opening, Production, Closing; bracket spaced cols [Total Production], [Loom Dept], [FIBC Dept], [Wastage Dept]). Loom roll production — prefer vw_LoomProductionENtry (CompanyName, Sysdate, LoomNo, RollNo, Quality, NetWt, Metre, Partyname) — ~716k MUST filter CompanyName and/or Sysdate/LoomNo/RollNo + TOP 50. FIBC bag production — prefer VW_FIBCBagwiseProduction (NOT stale VW_FIBCBagwiseProduction_New which ends 2016); BagPCS, BagWt, TYPEOFBAG, TeamNO, PartyName, PONO. Item/plant MIS qty — VW_PRODUCTION_EBD_DTL (itemcode, Qty, PlantName, companyname, sysdate) — filter company/item/date + TOP 50. WIP by item/dept — vw_WIPReport (ItemCode, Qty, Consumption, Deptt, CompanyName, Date). Small-bag line — SmallBagProductionEntry (Cutting, Stitching, BagPcs, PartyName) — live data is mainly Plastene India / HCP Plastene units (~8k rows); Oswal Extrusion Limited has NO SmallBagProductionEntry rows (Oswal production is Tape/Fabric/WEBBING via vw_FactoryProduction and FIBC via VW_FIBCBagwiseProduction). Skip stale vw_Loom_Prod_Mtr / vw_daily_loom_Meter_Rep (last ~2023), empty/timeout vw_totalproductionconsumption / Vw_Prod_WIPLoom, dailyProductionReport/DailyTotalProduction (no company), huge raw MISLOOMProductionEntryNew / misneedleloomproductionentry / Prod_Cutting_InOut / TapePlantConsumption / stockJournalProd. Production ≠ despatch and ≠ ApproveWorkOrder. Always TOP 50."
@@ -812,6 +842,48 @@
       "embeddingText": "Table LedgerMaster (also queried as ledgermaster). Domain: Ledger / chart of accounts. Purpose: party, vendor, bank and GL ledger master per CompanyName. Columns: CompanyName, LedgerName, Under (parent account/ledger GROUP — use DISTINCT Under for ledger groups; never empty LedgerGroupMaster), Openingbalance (opening balance — use for opening-balance questions), PendingBalance (pending/outstanding — use for pending balance questions; LedgerOpeningBalance table is EMPTY do not query it), Category, MainCategory, GSTNo, NewGSTNo, PANNo (ledger/party PAN only — company PAN is FactoryInfo.PermanentAccountNo), BankAccNo, BankName, IFSCCode, PaymentTerms, email, ContactNo, MSMENumber, LVendorCode, IsHold. Join CompanyName = FactoryInfo.Name. Synonyms: ledger list, party master, opening balance, pending balance, ledger outstanding, LedgerOpeningBalance (redirect here), ledger groups, account groups. For pending/opening bills/balances: SELECT LedgerName, Openingbalance, PendingBalance FROM LedgerMaster WHERE CompanyName = .... Do not use for full voucher/ledger statement SP. Avoid vw_LedgerSummary."
     },
     {
+      "id": "vw_BillWiseTransaction",
+      "objectName": "vw_BillWiseTransaction",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Ledger",
+      "purpose": "Bill-wise AR/AP transaction lines (~1.6M rows). Use for day-bucket ageing (0-30/31-60/61-90/90+) joined to LedgerMaster — NOT for monthly ERP ageing pivot (use sp_Representative_Outstanding_Pivot) or bill-wise overdue pivot (use sp_Overdue_Ledger). Always filter CompanyName + LedgerName or Under group + TOP 50.",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company; join LedgerMaster.CompanyName" },
+        { "name": "LedgerName", "dataType": "varchar", "nullable": true, "meaning": "Party/customer/vendor ledger name" },
+        { "name": "VoucherType", "dataType": "varchar", "nullable": true, "meaning": "Voucher type code" },
+        { "name": "VoucherNo", "dataType": "varchar", "nullable": true, "meaning": "Voucher number" },
+        { "name": "VoucherDate", "dataType": "datetime", "nullable": true, "meaning": "Voucher date; fallback for age if BillDate null" },
+        { "name": "RefType", "dataType": "varchar", "nullable": true, "meaning": "Reference type" },
+        { "name": "BillNo", "dataType": "varchar", "nullable": true, "meaning": "Bill/invoice number" },
+        { "name": "BillDate", "dataType": "datetime", "nullable": true, "meaning": "Bill date — primary age basis for day buckets" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Bill amount (+/-)" },
+        { "name": "Currency", "dataType": "varchar", "nullable": true, "meaning": "Bill currency e.g. Rs., USD" },
+        { "name": "ExcRate", "dataType": "float", "nullable": true, "meaning": "Exchange rate" },
+        { "name": "DueDate", "dataType": "datetime", "nullable": true, "meaning": "Due date (overdue SPs may use this)" },
+        { "name": "companyId", "dataType": "int", "nullable": true, "meaning": "Company id" },
+        { "name": "LedgerID", "dataType": "varchar", "nullable": true, "meaning": "Ledger id" },
+        { "name": "ApprovalStatus", "dataType": "varchar", "nullable": true, "meaning": "Approval status" }
+      ],
+      "joins": [
+        { "to": "LedgerMaster", "on": "vw_BillWiseTransaction.CompanyName = LedgerMaster.CompanyName AND vw_BillWiseTransaction.LedgerName = LedgerMaster.LedgerName" }
+      ],
+      "synonyms": [
+        "bill wise transaction",
+        "bill-wise outstanding",
+        "day bucket ageing",
+        "0-30 31-60 ageing",
+        "age bucket",
+        "bill wise ageing"
+      ],
+      "exampleQuestions": [
+        "Day bucket ageing 0-30 31-60 90 days for customer Commercial Bag Company at Plastene Polyfilms Limited",
+        "Debtor ageing buckets for Plastene India Limited",
+        "Show bill-wise outstanding lines for a party"
+      ],
+      "embeddingText": "View vw_BillWiseTransaction. Domain: Ledger / bill-wise AR AP. Purpose: bill lines for ageing bucket analysis joined to LedgerMaster. Columns: CompanyName, LedgerName, VoucherType, VoucherNo, VoucherDate, BillNo, BillDate, Amount, Currency, DueDate. CRITICAL: large view ~1.6M rows — always filter CompanyName and party or Under group and TOP 50. Day-bucket ageing (0-30/31-60/61-90/90+): DATEDIFF from ISNULL(BillDate,VoucherDate) to as-on date, SUM ABS(Amount) by bucket. Monthly ageing pivot: sp_Representative_Outstanding_Pivot NOT this view alone. Single party bill-wise overdue pivot: sp_Overdue_Ledger. Related: vw_BillWiseTransactionWithOnAccount (SPs prefer on-account variant). Synonyms: bill wise, age buckets, day wise ageing."
+    },
+    {
       "id": "CommonLedgerMaster",
       "objectName": "CommonLedgerMaster",
       "schema": "dbo",
@@ -845,6 +917,307 @@
         "List common ledger master entries for a company"
       ],
       "embeddingText": "Table CommonLedgerMaster. Domain: Ledger. Purpose: common/shared ledger master similar to LedgerMaster with CompanyName, LedgerName, Under, balances, GST/PAN/bank, LSTATUS. Prefer LedgerMaster for normal portal ledger questions. Synonyms: common ledger master, shared chart of accounts."
+    },
+    {
+      "id": "PurchaseVoucher",
+      "objectName": "PurchaseVoucher",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Payment",
+      "purpose": "Purchase invoice/voucher header (~153k). SupplierName is vendor (NOT CompanyName). SysDate is voucher date. StoreInwardNo links to MRN/store inward. NOT PO approval (PurchasePayment).",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Our company" },
+        { "name": "StoreInwardNo", "dataType": "varchar", "nullable": true, "meaning": "Store inward / MRN document key" },
+        { "name": "SysDate", "dataType": "datetime", "nullable": true, "meaning": "Voucher date — use for FY filters" },
+        { "name": "SupplierName", "dataType": "varchar", "nullable": true, "meaning": "Vendor/supplier party name" },
+        { "name": "BillAMount", "dataType": "float", "nullable": true, "meaning": "Bill amount" },
+        { "name": "BillNo", "dataType": "varchar", "nullable": true, "meaning": "Supplier bill number" },
+        { "name": "BillDate", "dataType": "datetime", "nullable": true, "meaning": "Bill date" },
+        { "name": "currency", "dataType": "varchar", "nullable": true, "meaning": "Currency" },
+        { "name": "VoucherType", "dataType": "varchar", "nullable": true, "meaning": "Voucher type e.g. Job Invoice" }
+      ],
+      "joins": [
+        { "to": "PurchaseVoucherItem", "on": "PurchaseVoucher.StoreInwardNo = PurchaseVoucherItem.StoreInwardNo AND PurchaseVoucher.CompanyName = PurchaseVoucherItem.CompanyName" }
+      ],
+      "synonyms": ["purchase invoice", "purchase voucher", "purchase bill", "supplier invoice"],
+      "embeddingText": "Table PurchaseVoucher. Domain: Payment/purchase accounting. Purchase invoices linked to store inward StoreInwardNo. SupplierName is vendor. SysDate for date/FY filter. BillAMount bill total. NOT PurchasePayment PO queue. Lines on PurchaseVoucherItem. Always TOP 50."
+    },
+    {
+      "id": "PurchaseVoucherItem",
+      "objectName": "PurchaseVoucherItem",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Payment",
+      "purpose": "Purchase voucher line items. Join PurchaseVoucher on StoreInwardNo + CompanyName.",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "StoreInwardNo", "dataType": "varchar", "nullable": true, "meaning": "Links to PurchaseVoucher" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ActualQty", "dataType": "float", "nullable": true, "meaning": "Quantity" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Line amount" }
+      ],
+      "synonyms": ["purchase voucher lines", "purchase invoice items"],
+      "embeddingText": "Table PurchaseVoucherItem. Purchase invoice lines: ItemCode, ActualQty, Amount. Join StoreInwardNo+CompanyName to PurchaseVoucher header."
+    },
+    {
+      "id": "Payment",
+      "objectName": "Payment",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Payment",
+      "purpose": "Outgoing payment vouchers (~326k). NOT BillPaymentEntry approval workflow.",
+      "columns": [
+        { "name": "PaymentNo", "dataType": "int", "nullable": true, "meaning": "Payment voucher number" },
+        { "name": "PaymentDate", "dataType": "datetime", "nullable": true, "meaning": "Payment date" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "Currency", "dataType": "varchar", "nullable": true, "meaning": "Currency" }
+      ],
+      "synonyms": ["payment voucher", "payments made", "payment entry"],
+      "embeddingText": "Table Payment. Outgoing payment vouchers: PaymentNo, PaymentDate, CompanyName, Currency. NOT bill payment approval (BillPaymentEntry). FY filter on PaymentDate. TOP 50."
+    },
+    {
+      "id": "PaymentReceipt",
+      "objectName": "PaymentReceipt",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Payment",
+      "purpose": "Incoming payment receipt vouchers (~133k).",
+      "columns": [
+        { "name": "PaymentNo", "dataType": "int", "nullable": true, "meaning": "Receipt number" },
+        { "name": "PaymentDate", "dataType": "datetime", "nullable": true, "meaning": "Receipt date" },
+        { "name": "companyname", "dataType": "varchar", "nullable": true, "meaning": "Company (lowercase column)" },
+        { "name": "currency", "dataType": "varchar", "nullable": true, "meaning": "Currency" }
+      ],
+      "synonyms": ["payment receipt", "receipt voucher", "money received"],
+      "embeddingText": "Table PaymentReceipt. Incoming payment receipts: PaymentNo, PaymentDate, companyname, currency. FY filter on PaymentDate. TOP 50."
+    },
+    {
+      "id": "vw_advancebilloutstanding",
+      "objectName": "vw_advancebilloutstanding",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Ledger",
+      "purpose": "Advance bills with pending outstanding by party.",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "LedgerName", "dataType": "varchar", "nullable": true, "meaning": "Party ledger" },
+        { "name": "BillNo", "dataType": "varchar", "nullable": true, "meaning": "Bill number" },
+        { "name": "BillDate", "dataType": "datetime", "nullable": true, "meaning": "Bill date" },
+        { "name": "PendingAmount", "dataType": "float", "nullable": true, "meaning": "Pending advance amount" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Bill amount" }
+      ],
+      "synonyms": ["advance bill outstanding", "advance outstanding"],
+      "embeddingText": "View vw_advancebilloutstanding. Advance bill outstanding by CompanyName and LedgerName. PendingAmount key column. TOP 50."
+    },
+    {
+      "id": "vw_DueOverDue",
+      "objectName": "vw_DueOverDue",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Ledger",
+      "purpose": "Due/overdue summary by representative (HOD/Acct/Fin buckets).",
+      "columns": [
+        { "name": "Name", "dataType": "varchar", "nullable": true, "meaning": "Representative name" },
+        { "name": "Pending But Not Overdue", "dataType": "float", "nullable": true, "meaning": "Bracket-quoted in SQL" },
+        { "name": "OverDue_Hod", "dataType": "float", "nullable": true, "meaning": "Overdue HOD bucket" },
+        { "name": "tot", "dataType": "float", "nullable": true, "meaning": "Total" }
+      ],
+      "synonyms": ["due overdue summary", "overdue summary", "highly overdue hod"],
+      "embeddingText": "View vw_DueOverDue. Due and overdue totals by representative Name with HOD/Acct/Fin buckets. Bracket spaced columns. TOP 50."
+    },
+    {
+      "id": "Vw_DueDateCashFlow",
+      "objectName": "Vw_DueDateCashFlow",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Payment",
+      "purpose": "LC/payment due-date cash flow schedule.",
+      "columns": [
+        { "name": "PaymentDetails", "dataType": "varchar", "nullable": true, "meaning": "Payment/LC description" },
+        { "name": "Amount", "dataType": "int", "nullable": true, "meaning": "Amount" },
+        { "name": "LcDueDate", "dataType": "datetime", "nullable": true, "meaning": "LC due date" }
+      ],
+      "synonyms": ["cash flow", "lc due date", "due date cash flow"],
+      "embeddingText": "View Vw_DueDateCashFlow. Cash flow / LC due dates: PaymentDetails, Amount, LcDueDate. TOP 50 ordered by LcDueDate."
+    },
+    {
+      "id": "vw_ImportPurchasewithPOandMRNqty",
+      "objectName": "vw_ImportPurchasewithPOandMRNqty",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "PO",
+      "purpose": "Import purchase orders vs MRN received qty and pending gap.",
+      "columns": [
+        { "name": "orderno", "dataType": "varchar", "nullable": true, "meaning": "Import order number" },
+        { "name": "BeneficiaryName", "dataType": "varchar", "nullable": true, "meaning": "Beneficiary" },
+        { "name": "BuyerName", "dataType": "varchar", "nullable": true, "meaning": "Buyer / company hint" },
+        { "name": "OrderDate", "dataType": "datetime", "nullable": true, "meaning": "Order date" },
+        { "name": "poqty", "dataType": "float", "nullable": true, "meaning": "PO quantity" },
+        { "name": "MRNqty", "dataType": "float", "nullable": true, "meaning": "MRN received qty" },
+        { "name": "pendingqty", "dataType": "float", "nullable": true, "meaning": "Pending qty (PO minus MRN)" },
+        { "name": "AdvancelicNo", "dataType": "varchar", "nullable": true, "meaning": "Advance LC number" }
+      ],
+      "synonyms": ["import po mrn pending", "import purchase pending", "pending mrn against import po"],
+      "embeddingText": "View vw_ImportPurchasewithPOandMRNqty. Import PO vs MRN pending: orderno, BuyerName, BeneficiaryName, poqty, MRNqty, pendingqty. Filter pendingqty > 0. TOP 50. Related vw_importpomrnpendingqty."
+    },
+    {
+      "id": "vw_JobMRN_PendingWO",
+      "objectName": "vw_JobMRN_PendingWO",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "JobWork",
+      "purpose": "Job-work MRN receipts linked to pending work orders (~3k rows).",
+      "columns": [
+        { "name": "MRNo", "dataType": "varchar", "nullable": true, "meaning": "Material receipt number" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "SupplierName", "dataType": "varchar", "nullable": true, "meaning": "Job worker / supplier" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item code" },
+        { "name": "ItemName", "dataType": "varchar", "nullable": true, "meaning": "Item name" },
+        { "name": "SysDate", "dataType": "datetime", "nullable": true, "meaning": "Receipt date" }
+      ],
+      "synonyms": ["job mrn pending", "job work mrn pending wo"],
+      "embeddingText": "View vw_JobMRN_PendingWO. Job-work MRN vs pending WO — MRNo, SupplierName, ItemCode, CompanyName, BillNo, GroupName. TOP 50."
+    },
+    {
+      "id": "Vw_AmendmentPurchaseOrder",
+      "objectName": "Vw_AmendmentPurchaseOrder",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "PO",
+      "purpose": "Purchase order amendments with pending qty (~24k rows).",
+      "columns": [
+        { "name": "PurchaseCode", "dataType": "varchar", "nullable": true, "meaning": "PO code" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "FirmName", "dataType": "varchar", "nullable": true, "meaning": "Vendor" },
+        { "name": "PendingQty", "dataType": "float", "nullable": true, "meaning": "Pending amendment qty" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item" }
+      ],
+      "synonyms": ["po amendment", "amended purchase order", "pending po amendment"],
+      "embeddingText": "View Vw_AmendmentPurchaseOrder. PO amendments — PurchaseCode, FirmName, PendingQty > 0, CompanyName, ItemCode. TOP 50."
+    },
+    {
+      "id": "Vw_EditPurchaseOrder",
+      "objectName": "Vw_EditPurchaseOrder",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "PO",
+      "purpose": "Purchase order line details for edit/view (~415k rows).",
+      "columns": [
+        { "name": "PurchaseCode", "dataType": "varchar", "nullable": true, "meaning": "PO code" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "FirmName", "dataType": "varchar", "nullable": true, "meaning": "Vendor" },
+        { "name": "ItemCode", "dataType": "varchar", "nullable": true, "meaning": "Item" },
+        { "name": "Qty", "dataType": "float", "nullable": true, "meaning": "Quantity" },
+        { "name": "Rate", "dataType": "float", "nullable": true, "meaning": "Rate" }
+      ],
+      "synonyms": ["edit purchase order", "po lines", "purchase order details"],
+      "embeddingText": "View Vw_EditPurchaseOrder. PO line details — PurchaseCode, CompanyName, FirmName, ItemCode, Qty, Rate, Total. Filter PurchaseCode or CompanyName. TOP 50."
+    },
+    {
+      "id": "vw_BillPaymentReqDraft",
+      "objectName": "vw_BillPaymentReqDraft",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Payment",
+      "purpose": "Draft bill payment requests before HOD approval (large view).",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "BillNo", "dataType": "varchar", "nullable": true, "meaning": "Bill number" },
+        { "name": "Partyname", "dataType": "varchar", "nullable": true, "meaning": "Vendor/party" },
+        { "name": "PendingQty", "dataType": "float", "nullable": true, "meaning": "Pending qty" },
+        { "name": "PoNO", "dataType": "varchar", "nullable": true, "meaning": "PO number" }
+      ],
+      "synonyms": ["payment draft", "bill payment draft", "draft payment request"],
+      "embeddingText": "View vw_BillPaymentReqDraft. Draft payment requests — CompanyName, BillNo, Partyname, PoNO, PendingQty, MRno. TOP 50 + company filter required."
+    },
+    {
+      "id": "vw_Commonledgergrouping",
+      "objectName": "vw_Commonledgergrouping",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Ledger",
+      "purpose": "Ledger hierarchy and expense grouping (~11k rows).",
+      "columns": [
+        { "name": "ledgername", "dataType": "varchar", "nullable": true, "meaning": "Ledger name" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "expensehead", "dataType": "varchar", "nullable": true, "meaning": "Expense head" },
+        { "name": "expensegrouphead", "dataType": "varchar", "nullable": true, "meaning": "Expense group" }
+      ],
+      "synonyms": ["ledger grouping", "ledger hierarchy", "expense group"],
+      "embeddingText": "View vw_Commonledgergrouping. Ledger hierarchy — ledgername, expensehead, expensegrouphead, CompanyName. TOP 50."
+    },
+    {
+      "id": "AccountVoucherApproval",
+      "objectName": "AccountVoucherApproval",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Ledger",
+      "purpose": "Pending accounting voucher approvals (~301k rows).",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "VoucherNo", "dataType": "varchar", "nullable": true, "meaning": "Voucher number" },
+        { "name": "VoucherType", "dataType": "varchar", "nullable": true, "meaning": "Voucher type" },
+        { "name": "LedgerName", "dataType": "varchar", "nullable": true, "meaning": "Ledger" },
+        { "name": "Status", "dataType": "varchar", "nullable": true, "meaning": "Approval status" },
+        { "name": "Debit", "dataType": "float", "nullable": true, "meaning": "Debit amount" },
+        { "name": "Credit", "dataType": "float", "nullable": true, "meaning": "Credit amount" }
+      ],
+      "synonyms": ["voucher approval pending", "account voucher approval"],
+      "embeddingText": "Table AccountVoucherApproval. Pending voucher approvals — Status='Pending', CompanyName, VoucherNo, LedgerName, Debit, Credit. TOP 50."
+    },
+    {
+      "id": "ac_voucher_party",
+      "objectName": "ac_voucher_party",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Ledger",
+      "purpose": "Voucher party/second-ledger mapping (~870k rows). Join FactoryInfo on CompanyId=SrNo.",
+      "columns": [
+        { "name": "FinancialYear", "dataType": "varchar", "nullable": true, "meaning": "FY label e.g. 25-26" },
+        { "name": "VoucherNo", "dataType": "varchar", "nullable": true, "meaning": "Voucher number" },
+        { "name": "PartyLedgerName", "dataType": "varchar", "nullable": true, "meaning": "Party ledger" },
+        { "name": "SecondLedgerName", "dataType": "varchar", "nullable": true, "meaning": "Second ledger" },
+        { "name": "CompanyId", "dataType": "int", "nullable": true, "meaning": "FactoryInfo.SrNo" }
+      ],
+      "synonyms": ["voucher party", "party ledger on voucher"],
+      "embeddingText": "Table ac_voucher_party. Voucher party mapping — PartyLedgerName, SecondLedgerName, VoucherNo, FinancialYear (25-26). Join FactoryInfo CompanyId=SrNo. TOP 50."
+    },
+    {
+      "id": "vw_DailySmallBagProductionReport",
+      "objectName": "vw_DailySmallBagProductionReport",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Production",
+      "purpose": "Daily small-bag production metrics (bailing, stitching, despatch).",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "PartyName", "dataType": "varchar", "nullable": true, "meaning": "Customer/party" },
+        { "name": "BagSize", "dataType": "varchar", "nullable": true, "meaning": "Bag size" },
+        { "name": "OrderQty", "dataType": "int", "nullable": true, "meaning": "Order qty" },
+        { "name": "Sysdate", "dataType": "datetime", "nullable": true, "meaning": "Production date" },
+        { "name": "Stitching", "dataType": "int", "nullable": true, "meaning": "Stitching count" },
+        { "name": "Despatch", "dataType": "int", "nullable": true, "meaning": "Despatch count" }
+      ],
+      "synonyms": ["small bag production", "daily small bag report", "bailing stitching"],
+      "embeddingText": "View vw_DailySmallBagProductionReport. Small-bag daily production — CompanyName, BagSize, OrderQty, bailing, Stitching, Despatch, Sysdate. TOP 50."
+    },
+    {
+      "id": "AutoMail_Export_Debtors_Due",
+      "objectName": "AutoMail_Export_Debtors_Due",
+      "schema": "dbo",
+      "objectType": "TABLE",
+      "domain": "Ledger",
+      "purpose": "Export/overseas debtor due bills snapshot (~700 rows) populated by automail job.",
+      "columns": [
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Company" },
+        { "name": "LedgerName", "dataType": "varchar", "nullable": true, "meaning": "Export customer ledger" },
+        { "name": "BillNo", "dataType": "varchar", "nullable": true, "meaning": "Bill number" },
+        { "name": "PendingAmount", "dataType": "float", "nullable": true, "meaning": "Pending amount" },
+        { "name": "BillAmount", "dataType": "float", "nullable": true, "meaning": "Bill amount" },
+        { "name": "DueDate", "dataType": "datetime", "nullable": true, "meaning": "Due date" }
+      ],
+      "synonyms": ["export debtors due", "overseas debtor due", "export debtor overdue"],
+      "embeddingText": "Table AutoMail_Export_Debtors_Due. Export debtors due snapshot — CompanyName, LedgerName, BillNo, PendingAmount, DueDate. TOP 50. Last 3 month totals: sp_Export_Debtors_Last3Months. NOT sp_Export_Debtors_Due automail SP."
     },
     {
       "id": "StoreInwardsPayment",
@@ -2319,6 +2692,41 @@
       "embeddingText": "View VW_RECJOBWORK_EBD_DTL. Domain: Job work. Receipts from job work (~17k) — CompanyName, ITEMCODE, ITEMNAME, MRNo (JBIN-SE...), Qty, GroupName, sysdate. Filter CompanyName/ITEMCODE + TOP 50. Sent/at job work: VW_JobWork_EBD_DTL. Formal job-work orders: Vw_EditJOBWorkOrder. NOT pending WO approval (ApproveWorkOrder). Synonyms: job work receipt, received from job work, JBIN. Always TOP 50."
     },
     {
+      "id": "vw_Countrywise_sales",
+      "objectName": "vw_Countrywise_sales",
+      "schema": "dbo",
+      "objectType": "VIEW",
+      "domain": "Sales",
+      "purpose": "Preferred portal MIS view for country-wise sales totals. Pre-aggregated by company, country, and Indian FY. Use for 'country wise sales', 'sales by country', 'country breakdown'. Do NOT rebuild from vw_Salesvoucher with Domestic/Export CASE.",
+      "primaryKeyHint": "GroupName + Country + InvYear",
+      "statusColumn": null,
+      "columns": [
+        { "name": "GroupName", "dataType": "varchar", "nullable": true, "meaning": "Legal company name e.g. Plastene India Limited, Oswal Extrusion Limited — NOT FactoryInfo.GroupName field; filter with = or IN (SELECT Name FROM FactoryInfo ...) for groups" },
+        { "name": "Country", "dataType": "varchar", "nullable": true, "meaning": "Destination country e.g. INDIA, USA, UNITED ARAB EMIRATES" },
+        { "name": "Amount", "dataType": "float", "nullable": true, "meaning": "Sales amount for this company+country+FY (already aggregated — do not SUM unless combining rows)" },
+        { "name": "InvYear", "dataType": "varchar", "nullable": true, "meaning": "Indian financial year as yy-yy e.g. 25-26 for FY 2025-26, 24-25 for FY 2024-25" }
+      ],
+      "joins": [
+        { "to": "FactoryInfo", "on": "vw_Countrywise_sales.GroupName = FactoryInfo.Name", "note": "GroupName column holds company legal name" },
+        { "to": "vw_Countrywise_sales_basic_value", "on": "same shape; basic value variant" },
+        { "to": "vw_Countrywise_sales_dashboard", "on": "adds DebitNote and Value columns for dashboard" }
+      ],
+      "synonyms": [
+        "country wise sales",
+        "country-wise sales",
+        "sales by country",
+        "country breakdown",
+        "vw_Countrywise_sales",
+        "countrywise sales"
+      ],
+      "exampleQuestions": [
+        "Country wise sales of Plastene India Limited for financial year 25-26",
+        "Sales by country for Oswal Extrusion Limited FY 24-25",
+        "Which countries does Plastene India export to this year?"
+      ],
+      "embeddingText": "View vw_Countrywise_sales. Domain: Sales. PREFERRED for country-wise sales — GroupName (legal company name e.g. Plastene India Limited), Country (INDIA, USA, UAE...), Amount (pre-aggregated total), InvYear (yy-yy e.g. 25-26 = FY 2025-26). Filter GroupName = company and InvYear = '25-26'. Related: vw_Countrywise_sales_basic_value, vw_Countrywise_sales_dashboard (DebitNote, Value). NEVER use vw_Salesvoucher Domestic/Export CASE for country-wise. Top export customers still use vw_Salesvoucher BuyerName. Synonyms: country wise sales, sales by country, country breakdown. Always TOP 50."
+    },
+    {
       "id": "vw_Salesvoucher",
       "objectName": "vw_Salesvoucher",
       "schema": "dbo",
@@ -3287,6 +3695,10 @@
       "verifiedOn": "live counts 2026-08-11"
     },
     {
+      "fact": "vw_Countrywise_sales: portal country-wise sales MIS — GroupName (legal company name), Country, Amount, InvYear (yy-yy e.g. 25-26). Plastene India Limited FY 25-26 includes INDIA ~4.47B, USA ~262M, UAE ~234M. Related vw_Countrywise_sales_basic_value, vw_Countrywise_sales_dashboard. Prefer over vw_Salesvoucher for country-wise questions.",
+      "verifiedOn": "live counts 2026-08-13"
+    },
+    {
       "fact": "SalesVoucher/vw_Salesvoucher ~104k headers; SalesVoucherItem ~195k. Join CompanyName+InvNo. InvType includes Sales, Export Sales, Commercial Export Sales, Sales InterUnit, Job Invoice. Oswal ~4155 invoices. PPL InvNo 468 has WIP00004 etc. vw_SalesInvList ~99k with DespatchDate. Physical despatch in Despatch domain.",
       "verifiedOn": "live counts/joins 2026-08-11"
     },
@@ -3308,7 +3720,7 @@
     "recommendedBackend": "fastembed (ONNX) via build_embeddings.py; sentence-transformers fallback",
     "outputFile": "schema-embeddings.json",
     "textField": "embeddingText",
-    "chunkCount": 71,
+    "chunkCount": 72,
     "retrieveTopK": "3-8"
   }
 }

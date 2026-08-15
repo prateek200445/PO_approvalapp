@@ -29,6 +29,10 @@ function Test-EvalCheck {
     if ($check -eq "governed_warning") {
         return -not [string]::IsNullOrWhiteSpace([string]$resp.warning)
     }
+    if ($check -eq "deterministic_answer") {
+        $a = [string]$resp.answer
+        return ($a -match 'Sample rows:' -or $a -match 'Found \d+ matching row')
+    }
     return $false
 }
 
