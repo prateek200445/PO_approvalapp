@@ -82,6 +82,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackground
 builder.Services.AddHostedService<BomCacheWarmupService>();
 builder.Services.AddHostedService<SalesDashboardCacheWarmupService>();
 builder.Services.AddHostedService<ExportBillOverdueCacheWarmupService>();
+builder.Services.AddScoped<AgeingReportService>();
 
 builder.Services.AddSingleton<SchemaRetrievalService>();
 builder.Services.AddSingleton<SchemaCatalogService>();

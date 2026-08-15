@@ -194,7 +194,7 @@ public class SchemaRetrievalService
             var psi = new ProcessStartInfo
             {
                 FileName = resolved,
-                Arguments = "--version",
+                Arguments = "-c \"import numpy, fastembed\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -204,11 +204,8 @@ public class SchemaRetrievalService
             if (p == null)
                 return false;
 
-            p.WaitForExit(5000);
-            if (p.ExitCode != 0)
-                return false;
-
-            return true;
+            p.WaitForExit(15000);
+            return p.ExitCode == 0;
         }
         catch
         {

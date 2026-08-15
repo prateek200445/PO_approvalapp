@@ -13,6 +13,7 @@ public partial class ChatOrchestratorService
     private readonly IChatCompletionService _llm;
     private readonly SqlGuardService _sqlGuard;
     private readonly DatabaseService _database;
+    private readonly AgeingReportService _ageingService;
     private readonly ILogger<ChatOrchestratorService> _logger;
 
     private const int MaxReturnRows = 50;
@@ -25,6 +26,7 @@ public partial class ChatOrchestratorService
         IChatCompletionService llm,
         SqlGuardService sqlGuard,
         DatabaseService database,
+        AgeingReportService ageingService,
         ILogger<ChatOrchestratorService> logger)
     {
         _retrieval = retrieval;
@@ -32,6 +34,7 @@ public partial class ChatOrchestratorService
         _llm = llm;
         _sqlGuard = sqlGuard;
         _database = database;
+        _ageingService = ageingService;
         _logger = logger;
     }
 
@@ -82,6 +85,7 @@ public partial class ChatOrchestratorService
             - Country-wise sales / sales by country: ALWAYS vw_Countrywise_sales_dashboard (NOT vw_Salesvoucher). Columns: Country, Value (Amount-DebitNote), InvYear (short label 25-26), GroupName. Filter InvYear = '25-26' for FY 2025-26. Filter company via GroupName IN (SELECT DISTINCT GroupName FROM FactoryInfo WHERE Name = legal company). NEVER use vw_Salesvoucher.Destination for country — Destination is port/city/state (Gujarat, Ahmedabad), not country. GROUP BY Country, SUM(CAST(Value AS float)), ORDER BY total DESC, TOP 50.
             - Total sales / sales by product group for FY: ALWAYS vw_Sales_EBIDTA (same as Sales Dashboard, excl. InterGroup='Intergroup'). Total: SUM(Amount), SUM(netwt). By group: GROUP BY Groupname; by sub-group: GROUP BY Groupname, SubGroupName. Filter CompanyName and invdate for Indian FY (2025-04-01 to 2026-03-31 for FY 25-26). Total purchase: vw_Purchase_EBIDTA with same rules.
             - Ledger count: COUNT(*) FROM LedgerMaster WHERE CompanyName = company; when user says under/in a group (e.g. Sundry Debtors) also filter LedgerMaster.Under LIKE '%group%'. Ledger/account groups list: SELECT DISTINCT Under FROM LedgerMaster (never LedgerGroupMaster).
+            - Debtor/creditor ageing / overdue buckets: handled by ERP stored procedures (sp_Representative_Outstanding_Pivot, sp_Overdue_Ledger) — NOT vw_BillWiseTransaction or LedgerMaster alone. Debtors use G3='Sundry Debtors'; creditors use G3='Trade Creditors' (never 'Sundry Creditors'). Sub-groups: Debtors-Overseas, Debtors-Domestic, Creditors-RM, etc.
             - Despatch/packing: roll history vw_MISrolldespatch; FIBC bails FIBCDespatch; yarn MIS_YarnDespatch; small bag SmallBagBailForDespatch; rolls waiting vw_RollforDespatch. ALWAYS filter CompanyName/Companyname or InvNo/PartyName/date + TOP 50 (million-row tables). Prefer view over MISRollforDespatch table.
             - Production: factory daily vw_FactoryProduction (companyname, Particulars, TapeProduction/Fabric/SmallBag); tape plant vw_daily_tape_prod_New (bracket [Loom Dept]/[FIBC Dept]); loom rolls vw_LoomProductionENtry (MUST filter CompanyName/Sysdate/LoomNo + TOP 50 — ~716k; skip stale vw_Loom_Prod_Mtr); FIBC bags VW_FIBCBagwiseProduction (not _New); MIS qty VW_PRODUCTION_EBD_DTL; WIP vw_WIPReport; small bags SmallBagProductionEntry (Cutting/Stitching — live data mainly Plastene/HCP units, NOT Oswal; Oswal uses Tape/Fabric/WEBBING in vw_FactoryProduction). Filter EBD/WIP/loom + TOP 50. Not despatch / not ApproveWorkOrder.
             - Prefer TOP 50 for detail lists. COUNT aggregates need no TOP.
@@ -119,90 +123,104 @@ public partial class ChatOrchestratorService
         List<Dictionary<string, object?>> rows = new();
         string? warning = null;
         string? supplementalAnswerContext = null;
-        string sql;
+        string sql = "";
         string? columnRepairHint = null;
+        var usedErpAgeing = false;
+        int? ageingTotalCount = null;
+
+        // ERP ageing (portal parity SPs) — before LLM / LedgerMaster-only outstanding
+        if (TryBuildAgeingReportPlan(request.Message, out var ageingPlan))
+        {
+            _logger.LogInformation("Using ERP ageing service (mode={Mode})", ageingPlan.Mode);
+            var ageingResult = await _ageingService.ExecuteAsync(ageingPlan, ct);
+            rows = ageingResult.Rows;
+            sql = ageingResult.SqlDescription;
+            warning = ageingResult.Warning;
+            ageingTotalCount = ageingResult.TotalCount;
+            usedErpAgeing = true;
+        }
 
         // Governed: pending PO approval (portal queue) — highest priority; skip LLM/PR confusion
-        if (TryBuildPendingPoApprovalSql(request.Message, "", out var earlyPendingPoSql, out var earlyPendingPoWarn))
+        if (!usedErpAgeing && TryBuildPendingPoApprovalSql(request.Message, "", out var earlyPendingPoSql, out var earlyPendingPoWarn))
         {
             _logger.LogInformation("Using governed pending PO SQL (early path)");
             sql = earlyPendingPoSql;
             warning = earlyPendingPoWarn;
         }
         // Governed: country-wise sales (Sales Dashboard source) — before export-customer ranking
-        else if (TryBuildCountryWiseSalesSql(request.Message, out var countryWiseSql, out var countryWiseWarning))
+        else if (!usedErpAgeing && TryBuildCountryWiseSalesSql(request.Message, out var countryWiseSql, out var countryWiseWarning))
         {
             _logger.LogInformation("Using governed country-wise sales SQL");
             sql = countryWiseSql;
             warning = countryWiseWarning;
         }
-        else if (TryBuildSalesTotalsSql(request.Message, out var salesTotalsSql, out var salesTotalsWarning))
+        else if (!usedErpAgeing && TryBuildSalesTotalsSql(request.Message, out var salesTotalsSql, out var salesTotalsWarning))
         {
             _logger.LogInformation("Using governed sales totals SQL");
             sql = salesTotalsSql;
             warning = salesTotalsWarning;
         }
-        else if (TryBuildSalesByGroupSql(request.Message, out var salesByGroupSql, out var salesByGroupWarning))
+        else if (!usedErpAgeing && TryBuildSalesByGroupSql(request.Message, out var salesByGroupSql, out var salesByGroupWarning))
         {
             _logger.LogInformation("Using governed sales-by-group SQL");
             sql = salesByGroupSql;
             warning = salesByGroupWarning;
         }
-        else if (TryBuildExportSalesInvoiceListSql(request.Message, out var exportInvSql, out var exportInvWarn))
+        else if (!usedErpAgeing && TryBuildExportSalesInvoiceListSql(request.Message, out var exportInvSql, out var exportInvWarn))
         {
             _logger.LogInformation("Using governed export sales invoice list SQL");
             sql = exportInvSql;
             warning = exportInvWarn;
         }
-        else if (TryBuildInterUnitSalesSql(request.Message, out var interUnitSql, out var interUnitWarn))
+        else if (!usedErpAgeing && TryBuildInterUnitSalesSql(request.Message, out var interUnitSql, out var interUnitWarn))
         {
             _logger.LogInformation("Using governed inter-unit sales SQL");
             sql = interUnitSql;
             warning = interUnitWarn;
         }
-        else if (TryBuildPurchaseTotalsSql(request.Message, out var purchaseTotalsSql, out var purchaseTotalsWarning))
+        else if (!usedErpAgeing && TryBuildPurchaseTotalsSql(request.Message, out var purchaseTotalsSql, out var purchaseTotalsWarning))
         {
             _logger.LogInformation("Using governed purchase totals SQL");
             sql = purchaseTotalsSql;
             warning = purchaseTotalsWarning;
         }
-        else if (TryBuildLedgerCountSql(request.Message, out var ledgerCountSql, out var ledgerCountWarning))
+        else if (!usedErpAgeing && TryBuildLedgerCountSql(request.Message, out var ledgerCountSql, out var ledgerCountWarning))
         {
             _logger.LogInformation("Using governed ledger count SQL");
             sql = ledgerCountSql;
             warning = ledgerCountWarning;
         }
-        else if (TryBuildLedgerGroupsSql(request.Message, out var ledgerGroupsSql, out var ledgerGroupsWarning))
+        else if (!usedErpAgeing && TryBuildLedgerGroupsSql(request.Message, out var ledgerGroupsSql, out var ledgerGroupsWarning))
         {
             _logger.LogInformation("Using governed ledger groups SQL");
             sql = ledgerGroupsSql;
             warning = ledgerGroupsWarning;
         }
-        else if (TryBuildTopExportCustomersSql(request.Message, out var topExportSql, out var topExportWarning))
+        else if (!usedErpAgeing && TryBuildTopExportCustomersSql(request.Message, out var topExportSql, out var topExportWarning))
         {
             _logger.LogInformation("Using governed top-export-customers SQL");
             sql = topExportSql;
             warning = topExportWarning;
         }
-        else if (TryBuildLedgerOutstandingSql(request.Message, out var ledgerOstSql, out var ledgerOstWarning))
+        else if (!usedErpAgeing && TryBuildLedgerOutstandingSql(request.Message, out var ledgerOstSql, out var ledgerOstWarning))
         {
             _logger.LogInformation("Using governed ledger-outstanding SQL");
             sql = ledgerOstSql;
             warning = ledgerOstWarning;
         }
-        else if (TryBuildStockInHandSql(request.Message, out var stockInHandSql, out var stockInHandWarn))
+        else if (!usedErpAgeing && TryBuildStockInHandSql(request.Message, out var stockInHandSql, out var stockInHandWarn))
         {
             _logger.LogInformation("Using governed stock-in-hand SQL");
             sql = stockInHandSql;
             warning = stockInHandWarn;
         }
-        else if (TryBuildGovernedDomainSql(request.Message, out var govSql, out var govWarning))
+        else if (!usedErpAgeing && TryBuildGovernedDomainSql(request.Message, out var govSql, out var govWarning))
         {
             _logger.LogInformation("Using governed domain SQL");
             sql = govSql;
             warning = govWarning;
         }
-        else
+        else if (!usedErpAgeing)
         {
             var sqlRaw = await _llm.CompleteAsync(sqlSystem, sqlUser, ct);
             sql = ApplySqlPostProcess(sqlRaw, request.Message, out columnRepairHint);
@@ -253,7 +271,7 @@ public partial class ChatOrchestratorService
         }
 
         // Still-unknown columns after auto-fix → one targeted repair before execute
-        if (!string.IsNullOrWhiteSpace(columnRepairHint))
+        if (!usedErpAgeing && !string.IsNullOrWhiteSpace(columnRepairHint))
         {
             _logger.LogWarning("Unresolved hallucinated columns; requesting catalog-aware repair");
             var colRepairUser = $"""
@@ -309,6 +327,8 @@ public partial class ChatOrchestratorService
             }
         }
 
+        if (!usedErpAgeing)
+        {
         try
         {
             rows = await ExecuteReadOnlyAsync(sql, ct);
@@ -968,12 +988,15 @@ public partial class ChatOrchestratorService
             }
         }
         }
+        }
 
         var hitCap = rows.Count > MaxReturnRows;
         if (hitCap)
             rows = rows.Take(MaxReturnRows).ToList();
 
-        var (totalCount, truncated) = await ResolveListCardinalityAsync(sql, rows, hitCap, ct);
+        var (totalCount, truncated) = usedErpAgeing && ageingTotalCount.HasValue
+            ? (ageingTotalCount, ageingTotalCount.Value > rows.Count)
+            : await ResolveListCardinalityAsync(sql, rows, hitCap, ct);
 
         var preview = JsonSerializer.Serialize(rows);
         if (preview.Length > 12000)
@@ -990,6 +1013,7 @@ public partial class ChatOrchestratorService
         var answerSystem = """
             You answer business questions using ONLY the SQL result data provided.
             Be concise and factual. If the result is empty, say so.
+            For debtor/creditor ageing results: explain monthly bucket columns (Opening, month names, Total) or bill-wise overdue columns from the ERP ageing report; mention the as-on date from the warning if present.
             If supplemental context is provided for an empty small-bag query, explain that SmallBagProductionEntry has no rows for that company and summarize what production types (Particulars) the company does have instead — do not invent small-bag figures.
             Do not invent numbers. Mention key figures clearly.
             For payment questions: ignore rows where PaymentNo is null; only null/empty after filtering means no payment.
@@ -1120,6 +1144,9 @@ public partial class ChatOrchestratorService
             && !LooksLikeLooseOutstandingBalanceQuestion(message))
             return false;
 
+        if (LooksLikeAgeingQuestion(message))
+            return false;
+
         var party = TryExtractLedgerPartyName(message);
         if (string.IsNullOrWhiteSpace(party))
             return false;
@@ -1181,7 +1208,7 @@ public partial class ChatOrchestratorService
     {
         var alias = ResolveVendorFirmAlias(message);
         if (!string.IsNullOrWhiteSpace(alias))
-            return alias;
+            return FinalizeLedgerPartyName(alias, message);
 
         static string? CleanParty(string? raw)
         {
@@ -1222,7 +1249,7 @@ public partial class ChatOrchestratorService
         if (m.Success)
         {
             var p = CleanParty(m.Groups[1].Value);
-            if (p is not null) return p;
+            if (p is not null) return FinalizeLedgerPartyName(p, message);
         }
 
         // "outstanding for Procon Pacific LLC" / "pending balance of X"
@@ -1233,7 +1260,7 @@ public partial class ChatOrchestratorService
         if (m.Success)
         {
             var p = CleanParty(m.Groups[1].Value);
-            if (p is not null) return p;
+            if (p is not null) return FinalizeLedgerPartyName(p, message);
         }
 
         // "Procon Pacific LLC ledger outstanding" / "find Procon Pacific pending balance"
@@ -1247,7 +1274,7 @@ public partial class ChatOrchestratorService
             if (p is not null
                 && !p.Contains("ledger", StringComparison.OrdinalIgnoreCase)
                 && !LooksLikeOnlyOurCompanyPhrase(p))
-                return p;
+                return FinalizeLedgerPartyName(p, message);
         }
 
         // "ledger outstanding Procon Pacific LLC" (name at end without for/)
@@ -1259,10 +1286,48 @@ public partial class ChatOrchestratorService
         {
             var p = CleanParty(m.Groups[1].Value);
             if (p is not null && !LooksLikeOnlyOurCompanyPhrase(p))
-                return p;
+                return FinalizeLedgerPartyName(p, message);
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// "Commercial Bag Company at Plastene Polyfilms Limited" → "Commercial Bag Company"
+    /// when company is resolved separately for @companyname / CompanyName filters.
+    /// </summary>
+    private static string? FinalizeLedgerPartyName(string party, string message)
+    {
+        if (string.IsNullOrWhiteSpace(party)) return null;
+
+        var company = ResolveOutwardCompanyAlias(message)
+                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var trimmed = StripTrailingCompanyFromParty(party.Trim(), company);
+        return trimmed.Length < 3 ? null : trimmed;
+    }
+
+    private static string StripTrailingCompanyFromParty(string party, string? knownCompany)
+    {
+        var s = party.Trim();
+        if (string.IsNullOrWhiteSpace(s)) return s;
+
+        if (!string.IsNullOrWhiteSpace(knownCompany))
+        {
+            s = System.Text.RegularExpressions.Regex.Replace(
+                s,
+                $@"\s+(?:at|for)\s+{System.Text.RegularExpressions.Regex.Escape(knownCompany)}\s*$",
+                "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        // Fallback when company alias did not match but message ends with " at … Limited"
+        s = System.Text.RegularExpressions.Regex.Replace(
+            s,
+            @"\s+(?:at|for)\s+(?:the\s+)?[A-Za-z0-9][A-Za-z0-9 .,&\-()']*?(?:Limited|Ltd|Pvt|Private)(?:\s*\([^)]+\))?\s*$",
+            "",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        return s.Trim();
     }
 
     private static bool LooksLikeOnlyOurCompanyPhrase(string phrase)

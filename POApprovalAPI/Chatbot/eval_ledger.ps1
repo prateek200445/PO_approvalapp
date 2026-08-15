@@ -8,6 +8,16 @@ param(
 
 $cases = @(
   @{
+    id = "debtor_ageing_pil"
+    message = "Debtor ageing for Plastene India Limited as on today"
+    checks = @("sql_has:sp_Representative_Outstanding_Pivot", "sql_has:Sundry Debtors", "rows_gt:0", "governed_warning")
+  },
+  @{
+    id = "party_overdue_polyfilms"
+    message = "Overdue ageing for customer Commercial Bag Company at Plastene Polyfilms Limited"
+    checks = @("sql_has:sp_Overdue_Ledger", "sql_has:Commercial Bag", "rows_gt:0", "governed_warning")
+  },
+  @{
     id = "ledger_count_sundry_debtors_pil"
     message = "How many ledgers are there under Sundry Debtors for Plastene India Limited?"
     checks = @("sql_has:LedgerMaster", "sql_has:COUNT|LedgerCount", "sql_has:Under", "sql_has:Sundry|Debtor", "sql_has:Plastene India", "rows_gte:1", "governed_warning")
