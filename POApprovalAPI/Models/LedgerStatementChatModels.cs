@@ -17,4 +17,6 @@ public class LedgerStatementChatResult
     public string Warning { get; set; } = "";
     public List<Dictionary<string, object?>> Rows { get; set; } = [];
     public int? TotalCount { get; set; }
+    public decimal OpeningBalance { get; set; }
+    public decimal ClosingBalance { get; set; }
 }

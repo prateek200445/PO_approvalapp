@@ -105,6 +105,7 @@ else
     builder.Services.AddScoped<IChatCompletionService>(sp => sp.GetRequiredService<GeminiChatService>());
 }
 
+builder.Services.AddScoped<ChatEntityResolutionService>();
 builder.Services.AddScoped<ChatOrchestratorService>();
 
 builder.Services.AddCors(options =>

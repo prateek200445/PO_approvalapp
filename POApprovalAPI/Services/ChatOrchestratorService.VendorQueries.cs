@@ -6,17 +6,7 @@ public partial class ChatOrchestratorService
 {
     private static string? TryResolveVendorFirmNameForEarly(string message)
     {
-        foreach (var cand in new[]
-                 {
-                     ResolveVendorFirmAlias(message),
-                     TryExtractFirmNameBeforeProfileFields(message),
-                     TryExtractVendorFirmName(message),
-                     TryExtractVendorFirmFromMessage(message)
-                 })
-        {
-            if (!string.IsNullOrWhiteSpace(cand)) return cand.Trim();
-        }
-        return null;
+        return ResolveVendorFirmForChat(message);
     }
 
     private static string? TryExtractVendorFirmFromMessage(string message)

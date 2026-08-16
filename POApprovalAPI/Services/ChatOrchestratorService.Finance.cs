@@ -22,8 +22,7 @@ public partial class ChatOrchestratorService
         plan = new ErpFinanceReportPlan { Mode = ErpFinanceReportMode.StockAgeing };
         if (!LooksLikeStockAgeingQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         plan.CompanyName = company;
@@ -55,7 +54,7 @@ public partial class ChatOrchestratorService
         if (LooksLikeStockAgeingQuestion(message)) return false;
         if (!LooksLikeDayBucketAgeing(message) && !m.Contains("group overdue") && !m.Contains("overdue group"))
             return false;
-        if (TryExtractLedgerPartyName(message) is not null) return false;
+        if (ResolveLedgerPartyForChat(message) is not null) return false;
         return m.Contains("debtor") || m.Contains("creditor") || m.Contains("sundry")
                || m.Contains("trade creditor") || m.Contains("group overdue");
     }
@@ -65,8 +64,7 @@ public partial class ChatOrchestratorService
         plan = new ErpFinanceReportPlan { Mode = ErpFinanceReportMode.GroupOverdueDays };
         if (!LooksLikeGroupOverdueDaysQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         plan.CompanyName = company;
@@ -97,9 +95,8 @@ public partial class ChatOrchestratorService
         plan = new ErpFinanceReportPlan { Mode = ErpFinanceReportMode.MsmeOverdue };
         if (!LooksLikeMsmeOverdueQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
-        var party = TryExtractLedgerPartyName(message);
+        var company = ResolveCompanyForChat(message);
+        var party = ResolveLedgerPartyForChat(message);
         if (string.IsNullOrWhiteSpace(company) || string.IsNullOrWhiteSpace(party)) return false;
 
         plan.CompanyName = company;
@@ -112,7 +109,7 @@ public partial class ChatOrchestratorService
     private static bool LooksLikeOutstandingAllQuestion(string message)
     {
         var m = message.ToLowerInvariant();
-        if (TryExtractLedgerPartyName(message) is not null) return false;
+        if (ResolveLedgerPartyForChat(message) is not null) return false;
         if (LooksLikeStockAgeingQuestion(message)) return false;
 
         var wantsAll = m.Contains("outstanding all") || m.Contains("all outstanding")
@@ -128,8 +125,7 @@ public partial class ChatOrchestratorService
         plan = new ErpFinanceReportPlan { Mode = ErpFinanceReportMode.OutstandingAll };
         if (!LooksLikeOutstandingAllQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         plan.CompanyName = company;
@@ -163,7 +159,7 @@ public partial class ChatOrchestratorService
         plan = new ErpFinanceReportPlan { Mode = ErpFinanceReportMode.SalesDiscount };
         if (!LooksLikeSalesDiscountQuestion(message)) return false;
 
-        var customer = TryExtractLedgerPartyName(message)
+        var customer = ResolveLedgerPartyForChat(message)
                        ?? TryExtractCustomerNameForDiscount(message);
         if (!string.IsNullOrWhiteSpace(customer))
         {
@@ -173,8 +169,7 @@ public partial class ChatOrchestratorService
             return true;
         }
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         plan.CompanyName = company;

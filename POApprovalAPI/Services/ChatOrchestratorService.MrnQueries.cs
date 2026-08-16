@@ -117,8 +117,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeMrnPendingQtyQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         sql = $"""
@@ -149,7 +148,7 @@ public partial class ChatOrchestratorService
         if (!LooksLikeMrnPartyReceiptQuestion(message)) return false;
         if (TryExtractMrnNumber(message) is not null) return false;
 
-        var party = TryExtractLedgerPartyName(message);
+        var party = ResolveLedgerPartyForChat(message);
         if (string.IsNullOrWhiteSpace(party))
         {
             var purchaseMatch = Regex.Match(message, @"([\w\s\.]+-Purchase)", RegexOptions.IgnoreCase);

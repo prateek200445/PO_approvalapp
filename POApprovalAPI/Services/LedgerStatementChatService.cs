@@ -86,6 +86,8 @@ public class LedgerStatementChatService
                 $"ERP ledger statement (portal parity): {plan.LedgerName} at {plan.CompanyName} from {plan.DateFrom:yyyy-MM-dd} to {plan.DateTo:yyyy-MM-dd}. Opening {result.OpeningBalance:N2}, closing {result.ClosingBalance:N2}.{capNote}",
             Rows = capped,
             TotalCount = total > capped.Count ? total : null,
+            OpeningBalance = result.OpeningBalance,
+            ClosingBalance = result.ClosingBalance,
         };
     }
 

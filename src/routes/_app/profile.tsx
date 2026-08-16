@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { KeyRound, LogOut, Building2, Server, Phone, Mail, Sparkles, ChevronRight } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
@@ -13,6 +13,7 @@ export const Route = createFileRoute("/_app/profile")({
 function Profile() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const router = useRouter();
   const [showPwd, setShowPwd] = useState(false);
   const [showServerSettings, setShowServerSettings] = useState(false);
 
@@ -21,6 +22,10 @@ function Profile() {
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;
   }, []);
+
+  useEffect(() => {
+    void router.preloadRoute({ to: "/assistant" });
+  }, [router]);
 
   const initials = (user?.name ?? "U").split(" ").map((s) => s[0]).slice(0, 2).join("");
 
@@ -50,9 +55,10 @@ function Profile() {
       <div className="card-3d rounded-2xl p-6">
         <h2 className="text-sm font-semibold">Tools</h2>
         <div className="mt-4 space-y-2">
-          <button
-            onClick={() => navigate({ to: "/assistant" })}
-            className="flex w-full cursor-pointer items-center justify-between rounded-lg border border-primary/20 bg-gradient-to-r from-primary/5 to-accent/10 p-3 text-left hover:border-primary/30 hover:from-primary/10"
+          <Link
+            to="/assistant"
+            preload="intent"
+            className="flex w-full items-center justify-between rounded-lg border border-primary/20 bg-gradient-to-r from-primary/5 to-accent/10 p-3 text-left hover:border-primary/30 hover:from-primary/10"
           >
             <div className="flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -71,7 +77,7 @@ function Profile() {
               </div>
             </div>
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-          </button>
+          </Link>
         </div>
       </div>
 

@@ -20,7 +20,7 @@ import {
   Search,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useLayoutEffect, useState, type ComponentType } from "react";
 import { cn } from "@/lib/utils";
 import { formatBadgeCount, useApprovalInbox, type InboxKind } from "@/hooks/useApprovalInbox";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -78,7 +78,14 @@ export function AppShell() {
     localStorage.setItem("po-sidebar-collapsed", sidebarCollapsed ? "true" : "false");
   }, [sidebarCollapsed]);
 
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle("assistant-copilot", isCopilot);
+    return () => document.documentElement.classList.remove("assistant-copilot");
+  }, [isCopilot]);
+
   useEffect(() => {
+    if (isCopilot) return;
+
     const scrollToTop = () => {
       window.scrollTo({ top: 0, behavior: "instant" });
       document.documentElement.scrollTop = 0;
@@ -94,7 +101,7 @@ export function AppShell() {
     setMenuOpen(false);
     const timer = setTimeout(scrollToTop, 100);
     return () => clearTimeout(timer);
-  }, [path]);
+  }, [path, isCopilot]);
 
   function toggleTheme() {
     const next = !dark;

@@ -4,10 +4,30 @@ namespace POApprovalAPI.Services;
 
 public partial class ChatOrchestratorService
 {
+    /// <summary>
+    /// Tape plant opening/closing + dept issues — vw_daily_tape_prod_New (not vw_FactoryProduction).
+    /// </summary>
+    private static bool LooksLikeTapePlantQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        var hasOpeningClosing = m.Contains("opening") || m.Contains("closing");
+        if (hasOpeningClosing && (m.Contains("loom") || m.Contains("tape") || m.Contains("fibc dept")))
+            return true;
+        if (m.Contains("tape plant") || m.Contains("tape production"))
+            return true;
+        if (m.Contains("loom dept") || m.Contains("fibc dept"))
+            return m.Contains("production") || hasOpeningClosing;
+        if (m.Contains("tape") && (m.Contains("production") || hasOpeningClosing))
+            return true;
+        return false;
+    }
+
     private static bool TryBuildFactoryProductionEarlySql(string message, out string sql, out string warning)
     {
         sql = "";
         warning = "";
+        if (LooksLikeTapePlantQuestion(message)) return false;
+
         var m = message.ToLowerInvariant();
         if (m.Contains("webbing")) return false;
         if (!m.Contains("production") && !m.Contains("factory") && !m.Contains("produced")) return false;
@@ -16,8 +36,7 @@ public partial class ChatOrchestratorService
         if (m.Contains("loom") && m.Contains("quality")) return false;
         if (m.Contains("small bag") && m.Contains("cutting")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         var particularsFilter = "";
@@ -41,22 +60,20 @@ public partial class ChatOrchestratorService
     {
         sql = "";
         warning = "";
-        var m = message.ToLowerInvariant();
-        if (!m.Contains("tape") && !m.Contains("loom dept") && !m.Contains("fibc dept")) return false;
-        if (!m.Contains("production") && !m.Contains("opening") && !m.Contains("closing")) return false;
+        if (!LooksLikeTapePlantQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         sql = $"""
             SELECT TOP {MaxReturnRows}
-                companyname, Sysdate, [Loom Dept], [FIBC Dept], Opening, Closing, Production, Wastage
+                CompanyName, date, Opening, Closing, Production, [Total Production],
+                [Loom Dept], [FIBC Dept], [Wastage Dept]
             FROM vw_daily_tape_prod_New WITH (NOLOCK)
-            WHERE companyname = '{EscapeSqlLiteral(company)}'
-            ORDER BY Sysdate DESC
+            WHERE CompanyName = '{EscapeSqlLiteral(company)}'
+            ORDER BY date DESC
             """;
-        warning = $"Governed tape plant daily production for {company} (vw_daily_tape_prod_New; bracket dept columns).";
+        warning = $"Governed tape plant daily production for {company} (vw_daily_tape_prod_New; opening/closing + dept columns).";
         return true;
     }
 
@@ -72,8 +89,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeWipQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(company))
             filters.Add($"CompanyName = '{EscapeSqlLiteral(company)}'");
@@ -104,8 +120,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("ebd") && !m.Contains("plant") && !m.Contains("by item")) return false;
         if (m.Contains("sales") || m.Contains("despatch")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         sql = $"""
@@ -134,8 +149,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeRollDespatchQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         sql = $"""
@@ -157,8 +171,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("fibc")) return false;
         if (!m.Contains("despatch") && !m.Contains("dispatch") && !m.Contains("packing")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(company))
             filters.Add($"CompanyName = '{EscapeSqlLiteral(company)}'");
@@ -184,8 +197,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("yarn")) return false;
         if (!m.Contains("despatch") && !m.Contains("dispatch") && !m.Contains("packing")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         sql = $"""
@@ -207,8 +219,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("small bag") && !m.Contains("smallbag")) return false;
         if (!m.Contains("despatch") && !m.Contains("dispatch") && !m.Contains("bail")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         sql = $"""

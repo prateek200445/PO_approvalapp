@@ -154,8 +154,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeSalesEbdQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(company))
             filters.Add($"companyname = '{EscapeSqlLiteral(company)}'");

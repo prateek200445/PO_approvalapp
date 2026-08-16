@@ -14,17 +14,28 @@ export function stripMarkdown(text: string): string {
 }
 
 /** Parse inline **bold**, *italic*, and stray markers so raw ** never shows in UI. */
-export function InlineMarkdown({ text, className }: { text: string; className?: string }) {
-  const nodes = parseInlineMarkdown(text);
+export function InlineMarkdown({
+  text,
+  className,
+  highlight = false,
+}: {
+  text: string;
+  className?: string;
+  highlight?: boolean;
+}) {
+  const nodes = parseInlineMarkdown(text, highlight);
   return <span className={className}>{nodes}</span>;
 }
 
-function parseInlineMarkdown(text: string): ReactNode[] {
+function parseInlineMarkdown(text: string, highlight = false): ReactNode[] {
   const nodes: ReactNode[] = [];
   const pattern = /(\*\*[^*\n]+?\*\*|\*[^*\n]+?\*|__[^_\n]+?__)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
   let key = 0;
+  const strongClass = highlight
+    ? "font-semibold text-white"
+    : "font-semibold text-slate-200";
 
   while ((match = pattern.exec(text)) !== null) {
     if (match.index > lastIndex) {
@@ -34,7 +45,7 @@ function parseInlineMarkdown(text: string): ReactNode[] {
     const token = match[0];
     if (token.startsWith("**") && token.endsWith("**")) {
       nodes.push(
-        <strong key={key++} className="font-semibold text-slate-200">
+        <strong key={key++} className={strongClass}>
           {token.slice(2, -2)}
         </strong>,
       );
@@ -46,7 +57,7 @@ function parseInlineMarkdown(text: string): ReactNode[] {
       );
     } else if (token.startsWith("__") && token.endsWith("__")) {
       nodes.push(
-        <strong key={key++} className="font-semibold text-slate-200">
+        <strong key={key++} className={strongClass}>
           {token.slice(2, -2)}
         </strong>,
       );
@@ -69,11 +80,14 @@ function parseInlineMarkdown(text: string): ReactNode[] {
 export function FormattedAnswer({
   text,
   className,
+  variant = "default",
 }: {
   text: string;
   className?: string;
+  variant?: "default" | "highlight";
 }) {
   const lines = text.split("\n");
+  const highlight = variant === "highlight";
 
   return (
     <div className={cn("space-y-2", className)}>
@@ -87,7 +101,7 @@ export function FormattedAnswer({
             <div key={i} className="flex gap-2 pl-1">
               <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-cyan-400/80" />
               <p className="min-w-0 flex-1 leading-relaxed">
-                <InlineMarkdown text={bullet[1]} />
+                <InlineMarkdown text={bullet[1]} highlight={highlight} />
               </p>
             </div>
           );
@@ -97,14 +111,14 @@ export function FormattedAnswer({
         if (numbered) {
           return (
             <p key={i} className="leading-relaxed pl-1">
-              <InlineMarkdown text={trimmed} />
+              <InlineMarkdown text={trimmed} highlight={highlight} />
             </p>
           );
         }
 
         return (
           <p key={i} className="leading-relaxed">
-            <InlineMarkdown text={trimmed} />
+            <InlineMarkdown text={trimmed} highlight={highlight} />
           </p>
         );
       })}

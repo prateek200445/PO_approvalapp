@@ -17,8 +17,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeJobMrnPendingWoQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(company))
             filters.Add($"CompanyName = '{EscapeSqlLiteral(company)}'");
@@ -56,8 +55,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikePoAmendmentQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var filters = new List<string> { "PendingQty > 0" };
         if (!string.IsNullOrWhiteSpace(company))
             filters.Add($"CompanyName = '{EscapeSqlLiteral(company)}'");
@@ -95,8 +93,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeBillPaymentDraftQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         var companyLit = EscapeSqlLiteral(company);
@@ -132,8 +129,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikePurchaseReqQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         var companyLit = EscapeSqlLiteral(company);
@@ -176,8 +172,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeSmallBagProductionQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(company))
             filters.Add($"CompanyName = '{EscapeSqlLiteral(company)}'");
@@ -209,13 +204,12 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeLedgerGroupingQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(company))
             filters.Add($"CompanyName = '{EscapeSqlLiteral(company)}'");
 
-        var party = TryExtractLedgerPartyName(message);
+        var party = ResolveLedgerPartyForChat(message);
         if (!string.IsNullOrWhiteSpace(party))
             filters.Add($"ledgername LIKE '%{EscapeSqlLiteral(party)}%'");
 
@@ -246,13 +240,12 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeAccountVoucherApprovalQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var filters = new List<string> { "Status = 'Pending'", "Isdel = 0" };
         if (!string.IsNullOrWhiteSpace(company))
             filters.Add($"CompanyName = '{EscapeSqlLiteral(company)}'");
 
-        var party = TryExtractLedgerPartyName(message);
+        var party = ResolveLedgerPartyForChat(message);
         if (!string.IsNullOrWhiteSpace(party))
             filters.Add($"LedgerName LIKE '%{EscapeSqlLiteral(party)}%'");
 
@@ -281,7 +274,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeVoucherPartyQuestion(message)) return false;
 
-        var party = TryExtractLedgerPartyName(message);
+        var party = ResolveLedgerPartyForChat(message);
         if (string.IsNullOrWhiteSpace(party)) return false;
 
         var partyLit = EscapeSqlLiteral(party);
@@ -319,8 +312,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeEditPurchaseOrderQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(company))
             filters.Add($"CompanyName = '{EscapeSqlLiteral(company)}'");

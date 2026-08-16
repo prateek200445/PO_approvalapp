@@ -88,8 +88,7 @@ public partial class ChatOrchestratorService
             return true;
         }
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
 
         if (LooksLikeEbidtaPivotQuestion(message))
         {

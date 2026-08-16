@@ -38,8 +38,8 @@ public partial class ChatOrchestratorService
         if (TryBuildJobWorkReceiptSql(message, out sql, out warning)) return true;
         if (TryBuildPoPendingReceiptSql(message, out sql, out warning)) return true;
         if (TryBuildFibcBagProductionSql(message, out sql, out warning)) return true;
-        if (TryBuildFactoryProductionEarlySql(message, out sql, out warning)) return true;
         if (TryBuildTapePlantEarlySql(message, out sql, out warning)) return true;
+        if (TryBuildFactoryProductionEarlySql(message, out sql, out warning)) return true;
         if (TryBuildWipReportEarlySql(message, out sql, out warning)) return true;
         if (TryBuildProductionEbdEarlySql(message, out sql, out warning)) return true;
         if (TryBuildRollDespatchEarlySql(message, out sql, out warning)) return true;
@@ -164,8 +164,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("indent")) return false;
         if (!m.Contains("pending")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var deptFrag = TryExtractDepartmentFragment(message);
         var isCount = m.Contains("how many") || m.Contains("count") || m.StartsWith("number of");
         var storeIndentOnly = m.Contains("store indent");
@@ -350,8 +349,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("approved") && !m.Contains("total")) return false;
         if (!m.Contains("amount") && !m.Contains("paymentamount") && !m.Contains("sum")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         var sinceDate = TryParseSinceDate(message) ?? new DateTime(DateTime.Today.Year, 7, 1);
@@ -391,8 +389,7 @@ public partial class ChatOrchestratorService
         if (!ContainsPoIntent(message)) return false;
         if (!(m.Contains("currency") || m.Contains("delivery") || m.Contains("payment term"))) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         var openOnly = m.Contains("open") || m.Contains("pending");
@@ -436,8 +433,7 @@ public partial class ChatOrchestratorService
               || m.Contains("descending") || m.Contains("largest") || m.Contains("high-value")))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         var (fyStart, fyEnd, fyLabel) = ParseIndianFinancialYear(message);
@@ -476,8 +472,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("above") && !m.Contains("over") && !m.Contains("exceed")) return false;
         if (!m.Contains("stock") && !m.Contains("inventory")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         sql = $"""
@@ -508,8 +503,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("issued") && !m.Contains("issue")) return false;
         if (!m.Contains("store") && !m.Contains("material")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         var deptNames = TryExtractDepartmentList(message);
@@ -553,8 +547,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("inter-unit") && !m.Contains("inter unit") && !m.Contains("interunit")) return false;
         if (!m.Contains("sales") && !m.Contains("invoice")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         sql = $"""
@@ -581,8 +574,7 @@ public partial class ChatOrchestratorService
         if (!LooksLikeExportSalesInvoiceListQuestion(message))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company))
             return false;
 
@@ -668,8 +660,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("tax") && !m.Contains("gst")) return false;
         if (!m.Contains("invoice") && !m.Contains("sales")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var invNo = TryExtractInvoiceNumber(message);
         if (string.IsNullOrWhiteSpace(company) || string.IsNullOrWhiteSpace(invNo)) return false;
 
@@ -700,8 +691,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("despatch") && !m.Contains("dispatch")) return false;
         if (!m.Contains("waiting") && !m.Contains("pending") && !m.Contains("roll")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         var useNeedle = m.Contains("needle") && !relaxNeedleFilter;
@@ -747,8 +737,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("webbing")) return false;
         if (!m.Contains("production") && !m.Contains("factory")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         sql = $"""
@@ -785,8 +774,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("production")) return false;
         if (!m.Contains("quality") && !m.Contains("group")) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         sql = $"""
@@ -810,8 +798,7 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeDailyInwardOutwardQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         var m = message.ToLowerInvariant();
@@ -886,8 +873,7 @@ public partial class ChatOrchestratorService
             && !m.Contains("description"))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "")
+        var company = ResolveCompanyForChat(message)
                       ?? "Oswal Extrusion Limited";
 
         sql = $"""
@@ -929,8 +915,7 @@ public partial class ChatOrchestratorService
         if (m.Contains("export") || m.Contains("sales invoice") || m.Contains("invoice"))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var user = TryExtractPoAllocationUsername(message);
 
         if (!string.IsNullOrWhiteSpace(company) && string.IsNullOrWhiteSpace(user))
@@ -1138,8 +1123,7 @@ public partial class ChatOrchestratorService
     {
         sql = "";
         warning = "";
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         sql = $"""
@@ -1228,8 +1212,7 @@ public partial class ChatOrchestratorService
         if (!LooksLikeSalesTotalsQuestion(message))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company))
             return false;
 
@@ -1261,8 +1244,7 @@ public partial class ChatOrchestratorService
         if (!LooksLikeSalesByGroupQuestion(message))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company))
             return false;
 
@@ -1324,8 +1306,7 @@ public partial class ChatOrchestratorService
         if (!LooksLikePurchaseTotalsQuestion(message))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company))
             return false;
 
@@ -1357,8 +1338,7 @@ public partial class ChatOrchestratorService
         if (!LooksLikeLedgerCountQuestion(message))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company))
             return false;
 
@@ -1423,8 +1403,7 @@ public partial class ChatOrchestratorService
         if (!LooksLikeLedgerGroupQuestion(message))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
 
         if (string.IsNullOrWhiteSpace(company))
         {
@@ -1458,8 +1437,7 @@ public partial class ChatOrchestratorService
         if (!LooksLikeStockInHandQuestion(message))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company))
             return false;
 
@@ -1695,12 +1673,11 @@ public partial class ChatOrchestratorService
         if (!LooksLikeDayBucketAgeing(message) || !LooksLikeAgeingQuestion(message))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company))
             return false;
 
-        var party = TryExtractLedgerPartyName(message);
+        var party = ResolveLedgerPartyForChat(message);
         if (string.IsNullOrWhiteSpace(party))
             return false;
 
@@ -1755,11 +1732,10 @@ public partial class ChatOrchestratorService
         if (!LooksLikeDayBucketAgeing(message) || !LooksLikeAgeingQuestion(message))
             return false;
 
-        if (TryExtractLedgerPartyName(message) is not null)
+        if (ResolveLedgerPartyForChat(message) is not null)
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company))
             return false;
 

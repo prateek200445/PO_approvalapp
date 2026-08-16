@@ -63,10 +63,12 @@ const COLUMN_LABELS: Record<string, string> = {
   Maxlevel: "Max level",
   Minlevel: "Min level",
   Deptt: "Department",
-  GroupName: "Group",
-  SubGroupName: "Sub group",
+  PendingPOCount: "Pending POs",
+  LedgerCount: "Ledgers",
 };
 
+/** Count/quantity columns — never format as currency even if name contains "pending" or "total". */
+const COUNT_COLS = /count|cnt|numrecords|rowcount|howmany/i;
 const CURRENCY_COLS =
   /amount|bill|payment|rate|balance|total|debit|credit|opening|pending|price|charges|utr/i;
 const DATE_COLS = /date|sysdate|sysDate|timestamp|created|modified/i;
@@ -135,6 +137,14 @@ export function formatCellValue(column: string, value: unknown): FormattedCell {
   const num = typeof value === "number" ? value : Number(str.replace(/,/g, ""));
   const isNum = typeof value === "number" || (str !== "" && !Number.isNaN(num) && /^-?\d/.test(str));
 
+  if (isNum && COUNT_COLS.test(column)) {
+    return {
+      text: formatIndianNumber(num, 0),
+      kind: "number",
+      raw: value,
+    };
+  }
+
   if (isNum && CURRENCY_COLS.test(column)) {
     return {
       text: `₹${formatIndianNumber(num)}`,
@@ -175,9 +185,10 @@ export function detectResultCardMode(
   if (rows.length === 1 && columns.length <= 4) {
     const hasMetric = columns.some(
       (c) =>
+        COUNT_COLS.test(c) ||
         CURRENCY_COLS.test(c) ||
         NUMERIC_COLS.test(c) ||
-        /count|total|sum/i.test(c),
+        /total|sum/i.test(c),
     );
     if (hasMetric || columns.length <= 2) return "summary";
   }
@@ -199,10 +210,20 @@ export function extractHeroMetric(
   const row = rows[0];
   const cols = Object.keys(row);
 
+  const countCol = cols.find((c) => COUNT_COLS.test(c));
+  if (countCol) {
+    const formatted = formatCellValue(countCol, row[countCol]);
+    return {
+      label: humanizeColumn(countCol),
+      value: formatted.text,
+      kind: formatted.kind,
+    };
+  }
+
   const priority = cols.find(
     (c) =>
       CURRENCY_COLS.test(c) ||
-      /count|total|sum|balance|amount|qty|stock|stk/i.test(c),
+      /total|sum|balance|amount|qty|stock|stk/i.test(c),
   );
   if (priority) {
     const formatted = formatCellValue(priority, row[priority]);
@@ -353,7 +374,21 @@ export function getDomainTheme(response: ChatApiResponse, answer?: string): Doma
 
 export function isGovernedResponse(warning?: string | null): boolean {
   if (!warning) return false;
-  return /governed|rewrote|verified/i.test(warning);
+  return /governed|rewrote|^erp\s|verified/i.test(warning);
+}
+
+/** Warnings safe to show end users (no table/SQL names). */
+export function userFacingWarning(warning?: string | null): string | null {
+  if (!warning) return null;
+
+  if (/stock analysis|STOCK_ANALYSIS|opening.*stale|warehouse\.stkinhand/i.test(warning)) {
+    return "Opening/closing stock analysis may not match current warehouse stock due to known ERP data limitations.";
+  }
+
+  // Governed / ERP routing notes are for developers — hide from business users.
+  if (isGovernedResponse(warning)) return null;
+
+  return null;
 }
 
 export function shortenWarning(warning: string): string {

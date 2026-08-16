@@ -17,9 +17,8 @@ import {
   hasReorderProgress,
   humanizeColumn,
   isGovernedResponse,
-  primarySourceLabel,
   reorderProgress,
-  shortenWarning,
+  userFacingWarning,
   splitAnswerRich,
 } from "@/lib/result-card-format";
 import { cn } from "@/lib/utils";
@@ -67,6 +66,7 @@ export function ChatResultCard({
     response.rows.length > 0 ? Object.keys(response.rows[0]) : [];
   const hero = extractHeroMetric(response.rows);
   const governed = isGovernedResponse(response.warning);
+  const displayWarning = userFacingWarning(response.warning);
   const followUps = getFollowUpPrompts(response);
   const showProgress = hasReorderProgress(columns);
   const listPrimary = getListPrimaryColumn(columns);
@@ -168,9 +168,6 @@ export function ChatResultCard({
                 </span>
               )}
             </div>
-            <p className="text-[11px] text-slate-500">
-              Source · {primarySourceLabel(response.tablesUsed)}
-            </p>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
@@ -190,7 +187,7 @@ export function ChatResultCard({
                     ? "border-cyan-400/40 bg-cyan-500/15 text-cyan-300"
                     : "border-white/[0.08] bg-white/[0.03] text-slate-400 hover:border-white/20 hover:text-white",
                 )}
-                title="Open insights panel"
+                title="Open answer details"
               >
                 <PanelRightOpen className="h-4 w-4" />
               </button>
@@ -204,22 +201,20 @@ export function ChatResultCard({
             <InlineMarkdown text={title} />
           </h3>
           {body && (
-            <div className="mt-3 text-[15px] text-slate-400">
-              <FormattedAnswer text={body} />
+            <div className="mt-3 text-[15px] leading-relaxed text-slate-200/95">
+              <FormattedAnswer text={body} variant="highlight" />
             </div>
           )}
         </section>
 
-        {/* Governed note */}
-        {response.warning && (
+        {/* User-facing note (no table/SQL names) */}
+        {displayWarning && (
           <div className="relative mx-5 mt-4 flex gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.07] px-4 py-3">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
             <div>
-              <p className="text-xs font-medium text-emerald-300">
-                {governed ? "Business rules applied" : "Query note"}
-              </p>
+              <p className="text-xs font-medium text-emerald-300">Note</p>
               <p className="mt-0.5 text-[11px] leading-relaxed text-emerald-200/70">
-                {shortenWarning(response.warning)}
+                {displayWarning}
               </p>
             </div>
           </div>

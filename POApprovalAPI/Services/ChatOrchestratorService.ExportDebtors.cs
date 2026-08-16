@@ -27,13 +27,12 @@ public partial class ChatOrchestratorService
         warning = "";
         if (!LooksLikeExportDebtorsDueQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var filters = new List<string>();
         if (!string.IsNullOrWhiteSpace(company))
             filters.Add($"CompanyName = '{EscapeSqlLiteral(company)}'");
 
-        var party = TryExtractLedgerPartyName(message);
+        var party = ResolveLedgerPartyForChat(message);
         if (!string.IsNullOrWhiteSpace(party))
             filters.Add($"LedgerName LIKE '%{EscapeSqlLiteral(party)}%'");
 
@@ -57,8 +56,7 @@ public partial class ChatOrchestratorService
         plan = new ErpFinanceReportPlan { Mode = ErpFinanceReportMode.ExportDebtorsLast3Months };
         if (!LooksLikeExportDebtorsLast3MonthsQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         plan.CompanyName = company;
@@ -80,8 +78,7 @@ public partial class ChatOrchestratorService
         plan = new ErpInventoryReportPlan { MaxRows = MaxReturnRows };
         if (!LooksLikeStockAnalysisQuestion(message)) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
         var (fyStart, fyEndEx, _) = ParseIndianFinancialYear(message);

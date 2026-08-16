@@ -43,14 +43,14 @@ export function SuggestedPrompts({
   return (
     <aside className={cn("flex flex-col gap-5", className)}>
       <div>
-        <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          <Sparkles className="h-3.5 w-3.5 text-primary/70" />
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-primary dark:border-sky-400/35 dark:bg-sky-500/15 dark:text-sky-200">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 dark:text-sky-300" />
           Suggested · tap to ask
         </div>
         <div className="space-y-4">
           {SUGGESTED_PROMPTS.map((group) => (
             <div key={group.category}>
-              <p className="mb-2 text-[11px] font-semibold text-muted-foreground/90">
+              <p className="mb-2 pl-0.5 text-[11px] font-bold uppercase tracking-wide text-foreground/80 dark:text-foreground/75">
                 {group.category}
               </p>
               <div className="flex flex-col gap-1.5">
@@ -60,7 +60,7 @@ export function SuggestedPrompts({
                     type="button"
                     onClick={() => onSelect(prompt)}
                     title={prompt}
-                    className="group w-full rounded-full border border-border/50 bg-card/70 px-3 py-2 text-left text-[11px] leading-snug text-foreground/85 shadow-sm transition-all hover:border-primary/35 hover:bg-primary/8 hover:text-foreground hover:shadow-md active:scale-[0.99] dark:bg-card/50 dark:hover:bg-primary/10"
+                    className="group w-full rounded-xl border border-border/60 bg-card/90 px-3 py-2 text-left text-[11px] leading-snug text-foreground/85 shadow-sm transition-all hover:border-primary/40 hover:bg-primary/6 hover:text-foreground hover:shadow-md active:scale-[0.99] dark:bg-card/60 dark:hover:bg-primary/10"
                   >
                     <span className="line-clamp-2 group-hover:text-foreground">{prompt}</span>
                   </button>
@@ -73,8 +73,8 @@ export function SuggestedPrompts({
 
       {hasGrouped && (
         <div>
-          <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <Clock className="h-3.5 w-3.5" />
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-border/60 bg-muted/50 px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground dark:border-border/50 dark:bg-muted/30 dark:text-foreground/70">
+            <Clock className="h-3.5 w-3.5 shrink-0" />
             History
           </div>
           <div className="space-y-4">

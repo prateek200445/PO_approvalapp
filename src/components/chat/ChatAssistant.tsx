@@ -1,10 +1,9 @@
 import { ChatInput } from "@/components/chat/ChatInput";
 import { ChatInsightsPanel } from "@/components/chat/ChatInsightsPanel";
+import { ChatNavbar } from "@/components/chat/ChatNavbar";
 import { AssistantGreeting, ChatMessageBubble } from "@/components/chat/ChatMessage";
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { SuggestedPrompts } from "@/components/chat/SuggestedPrompts";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
@@ -31,24 +30,13 @@ import { getMockExamplePrompts, MOCK_SCENARIOS } from "@/lib/chat-mocks";
 import type { ChatHistoryItem } from "@/lib/chat-helpers";
 import { groupHistoryByDay } from "@/lib/chat-helpers";
 import type { ChatApiResponse, ChatMessage } from "@/lib/chat-types";
-import { cn } from "@/lib/utils";
-import {
-  ArrowLeft,
-  Bot,
-  FlaskConical,
-  MessageSquarePlus,
-  Moon,
-  PanelLeft,
-  PanelRight,
-  Sparkles,
-  Sun,
-} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 export function ChatAssistant() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const { dark, toggleTheme } = useTheme();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -66,11 +54,6 @@ export function ChatAssistant() {
 
   const firstName = user?.name?.split(" ")[0] ?? "there";
   const initials = (user?.name ?? "U").split(" ").map((s) => s[0]).slice(0, 2).join("");
-
-  useEffect(() => {
-    document.documentElement.classList.add("assistant-copilot");
-    return () => document.documentElement.classList.remove("assistant-copilot");
-  }, []);
 
   useEffect(() => {
     if (hydrated.current) return;
@@ -225,7 +208,7 @@ export function ChatAssistant() {
   const hasMessages = messages.length > 0;
 
   return (
-    <div className="relative flex h-dvh flex-col overflow-hidden bg-background">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-background animate-in fade-in duration-200">
       <div
         className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_90%_60%_at_50%_-10%,rgba(59,130,246,0.14),transparent_55%)] dark:bg-[radial-gradient(ellipse_90%_60%_at_50%_-10%,rgba(96,165,250,0.1),transparent_55%)]"
         aria-hidden
@@ -235,139 +218,44 @@ export function ChatAssistant() {
         aria-hidden
       />
 
-      <header className="relative z-10 flex shrink-0 items-center justify-between gap-3 border-b border-border/40 bg-background/70 px-4 py-3 backdrop-blur-xl md:px-5">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={() => setSidebarOpen(true)}
-            className="h-9 w-9 shrink-0 rounded-xl border-border/60 bg-card/50 lg:hidden"
-            aria-label="Open menu"
-          >
-            <PanelLeft className="h-4 w-4" />
-          </Button>
-          <Link
-            to="/profile"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-card/80 text-muted-foreground shadow-sm transition-colors hover:bg-secondary hover:text-foreground"
-            aria-label="Back to profile"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary via-primary to-violet-600 shadow-lg shadow-primary/30 ring-1 ring-white/10">
-              <Bot className="h-5 w-5 text-primary-foreground" strokeWidth={2.25} />
-              <span
-                className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-background"
-                aria-hidden
-              />
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                <h1 className="assistant-title-shimmer truncate text-base font-bold tracking-tight md:text-lg">
-                  Data Assistant
-                </h1>
-                <Badge
-                  variant="secondary"
-                  className="shrink-0 gap-1 border-primary/25 bg-primary/10 px-1.5 py-0 text-[10px] font-semibold text-primary"
-                >
-                  <Sparkles className="h-2.5 w-2.5" />
-                  Beta
-                </Badge>
-                {mockMode && (
-                  <Badge
-                    variant="secondary"
-                    className="shrink-0 border-amber-500/30 bg-amber-500/15 text-[10px] text-amber-700 dark:text-amber-300"
-                  >
-                    Mock data
-                  </Badge>
-                )}
-              </div>
-              <p className="hidden truncate text-[11px] text-muted-foreground sm:block">
-                ERP copilot · POs · stock · ledgers · production
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <div className="hidden items-center gap-2 rounded-xl border border-border/50 bg-card/50 px-2.5 py-1.5 sm:flex">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-[10px] font-semibold text-primary">
-              {initials}
-            </div>
-            <div className="hidden text-left leading-tight md:block">
-              <p className="max-w-[120px] truncate text-xs font-medium">{user?.name}</p>
-              <p className="text-[10px] text-muted-foreground">{user?.role}</p>
-            </div>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={toggleTheme}
-            className="h-9 w-9 rounded-xl border-border/60 bg-card/50"
-            aria-label="Toggle theme"
-          >
-            {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </Button>
-          {isMockToggleAllowed() && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                const next = toggleChatMockEnabled();
-                setMockMode(next);
-                toast.success(
-                  next ? "Mock mode on — no API key needed" : "Mock mode off — using live API",
-                );
-              }}
-              className={cn(
-                "gap-1.5 border-border/60 bg-card/50 backdrop-blur-sm",
-                mockMode &&
-                  "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200",
-              )}
-              title="Toggle mock responses for UI testing"
-            >
-              <FlaskConical className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{mockMode ? "Mock on" : "Mock off"}</span>
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setInsightsOpen(true)}
-            disabled={!selectedResponse}
-            className="gap-1.5 border-border/60 bg-card/50 backdrop-blur-sm xl:hidden"
-          >
-            <PanelRight className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Insights</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleClear}
-            disabled={!hasMessages && !loading}
-            className="gap-1.5 border-border/60 bg-card/50 backdrop-blur-sm"
-          >
-            <MessageSquarePlus className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Clear chat</span>
-          </Button>
-        </div>
-      </header>
+      <ChatNavbar
+        user={user}
+        initials={initials}
+        dark={dark}
+        mockMode={mockMode}
+        mockToggleAllowed={isMockToggleAllowed()}
+        hasMessages={hasMessages}
+        loading={loading}
+        selectedResponse={selectedResponse}
+        onOpenSidebar={() => setSidebarOpen(true)}
+        onNewChat={handleClear}
+        onClearChat={handleClear}
+        onToggleTheme={toggleTheme}
+        onToggleMock={() => {
+          const next = toggleChatMockEnabled();
+          setMockMode(next);
+          toast.success(
+            next ? "Mock mode on — no API key needed" : "Mock mode off — using live API",
+          );
+        }}
+        onOpenDetails={() => setInsightsOpen(true)}
+        onLogout={() => {
+          logout();
+          navigate({ to: "/" });
+          toast.success("Signed out");
+        }}
+      />
 
       <div className="relative flex min-h-0 flex-1">
-        <aside className="hidden w-64 shrink-0 border-r border-border/40 bg-muted/15 p-4 backdrop-blur-sm lg:block xl:w-72">
+        <aside className="chat-nav-panel hidden w-64 shrink-0 border-r-2 border-primary/20 p-4 lg:block xl:w-72 dark:border-primary/30">
           <ChatSidebar
             onNewChat={handleClear}
             onSelectPrompt={handlePromptSelect}
             groupedHistory={groupedHistory}
-            userName={user?.name}
-            userRole={user?.role}
-            userInitials={initials}
           />
         </aside>
 
-        <div className="relative flex min-w-0 flex-1 flex-col">
+        <div className="relative flex min-w-0 flex-1 flex-col bg-background/80">
           <div
             ref={scrollRef}
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
@@ -417,11 +305,14 @@ export function ChatAssistant() {
         </div>
       </div>
 
-      {/* Mobile sidebar sheet */}
+      {/* Mobile sidebar sheet — chat menu */}
       <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-        <SheetContent side="left" className="w-[min(100vw,20rem)] border-border/40 p-4">
+        <SheetContent
+          side="left"
+          className="chat-nav-panel w-[min(100vw,20rem)] border-r-2 border-primary/20 p-4 dark:border-primary/30"
+        >
           <SheetHeader className="sr-only">
-            <SheetTitle>Menu</SheetTitle>
+            <SheetTitle>Chat menu</SheetTitle>
           </SheetHeader>
           <ChatSidebar
             onNewChat={() => {
@@ -430,18 +321,18 @@ export function ChatAssistant() {
             }}
             onSelectPrompt={handlePromptSelect}
             groupedHistory={groupedHistory}
-            userName={user?.name}
-            userRole={user?.role}
-            userInitials={initials}
           />
         </SheetContent>
       </Sheet>
 
-      {/* Mobile / tablet insights sheet */}
+      {/* Mobile / tablet — answer details sheet */}
       <Sheet open={insightsOpen} onOpenChange={setInsightsOpen}>
-        <SheetContent side="right" className="w-full max-w-sm border-border/40 p-0 sm:max-w-md">
+        <SheetContent
+          side="right"
+          className="w-full max-w-sm border-l-2 border-violet-500/20 p-0 sm:max-w-md dark:border-violet-400/25"
+        >
           <SheetHeader className="sr-only">
-            <SheetTitle>Insights</SheetTitle>
+            <SheetTitle>Answer details</SheetTitle>
           </SheetHeader>
           <ChatInsightsPanel
             response={selectedResponse}

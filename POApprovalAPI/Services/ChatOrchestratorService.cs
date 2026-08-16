@@ -17,6 +17,7 @@ public partial class ChatOrchestratorService
     private readonly LedgerStatementChatService _ledgerStatementChat;
     private readonly ErpFinanceReportService _financeReportService;
     private readonly ErpInventoryReportService _inventoryReportService;
+    private readonly ChatEntityResolutionService _entityResolution;
     private readonly ILogger<ChatOrchestratorService> _logger;
 
     private const int MaxReturnRows = 50;
@@ -33,6 +34,7 @@ public partial class ChatOrchestratorService
         LedgerStatementChatService ledgerStatementChat,
         ErpFinanceReportService financeReportService,
         ErpInventoryReportService inventoryReportService,
+        ChatEntityResolutionService entityResolution,
         ILogger<ChatOrchestratorService> logger)
     {
         _retrieval = retrieval;
@@ -44,6 +46,7 @@ public partial class ChatOrchestratorService
         _ledgerStatementChat = ledgerStatementChat;
         _financeReportService = financeReportService;
         _inventoryReportService = inventoryReportService;
+        _entityResolution = entityResolution;
         _logger = logger;
     }
 
@@ -57,6 +60,11 @@ public partial class ChatOrchestratorService
         if (chunks.Count == 0)
             throw new InvalidOperationException("No schema chunks retrieved.");
 
+        var entities = await _entityResolution.ResolveAsync(request.Message, ct);
+        CurrentEntities.Value = entities;
+
+        try
+        {
         var schemaBlock = BuildSchemaBlock(chunks);
         var sqlSystem = """
             You are a T-SQL expert for Microsoft SQL Server (database MaterialProcessing).
@@ -113,7 +121,7 @@ public partial class ChatOrchestratorService
             - Pending POs AT/FOR our company X → PurchasePayment.CompanyName = full legal name. Pending POs TO a vendor/supplier → Vw_PurchaseOrder.FirmName LIKE '%name%'. Always start FROM pending ApprovePO/ApprovePOHOD then join — never SELECT FROM Vw_PurchaseOrder without joining the pending set first (view is huge and times out).
             """;
 
-        var resolvedOurCompany = ResolveOutwardCompanyAlias(request.Message);
+        var resolvedOurCompany = ResolveCompanyForChat(request.Message);
         var companyHint = string.IsNullOrWhiteSpace(resolvedOurCompany)
             ? ""
             : $"""
@@ -474,17 +482,17 @@ public partial class ChatOrchestratorService
             sql = fibcProdSql;
             warning = fibcProdWarn;
         }
-        else if (useLlm && TryBuildFactoryProductionEarlySql(request.Message, out var factoryProdSql, out var factoryProdWarn))
-        {
-            _logger.LogInformation("Using governed factory production SQL (early path)");
-            sql = factoryProdSql;
-            warning = factoryProdWarn;
-        }
         else if (useLlm && TryBuildTapePlantEarlySql(request.Message, out var tapePlantSql, out var tapePlantWarn))
         {
             _logger.LogInformation("Using governed tape plant production SQL (early path)");
             sql = tapePlantSql;
             warning = tapePlantWarn;
+        }
+        else if (useLlm && TryBuildFactoryProductionEarlySql(request.Message, out var factoryProdSql, out var factoryProdWarn))
+        {
+            _logger.LogInformation("Using governed factory production SQL (early path)");
+            sql = factoryProdSql;
+            warning = factoryProdWarn;
         }
         else if (useLlm && TryBuildWipReportEarlySql(request.Message, out var wipSql, out var wipWarn))
         {
@@ -647,6 +655,13 @@ public partial class ChatOrchestratorService
             _logger.LogInformation("Using governed domain SQL");
             sql = govSql;
             warning = govWarning;
+        }
+        else if (useLlm && LooksLikeLedgerStatementIntent(request.Message)
+                 && !TryBuildLedgerStatementPlan(request.Message, out _))
+        {
+            throw new InvalidOperationException(
+                "Could not match a ledger/party name in our books for that company. " +
+                "Try naming the customer and plant, e.g. Commercial Bag Company at Plastene Polyfilms.");
         }
         else if (useLlm)
         {
@@ -992,6 +1007,19 @@ public partial class ChatOrchestratorService
             sql = forcedLedgerCountSql;
             rows = await ExecuteReadOnlyAsync(sql, ct);
             warning = forcedLedgerCountWarn;
+        }
+
+        if (!skipSqlExecution
+            && !LooksLikeAgeingQuestion(request.Message)
+            && LooksLikeNamedLedgerOutstandingQuestion(request.Message)
+            && IsLedgerMasterOutstandingSql(sql)
+            && IsStaleLedgerMasterBalanceResult(rows)
+            && await TryEnrichStaleLedgerOutstandingAsync(request.Message, rows, ct) is { } enriched)
+        {
+            _logger.LogWarning("LedgerMaster pending/opening zero; applying ERP outstanding enrichment");
+            rows = enriched.Rows;
+            sql = enriched.Sql;
+            warning = enriched.Warning;
         }
 
         if (warning is null)
@@ -1425,6 +1453,7 @@ public partial class ChatOrchestratorService
         var erpTotalCount = usedErpAgeing ? ageingTotalCount
             : usedErpLedgerStatement ? ledgerStatementTotalCount
             : usedErpFinance ? financeTotalCount
+            : usedErpInventory ? inventoryTotalCount
             : null;
         var (totalCount, truncated) = erpTotalCount.HasValue
             ? (erpTotalCount, erpTotalCount.Value > rows.Count)
@@ -1499,6 +1528,11 @@ public partial class ChatOrchestratorService
             Truncated = truncated,
             Warning = warning
         };
+        }
+        finally
+        {
+            CurrentEntities.Value = null;
+        }
     }
 
     public async Task<ChatExportResult> ExportCsvAsync(string rawSql, CancellationToken ct = default)
@@ -1586,8 +1620,9 @@ public partial class ChatOrchestratorService
         if (LooksLikeLedgerStatementQuestion(message))
             return false;
 
-        var party = TryExtractLedgerPartyName(message);
-        if (string.IsNullOrWhiteSpace(party))
+        var party = ResolveLedgerPartyForChat(message);
+        if (string.IsNullOrWhiteSpace(party)
+            || ChatEntityResolutionService.IsGarbagePartyHint(party))
             return false;
 
         // Our-company-only questions are company-wide lists, not a named party
@@ -1601,7 +1636,7 @@ public partial class ChatOrchestratorService
             && !message.Contains("party", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var ourCompany = ResolveOutwardCompanyAlias(message);
+        var ourCompany = ResolveCompanyForChat(message);
         // If the only company mention is the party itself, don't also filter CompanyName
         if (!string.IsNullOrWhiteSpace(ourCompany) && NamesLooselyMatch(party, ourCompany))
             ourCompany = null;
@@ -1668,6 +1703,26 @@ public partial class ChatOrchestratorService
                 @"\s+(?:ledger|outstanding|pending|opening|balance|bill|amount|please).*$",
                 "",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            s = System.Text.RegularExpressions.Regex.Replace(
+                s,
+                @"\s+(?:ka|ke|ki|ko|kitna|kya|hai|hain|batao|dikhao).*$",
+                "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            s = System.Text.RegularExpressions.Regex.Replace(
+                s,
+                @"^(?:pe|par|mein)\s+",
+                "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            s = System.Text.RegularExpressions.Regex.Replace(
+                s,
+                @"\s+(?:fy|financial\s+year)\s+[\d\-/–]+.*$",
+                "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            s = System.Text.RegularExpressions.Regex.Replace(
+                s,
+                @"\s+(?:this|current)\s+year\s*$",
+                "",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             s = s.Trim().TrimEnd('.', ',', ';', '?', '!');
             if (s.Length < 3) return null;
             // Reject generic leftovers
@@ -1680,8 +1735,54 @@ public partial class ChatOrchestratorService
             return s;
         }
 
-        // "for customer Procon Pacific LLC" / "for vendor Bright Rubber"
+        // Hinglish: "Polyfilms pe Commercial Bag ka kitna pending balance hai"
         var m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:pe|par|mein)\s+(.+?)\s+ka\s+(?:kitna|kya)?\s*(?:pending|opening|outstanding|balance)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var p = CleanParty(m.Groups[1].Value);
+            if (p is not null && !ChatEntityResolutionService.IsGarbagePartyHint(p))
+                return FinalizeLedgerPartyName(p, message);
+        }
+
+        // Hinglish company-first: "Polyfilms pe Commercial Bag ka ..."
+        m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"^(?:plastene\s+)?(?:polyfilms|ppl|oswal|oswal\s+extrusion)\s+pe\s+(.+?)\s+ka\b",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var p = CleanParty(m.Groups[1].Value);
+            if (p is not null && !ChatEntityResolutionService.IsGarbagePartyHint(p))
+                return FinalizeLedgerPartyName(p, message);
+        }
+
+        // "show vouchers for commercial bag company plastene polyfilms this year"
+        m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:show|list|get|give\s+me)\s+vouchers\s+(?:for|of)\s+(?:the\s+)?(.+)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var p = CleanParty(m.Groups[1].Value);
+            if (p is not null) return FinalizeLedgerPartyName(p, message);
+        }
+
+        // "ledger statement for Commercial Bag Company at Plastene Polyfilms"
+        m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:ledger\s+)?(?:statement|summary|account\s+statement|transaction\s+history|voucher\s+(?:history|details|wise))\s+(?:for|of)\s+(?:the\s+)?(.+)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var p = CleanParty(m.Groups[1].Value);
+            if (p is not null) return FinalizeLedgerPartyName(p, message);
+        }
+
+        // "for customer Procon Pacific LLC" / "for vendor Bright Rubber"
+        m = System.Text.RegularExpressions.Regex.Match(
             message,
             @"\b(?:for|of|against)\s+(?:the\s+)?(?:customer|buyer|party|vendor|supplier|ledger)\s+(.+)$",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -1703,6 +1804,7 @@ public partial class ChatOrchestratorService
         }
 
         // "Procon Pacific LLC ledger outstanding" / "find Procon Pacific pending balance"
+        // Skip Hinglish company-first questions — handled above.
         m = System.Text.RegularExpressions.Regex.Match(
             message,
             @"^(?:find|show|get|list|what(?:'s| is)?|give\s+me)?\s*(.+?)\s+(?:ledger\s+)?(?:outstanding|pending\s+balance|opening\s+balance)\b",
@@ -1712,7 +1814,9 @@ public partial class ChatOrchestratorService
             var p = CleanParty(m.Groups[1].Value);
             if (p is not null
                 && !p.Contains("ledger", StringComparison.OrdinalIgnoreCase)
-                && !LooksLikeOnlyOurCompanyPhrase(p))
+                && !LooksLikeOnlyOurCompanyPhrase(p)
+                && !ChatEntityResolutionService.IsGarbagePartyHint(p)
+                && !System.Text.RegularExpressions.Regex.IsMatch(message, @"\bpe\s+.+\s+ka\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                 return FinalizeLedgerPartyName(p, message);
         }
 
@@ -1739,10 +1843,39 @@ public partial class ChatOrchestratorService
     {
         if (string.IsNullOrWhiteSpace(party)) return null;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         var trimmed = StripTrailingCompanyFromParty(party.Trim(), company);
+        trimmed = StripEmbeddedCompanySuffix(trimmed, company);
+        if (ChatEntityResolutionService.IsGarbagePartyHint(trimmed))
+            return null;
         return trimmed.Length < 3 ? null : trimmed;
+    }
+
+    /// <summary>
+    /// "commercial bag company plastene polyfilms" → "commercial bag company" when company is known.
+    /// </summary>
+    private static string StripEmbeddedCompanySuffix(string party, string? knownCompany)
+    {
+        var s = party.Trim();
+        if (string.IsNullOrWhiteSpace(s) || string.IsNullOrWhiteSpace(knownCompany))
+            return s;
+
+        var words = s.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length < 2) return s;
+
+        for (var take = Math.Min(6, words.Length - 1); take >= 1; take--)
+        {
+            var tail = string.Join(' ', words[^take..]);
+            var alias = ResolveOutwardCompanyAlias(tail);
+            if (!string.IsNullOrWhiteSpace(alias)
+                && alias.Equals(knownCompany, StringComparison.OrdinalIgnoreCase))
+                return string.Join(' ', words[..^take]).Trim();
+
+            if (NamesLooselyMatch(tail, knownCompany))
+                return string.Join(' ', words[..^take]).Trim();
+        }
+
+        return s;
     }
 
     private static string StripTrailingCompanyFromParty(string party, string? knownCompany)
@@ -2314,8 +2447,7 @@ public partial class ChatOrchestratorService
 
         if (!LooksLikePendingWorkOrderQuestion(message) && !badCols) return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "")
+        var company = ResolveCompanyForChat(message)
                       ?? TryExtractSqlCompanyNameLiteral(sql);
 
         // CompName = '...' mistaken literal on WO — treat as company
@@ -2497,8 +2629,7 @@ public partial class ChatOrchestratorService
     }
 
     private static string? ResolvePendingPoCompany(string message, string sql) =>
-        ResolveOutwardCompanyAlias(message)
-        ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "")
+        ResolveCompanyForChat(message)
         ?? TryExtractSqlCompanyNameLiteral(sql);
 
     private static bool LooksLikePendingPoCountQuestion(string message)
@@ -3470,8 +3601,7 @@ public partial class ChatOrchestratorService
         var invYearLit = EscapeSqlLiteral(invYear);
 
         var groupHint = ResolveFactoryGroupHint(message);
-        var companyExact = ResolveOutwardCompanyAlias(message)
-                           ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var companyExact = ResolveCompanyForChat(message);
 
         var isAll = message.Contains("all companies", StringComparison.OrdinalIgnoreCase)
                     || message.Contains("all company", StringComparison.OrdinalIgnoreCase);
@@ -3534,8 +3664,7 @@ public partial class ChatOrchestratorService
             return false;
 
         var groupHint = ResolveFactoryGroupHint(message);
-        var companyExact = ResolveOutwardCompanyAlias(message)
-                           ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var companyExact = ResolveCompanyForChat(message);
         var likeHint = groupHint
                        ?? (companyExact is not null
                            ? System.Text.RegularExpressions.Regex.Replace(
@@ -3596,8 +3725,7 @@ public partial class ChatOrchestratorService
         var (fyStart, fyEndExclusive, fyLabel) = ParseIndianFinancialYear(message);
         var wantsGroup = message.Contains("group", StringComparison.OrdinalIgnoreCase);
         var groupHint = ResolveFactoryGroupHint(message);
-        var companyExact = ResolveOutwardCompanyAlias(message)
-                           ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var companyExact = ResolveCompanyForChat(message);
 
         string companyFilter;
         string companyNote;
@@ -3674,8 +3802,7 @@ public partial class ChatOrchestratorService
             return false;
 
         var groupHint = ResolveFactoryGroupHint(message);
-        var companyExact = ResolveOutwardCompanyAlias(message)
-                           ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var companyExact = ResolveCompanyForChat(message);
         var likeHint = groupHint
                        ?? (companyExact is not null
                            ? System.Text.RegularExpressions.Regex.Replace(
@@ -4145,6 +4272,10 @@ public partial class ChatOrchestratorService
     {
         countSql = "";
         if (string.IsNullOrWhiteSpace(sql) || LooksLikeCountOnlyQuery(sql))
+            return false;
+
+        // EXEC / SP descriptions cannot be wrapped in SELECT COUNT(*) FROM (...)
+        if (System.Text.RegularExpressions.Regex.IsMatch(sql, @"\bEXEC\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
             return false;
 
         var cleaned = StripLeadingTop(sql);

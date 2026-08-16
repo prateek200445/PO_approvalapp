@@ -33,6 +33,21 @@ $cases = @(
     checks = @("sql_has:sp_ac_LedgerSummary_BankRecoDate", "sql_has:Commercial Bag", "rows_gt:0", "governed_warning")
   },
   @{
+    id = "ledger_statement_no_customer_keyword"
+    message = "ledger statement for Commercial Bag Company at Plastene Polyfilms Limited FY 25-26"
+    checks = @("sql_has:sp_ac_LedgerSummary_BankRecoDate", "sql_has:Commercial Bag", "rows_gt:0", "governed_warning")
+  },
+  @{
+    id = "hinglish_pending_balance_polyfilms"
+    message = "Polyfilms pe Commercial Bag ka kitna pending balance hai?"
+    checks = @("sql_has:sp_ac_LedgerSummary_BankRecoDate|vw_BillWiseTransaction|sp_Overdue_Ledger", "sql_has:Commercial Bag", "rows_gte:1", "governed_warning")
+  },
+  @{
+    id = "show_vouchers_messy_polyfilms"
+    message = "show vouchers for commercial bag company plastene polyfilms this year"
+    checks = @("sql_has:sp_ac_LedgerSummary_BankRecoDate", "sql_has:Commercial Bag", "rows_gt:0", "governed_warning")
+  },
+  @{
     id = "ledger_count_sundry_debtors_pil"
     message = "How many ledgers are there under Sundry Debtors for Plastene India Limited?"
     checks = @("sql_has:LedgerMaster", "sql_has:COUNT|LedgerCount", "sql_has:Under", "sql_has:Sundry|Debtor", "sql_has:Plastene India", "rows_gte:1", "governed_warning")

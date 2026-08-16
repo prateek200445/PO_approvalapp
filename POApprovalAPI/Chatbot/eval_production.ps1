@@ -14,6 +14,11 @@ $cases = @(
     checks = @("sql_has:vw_daily_tape_prod_New", "sql_has:K.P.|KP", "governed_warning", "rows_gt:0")
   },
   @{
+    id = "tape_plant_kp_loom"
+    message = "opening closing production for kp woven loom recent"
+    checks = @("sql_has:vw_daily_tape_prod_New", "sql_not:vw_FactoryProduction", "sql_has:Opening", "sql_has:Loom Dept", "governed_warning", "rows_gt:0")
+  },
+  @{
     id = "loom_rolls"
     message = "Recent loom rolls produced at Oswal Extrusion Limited with roll no net weight and quality"
     checks = @("sql_has:vw_LoomProductionENtry", "sql_has:Oswal", "sql_has:CompanyName|Sysdate", "rows_gt:0")

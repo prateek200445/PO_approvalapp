@@ -5,6 +5,23 @@ namespace POApprovalAPI.Services;
 
 public partial class ChatOrchestratorService
 {
+    private static bool LooksLikeLedgerStatementIntent(string message)
+    {
+        var m = message.ToLowerInvariant();
+        return m.Contains("ledger statement")
+               || m.Contains("ledger summary")
+               || m.Contains("account statement")
+               || m.Contains("voucher history")
+               || m.Contains("transaction history")
+               || m.Contains("ledger transactions")
+               || m.Contains("show vouchers")
+               || m.Contains("voucher details")
+               || m.Contains("voucher wise")
+               || (m.Contains("statement") && (m.Contains("customer") || m.Contains("vendor")
+                   || m.Contains("supplier") || m.Contains("party") || m.Contains("ledger")))
+               || (m.Contains("ledger") && Regex.IsMatch(m, @"\bfrom\b.*\bto\b"));
+    }
+
     private static bool LooksLikeLedgerStatementQuestion(string message)
     {
         var m = message.ToLowerInvariant();
@@ -16,24 +33,10 @@ public partial class ChatOrchestratorService
             || LooksLikeLooseOutstandingBalanceQuestion(message))
             return false;
 
-        var hasStatementIntent =
-            m.Contains("ledger statement")
-            || m.Contains("ledger summary")
-            || m.Contains("account statement")
-            || m.Contains("voucher history")
-            || m.Contains("transaction history")
-            || m.Contains("ledger transactions")
-            || m.Contains("show vouchers")
-            || m.Contains("voucher details")
-            || m.Contains("voucher wise")
-            || (m.Contains("statement") && (m.Contains("customer") || m.Contains("vendor")
-                || m.Contains("supplier") || m.Contains("party") || m.Contains("ledger")))
-            || (m.Contains("ledger") && Regex.IsMatch(m, @"\bfrom\b.*\bto\b"));
-
-        if (!hasStatementIntent)
+        if (!LooksLikeLedgerStatementIntent(message))
             return false;
 
-        return TryExtractLedgerPartyName(message) is not null;
+        return ResolveLedgerPartyForChat(message) is not null;
     }
 
     private static bool TryBuildLedgerStatementPlan(string message, out LedgerStatementPlan plan)
@@ -42,12 +45,11 @@ public partial class ChatOrchestratorService
         if (!LooksLikeLedgerStatementQuestion(message))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                      ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company))
             return false;
 
-        var party = TryExtractLedgerPartyName(message);
+        var party = ResolveLedgerPartyForChat(message);
         if (string.IsNullOrWhiteSpace(party))
             return false;
 
@@ -57,6 +59,9 @@ public partial class ChatOrchestratorService
         plan.DateFrom = dateFrom;
         plan.DateTo = dateTo;
         plan.MaxRows = MaxReturnRows;
+        if (CurrentEntities.Value?.Company is { CompanyId: > 0 } resolvedCo
+            && resolvedCo.Name.Equals(company, StringComparison.OrdinalIgnoreCase))
+            plan.CompanyId = resolvedCo.CompanyId;
         return true;
     }
 
@@ -82,6 +87,9 @@ public partial class ChatOrchestratorService
 
         var (fyStart, fyEndEx, _) = ParseIndianFinancialYear(message);
         var today = DateTime.Today;
+        if (Regex.IsMatch(message, @"\b(?:this|current)\s+year\b", RegexOptions.IgnoreCase))
+            return (fyStart, today);
+
         if (message.Contains("fy", StringComparison.OrdinalIgnoreCase)
             || message.Contains("financial year", StringComparison.OrdinalIgnoreCase)
             || Regex.IsMatch(message, @"\b20\d{2}\s*[-–/]\s*\d{2}\b"))

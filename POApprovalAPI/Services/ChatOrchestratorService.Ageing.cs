@@ -31,7 +31,7 @@ public partial class ChatOrchestratorService
             || m.Contains("receivable") || m.Contains("payable")
             || m.Contains("ledger");
 
-        return hasLedgerContext || TryExtractLedgerPartyName(message) is not null;
+        return hasLedgerContext || ResolveLedgerPartyForChat(message) is not null;
     }
 
     private static bool LooksLikeDayBucketAgeing(string message)
@@ -54,8 +54,7 @@ public partial class ChatOrchestratorService
         if (LooksLikeDayBucketAgeing(message))
             return false;
 
-        var company = ResolveOutwardCompanyAlias(message)
-                        ?? CanonicalizeCompanyName(TryExtractCompanyName(message) ?? "");
+        var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company))
             return false;
 
@@ -68,7 +67,7 @@ public partial class ChatOrchestratorService
         plan.G3 = g3;
         plan.G4 = g4;
 
-        var party = TryExtractLedgerPartyName(message);
+        var party = ResolveLedgerPartyForChat(message);
         if (!string.IsNullOrWhiteSpace(party))
         {
             plan.LedgerName = party;
