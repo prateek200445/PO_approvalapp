@@ -10,6 +10,8 @@ import {
   CreditCard,
   BookOpen,
   BarChart3,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
@@ -21,6 +23,7 @@ export function AppShell() {
   const router = useRouterState();
   const path = router.location.pathname;
   const [dark, setDark] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem("po-theme");
@@ -30,7 +33,15 @@ export function AppShell() {
     }
   }, []);
 
-  // Scroll to top on every navigation including first load
+  useEffect(() => {
+    const stored = localStorage.getItem("po-sidebar-collapsed");
+    if (stored === "true") setSidebarCollapsed(true);
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("po-sidebar-collapsed", sidebarCollapsed ? "true" : "false");
+  }, [sidebarCollapsed]);
+
   useEffect(() => {
     const scrollToTop = () => {
       window.scrollTo({ top: 0, behavior: "instant" });
@@ -55,6 +66,10 @@ export function AppShell() {
     localStorage.setItem("po-theme", next ? "dark" : "light");
   }
 
+  function toggleSidebar() {
+    setSidebarCollapsed((prev) => !prev);
+  }
+
   const desktopNav = [
     { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", match: (p: string) => p.startsWith("/dashboard") },
     {
@@ -76,7 +91,6 @@ export function AppShell() {
     { to: "/profile", icon: User, label: "Profile", match: (p: string) => p.startsWith("/profile") || p.startsWith("/bom") },
   ];
 
-  // Mobile bottom nav includes Sales; 7 items → grid-cols-7
   const mobileNav = [
     { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", shortLabel: "Home", match: (p: string) => p.startsWith("/dashboard") },
     {
@@ -95,8 +109,9 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-background pb-20 md:pb-0">
-      <header className="sticky top-0 z-30 border-b border-border bg-surface/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 md:px-6">
+      {/* Mobile header — unchanged */}
+      <header className="sticky top-0 z-30 border-b border-border bg-surface/80 backdrop-blur-md md:hidden">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link to="/dashboard" className="flex items-center gap-2.5">
             <img
               src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"}
@@ -108,48 +123,6 @@ export function AppShell() {
               <div className="text-[11px] text-muted-foreground">Approvals Portal</div>
             </div>
           </Link>
-
-          <nav className="hidden items-center gap-1 lg:flex">
-            {desktopNav.map((n) => {
-              const active = n.match(path);
-              return (
-                <Link
-                  key={n.to}
-                  to={n.to}
-                  className={cn(
-                    "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm font-medium transition-colors xl:px-3",
-                    active
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
-                  )}
-                >
-                  <n.icon className="h-4 w-4" />
-                  <span className="hidden lg:inline">{n.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
-
-          <nav className="hidden items-center gap-1 md:flex lg:hidden">
-            {desktopNav.map((n) => {
-              const active = n.match(path);
-              return (
-                <Link
-                  key={n.to}
-                  to={n.to}
-                  title={n.label}
-                  className={cn(
-                    "flex items-center justify-center rounded-md p-2 text-sm font-medium transition-colors",
-                    active
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
-                  )}
-                >
-                  <n.icon className="h-4 w-4" />
-                </Link>
-              );
-            })}
-          </nav>
 
           <div className="flex items-center gap-2">
             <button
@@ -163,24 +136,150 @@ export function AppShell() {
               <div className="font-medium">{user?.name}</div>
               <div className="text-muted-foreground">{user?.role}</div>
             </div>
-            <button
-              onClick={() => {
-                logout();
-                navigate({ to: "/" });
-              }}
-              className="hidden rounded-md p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive md:inline-flex"
-              aria-label="Logout"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
           </div>
         </div>
       </header>
 
-      <main className="w-full min-w-0 max-w-full overflow-x-hidden px-4 py-5 md:mx-auto md:max-w-7xl md:px-6 md:py-8" id="main-content">
-        <Outlet />
-      </main>
+      <div className="md:flex md:min-h-screen">
+        {/* Desktop sidebar — collapsible */}
+        <aside
+          className={cn(
+            "fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-border bg-surface/95 backdrop-blur-md transition-[width] duration-300 ease-in-out md:flex",
+            sidebarCollapsed ? "w-[4.5rem]" : "w-64",
+          )}
+        >
+          <div
+            className={cn(
+              "flex items-center border-b border-border py-4 transition-all duration-300",
+              sidebarCollapsed ? "justify-center px-2" : "gap-3 px-4",
+            )}
+          >
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              className="group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg outline-none ring-primary/40 focus-visible:ring-2"
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              <img
+                src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"}
+                alt="HCP"
+                className="h-9 w-9 rounded-lg object-cover transition-all duration-300 ease-in-out group-hover:scale-90 group-hover:opacity-0"
+              />
+              <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                {sidebarCollapsed ? (
+                  <PanelLeftOpen className="h-5 w-5 text-primary opacity-0 transition-all duration-300 ease-in-out group-hover:scale-100 group-hover:opacity-100" />
+                ) : (
+                  <PanelLeftClose className="h-5 w-5 text-primary opacity-0 transition-all duration-300 ease-in-out group-hover:scale-100 group-hover:opacity-100" />
+                )}
+              </span>
+            </button>
 
+            <div
+              className={cn(
+                "min-w-0 overflow-hidden leading-tight transition-all duration-300 ease-in-out",
+                sidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[12rem] opacity-100",
+              )}
+            >
+              <div className="truncate text-sm font-semibold">HCP</div>
+              <div className="truncate text-[11px] text-muted-foreground">Approvals Portal</div>
+            </div>
+          </div>
+
+          <nav className="flex-1 space-y-1 overflow-x-hidden overflow-y-auto px-2 py-4">
+            {desktopNav.map((n) => {
+              const active = n.match(path);
+              return (
+                <Link
+                  key={n.to}
+                  to={n.to}
+                  title={sidebarCollapsed ? n.label : undefined}
+                  className={cn(
+                    "flex items-center rounded-lg py-2.5 text-sm font-medium transition-all duration-300",
+                    sidebarCollapsed ? "justify-center px-2" : "gap-3 px-3",
+                    active
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                  )}
+                >
+                  <n.icon className="h-4 w-4 shrink-0" />
+                  <span
+                    className={cn(
+                      "truncate whitespace-nowrap transition-all duration-300 ease-in-out",
+                      sidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[12rem] opacity-100",
+                    )}
+                  >
+                    {n.label}
+                  </span>
+                </Link>
+              );
+            })}
+          </nav>
+
+          <div
+            className={cn(
+              "space-y-3 border-t border-border py-4 transition-all duration-300",
+              sidebarCollapsed ? "px-2" : "px-4",
+            )}
+          >
+            <div
+              className={cn(
+                "min-w-0 overflow-hidden transition-all duration-300 ease-in-out",
+                sidebarCollapsed ? "max-h-0 opacity-0" : "max-h-16 opacity-100",
+              )}
+            >
+              <div className="truncate text-sm font-medium">{user?.name}</div>
+              <div className="truncate text-xs text-muted-foreground">{user?.role}</div>
+            </div>
+            <div className={cn("flex gap-2", sidebarCollapsed ? "flex-col items-center" : "items-center")}>
+              <button
+                onClick={toggleTheme}
+                title={dark ? "Light mode" : "Dark mode"}
+                className={cn(
+                  "flex items-center justify-center rounded-lg border border-border bg-background text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground",
+                  sidebarCollapsed ? "h-10 w-10 p-0" : "flex-1 gap-2 px-3 py-2",
+                )}
+                aria-label="Toggle theme"
+              >
+                {dark ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
+                <span
+                  className={cn(
+                    "transition-all duration-300 ease-in-out",
+                    sidebarCollapsed ? "sr-only max-w-0 opacity-0" : "opacity-100",
+                  )}
+                >
+                  {dark ? "Light" : "Dark"}
+                </span>
+              </button>
+              <button
+                onClick={() => {
+                  logout();
+                  navigate({ to: "/" });
+                }}
+                title="Logout"
+                className="rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                aria-label="Logout"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <main
+          className={cn(
+            "w-full min-w-0 max-w-full overflow-x-hidden px-4 py-5 transition-[margin-left] duration-300 ease-in-out md:px-6 md:py-8 lg:px-8",
+            sidebarCollapsed ? "md:ml-[4.5rem]" : "md:ml-64",
+          )}
+          id="main-content"
+        >
+          <div className="mx-auto w-full max-w-7xl">
+            <Outlet />
+          </div>
+        </main>
+      </div>
+
+      {/* Mobile bottom nav — unchanged */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-7 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
         {mobileNav.map((n) => {
           const active = n.match(path);
