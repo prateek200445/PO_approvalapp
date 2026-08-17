@@ -845,8 +845,8 @@ WHERE CompanyName LIKE @CompanyPattern
             return;
 
         sql += @"
-  AND COALESCE(BillDate, VoucherDate) >= @DateFrom
-  AND COALESCE(BillDate, VoucherDate) < @DateToExclusive";
+  AND VoucherDate >= @DateFrom
+  AND VoucherDate < @DateToExclusive";
         parameters.Add("DateFrom", from.Value);
         parameters.Add("DateToExclusive", toExclusive.Value);
     }

@@ -862,7 +862,7 @@ function ReconciliationPage() {
               </div>
               {dateFrom && dateTo ? (
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  Date range: {dateFrom} to {dateTo} (Bill Date, else Voucher Date)
+                  Date range: {dateFrom} to {dateTo} (Voucher Date)
                 </p>
               ) : null}
             </div>
