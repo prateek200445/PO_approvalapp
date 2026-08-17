@@ -48,6 +48,7 @@ export const Route = createFileRoute("/_app/reconciliation")({
 type Step = 1 | 2 | 3;
 type StatusFilter = "issues" | "all" | "missing" | "other" | ComparisonStatus;
 type CompareMode = "excel" | "db";
+type DateRangeField = "voucher" | "bill";
 
 type FileSide = {
   file: File | null;
@@ -124,6 +125,7 @@ function ReconciliationPage() {
   const [ledgerB, setLedgerB] = useState("");
   const [dateFrom, setDateFrom] = useState(financialYearStart());
   const [dateTo, setDateTo] = useState(toInputDate(new Date()));
+  const [dateRangeField, setDateRangeField] = useState<DateRangeField>("voucher");
   const [comparing, setComparing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<ComparisonResult | null>(null);
@@ -293,6 +295,7 @@ function ReconciliationPage() {
             ledgerB: ledgerB.trim(),
             dateFrom: range.from || null,
             dateTo: range.to || null,
+            dateRangeField,
             options,
           }),
         });
@@ -862,7 +865,8 @@ function ReconciliationPage() {
               </div>
               {dateFrom && dateTo ? (
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  Date range: {dateFrom} to {dateTo} (Voucher Date)
+                  Date range: {dateFrom} to {dateTo} (
+                  {dateRangeField === "bill" ? "Bill Date" : "Voucher Date"})
                 </p>
               ) : null}
             </div>
@@ -893,6 +897,31 @@ function ReconciliationPage() {
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {compareMode === "db" ? (
                 <>
+                  <div className="sm:col-span-2">
+                    <div className="text-sm text-muted-foreground">Filter entries by</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {(
+                        [
+                          { value: "voucher", label: "Voucher Date" },
+                          { value: "bill", label: "Bill Date" },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setDateRangeField(opt.value)}
+                          className={cn(
+                            "rounded-md border px-3 py-2 text-sm transition-colors",
+                            dateRangeField === opt.value
+                              ? "border-primary bg-primary/10 font-semibold text-foreground"
+                              : "border-input bg-surface hover:bg-secondary",
+                          )}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="text-muted-foreground">From date</span>
                     <DatePickerField value={dateFrom} onChange={setDateFrom} placeholder="Start date" />

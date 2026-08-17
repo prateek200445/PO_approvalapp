@@ -71,7 +71,8 @@ public class BillWiseController : ControllerBase
                     request.CompanyB,
                     options,
                     request.DateFrom,
-                    request.DateTo);
+                    request.DateTo,
+                    request.DateRangeField);
             }
             else
             {
@@ -82,7 +83,8 @@ public class BillWiseController : ControllerBase
                     request.LedgerB,
                     options,
                     request.DateFrom,
-                    request.DateTo);
+                    request.DateTo,
+                    request.DateRangeField);
             }
 
             return Ok(result);
@@ -102,5 +104,7 @@ public class BillWiseCompareRequest
     public string? LedgerB { get; set; }
     public DateTime? DateFrom { get; set; }
     public DateTime? DateTo { get; set; }
+    /// <summary>bill | voucher — which column filters the date range (default voucher).</summary>
+    public string? DateRangeField { get; set; }
     public LedgerMatchOptions? Options { get; set; }
 }
