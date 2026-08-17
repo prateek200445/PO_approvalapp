@@ -1,4 +1,4 @@
-import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { Link, Outlet, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { formatBadgeCount, useApprovalInbox, type InboxKind } from "@/hooks/useApprovalInbox";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { GlobalCommandPalette, SearchTrigger } from "@/components/GlobalCommandPalette";
+import { AssistantShellSkeleton } from "@/components/chat/AssistantShellSkeleton";
 
 type AppPath =
   | "/dashboard"
@@ -52,14 +53,23 @@ type NavItem = {
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const router = useRouterState();
-  const path = router.location.pathname;
+  const router = useRouter();
+  const routerState = useRouterState();
+  const path = routerState.location.pathname;
   const fullScreenReport = path.includes("export-bill-overdue");
   const isCopilot = path.startsWith("/assistant");
+  const assistantLoading = useRouterState({
+    select: (s) =>
+      s.location.pathname.startsWith("/assistant") && s.status !== "idle",
+  });
   const [dark, setDark] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const inbox = useApprovalInbox(user?.username);
+
+  useEffect(() => {
+    void router.preloadRoute({ to: "/assistant" });
+  }, [router]);
 
   useEffect(() => {
     const stored = localStorage.getItem("po-theme");
@@ -263,7 +273,7 @@ export function AppShell() {
     return (
       <div className="h-dvh overflow-hidden bg-background">
         <main className="h-full w-full overflow-hidden" id="main-content">
-          <Outlet />
+          {assistantLoading ? <AssistantShellSkeleton /> : <Outlet />}
         </main>
       </div>
     );

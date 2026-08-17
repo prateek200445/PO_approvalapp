@@ -48,8 +48,10 @@ export function ChatAssistant() {
   const [mockMode, setMockMode] = useState(() =>
     typeof window !== "undefined" ? isChatMockEnabled() : false,
   );
-  const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const pendingScrollQuestionId = useRef<string | null>(null);
+  const userScrolledAway = useRef(false);
   const hydrated = useRef(false);
 
   const firstName = user?.name?.split(" ")[0] ?? "there";
@@ -79,36 +81,51 @@ export function ChatAssistant() {
     saveChatSession(messages);
   }, [messages]);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const run = () => {
-      el.scrollTo({ top: el.scrollHeight, behavior });
+  const scrollToMessage = useCallback(
+    (messageId: string, behavior: ScrollBehavior = "auto", force = false) => {
+      if (!force && userScrolledAway.current) return;
+
+      const container = scrollRef.current;
+      const el = messageRefs.current.get(messageId);
+      if (!container || !el) return;
+
+      const topPadding = 12;
+      const offset =
+        el.getBoundingClientRect().top -
+        container.getBoundingClientRect().top +
+        container.scrollTop -
+        topPadding;
+      container.scrollTo({ top: Math.max(0, offset), behavior });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const onUserScroll = () => {
+      userScrolledAway.current = true;
     };
-    // Result cards grow after paint — scroll twice so loading/answer stays above input
-    requestAnimationFrame(() => {
-      run();
-      requestAnimationFrame(run);
-    });
-    window.setTimeout(run, 120);
+
+    container.addEventListener("wheel", onUserScroll, { passive: true });
+    container.addEventListener("touchmove", onUserScroll, { passive: true });
+    return () => {
+      container.removeEventListener("wheel", onUserScroll);
+      container.removeEventListener("touchmove", onUserScroll);
+    };
   }, []);
 
+  // Scroll to the question once right after send (before answer card expands).
   useEffect(() => {
-    scrollToBottom(loading ? "auto" : "smooth");
-  }, [messages, loading, scrollToBottom]);
+    const questionId = pendingScrollQuestionId.current;
+    if (!questionId) return;
 
-  // Keep pinned to bottom while result cards (tables) grow after paint
-  useEffect(() => {
-    const el = scrollRef.current;
-    const content = el?.firstElementChild;
-    if (!el || !content) return;
-    const ro = new ResizeObserver(() => {
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
-      if (nearBottom || loading) el.scrollTop = el.scrollHeight;
+    pendingScrollQuestionId.current = null;
+    requestAnimationFrame(() => {
+      scrollToMessage(questionId, "auto", true);
     });
-    ro.observe(content);
-    return () => ro.disconnect();
-  }, [loading, messages.length]);
+  }, [messages.length, scrollToMessage]);
 
   const recentQuestions = useMemo(
     () => history.map((h) => h.question).slice(0, 6),
@@ -144,6 +161,8 @@ export function ChatAssistant() {
       };
 
       setMessages((prev) => [...prev, userMsg, pendingMsg]);
+      userScrolledAway.current = false;
+      pendingScrollQuestionId.current = userMsg.id;
       setInput("");
       setLoading(true);
       setHistory(pushChatHistory(trimmed));
@@ -258,7 +277,7 @@ export function ChatAssistant() {
         <div className="relative flex min-w-0 flex-1 flex-col bg-background/80">
           <div
             ref={scrollRef}
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]"
           >
             <div className="mx-auto max-w-3xl space-y-6 px-4 py-6 pb-8 md:px-6 md:py-8">
               {!hasMessages && (
@@ -270,15 +289,22 @@ export function ChatAssistant() {
               )}
 
               {messages.map((message) => (
-                <ChatMessageBubble
+                <div
                   key={message.id}
-                  message={message}
-                  selected={selectedId === message.id}
-                  onSelect={() => selectMessage(message.id)}
-                  onFollowUp={handlePromptSelect}
-                />
+                  className="[overflow-anchor:none]"
+                  ref={(node) => {
+                    if (node) messageRefs.current.set(message.id, node);
+                    else messageRefs.current.delete(message.id);
+                  }}
+                >
+                  <ChatMessageBubble
+                    message={message}
+                    selected={selectedId === message.id}
+                    onSelect={() => selectMessage(message.id)}
+                    onFollowUp={handlePromptSelect}
+                  />
+                </div>
               ))}
-              <div ref={bottomRef} className="h-px w-full shrink-0" aria-hidden />
             </div>
           </div>
 
