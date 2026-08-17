@@ -1,0 +1,328 @@
+{
+  "amountDivisor": 100000,
+  "schedules": [
+    {
+      "note": "3",
+      "title": "Share capital",
+      "groups": [
+        "28,098,189 (previous year: 28,098,189) equity shares of Rs. 10 each fully paid up",
+        "100,000 (previous year: 100,000) 'Class A' Ordinary Shares of Rs. 10 each fully paid up"
+      ]
+    },
+    {
+      "note": "4",
+      "title": "Reserves and surplus",
+      "groups": [
+        "Profit & Loss Account",
+        "Securities premium Balance at the beginning and at the end of the year"
+      ]
+    },
+    {
+      "note": "5",
+      "title": "Long term borrowings",
+      "groups": [
+        "Indian rupee term loan from banks",
+        "Vehicle loan",
+        "Loans from others (unsecured)",
+        "Other Long term loans"
+      ]
+    },
+    {
+      "note": "6",
+      "title": "Deferred tax liabilities (net)",
+      "groups": ["Deferred tax liability (net)"]
+    },
+    {
+      "note": "7",
+      "title": "Provisions",
+      "groups": [
+        "Provision for leave benefits",
+        "Provision for gratuity",
+        "Provision for Expenses"
+      ]
+    },
+    {
+      "note": "8",
+      "title": "Short term borrowings",
+      "groups": ["Working capital facilities", "EDFS facility"]
+    },
+    {
+      "note": "9",
+      "title": "Trade payables",
+      "groups": [
+        "Total outstanding dues of creditors other than micro and small enterprise",
+        "Bill of Exchange"
+      ]
+    },
+    {
+      "note": "10",
+      "title": "Other current liabilities",
+      "groups": [
+        "Statutory dues payable",
+        "Employee benefits payable",
+        "Other Payables",
+        "Advance from customers",
+        "Creditors for capital goods",
+        "Interest accrued but not due on borrowings"
+      ]
+    },
+    {
+      "note": "11",
+      "title": "Property, plant & equipments / Intangible / CWIP",
+      "groups": [
+        "Property, plant & equipments",
+        "Intangible Assets",
+        "Assets under development",
+        "Depreciation Expenses"
+      ]
+    },
+    {
+      "note": "12",
+      "title": "Investments",
+      "groups": [
+        "Investment in subsidiary - Oliva Gardens S.A.",
+        "Investment in OGPS Power Gujarat Private Limited",
+        "Investment in Gopala Polyplast Limited",
+        "Investment in Oswal Extrusion Limited"
+      ]
+    },
+    {
+      "note": "13",
+      "title": "Loans and advances",
+      "groups": [
+        "Capital advances (Unsecured considered good)",
+        "Security deposits (Unsecured considered good)",
+        "Advance for supply of goods and rendering of services",
+        "Advance tax and Tax deducted at source (net of provision for tax)",
+        "Taxes paid under dispute",
+        "MAT credit entitlement",
+        "Pre-paid expenses",
+        "Advances to employees",
+        "Other advances",
+        "GST receivable",
+        "Interunit Balances"
+      ]
+    },
+    {
+      "note": "14",
+      "title": "Other assets",
+      "groups": [
+        "Deposits with remaining maturity of more than 12 months",
+        "Export incentives receivable",
+        "Interest accrued on fixed deposits",
+        "Insurance claim receivable"
+      ]
+    },
+    {
+      "note": "15",
+      "title": "Inventories",
+      "groups": ["Inventory"]
+    },
+    {
+      "note": "16",
+      "title": "Trade receivables",
+      "groups": ["Other receivable ( unsecured, considered good)"]
+    },
+    {
+      "note": "17",
+      "title": "Cash and bank balances",
+      "groups": ["Cash on hand", "In current accounts"]
+    },
+    {
+      "note": "18",
+      "title": "Revenue from operations",
+      "groups": [
+        "Domestic Sales",
+        "Export Sales",
+        "Income from Job work charges",
+        "Sale of scrap",
+        "Commission income",
+        "Export incentives",
+        "Gain on foreign currency (net)",
+        "Interest from customers",
+        "Exchange rate difference, net (finance)",
+        "Branch transfer"
+      ]
+    },
+    {
+      "note": "19",
+      "title": "Other income",
+      "groups": [
+        "Interest from Bank deposits",
+        "Rent Income",
+        "Profit  on Sale of property, plant and equipment",
+        "Liabilities no longer required written back",
+        "Other non-operating income"
+      ]
+    },
+    {
+      "note": "20",
+      "title": "Cost of raw material and components consumed",
+      "groups": [
+        "Add : Purchase of Raw Material",
+        "Add : Purchase of Packing Material",
+        "Add : Purchase Expenses",
+        "Inventory"
+      ]
+    },
+    {
+      "note": "21",
+      "title": "Purchase of traded goods",
+      "groups": ["Add : Purchase of Traded Goods", "Add : Purchase of traded goods"]
+    },
+    {
+      "note": "22",
+      "title": "Changes in inventories",
+      "groups": ["Add: Purchase of Stores, Spares & Consumables"]
+    },
+    {
+      "note": "23",
+      "title": "Employee benefits expenses",
+      "groups": [
+        "Salaries, wages and bonus",
+        "Contribution to provident and other funds",
+        "Gratuity expense",
+        "Staff welfare expenses"
+      ]
+    },
+    {
+      "note": "24",
+      "title": "Finance costs",
+      "groups": [
+        "On working capital loans from banks",
+        "On other secured loans from banks",
+        "Other interest",
+        "Bank charges and Commission"
+      ]
+    },
+    {
+      "note": "25",
+      "title": "Other expenses",
+      "groups": [
+        "Power and fuel",
+        "- Plant & machinery",
+        "- Building",
+        "- Others",
+        "Labour job work charges",
+        "Water charges",
+        "Testing charges",
+        "Rental expense",
+        "Security and housekeeping expenses",
+        "Postage & courier expenses",
+        "Selling and distribution expenses",
+        "Rates and taxes",
+        "Insurance",
+        "Electricity expenses",
+        "Legal and professional charges",
+        "Printing and stationery expenses",
+        "Corporate Social Responsibility",
+        "Income Tax Expenses",
+        "Communication expenses",
+        "Auditors' remuneration (refer note below)",
+        "Directors' remuneration (refer note below)",
+        "Balance Written Off",
+        "Miscellaneous expenses"
+      ]
+    }
+  ],
+  "groupNature": {
+    "28,098,189 (previous year: 28,098,189) equity shares of Rs. 10 each fully paid up": "equity",
+    "100,000 (previous year: 100,000) 'Class A' Ordinary Shares of Rs. 10 each fully paid up": "equity",
+    "Profit & Loss Account": "equity",
+    "Securities premium Balance at the beginning and at the end of the year": "equity",
+    "Indian rupee term loan from banks": "liability",
+    "Vehicle loan": "liability",
+    "Loans from others (unsecured)": "liability",
+    "Other Long term loans": "liability",
+    "Deferred tax liability (net)": "liability",
+    "Provision for leave benefits": "liability",
+    "Provision for gratuity": "liability",
+    "Provision for Expenses": "liability",
+    "Working capital facilities": "liability",
+    "EDFS facility": "liability",
+    "Total outstanding dues of creditors other than micro and small enterprise": "liability",
+    "Bill of Exchange": "liability",
+    "Statutory dues payable": "liability",
+    "Employee benefits payable": "liability",
+    "Other Payables": "liability",
+    "Advance from customers": "liability",
+    "Creditors for capital goods": "liability",
+    "Interest accrued but not due on borrowings": "liability",
+    "Domestic Sales": "income",
+    "Export Sales": "income",
+    "Income from Job work charges": "income",
+    "Sale of scrap": "income",
+    "Commission income": "income",
+    "Export incentives": "income",
+    "Gain on foreign currency (net)": "income",
+    "Interest from customers": "income",
+    "Exchange rate difference, net (finance)": "income",
+    "Branch transfer": "income",
+    "Interest from Bank deposits": "income",
+    "Rent Income": "income",
+    "Profit  on Sale of property, plant and equipment": "income",
+    "Liabilities no longer required written back": "income",
+    "Other non-operating income": "income"
+  },
+  "balanceSheet": {
+    "sections": [
+      {
+        "title": "Equity and liabilities",
+        "lines": [
+          { "label": "Shareholders' funds", "type": "header" },
+          { "label": "Share capital", "note": "3", "groups": ["28,098,189 (previous year: 28,098,189) equity shares of Rs. 10 each fully paid up", "100,000 (previous year: 100,000) 'Class A' Ordinary Shares of Rs. 10 each fully paid up"], "nature": "equity" },
+          { "label": "Reserves and surplus", "note": "4", "groups": ["Profit & Loss Account", "Securities premium Balance at the beginning and at the end of the year"], "nature": "equity" },
+          { "label": "Non-current liabilities", "type": "header" },
+          { "label": "Long term borrowings", "note": "5", "groups": ["Indian rupee term loan from banks", "Vehicle loan", "Loans from others (unsecured)", "Other Long term loans"], "nature": "liability" },
+          { "label": "Deferred tax liabilities (net)", "note": "6", "groups": ["Deferred tax liability (net)"], "nature": "liability" },
+          { "label": "Long-term provisions", "note": "7", "groups": ["Provision for leave benefits", "Provision for gratuity"], "nature": "liability" },
+          { "label": "Current liabilities", "type": "header" },
+          { "label": "Short term borrowings", "note": "8", "groups": ["Working capital facilities", "EDFS facility"], "nature": "liability" },
+          { "label": "Total outstanding dues of micro and small enterprise", "note": "9", "groups": [], "nature": "liability" },
+          { "label": "Total outstanding dues of creditors other than micro and small enterprise", "note": "9", "groups": ["Total outstanding dues of creditors other than micro and small enterprise", "Bill of Exchange"], "nature": "liability" },
+          { "label": "Other current liabilities", "note": "10", "groups": ["Statutory dues payable", "Employee benefits payable", "Other Payables", "Advance from customers", "Creditors for capital goods", "Interest accrued but not due on borrowings"], "nature": "liability" },
+          { "label": "Short-term provisions", "note": "7", "groups": ["Provision for Expenses"], "nature": "liability" }
+        ]
+      },
+      {
+        "title": "Assets",
+        "lines": [
+          { "label": "Non-current assets", "type": "header" },
+          { "label": "Property, plant & equipments", "note": "11", "groups": ["Property, plant & equipments"], "nature": "asset" },
+          { "label": "Intangible assets", "note": "11", "groups": ["Intangible Assets"], "nature": "asset" },
+          { "label": "Capital Work in Progress", "note": "11", "groups": ["Assets under development"], "nature": "asset" },
+          { "label": "Non-current investments", "note": "12", "groups": ["Investment in subsidiary - Oliva Gardens S.A.", "Investment in OGPS Power Gujarat Private Limited", "Investment in Gopala Polyplast Limited", "Investment in Oswal Extrusion Limited"], "nature": "asset" },
+          { "label": "Loans and advances", "note": "13", "groups": ["Capital advances (Unsecured considered good)", "Security deposits (Unsecured considered good)", "Taxes paid under dispute"], "nature": "asset" },
+          { "label": "Other non-current assets", "note": "14", "groups": ["Deposits with remaining maturity of more than 12 months", "Insurance claim receivable"], "nature": "asset" },
+          { "label": "Current assets", "type": "header" },
+          { "label": "Inventories", "note": "15", "groups": ["Inventory"], "nature": "asset" },
+          { "label": "Trade receivables", "note": "16", "groups": ["Other receivable ( unsecured, considered good)"], "nature": "asset" },
+          { "label": "Cash and bank balances", "note": "17", "groups": ["Cash on hand", "In current accounts"], "nature": "asset" },
+          { "label": "Loans and advances", "note": "13", "groups": ["Advance for supply of goods and rendering of services", "Advance tax and Tax deducted at source (net of provision for tax)", "MAT credit entitlement", "Pre-paid expenses", "Advances to employees", "Other advances", "GST receivable", "Interunit Balances"], "nature": "asset" },
+          { "label": "Other current assets", "note": "14", "groups": ["Export incentives receivable", "Interest accrued on fixed deposits"], "nature": "asset" }
+        ]
+      }
+    ]
+  },
+  "profitLoss": {
+    "lines": [
+      { "label": "Income", "type": "header" },
+      { "label": "Revenue from operations", "note": "18", "groups": ["Domestic Sales", "Export Sales"], "nature": "income" },
+      { "label": "Sale of services", "note": "18", "groups": ["Income from Job work charges"], "nature": "income" },
+      { "label": "Other operating revenue", "note": "18", "groups": ["Sale of scrap", "Commission income", "Export incentives", "Gain on foreign currency (net)", "Interest from customers", "Exchange rate difference, net (finance)", "Branch transfer"], "nature": "income" },
+      { "label": "Total Revenue from operations", "type": "subtotal", "sumLabels": ["Revenue from operations", "Sale of services", "Other operating revenue"] },
+      { "label": "Other income", "note": "19", "groups": ["Interest from Bank deposits", "Rent Income", "Profit  on Sale of property, plant and equipment", "Liabilities no longer required written back", "Other non-operating income"], "nature": "income" },
+      { "label": "Total revenue (I+II)", "type": "subtotal", "sumLabels": ["Total Revenue from operations", "Other income"] },
+      { "label": "Expenses", "type": "header" },
+      { "label": "Cost of raw material and components consumed", "note": "20", "groups": ["Add : Purchase of Raw Material", "Add : Purchase of Packing Material", "Add : Purchase Expenses", "Inventory"], "nature": "expense" },
+      { "label": "Purchase of traded goods", "note": "21", "groups": ["Add : Purchase of Traded Goods", "Add : Purchase of traded goods"], "nature": "expense" },
+      { "label": "Changes in inventories of finished goods, work-in-progress and stock-in-trade", "note": "22", "groups": ["Add: Purchase of Stores, Spares & Consumables"], "nature": "expense" },
+      { "label": "Employee benefits expenses", "note": "23", "groups": ["Salaries, wages and bonus", "Contribution to provident and other funds", "Gratuity expense", "Staff welfare expenses"], "nature": "expense" },
+      { "label": "Depreciation and amortization expenses", "note": "11", "groups": ["Depreciation Expenses"], "nature": "expense" },
+      { "label": "Finance costs", "note": "24", "groups": ["On working capital loans from banks", "On other secured loans from banks", "Other interest", "Bank charges and Commission"], "nature": "expense" },
+      { "label": "Other expenses", "note": "25", "groups": ["Power and fuel", "- Plant & machinery", "- Building", "- Others", "Labour job work charges", "Water charges", "Testing charges", "Rental expense", "Security and housekeeping expenses", "Postage & courier expenses", "Selling and distribution expenses", "Rates and taxes", "Insurance", "Electricity expenses", "Legal and professional charges", "Printing and stationery expenses", "Corporate Social Responsibility", "Income Tax Expenses", "Communication expenses", "Auditors' remuneration (refer note below)", "Directors' remuneration (refer note below)", "Balance Written Off", "Miscellaneous expenses"], "nature": "expense" },
+      { "label": "Total expenses", "type": "subtotal", "sumLabels": ["Cost of raw material and components consumed", "Purchase of traded goods", "Changes in inventories of finished goods, work-in-progress and stock-in-trade", "Employee benefits expenses", "Depreciation and amortization expenses", "Finance costs", "Other expenses"] },
+      { "label": "Profit before tax", "type": "formula", "formula": "totalRevenue - totalExpenses" }
+    ]
+  }
+}

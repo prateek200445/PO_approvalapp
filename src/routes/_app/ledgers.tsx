@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeftRight, BookOpen, ChevronRight } from "lucide-react";
+import { ArrowLeftRight, BookOpen, ChevronRight, FileSpreadsheet } from "lucide-react";
 
 export const Route = createFileRoute("/_app/ledgers")({
   head: () => ({ meta: [{ title: "Ledgers — PO Portal" }] }),
@@ -28,6 +28,12 @@ function LedgersHubPage() {
           icon={ArrowLeftRight}
           title="Ledger Reconciliation"
           description="Upload two company Excel ledgers and match Bill No + Bill Date (with voucher-date fallback)."
+        />
+        <HubCard
+          to="/financial-statements"
+          icon={FileSpreadsheet}
+          title="Financial Statements"
+          description="Upload trial balance to auto-generate schedules, balance sheet, and profit & loss."
         />
       </div>
     </div>

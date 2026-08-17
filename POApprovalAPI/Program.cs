@@ -1,4 +1,5 @@
 using POApprovalAPI.Services;
+using POApprovalAPI.Services.FinancialStatements;
 using QuestPDF.Infrastructure;
 using POApprovalAPI.Interfaces;
 
@@ -73,6 +74,11 @@ builder.Services.AddScoped<SalesDashboardService>();
 builder.Services.AddScoped<ExcelLedgerService>();
 builder.Services.AddScoped<BillWiseTransactionService>();
 builder.Services.AddScoped<LedgerSummaryService>();
+builder.Services.AddSingleton<FinancialStatementTemplateStore>();
+builder.Services.AddScoped<LedgerGroupMappingService>();
+builder.Services.AddScoped<TrialBalanceExcelService>();
+builder.Services.AddScoped<FinancialStatementEngine>();
+builder.Services.AddScoped<FinancialStatementService>();
 builder.Services.AddScoped<BomService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());

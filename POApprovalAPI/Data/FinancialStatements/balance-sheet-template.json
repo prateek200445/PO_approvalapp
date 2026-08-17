@@ -1,0 +1,112 @@
+[
+  {
+    "label": "Share capital",
+    "note": "3",
+    "indent": 0
+  },
+  {
+    "label": "Reserves and surplus",
+    "note": "4",
+    "indent": 0
+  },
+  {
+    "label": "Long term borrowings",
+    "note": "5",
+    "indent": 0
+  },
+  {
+    "label": "Deferred tax liabilities (net)",
+    "note": "6",
+    "indent": 0
+  },
+  {
+    "label": "Other long-term liabilities",
+    "note": "",
+    "indent": 0
+  },
+  {
+    "label": "Long-term provisions",
+    "note": "7",
+    "indent": 0
+  },
+  {
+    "label": "Short term borrowings",
+    "note": "8",
+    "indent": 0
+  },
+  {
+    "label": "Total outstanding dues of micro and small enterprise",
+    "note": "",
+    "indent": 0
+  },
+  {
+    "label": "Total outstanding dues of creditors other than micro and small enterprise",
+    "note": "",
+    "indent": 0
+  },
+  {
+    "label": "Other current liabilities",
+    "note": "10",
+    "indent": 0
+  },
+  {
+    "label": "Short-term provisions",
+    "note": "7",
+    "indent": 0
+  },
+  {
+    "label": "Property, plant & equipments",
+    "note": "11",
+    "indent": 0
+  },
+  {
+    "label": "Intangible assets",
+    "note": "11",
+    "indent": 0
+  },
+  {
+    "label": "Capital Work in Progress",
+    "note": "11",
+    "indent": 0
+  },
+  {
+    "label": "Loans and advances",
+    "note": "13",
+    "indent": 0
+  },
+  {
+    "label": "Other non-current assets",
+    "note": "14",
+    "indent": 0
+  },
+  {
+    "label": "Deferred tax Asset",
+    "note": "",
+    "indent": 0
+  },
+  {
+    "label": "Inventories",
+    "note": "15",
+    "indent": 0
+  },
+  {
+    "label": "Trade receivables",
+    "note": "16",
+    "indent": 0
+  },
+  {
+    "label": "Cash and bank balances",
+    "note": "17",
+    "indent": 0
+  },
+  {
+    "label": "Loans and advances",
+    "note": "13",
+    "indent": 0
+  },
+  {
+    "label": "Other current assets",
+    "note": "14",
+    "indent": 0
+  }
+]

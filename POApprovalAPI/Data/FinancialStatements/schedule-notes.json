@@ -1,0 +1,419 @@
+[
+  {
+    "note": "3",
+    "title": "Share capital & Reserves",
+    "sheet": "3 & 4",
+    "lines": [
+      {
+        "group": "28,098,189 (previous year: 28,098,189) equity shares of Rs. 10 each fully paid up",
+        "label": "28,098,189 (previous year: 28,098,189) equity shares of Rs. 10 each fully paid up"
+      },
+      {
+        "group": "100,000 (previous year: 100,000) 'Class A' Ordinary Shares of Rs. 10 each fully paid up",
+        "label": "100,000 (previous year: 100,000) 'Class A' Ordinary Shares of Rs. 10 each fully paid up"
+      }
+    ]
+  },
+  {
+    "note": "5",
+    "title": "Long term borrowings & DTL",
+    "sheet": "5 to 6",
+    "lines": [
+      {
+        "group": "Indian rupee term loan from banks",
+        "label": "Indian rupee term loan from banks"
+      },
+      {
+        "group": "Vehicle loan",
+        "label": "Vehicle loan"
+      },
+      {
+        "group": "Other Long term loans",
+        "label": "Other Long term loans"
+      },
+      {
+        "group": "Loans from others (unsecured)",
+        "label": "Loans from others (unsecured)"
+      },
+      {
+        "group": "Deferred tax liability (net)",
+        "label": "Deferred tax liability (net)"
+      }
+    ]
+  },
+  {
+    "note": "7",
+    "title": "Provisions, ST borrowings, Trade payables, OCL",
+    "sheet": "7 to 10",
+    "lines": [
+      {
+        "group": "Provision for leave benefits",
+        "label": "Provision for leave benefits"
+      },
+      {
+        "group": "Provision for gratuity",
+        "label": "Provision for gratuity"
+      },
+      {
+        "group": "Provision for Expenses",
+        "label": "Provision for Expenses"
+      },
+      {
+        "group": "Working capital facilities",
+        "label": "Working capital facilities"
+      },
+      {
+        "group": "EDFS facility",
+        "label": "EDFS facility"
+      },
+      {
+        "group": "Total outstanding dues of creditors other than micro and small enterprise",
+        "label": "Total outstanding dues of creditors other than micro and small enterprise"
+      },
+      {
+        "group": "Bill of Exchange",
+        "label": "Bill of Exchange"
+      },
+      {
+        "group": "Interest accrued but not due on borrowings",
+        "label": "Interest accrued but not due on borrowings"
+      },
+      {
+        "group": "Advance from customers",
+        "label": "Advance from customers"
+      },
+      {
+        "group": "Creditors for capital goods",
+        "label": "Creditors for capital goods"
+      },
+      {
+        "group": "Statutory dues payable",
+        "label": "Statutory dues payable"
+      },
+      {
+        "group": "Other Payables",
+        "label": "Other Payables"
+      },
+      {
+        "group": "Employee benefits payable",
+        "label": "Employee benefits payable"
+      }
+    ]
+  },
+  {
+    "note": "12",
+    "title": "Investments, Loans, Other assets, Inventories",
+    "sheet": "12 to 15",
+    "lines": [
+      {
+        "group": "Investment in subsidiary - Oliva Gardens S.A.",
+        "label": "Investment in subsidiary - Oliva Gardens S.A."
+      },
+      {
+        "group": "Investment in OGPS Power Gujarat Private Limited",
+        "label": "Investment in OGPS Power Gujarat Private Limited"
+      },
+      {
+        "group": "Investment in Gopala Polyplast Limited",
+        "label": "Investment in Gopala Polyplast Limited"
+      },
+      {
+        "group": "Investment in Oswal Extrusion Limited",
+        "label": "Investment in Oswal Extrusion Limited"
+      },
+      {
+        "group": "Capital advances (Unsecured considered good)",
+        "label": "Capital advances (Unsecured considered good)"
+      },
+      {
+        "group": "Security deposits (Unsecured considered good)",
+        "label": "Security deposits (Unsecured considered good)"
+      },
+      {
+        "group": "Advance for supply of goods and rendering of services",
+        "label": "Advance for supply of goods and rendering of services"
+      },
+      {
+        "group": "Advance tax and Tax deducted at source (net of provision for tax)",
+        "label": "Advance tax and Tax deducted at source (net of provision for tax)"
+      },
+      {
+        "group": "Taxes paid under dispute",
+        "label": "Taxes paid under dispute"
+      },
+      {
+        "group": "MAT credit entitlement",
+        "label": "MAT credit entitlement"
+      },
+      {
+        "group": "Pre-paid expenses",
+        "label": "Pre-paid expenses"
+      },
+      {
+        "group": "Advances to employees",
+        "label": "Advances to employees"
+      },
+      {
+        "group": "Other advances",
+        "label": "Other advances"
+      },
+      {
+        "group": "Interunit Balances",
+        "label": "Interunit Balances"
+      },
+      {
+        "group": "GST receivable",
+        "label": "GST receivable"
+      },
+      {
+        "group": "Export incentives receivable",
+        "label": "Export incentives receivable"
+      },
+      {
+        "group": "Interest accrued on fixed deposits",
+        "label": "Interest accrued on fixed deposits"
+      },
+      {
+        "group": "Insurance claim receivable",
+        "label": "Insurance claim receivable"
+      }
+    ]
+  },
+  {
+    "note": "16",
+    "title": "Trade receivables & Cash",
+    "sheet": "16 & 17",
+    "lines": [
+      {
+        "group": "Other receivable ( unsecured, considered good)",
+        "label": "Other receivable ( unsecured, considered good)"
+      },
+      {
+        "group": "Cash on hand",
+        "label": "Cash on hand"
+      },
+      {
+        "group": "In current accounts",
+        "label": "In current accounts"
+      },
+      {
+        "group": "Deposits with remaining maturity of more than 12 months",
+        "label": "Deposits with remaining maturity of more than 12 months"
+      }
+    ]
+  },
+  {
+    "note": "18",
+    "title": "Revenue, Expenses",
+    "sheet": "18 to 24",
+    "lines": [
+      {
+        "group": "Domestic Sales",
+        "label": "Domestic Sales"
+      },
+      {
+        "group": "Export Sales",
+        "label": "Export Sales"
+      },
+      {
+        "group": "Income from Job work charges",
+        "label": "Income from Job work charges"
+      },
+      {
+        "group": "Sale of scrap",
+        "label": "Sale of scrap"
+      },
+      {
+        "group": "Commission income",
+        "label": "Commission income"
+      },
+      {
+        "group": "Export incentives",
+        "label": "Export incentives"
+      },
+      {
+        "group": "Gain on foreign currency (net)",
+        "label": "Gain on foreign currency (net)"
+      },
+      {
+        "group": "Interest from customers",
+        "label": "Interest from customers"
+      },
+      {
+        "group": "Interest from Bank deposits",
+        "label": "Interest from Bank deposits"
+      },
+      {
+        "group": "Rent Income",
+        "label": "Rent Income"
+      },
+      {
+        "group": "Profit  on Sale of property, plant and equipment",
+        "label": "Profit  on Sale of property, plant and equipment"
+      },
+      {
+        "group": "Liabilities no longer required written back",
+        "label": "Liabilities no longer required written back"
+      },
+      {
+        "group": "Exchange rate difference, net (finance)",
+        "label": "Exchange rate difference, net (finance)"
+      },
+      {
+        "group": "Other non-operating income",
+        "label": "Other non-operating income"
+      },
+      {
+        "group": "Add : Purchase of Raw Material",
+        "label": "Add : Purchase of Raw Material"
+      },
+      {
+        "group": "Add : Purchase of Packing Material",
+        "label": "Add : Purchase of Packing Material"
+      },
+      {
+        "group": "Add : Purchase Expenses",
+        "label": "Add : Purchase Expenses"
+      },
+      {
+        "group": "Add : Purchase of traded goods",
+        "label": "Add : Purchase of traded goods"
+      },
+      {
+        "group": "Salaries, wages and bonus",
+        "label": "Salaries, wages and bonus"
+      },
+      {
+        "group": "Contribution to provident and other funds",
+        "label": "Contribution to provident and other funds"
+      },
+      {
+        "group": "Gratuity expense",
+        "label": "Gratuity expense"
+      },
+      {
+        "group": "Staff welfare expenses",
+        "label": "Staff welfare expenses"
+      },
+      {
+        "group": "On working capital loans from banks",
+        "label": "On working capital loans from banks"
+      },
+      {
+        "group": "On other secured loans from banks",
+        "label": "On other secured loans from banks"
+      },
+      {
+        "group": "Other interest",
+        "label": "Other interest"
+      },
+      {
+        "group": "Bank charges and Commission",
+        "label": "Bank charges and Commission"
+      }
+    ]
+  },
+  {
+    "note": "25",
+    "title": "Other expenses & EPS",
+    "sheet": "25 to 28",
+    "lines": [
+      {
+        "group": "Power and fuel",
+        "label": "Power and fuel"
+      },
+      {
+        "group": "- Plant & machinery",
+        "label": "- Plant & machinery"
+      },
+      {
+        "group": "- Building",
+        "label": "- Building"
+      },
+      {
+        "group": "- Others",
+        "label": "- Others"
+      },
+      {
+        "group": "Labour job work charges",
+        "label": "Labour job work charges"
+      },
+      {
+        "group": "Add: Purchase of Stores, Spares & Consumables",
+        "label": "Add: Purchase of Stores, Spares & Consumables"
+      },
+      {
+        "group": "Water charges",
+        "label": "Water charges"
+      },
+      {
+        "group": "Testing charges",
+        "label": "Testing charges"
+      },
+      {
+        "group": "Rental expense",
+        "label": "Rental expense"
+      },
+      {
+        "group": "Security and housekeeping expenses",
+        "label": "Security and housekeeping expenses"
+      },
+      {
+        "group": "Postage & courier expenses",
+        "label": "Postage & courier expenses"
+      },
+      {
+        "group": "Selling and distribution expenses",
+        "label": "Selling and distribution expenses"
+      },
+      {
+        "group": "Rates and taxes",
+        "label": "Rates and taxes"
+      },
+      {
+        "group": "Insurance",
+        "label": "Insurance"
+      },
+      {
+        "group": "Electricity expenses",
+        "label": "Electricity expenses"
+      },
+      {
+        "group": "Legal and professional charges",
+        "label": "Legal and professional charges"
+      },
+      {
+        "group": "Printing and stationery expenses",
+        "label": "Printing and stationery expenses"
+      },
+      {
+        "group": "Corporate Social Responsibility",
+        "label": "Corporate Social Responsibility"
+      },
+      {
+        "group": "Income Tax Expenses",
+        "label": "Income Tax Expenses"
+      },
+      {
+        "group": "Communication expenses",
+        "label": "Communication expenses"
+      },
+      {
+        "group": "Auditors' remuneration (refer note below)",
+        "label": "Auditors' remuneration (refer note below)"
+      },
+      {
+        "group": "Directors' remuneration (refer note below)",
+        "label": "Directors' remuneration (refer note below)"
+      },
+      {
+        "group": "Balance Written Off",
+        "label": "Balance Written Off"
+      },
+      {
+        "group": "Miscellaneous expenses",
+        "label": "Miscellaneous expenses"
+      }
+    ]
+  }
+]

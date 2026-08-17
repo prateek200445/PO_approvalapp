@@ -12,6 +12,7 @@ import {
   BarChart3,
   PanelLeftClose,
   PanelLeftOpen,
+  FileSpreadsheet,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useState } from "react";
@@ -86,7 +87,17 @@ export function AppShell() {
       to: "/ledgers",
       icon: BookOpen,
       label: "Ledgers",
-      match: (p: string) => p.startsWith("/ledgers") || p.startsWith("/ledger-summary") || p.startsWith("/reconciliation"),
+      match: (p: string) =>
+        p.startsWith("/ledgers") ||
+        p.startsWith("/ledger-summary") ||
+        p.startsWith("/reconciliation") ||
+        p.startsWith("/financial-statements"),
+    },
+    {
+      to: "/financial-statements",
+      icon: FileSpreadsheet,
+      label: "Financial Statements",
+      match: (p: string) => p.startsWith("/financial-statements"),
     },
     { to: "/profile", icon: User, label: "Profile", match: (p: string) => p.startsWith("/profile") || p.startsWith("/bom") },
   ];
