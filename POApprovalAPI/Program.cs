@@ -1,3 +1,4 @@
+using POApprovalAPI.Planning.Fibc;
 using POApprovalAPI.Services;
 using QuestPDF.Infrastructure;
 using POApprovalAPI.Interfaces;
@@ -74,6 +75,10 @@ builder.Services.AddScoped<ExcelLedgerService>();
 builder.Services.AddScoped<BillWiseTransactionService>();
 builder.Services.AddScoped<LedgerSummaryService>();
 builder.Services.AddScoped<BomService>();
+builder.Services.Configure<FibcPlanningOptions>(builder.Configuration.GetSection("FibcPlanning"));
+builder.Services.AddScoped<IFibcPlanningRepository, FibcPlanningRepository>();
+builder.Services.AddScoped<IFibcPlanningEngine, FibcPlanningEngine>();
+builder.Services.AddScoped<FibcPlanningService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();

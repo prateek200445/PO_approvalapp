@@ -26,10 +26,12 @@ import { Route as AppBomRouteImport } from './routes/_app/bom'
 import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
 import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
 import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
+import { Route as AppPlanningFibcRouteImport } from './routes/_app/planning/fibc'
 import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
 import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
 import { Route as AppBomCustomersRouteImport } from './routes/_app/bom.customers'
 import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
+import { Route as AppPlanningFibcIndexRouteImport } from './routes/_app/planning/fibc.index'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -115,6 +117,11 @@ const AppPoPoNoRoute = AppPoPoNoRouteImport.update({
   path: '/po/$poNo',
   getParentRoute: () => AppRoute,
 } as any)
+const AppPlanningFibcRoute = AppPlanningFibcRouteImport.update({
+  id: '/planning/fibc',
+  path: '/planning/fibc',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppPaymentPaymentNoRoute = AppPaymentPaymentNoRouteImport.update({
   id: '/payment/$paymentNo',
   path: '/payment/$paymentNo',
@@ -135,6 +142,11 @@ const AppBomSplatRoute = AppBomSplatRouteImport.update({
   path: '/$',
   getParentRoute: () => AppBomRoute,
 } as any)
+const AppPlanningFibcIndexRoute = AppPlanningFibcIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppPlanningFibcRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -154,9 +166,11 @@ export interface FileRoutesByFullPath {
   '/bom/customers': typeof AppBomCustomersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
+  '/planning/fibc': typeof AppPlanningFibcRouteWithChildren
   '/po/$poNo': typeof AppPoPoNoRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/bom/': typeof AppBomIndexRoute
+  '/planning/fibc/': typeof AppPlanningFibcIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -178,6 +192,7 @@ export interface FileRoutesByTo {
   '/po/$poNo': typeof AppPoPoNoRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/bom': typeof AppBomIndexRoute
+  '/planning/fibc': typeof AppPlanningFibcIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -199,9 +214,11 @@ export interface FileRoutesById {
   '/_app/bom/customers': typeof AppBomCustomersRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/_app/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
+  '/_app/planning/fibc': typeof AppPlanningFibcRouteWithChildren
   '/_app/po/$poNo': typeof AppPoPoNoRoute
   '/_app/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/_app/bom/': typeof AppBomIndexRoute
+  '/_app/planning/fibc/': typeof AppPlanningFibcIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -223,9 +240,11 @@ export interface FileRouteTypes {
     | '/bom/customers'
     | '/indent/$indentNo'
     | '/payment/$paymentNo'
+    | '/planning/fibc'
     | '/po/$poNo'
     | '/workorder/$poNo'
     | '/bom/'
+    | '/planning/fibc/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -247,6 +266,7 @@ export interface FileRouteTypes {
     | '/po/$poNo'
     | '/workorder/$poNo'
     | '/bom'
+    | '/planning/fibc'
   id:
     | '__root__'
     | '/'
@@ -267,9 +287,11 @@ export interface FileRouteTypes {
     | '/_app/bom/customers'
     | '/_app/indent/$indentNo'
     | '/_app/payment/$paymentNo'
+    | '/_app/planning/fibc'
     | '/_app/po/$poNo'
     | '/_app/workorder/$poNo'
     | '/_app/bom/'
+    | '/_app/planning/fibc/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -398,6 +420,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppPoPoNoRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/planning/fibc': {
+      id: '/_app/planning/fibc'
+      path: '/planning/fibc'
+      fullPath: '/planning/fibc'
+      preLoaderRoute: typeof AppPlanningFibcRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/payment/$paymentNo': {
       id: '/_app/payment/$paymentNo'
       path: '/payment/$paymentNo'
@@ -426,6 +455,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBomSplatRouteImport
       parentRoute: typeof AppBomRoute
     }
+    '/_app/planning/fibc/': {
+      id: '/_app/planning/fibc/'
+      path: '/'
+      fullPath: '/planning/fibc/'
+      preLoaderRoute: typeof AppPlanningFibcIndexRouteImport
+      parentRoute: typeof AppPlanningFibcRoute
+    }
   }
 }
 
@@ -444,6 +480,18 @@ const AppBomRouteChildren: AppBomRouteChildren = {
 const AppBomRouteWithChildren =
   AppBomRoute._addFileChildren(AppBomRouteChildren)
 
+interface AppPlanningFibcRouteChildren {
+  AppPlanningFibcIndexRoute: typeof AppPlanningFibcIndexRoute
+}
+
+const AppPlanningFibcRouteChildren: AppPlanningFibcRouteChildren = {
+  AppPlanningFibcIndexRoute: AppPlanningFibcIndexRoute,
+}
+
+const AppPlanningFibcRouteWithChildren = AppPlanningFibcRoute._addFileChildren(
+  AppPlanningFibcRouteChildren,
+)
+
 interface AppRouteChildren {
   AppBomRoute: typeof AppBomRouteWithChildren
   AppDashboardRoute: typeof AppDashboardRoute
@@ -459,6 +507,7 @@ interface AppRouteChildren {
   AppWorkordersRoute: typeof AppWorkordersRoute
   AppIndentIndentNoRoute: typeof AppIndentIndentNoRoute
   AppPaymentPaymentNoRoute: typeof AppPaymentPaymentNoRoute
+  AppPlanningFibcRoute: typeof AppPlanningFibcRouteWithChildren
   AppPoPoNoRoute: typeof AppPoPoNoRoute
   AppWorkorderPoNoRoute: typeof AppWorkorderPoNoRoute
 }
@@ -478,6 +527,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppWorkordersRoute: AppWorkordersRoute,
   AppIndentIndentNoRoute: AppIndentIndentNoRoute,
   AppPaymentPaymentNoRoute: AppPaymentPaymentNoRoute,
+  AppPlanningFibcRoute: AppPlanningFibcRouteWithChildren,
   AppPoPoNoRoute: AppPoPoNoRoute,
   AppWorkorderPoNoRoute: AppWorkorderPoNoRoute,
 }

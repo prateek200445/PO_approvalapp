@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { KeyRound, LogOut, Building2, Server, ArrowLeftRight, BookOpen, Phone, Mail, Layers } from "lucide-react";
+import { KeyRound, LogOut, Building2, Server, ArrowLeftRight, BookOpen, Phone, Mail, Layers, CalendarRange } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { ServerSettingsModal } from "@/components/ServerSettingsModal";
@@ -94,6 +94,18 @@ function Profile() {
               <div>
                 <span className="text-sm font-medium">BOM Report</span>
                 <p className="text-xs text-muted-foreground">Search, view PDFs & email BOMs</p>
+              </div>
+            </div>
+          </button>
+          <button
+            onClick={() => navigate({ to: "/planning/fibc" })}
+            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary cursor-pointer"
+          >
+            <div className="flex items-center gap-3">
+              <CalendarRange className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <span className="text-sm font-medium">FIBC Line Planning</span>
+                <p className="text-xs text-muted-foreground">View line capacity & slot grid (read-only)</p>
               </div>
             </div>
           </button>
