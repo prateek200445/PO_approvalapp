@@ -24,6 +24,8 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Sector } from "recha
 import { toast } from "sonner";
 import { getApiUrl } from "@/lib/api-config";
 import { cn } from "@/lib/utils";
+import { DatePickerField } from "@/components/DatePickerField";
+import { financialYearStart, toInputDate } from "@/lib/ledger-summary-types";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
@@ -72,6 +74,13 @@ const emptyMapping = (): LedgerColumnMapping => ({
 const RESULTS_PAGE_SIZE = 15;
 const HELP_TIP_STORAGE_KEY = "ledger-recon-help-tip-dismissed";
 
+function normalizeDateRange(from: string, to: string): { from: string; to: string } {
+  if (!from && !to) return { from: "", to: "" };
+  if (!from) return { from: to, to };
+  if (!to) return { from, to: from };
+  return from <= to ? { from, to } : { from: to, to: from };
+}
+
 type SortKey = "status" | "date" | "sideA" | "amountA" | "sideB" | "amountB" | "diff";
 type SortDir = "asc" | "desc";
 
@@ -111,6 +120,10 @@ function ReconciliationPage() {
   const [compareMode, setCompareMode] = useState<CompareMode>("db");
   const [companyA, setCompanyA] = useState("");
   const [companyB, setCompanyB] = useState("");
+  const [ledgerA, setLedgerA] = useState("");
+  const [ledgerB, setLedgerB] = useState("");
+  const [dateFrom, setDateFrom] = useState(financialYearStart());
+  const [dateTo, setDateTo] = useState(toInputDate(new Date()));
   const [comparing, setComparing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<ComparisonResult | null>(null);
@@ -221,9 +234,11 @@ function ReconciliationPage() {
   function validateMappings(): string | null {
     if (compareMode === "db") {
       if (!companyA.trim() || !companyB.trim()) return "Select both companies.";
+      if (!ledgerA.trim() || !ledgerB.trim()) return "Select a ledger for each company.";
       if (companyA.trim().toLowerCase() === companyB.trim().toLowerCase()) {
         return "Pick two different companies.";
       }
+      if (dateFrom && dateTo && dateFrom > dateTo) return "Start date must be on or before end date.";
       return null;
     }
     for (const [label, side] of [
@@ -267,12 +282,17 @@ function ReconciliationPage() {
     setComparing(true);
     try {
       if (compareMode === "db") {
+        const range = normalizeDateRange(dateFrom, dateTo);
         const res = await fetch(getApiUrl("/api/bill-wise/compare"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             companyA: companyA.trim(),
+            ledgerA: ledgerA.trim(),
             companyB: companyB.trim(),
+            ledgerB: ledgerB.trim(),
+            dateFrom: range.from || null,
+            dateTo: range.to || null,
             options,
           }),
         });
@@ -734,27 +754,51 @@ function ReconciliationPage() {
           {compareMode === "db" ? (
             <div className="space-y-4">
               <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-                <h2 className="text-sm font-semibold">Select two companies</h2>
+                <h2 className="text-sm font-semibold">Select company and ledger for each side</h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Type to search, then click a result. Ledgers are matched automatically from ERP.
+                  Pick the ERP company and the counterparty ledger in its books (e.g. Company A → ledger for Company B).
                 </p>
                 <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                  <CompanyCombobox
-                    label="Company A"
-                    value={companyA}
-                    onChange={setCompanyA}
-                  />
-                  <CompanyCombobox
-                    label="Company B"
-                    value={companyB}
-                    onChange={setCompanyB}
-                  />
+                  <div className="space-y-3 rounded-lg border border-border/60 bg-surface/30 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Side A</div>
+                    <CompanyCombobox
+                      label="Company A"
+                      value={companyA}
+                      onChange={(v) => {
+                        setCompanyA(v);
+                        setLedgerA("");
+                      }}
+                    />
+                    <LedgerSelect
+                      label="Ledger A"
+                      company={companyA}
+                      value={ledgerA}
+                      onChange={setLedgerA}
+                    />
+                  </div>
+                  <div className="space-y-3 rounded-lg border border-border/60 bg-surface/30 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Side B</div>
+                    <CompanyCombobox
+                      label="Company B"
+                      value={companyB}
+                      onChange={(v) => {
+                        setCompanyB(v);
+                        setLedgerB("");
+                      }}
+                    />
+                    <LedgerSelect
+                      label="Ledger B"
+                      company={companyB}
+                      value={ledgerB}
+                      onChange={setLedgerB}
+                    />
+                  </div>
                 </div>
               </div>
               <div className="flex justify-end">
                 <button
                   type="button"
-                  disabled={!companyA.trim() || !companyB.trim()}
+                  disabled={!companyA.trim() || !companyB.trim() || !ledgerA.trim() || !ledgerB.trim()}
                   onClick={() => setStep(2)}
                   className="inline-flex h-11 w-full items-center justify-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto"
                 >
@@ -797,18 +841,30 @@ function ReconciliationPage() {
         <div className="space-y-4">
           {compareMode === "db" ? (
             <div className="rounded-xl border border-border bg-card p-4 shadow-sm text-sm">
-              <div className="font-semibold">Companies</div>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2 text-xs text-muted-foreground">
-                <div>
-                  <span className="font-medium text-foreground">A:</span> {companyA}
+              <div className="font-semibold">Selection</div>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2 text-xs">
+                <div className="rounded-md border border-border/60 bg-surface/30 p-2.5">
+                  <div className="font-medium text-foreground">Side A</div>
+                  <div className="mt-1 text-muted-foreground">
+                    <span className="text-foreground">{companyA}</span>
+                    <span className="mx-1">→</span>
+                    <span className="text-foreground">{ledgerA}</span>
+                  </div>
                 </div>
-                <div>
-                  <span className="font-medium text-foreground">B:</span> {companyB}
+                <div className="rounded-md border border-border/60 bg-surface/30 p-2.5">
+                  <div className="font-medium text-foreground">Side B</div>
+                  <div className="mt-1 text-muted-foreground">
+                    <span className="text-foreground">{companyB}</span>
+                    <span className="mx-1">→</span>
+                    <span className="text-foreground">{ledgerB}</span>
+                  </div>
                 </div>
               </div>
-              <p className="mt-2 text-[11px] text-muted-foreground">
-                Matching party ledgers on each side will be resolved automatically when you compare.
-              </p>
+              {dateFrom && dateTo ? (
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  Date range: {dateFrom} to {dateTo} (Bill Date, else Voucher Date)
+                </p>
+              ) : null}
             </div>
           ) : (
             <div className="grid gap-4 lg:grid-cols-2">
@@ -835,6 +891,18 @@ function ReconciliationPage() {
               1) Match by Bill No first (including swapped formats), then compare opposite-signed totals. Date differences alone do not block a match. 2) Rows without Bill No fall back to Voucher Date. Unrelated Bill Nos never pair.
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              {compareMode === "db" ? (
+                <>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-muted-foreground">From date</span>
+                    <DatePickerField value={dateFrom} onChange={setDateFrom} placeholder="Start date" />
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="text-muted-foreground">To date</span>
+                    <DatePickerField value={dateTo} onChange={setDateTo} placeholder="End date" />
+                  </label>
+                </>
+              ) : null}
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-muted-foreground">Date tolerance (days)</span>
                 <input
@@ -1560,6 +1628,99 @@ function CompanyCombobox({
         </ul>
       )}
     </div>
+  );
+}
+
+function LedgerSelect({
+  label,
+  company,
+  value,
+  onChange,
+}: {
+  label: string;
+  company: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [ledgers, setLedgers] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const name = company.trim();
+    if (!name) {
+      setLedgers([]);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(
+          getApiUrl(`/api/bill-wise/ledgers?company=${encodeURIComponent(name)}`),
+        );
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || "Failed to load ledgers");
+        if (!cancelled) {
+          setLedgers(Array.isArray(data) ? data.map(String) : []);
+        }
+      } catch {
+        if (!cancelled) setLedgers([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [company]);
+
+  const disabled = !company.trim();
+
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <div className="relative">
+        <select
+          value={value}
+          disabled={disabled || loading}
+          onChange={(e) => onChange(e.target.value)}
+          className={cn(
+            "h-11 w-full rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20",
+            (disabled || loading) && "cursor-not-allowed opacity-60",
+          )}
+        >
+          <option value="">
+            {disabled
+              ? "Select a company first"
+              : loading
+                ? "Loading ledgers…"
+                : ledgers.length === 0
+                  ? "No ledgers found"
+                  : "Choose ledger…"}
+          </option>
+          {ledgers.map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
+        </select>
+        {loading ? (
+          <Loader2 className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+        ) : null}
+      </div>
+      {value ? (
+        <div className="inline-flex items-center gap-1 text-[11px] text-success">
+          <Check className="h-3 w-3" />
+          Selected
+        </div>
+      ) : (
+        <span className="text-[11px] text-muted-foreground">
+          {disabled ? "Pick the company above first" : "Counterparty ledger in this company’s books"}
+        </span>
+      )}
+    </label>
   );
 }
 

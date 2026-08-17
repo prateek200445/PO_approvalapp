@@ -143,7 +143,9 @@ ORDER BY LedgerName",
     public async Task<ComparisonResultDto> CompareFromCompaniesAsync(
         string companyA,
         string companyB,
-        LedgerMatchOptions? options = null)
+        LedgerMatchOptions? options = null,
+        DateTime? dateFrom = null,
+        DateTime? dateTo = null)
     {
         companyA = (companyA ?? "").Trim();
         companyB = (companyB ?? "").Trim();
@@ -177,9 +179,9 @@ ORDER BY LedgerName",
         Console.WriteLine("=======================================");
 
         // Side A books: company~A (+placesA), ledger~B (+placesB)
-        var fetchA = FetchBySwappedLikeAsync(coreA, placesA, coreB, placesB);
+        var fetchA = FetchBySwappedLikeAsync(coreA, placesA, coreB, placesB, dateFrom, dateTo);
         // Side B books: company~B (+placesB), ledger~A (+placesA)
-        var fetchB = FetchBySwappedLikeAsync(coreB, placesB, coreA, placesA);
+        var fetchB = FetchBySwappedLikeAsync(coreB, placesB, coreA, placesA, dateFrom, dateTo);
         await Task.WhenAll(fetchA, fetchB);
         var entriesA = await fetchA;
         var entriesB = await fetchB;
@@ -221,7 +223,9 @@ ORDER BY LedgerName",
         string companyCore,
         IReadOnlyList<string> companyPlaces,
         string ledgerCore,
-        IReadOnlyList<string> ledgerPlaces)
+        IReadOnlyList<string> ledgerPlaces,
+        DateTime? dateFrom = null,
+        DateTime? dateTo = null)
     {
         var companyFrag = ToLikeFragment(companyCore);
         var ledgerFrag = ToLikeFragment(ledgerCore);
@@ -263,6 +267,8 @@ WHERE CompanyName LIKE @CompanyPattern
             sql += $"\n  AND LedgerName LIKE @{name}";
             parameters.Add(name, "%" + place.Trim() + "%");
         }
+
+        AppendDateRangeFilter(ref sql, parameters, dateFrom, dateTo);
 
         var rows = (await connection.QueryAsync(sql, parameters, commandTimeout: 180)).ToList();
         var entries = new List<LedgerEntryDto>(rows.Count);
@@ -365,7 +371,9 @@ WHERE CompanyName LIKE @CompanyPattern
         string ledgerA,
         string companyB,
         string ledgerB,
-        LedgerMatchOptions? options = null)
+        LedgerMatchOptions? options = null,
+        DateTime? dateFrom = null,
+        DateTime? dateTo = null)
     {
         companyA = (companyA ?? "").Trim();
         ledgerA = (ledgerA ?? "").Trim();
@@ -374,13 +382,13 @@ WHERE CompanyName LIKE @CompanyPattern
 
         // If ledgers omitted, auto-resolve from the two companies.
         if (ledgerA.Length == 0 || ledgerB.Length == 0)
-            return await CompareFromCompaniesAsync(companyA, companyB, options);
+            return await CompareFromCompaniesAsync(companyA, companyB, options, dateFrom, dateTo);
 
         if (companyA.Length == 0 || companyB.Length == 0)
             throw new InvalidOperationException("Select Company and Ledger for both sides.");
 
-        var fetchA = FetchBillWiseExactAsync(companyA, ledgerA);
-        var fetchB = FetchBillWiseExactAsync(companyB, ledgerB);
+        var fetchA = FetchBillWiseExactAsync(companyA, ledgerA, dateFrom, dateTo);
+        var fetchB = FetchBillWiseExactAsync(companyB, ledgerB, dateFrom, dateTo);
         await Task.WhenAll(fetchA, fetchB);
 
         var entriesA = await fetchA;
@@ -531,7 +539,9 @@ WHERE CompanyName LIKE @CompanyPattern
 
     public async Task<List<LedgerEntryDto>> FetchBillWiseForLedgersAsync(
         string companyName,
-        IReadOnlyList<string> ledgerNames)
+        IReadOnlyList<string> ledgerNames,
+        DateTime? dateFrom = null,
+        DateTime? dateTo = null)
     {
         var company = (companyName ?? "").Trim();
         var ledgers = (ledgerNames ?? Array.Empty<string>())
@@ -544,7 +554,7 @@ WHERE CompanyName LIKE @CompanyPattern
             return new List<LedgerEntryDto>();
 
         using var connection = _database.CreateConnection();
-        const string sql = @"
+        var sql = @"
 SELECT
     CompanyName,
     LedgerName,
@@ -558,9 +568,14 @@ FROM dbo.vw_BillWiseTransactionWithOnAccount WITH (NOLOCK)
 WHERE CompanyName = @CompanyName
   AND LedgerName IN @LedgerNames";
 
+        var parameters = new DynamicParameters();
+        parameters.Add("CompanyName", company);
+        parameters.Add("LedgerNames", ledgers);
+        AppendDateRangeFilter(ref sql, parameters, dateFrom, dateTo);
+
         var rows = (await connection.QueryAsync(
             sql,
-            new { CompanyName = company, LedgerNames = ledgers },
+            parameters,
             commandTimeout: 180)).ToList();
 
         var entries = new List<LedgerEntryDto>(rows.Count);
@@ -575,9 +590,13 @@ WHERE CompanyName = @CompanyName
         return entries;
     }
 
-    public async Task<List<LedgerEntryDto>> FetchBillWiseExactAsync(string companyName, string ledgerName)
+    public async Task<List<LedgerEntryDto>> FetchBillWiseExactAsync(
+        string companyName,
+        string ledgerName,
+        DateTime? dateFrom = null,
+        DateTime? dateTo = null)
     {
-        return await FetchBillWiseForLedgersAsync(companyName, new[] { ledgerName });
+        return await FetchBillWiseForLedgersAsync(companyName, new[] { ledgerName }, dateFrom, dateTo);
     }
 
     public async Task<List<LedgerEntryDto>> FetchBillWiseAsync(
@@ -795,4 +814,40 @@ WHERE CompanyName LIKE @CompanyPattern
 
     private static string NormalizeLoose(string value) =>
         new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+
+    private static (DateTime? From, DateTime? ToExclusive) NormalizeDateRange(DateTime? dateFrom, DateTime? dateTo)
+    {
+        if (dateFrom == null && dateTo == null)
+            return (null, null);
+
+        var from = dateFrom?.Date;
+        var to = dateTo?.Date;
+        if (from == null && to == null)
+            return (null, null);
+        if (from == null)
+            from = to;
+        if (to == null)
+            to = from;
+        if (from!.Value > to!.Value)
+            (from, to) = (to, from);
+
+        return (from, to!.Value.AddDays(1));
+    }
+
+    private static void AppendDateRangeFilter(
+        ref string sql,
+        DynamicParameters parameters,
+        DateTime? dateFrom,
+        DateTime? dateTo)
+    {
+        var (from, toExclusive) = NormalizeDateRange(dateFrom, dateTo);
+        if (from == null || toExclusive == null)
+            return;
+
+        sql += @"
+  AND COALESCE(BillDate, VoucherDate) >= @DateFrom
+  AND COALESCE(BillDate, VoucherDate) < @DateToExclusive";
+        parameters.Add("DateFrom", from.Value);
+        parameters.Add("DateToExclusive", toExclusive.Value);
+    }
 }

@@ -69,7 +69,9 @@ public class BillWiseController : ControllerBase
                 result = await _billWise.CompareFromCompaniesAsync(
                     request.CompanyA,
                     request.CompanyB,
-                    options);
+                    options,
+                    request.DateFrom,
+                    request.DateTo);
             }
             else
             {
@@ -78,7 +80,9 @@ public class BillWiseController : ControllerBase
                     request.LedgerA,
                     request.CompanyB,
                     request.LedgerB,
-                    options);
+                    options,
+                    request.DateFrom,
+                    request.DateTo);
             }
 
             return Ok(result);
@@ -96,5 +100,7 @@ public class BillWiseCompareRequest
     public string? LedgerA { get; set; }
     public string CompanyB { get; set; } = "";
     public string? LedgerB { get; set; }
+    public DateTime? DateFrom { get; set; }
+    public DateTime? DateTo { get; set; }
     public LedgerMatchOptions? Options { get; set; }
 }
