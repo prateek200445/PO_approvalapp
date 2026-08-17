@@ -1,0 +1,21 @@
+{
+  "companyKey": "plastene-india-limited",
+  "companyName": "Plastene India Limited",
+  "groupPresentationLakhs": {},
+  "groupAdjustmentsLakhs": {},
+  "cogsMovement": {
+    "purchaseGroups": [
+      "Add : Purchase of Raw Material",
+      "Add : Purchase of Packing Material",
+      "Add : Purchase Expenses"
+    ],
+    "openingRmPackingLakhs": 0,
+    "closingRmPackingLakhs": 0
+  },
+  "loanMaturityLakhs": {},
+  "tradePayables": {
+    "msmeLakhs": 0,
+    "creditorsOthersLakhs": 0,
+    "billOfExchangeLakhs": 0
+  }
+}

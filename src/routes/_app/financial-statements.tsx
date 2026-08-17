@@ -132,9 +132,12 @@ function FinancialStatementsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Failed to generate statements");
 
-      const parsed = normalizeFinancialStatementResult(data);
+      const parsed = normalizeFinancialStatementResult(data.result ?? data);
       setResult(parsed);
       setActiveTab(parsed.unmappedLedgers > 0 ? "unmapped" : "schedules");
+      if (data.logPath) {
+        console.info("Financial statement log:", data.logPath);
+      }
       toast.success(
         `Generated for ${parsed.mappedLedgers}/${parsed.totalLedgers} mapped ledgers.`,
       );

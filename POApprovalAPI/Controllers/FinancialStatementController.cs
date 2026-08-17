@@ -15,10 +15,14 @@ public class FinancialStatementController : ControllerBase
     };
 
     private readonly FinancialStatementService _service;
+    private readonly FinancialStatementOutputLogger _outputLogger;
 
-    public FinancialStatementController(FinancialStatementService service)
+    public FinancialStatementController(
+        FinancialStatementService service,
+        FinancialStatementOutputLogger outputLogger)
     {
         _service = service;
+        _outputLogger = outputLogger;
     }
 
     [HttpGet("companies")]
@@ -122,7 +126,12 @@ public class FinancialStatementController : ControllerBase
             ms.Position = 0;
 
             var result = _service.GenerateFromStream(ms, request);
-            return Ok(result);
+            var logPath = _outputLogger.LogGeneration(result, request, file.FileName);
+            return Ok(new
+            {
+                logPath,
+                result
+            });
         }
         catch (Exception ex)
         {

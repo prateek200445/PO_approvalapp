@@ -49,6 +49,9 @@ obj/
 .env
 .env.*
 
+# Financial statement generation logs (runtime)
+docs/accounting/logs/
+
 # .NET Configuration files with secrets (never commit)
 **/appsettings.Production.json
 **/appsettings.Local.json

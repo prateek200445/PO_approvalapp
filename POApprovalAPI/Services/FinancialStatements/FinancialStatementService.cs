@@ -15,17 +15,26 @@ public class FinancialStatementService
     private readonly LedgerGroupMappingService _mappingService;
     private readonly FinancialStatementEngine _engine;
     private readonly FinancialStatementTemplateStore _templates;
+    private readonly FinancialStatementTemplateExporter _templateExporter;
+    private readonly WorkbookPresentationRulesExtractor _workbookRulesExtractor;
+    private readonly PresentationRulesService _presentationRules;
 
     public FinancialStatementService(
         TrialBalanceExcelService tbExcel,
         LedgerGroupMappingService mappingService,
         FinancialStatementEngine engine,
-        FinancialStatementTemplateStore templates)
+        FinancialStatementTemplateStore templates,
+        FinancialStatementTemplateExporter templateExporter,
+        WorkbookPresentationRulesExtractor workbookRulesExtractor,
+        PresentationRulesService presentationRules)
     {
         _tbExcel = tbExcel;
         _mappingService = mappingService;
         _engine = engine;
         _templates = templates;
+        _templateExporter = templateExporter;
+        _workbookRulesExtractor = workbookRulesExtractor;
+        _presentationRules = presentationRules;
     }
 
     public TrialBalancePreviewResponse Preview(Stream stream, string fileName, string? sheetName, int? headerRow)
@@ -35,16 +44,32 @@ public class FinancialStatementService
         Stream stream,
         GenerateFinancialStatementRequest request)
     {
-        var rows = _tbExcel.Parse(stream, request.Mapping);
-        return GenerateFromRows(rows, request);
+        using var ms = new MemoryStream();
+        stream.CopyTo(ms);
+        var bytes = ms.ToArray();
+
+        using var workbook = new XLWorkbook(new MemoryStream(bytes));
+        var rows = _tbExcel.ParseWorkbook(workbook, request.Mapping);
+        var companyKey = string.IsNullOrWhiteSpace(request.CompanyKey) ? "default" : request.CompanyKey.Trim();
+
+        var fileRules = _presentationRules.GetRules(companyKey);
+        var workbookRules = _workbookRulesExtractor.Extract(workbook, companyKey, bytes);
+        var rules = PresentationRulesMerger.Merge(fileRules, workbookRules);
+
+        return GenerateFromRows(rows, request, rules, workbook);
     }
 
     public FinancialStatementResultDto GenerateFromRows(
         IReadOnlyList<TrialBalanceRowDto> rows,
-        GenerateFinancialStatementRequest request)
+        GenerateFinancialStatementRequest request,
+        PresentationRules? rulesOverride = null,
+        XLWorkbook? sourceWorkbook = null)
     {
         var companyKey = string.IsNullOrWhiteSpace(request.CompanyKey) ? "default" : request.CompanyKey.Trim();
         var lookup = _mappingService.BuildLookup(companyKey, rows);
+
+        if (sourceWorkbook != null)
+            _workbookRulesExtractor.MergeGroupSheetLookup(sourceWorkbook, lookup);
 
         if (request.OverrideMappings != null)
         {
@@ -60,12 +85,17 @@ public class FinancialStatementService
             ? companyKey
             : request.CompanyName.Trim();
 
+        var rules = rulesOverride ?? PresentationRulesMerger.Merge(
+            _presentationRules.GetRules(companyKey),
+            sourceWorkbook != null ? _workbookRulesExtractor.Extract(sourceWorkbook, companyKey) : null);
+
         return _engine.Generate(
             companyKey,
             companyName,
             request.PeriodLabel?.Trim() ?? "",
             rows,
-            lookup);
+            lookup,
+            rules);
     }
 
     public IReadOnlyList<LedgerGroupMappingDto> GetMappings(string companyKey)
@@ -82,6 +112,9 @@ public class FinancialStatementService
 
     public byte[] ExportExcel(FinancialStatementResultDto result)
     {
+        if (_templateExporter.HasTemplate(result.CompanyKey))
+            return _templateExporter.Export(result);
+
         using var workbook = new XLWorkbook();
 
         WriteSchedulesSheet(workbook, result);

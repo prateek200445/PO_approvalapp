@@ -85,8 +85,10 @@ public class ReportLineDefinition
     public string Label { get; set; } = "";
     public string Note { get; set; } = "";
     public string Type { get; set; } = "line";
+    public string Calculation { get; set; } = "";
     public string Nature { get; set; } = "";
     public List<string> Groups { get; set; } = [];
     public List<string> SumLabels { get; set; } = [];
+    public List<string> Operands { get; set; } = [];
     public string Formula { get; set; } = "";
 }

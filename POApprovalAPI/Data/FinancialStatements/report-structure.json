@@ -168,7 +168,7 @@
     {
       "note": "21",
       "title": "Purchase of traded goods",
-      "groups": ["Add : Purchase of Traded Goods", "Add : Purchase of traded goods"]
+      "groups": ["Add : Purchase of traded goods"]
     },
     {
       "note": "22",
@@ -271,35 +271,35 @@
         "lines": [
           { "label": "Shareholders' funds", "type": "header" },
           { "label": "Share capital", "note": "3", "groups": ["28,098,189 (previous year: 28,098,189) equity shares of Rs. 10 each fully paid up", "100,000 (previous year: 100,000) 'Class A' Ordinary Shares of Rs. 10 each fully paid up"], "nature": "equity" },
-          { "label": "Reserves and surplus", "note": "4", "groups": ["Profit & Loss Account", "Securities premium Balance at the beginning and at the end of the year"], "nature": "equity" },
+          { "label": "Reserves and surplus", "note": "4", "calculation": "reservesAndSurplus", "groups": ["Profit & Loss Account", "Securities premium Balance at the beginning and at the end of the year"], "nature": "equity" },
           { "label": "Non-current liabilities", "type": "header" },
-          { "label": "Long term borrowings", "note": "5", "groups": ["Indian rupee term loan from banks", "Vehicle loan", "Loans from others (unsecured)", "Other Long term loans"], "nature": "liability" },
-          { "label": "Deferred tax liabilities (net)", "note": "6", "groups": ["Deferred tax liability (net)"], "nature": "liability" },
-          { "label": "Long-term provisions", "note": "7", "groups": ["Provision for leave benefits", "Provision for gratuity"], "nature": "liability" },
+          { "label": "Long term borrowings", "note": "5", "calculation": "longTermBorrowings", "groups": ["Indian rupee term loan from banks", "Vehicle loan", "Loans from others (unsecured)", "Other Long term loans"], "nature": "liability" },
+          { "label": "Deferred tax liabilities (net)", "note": "6", "calculation": "deferredTaxLiability", "groups": ["Deferred tax liability (net)"], "nature": "liability" },
+          { "label": "Long-term provisions", "note": "7", "calculation": "longTermProvisions", "groups": ["Provision for leave benefits", "Provision for gratuity"], "nature": "liability" },
           { "label": "Current liabilities", "type": "header" },
           { "label": "Short term borrowings", "note": "8", "groups": ["Working capital facilities", "EDFS facility"], "nature": "liability" },
-          { "label": "Total outstanding dues of micro and small enterprise", "note": "9", "groups": [], "nature": "liability" },
-          { "label": "Total outstanding dues of creditors other than micro and small enterprise", "note": "9", "groups": ["Total outstanding dues of creditors other than micro and small enterprise", "Bill of Exchange"], "nature": "liability" },
-          { "label": "Other current liabilities", "note": "10", "groups": ["Statutory dues payable", "Employee benefits payable", "Other Payables", "Advance from customers", "Creditors for capital goods", "Interest accrued but not due on borrowings"], "nature": "liability" },
-          { "label": "Short-term provisions", "note": "7", "groups": ["Provision for Expenses"], "nature": "liability" }
+          { "label": "Total outstanding dues of micro and small enterprise", "note": "9", "calculation": "tradePayablesMsme", "groups": [], "nature": "liability" },
+          { "label": "Total outstanding dues of creditors other than micro and small enterprise", "note": "9", "calculation": "tradePayablesOthers", "groups": ["Total outstanding dues of creditors other than micro and small enterprise", "Bill of Exchange"], "nature": "liability" },
+          { "label": "Other current liabilities", "note": "10", "calculation": "otherCurrentLiabilities", "groups": ["Statutory dues payable", "Employee benefits payable", "Other Payables", "Advance from customers", "Creditors for capital goods", "Interest accrued but not due on borrowings"], "nature": "liability" },
+          { "label": "Short-term provisions", "note": "7", "calculation": "shortTermProvisions", "groups": ["Provision for Expenses"], "nature": "liability" }
         ]
       },
       {
         "title": "Assets",
         "lines": [
           { "label": "Non-current assets", "type": "header" },
-          { "label": "Property, plant & equipments", "note": "11", "groups": ["Property, plant & equipments"], "nature": "asset" },
-          { "label": "Intangible assets", "note": "11", "groups": ["Intangible Assets"], "nature": "asset" },
+          { "label": "Property, plant & equipments", "note": "11", "calculation": "propertyPlantEquipment", "groups": ["Property, plant & equipments"], "nature": "asset" },
+          { "label": "Intangible assets", "note": "11", "calculation": "sumWithPresentation", "groups": ["Intangible Assets"], "nature": "asset" },
           { "label": "Capital Work in Progress", "note": "11", "groups": ["Assets under development"], "nature": "asset" },
           { "label": "Non-current investments", "note": "12", "groups": ["Investment in subsidiary - Oliva Gardens S.A.", "Investment in OGPS Power Gujarat Private Limited", "Investment in Gopala Polyplast Limited", "Investment in Oswal Extrusion Limited"], "nature": "asset" },
-          { "label": "Loans and advances", "note": "13", "groups": ["Capital advances (Unsecured considered good)", "Security deposits (Unsecured considered good)", "Taxes paid under dispute"], "nature": "asset" },
-          { "label": "Other non-current assets", "note": "14", "groups": ["Deposits with remaining maturity of more than 12 months", "Insurance claim receivable"], "nature": "asset" },
+          { "label": "Loans and advances", "note": "13", "calculation": "loansAndAdvancesNonCurrent", "groups": ["Capital advances (Unsecured considered good)", "Security deposits (Unsecured considered good)", "Taxes paid under dispute"], "nature": "asset" },
+          { "label": "Other non-current assets", "note": "14", "calculation": "otherNonCurrentAssets", "groups": ["Deposits with remaining maturity of more than 12 months", "Insurance claim receivable"], "nature": "asset" },
           { "label": "Current assets", "type": "header" },
-          { "label": "Inventories", "note": "15", "groups": ["Inventory"], "nature": "asset" },
-          { "label": "Trade receivables", "note": "16", "groups": ["Other receivable ( unsecured, considered good)"], "nature": "asset" },
-          { "label": "Cash and bank balances", "note": "17", "groups": ["Cash on hand", "In current accounts"], "nature": "asset" },
-          { "label": "Loans and advances", "note": "13", "groups": ["Advance for supply of goods and rendering of services", "Advance tax and Tax deducted at source (net of provision for tax)", "MAT credit entitlement", "Pre-paid expenses", "Advances to employees", "Other advances", "GST receivable", "Interunit Balances"], "nature": "asset" },
-          { "label": "Other current assets", "note": "14", "groups": ["Export incentives receivable", "Interest accrued on fixed deposits"], "nature": "asset" }
+          { "label": "Inventories", "note": "15", "calculation": "inventories", "groups": ["Inventory"], "nature": "asset" },
+          { "label": "Trade receivables", "note": "16", "calculation": "tradeReceivables", "groups": ["Other receivable ( unsecured, considered good)"], "nature": "asset" },
+          { "label": "Cash and bank balances", "note": "17", "calculation": "cashAndBank", "groups": ["Cash on hand", "In current accounts"], "nature": "asset" },
+          { "label": "Loans and advances", "note": "13", "calculation": "loansAndAdvancesCurrent", "groups": ["Advance for supply of goods and rendering of services", "Advance tax and Tax deducted at source (net of provision for tax)", "MAT credit entitlement", "Pre-paid expenses", "Advances to employees", "Other advances", "GST receivable", "Interunit Balances"], "nature": "asset" },
+          { "label": "Other current assets", "note": "14", "calculation": "otherCurrentAssets", "groups": ["Export incentives receivable", "Interest accrued on fixed deposits"], "nature": "asset" }
         ]
       }
     ]
@@ -307,22 +307,31 @@
   "profitLoss": {
     "lines": [
       { "label": "Income", "type": "header" },
-      { "label": "Revenue from operations", "note": "18", "groups": ["Domestic Sales", "Export Sales"], "nature": "income" },
+      { "label": "Revenue from operations", "note": "18", "calculation": "revenueFromOperations", "groups": ["Domestic Sales", "Export Sales"], "nature": "income" },
       { "label": "Sale of services", "note": "18", "groups": ["Income from Job work charges"], "nature": "income" },
-      { "label": "Other operating revenue", "note": "18", "groups": ["Sale of scrap", "Commission income", "Export incentives", "Gain on foreign currency (net)", "Interest from customers", "Exchange rate difference, net (finance)", "Branch transfer"], "nature": "income" },
+      { "label": "Other operating revenue", "note": "18", "calculation": "otherOperatingRevenue", "groups": ["Sale of scrap", "Commission income", "Export incentives", "Gain on foreign currency (net)", "Interest from customers", "Exchange rate difference, net (finance)", "Branch transfer"], "nature": "income" },
       { "label": "Total Revenue from operations", "type": "subtotal", "sumLabels": ["Revenue from operations", "Sale of services", "Other operating revenue"] },
-      { "label": "Other income", "note": "19", "groups": ["Interest from Bank deposits", "Rent Income", "Profit  on Sale of property, plant and equipment", "Liabilities no longer required written back", "Other non-operating income"], "nature": "income" },
-      { "label": "Total revenue (I+II)", "type": "subtotal", "sumLabels": ["Total Revenue from operations", "Other income"] },
+      { "label": "Other income", "note": "19", "calculation": "otherIncome", "groups": ["Interest from Bank deposits", "Rent Income", "Profit  on Sale of property, plant and equipment", "Liabilities no longer required written back", "Other non-operating income"], "nature": "income" },
+      { "label": "Total revenue   (I+II)", "type": "subtotal", "sumLabels": ["Total Revenue from operations", "Other income"] },
       { "label": "Expenses", "type": "header" },
-      { "label": "Cost of raw material and components consumed", "note": "20", "groups": ["Add : Purchase of Raw Material", "Add : Purchase of Packing Material", "Add : Purchase Expenses", "Inventory"], "nature": "expense" },
-      { "label": "Purchase of traded goods", "note": "21", "groups": ["Add : Purchase of Traded Goods", "Add : Purchase of traded goods"], "nature": "expense" },
-      { "label": "Changes in inventories of finished goods, work-in-progress and stock-in-trade", "note": "22", "groups": ["Add: Purchase of Stores, Spares & Consumables"], "nature": "expense" },
-      { "label": "Employee benefits expenses", "note": "23", "groups": ["Salaries, wages and bonus", "Contribution to provident and other funds", "Gratuity expense", "Staff welfare expenses"], "nature": "expense" },
-      { "label": "Depreciation and amortization expenses", "note": "11", "groups": ["Depreciation Expenses"], "nature": "expense" },
-      { "label": "Finance costs", "note": "24", "groups": ["On working capital loans from banks", "On other secured loans from banks", "Other interest", "Bank charges and Commission"], "nature": "expense" },
-      { "label": "Other expenses", "note": "25", "groups": ["Power and fuel", "- Plant & machinery", "- Building", "- Others", "Labour job work charges", "Water charges", "Testing charges", "Rental expense", "Security and housekeeping expenses", "Postage & courier expenses", "Selling and distribution expenses", "Rates and taxes", "Insurance", "Electricity expenses", "Legal and professional charges", "Printing and stationery expenses", "Corporate Social Responsibility", "Income Tax Expenses", "Communication expenses", "Auditors' remuneration (refer note below)", "Directors' remuneration (refer note below)", "Balance Written Off", "Miscellaneous expenses"], "nature": "expense" },
+      { "label": "Cost of raw material and components consumed", "note": "20", "calculation": "cogsMovement", "groups": ["Add : Purchase of Raw Material", "Add : Purchase of Packing Material", "Add : Purchase Expenses", "Inventory"], "nature": "expense" },
+      { "label": "Purchase of traded goods", "note": "21", "groups": ["Add : Purchase of traded goods"], "nature": "expense" },
+      { "label": "Changes in inventories of finished goods, work-in-progress and stock-in-trade", "note": "22", "calculation": "changesInInventory", "groups": ["Add: Purchase of Stores, Spares & Consumables"], "nature": "expense" },
+      { "label": "Employee benefits expenses", "note": "23", "calculation": "employeeBenefits", "groups": ["Salaries, wages and bonus", "Contribution to provident and other funds", "Gratuity expense", "Staff welfare expenses"], "nature": "expense" },
+      { "label": "Depreciation and amortization expenses", "note": "11", "calculation": "depreciation", "groups": ["Depreciation Expenses"], "nature": "expense" },
+      { "label": "Finance costs", "note": "24", "calculation": "financeCosts", "groups": ["On working capital loans from banks", "On other secured loans from banks", "Other interest", "Bank charges and Commission"], "nature": "expense" },
+      { "label": "Other expenses", "note": "25", "calculation": "otherExpenses", "groups": ["Power and fuel", "- Plant & machinery", "- Building", "- Others", "Labour job work charges", "Water charges", "Testing charges", "Rental expense", "Security and housekeeping expenses", "Postage & courier expenses", "Selling and distribution expenses", "Rates and taxes", "Insurance", "Electricity expenses", "Legal and professional charges", "Printing and stationery expenses", "Corporate Social Responsibility", "Communication expenses", "Auditors' remuneration (refer note below)", "Directors' remuneration (refer note below)", "Balance Written Off", "Miscellaneous expenses"], "nature": "expense" },
       { "label": "Total expenses", "type": "subtotal", "sumLabels": ["Cost of raw material and components consumed", "Purchase of traded goods", "Changes in inventories of finished goods, work-in-progress and stock-in-trade", "Employee benefits expenses", "Depreciation and amortization expenses", "Finance costs", "Other expenses"] },
-      { "label": "Profit before tax", "type": "formula", "formula": "totalRevenue - totalExpenses" }
+      { "label": "Profit before tax and exceptional item (III-IV)", "type": "formula", "formula": "subtract", "operands": ["Total revenue   (I+II)", "Total expenses"] },
+      { "label": "Exceptional item", "type": "header" },
+      { "label": "Insurance claim of earlier year", "calculation": "insuranceClaimExceptional", "groups": ["Insurance claim of earlier year"], "nature": "income" },
+      { "label": "Profit before tax (V-VI)", "type": "formula", "formula": "subtract", "operands": ["Profit before tax and exceptional item (III-IV)", "Insurance claim of earlier year"] },
+      { "label": "Tax expenses", "type": "header" },
+      { "label": "Current tax", "calculation": "currentTax", "groups": ["Income Tax Expenses"], "nature": "expense" },
+      { "label": "Deferred tax", "calculation": "deferredTax", "groups": ["Deferred tax liability (net)"], "nature": "expense" },
+      { "label": "Mat Credit", "type": "line", "groups": [], "nature": "expense" },
+      { "label": "Total Tax Expense", "type": "subtotal", "sumLabels": ["Current tax", "Deferred tax", "Mat Credit"] },
+      { "label": "Profit for the year (VII-VIII)", "type": "formula", "formula": "subtract", "operands": ["Profit before tax (V-VI)", "Total Tax Expense"] }
     ]
   }
 }

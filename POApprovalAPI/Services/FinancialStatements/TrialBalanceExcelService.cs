@@ -50,6 +50,11 @@ public class TrialBalanceExcelService
     public List<TrialBalanceRowDto> Parse(Stream stream, TrialBalanceColumnMapping mapping)
     {
         using var workbook = new XLWorkbook(stream);
+        return ParseWorkbook(workbook, mapping);
+    }
+
+    public List<TrialBalanceRowDto> ParseWorkbook(XLWorkbook workbook, TrialBalanceColumnMapping mapping)
+    {
         var sheetNames = workbook.Worksheets.Select(w => w.Name).ToList();
         var sheet = ResolveSheet(workbook, mapping.SheetName, sheetNames);
         var headerRow = mapping.HeaderRow <= 0 ? DetectHeaderRow(sheet) : mapping.HeaderRow;
