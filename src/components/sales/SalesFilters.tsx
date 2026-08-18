@@ -59,7 +59,7 @@ export function SalesFilters({
 
   return (
     <section
-      className="rounded-xl border border-border bg-card p-3 shadow-sm sm:p-4"
+      className="card-3d rounded-2xl p-3 sm:p-4"
       aria-label="Sales dashboard filters"
     >
       <div className="flex flex-col gap-3">

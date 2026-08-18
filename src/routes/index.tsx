@@ -60,9 +60,11 @@ try {
     <div className="grid min-h-screen lg:grid-cols-2">
       {/* Brand side */}
       <div className="relative hidden flex-col justify-between overflow-hidden bg-primary p-12 text-primary-foreground lg:flex">
-        <div className="absolute inset-0 opacity-20" style={{
-          backgroundImage: "radial-gradient(circle at 20% 30%, rgba(255,255,255,.4) 0, transparent 40%), radial-gradient(circle at 80% 70%, rgba(255,255,255,.25) 0, transparent 40%)"
+        <div className="absolute inset-0 opacity-30" style={{
+          backgroundImage: "radial-gradient(circle at 18% 22%, rgba(255,255,255,.5) 0, transparent 36%), radial-gradient(circle at 82% 78%, rgba(255,255,255,.28) 0, transparent 38%), linear-gradient(160deg, transparent 40%, rgba(0,0,0,.18))"
         }} />
+        <div className="absolute -left-16 top-24 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
+        <div className="absolute -right-10 bottom-24 h-64 w-64 rounded-full bg-black/10 blur-3xl" />
         <div className="relative flex items-center gap-3">
           <img 
             src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"} 
@@ -98,7 +100,7 @@ try {
           <Settings className="h-4.5 w-4.5" />
         </button>
 
-        <div className="w-full max-w-sm">
+        <div className="card-3d w-full max-w-sm rounded-2xl p-6 sm:p-8">
           <div className="mb-8 flex items-center gap-2.5 lg:hidden">
             <img 
               src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"} 
@@ -125,7 +127,7 @@ try {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="employee.id"
-                  className="h-11 w-full rounded-md border border-input bg-surface pl-10 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+                  className="h-11 w-full rounded-xl border border-input bg-surface pl-10 pr-3 text-sm shadow-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
                 />
               </div>
             </div>
@@ -140,7 +142,7 @@ try {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder=""
-                  className="h-11 w-full rounded-md border border-input bg-surface pl-10 pr-10 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+                  className="h-11 w-full rounded-xl border border-input bg-surface pl-10 pr-10 text-sm shadow-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
                 />
                 <button
                   type="button"
@@ -170,7 +172,7 @@ try {
             <button
               type="submit"
               disabled={loading}
-              className="h-11 w-full rounded-md bg-primary text-sm font-semibold text-primary-foreground transition hover:bg-primary/90 disabled:opacity-60"
+              className="btn-3d h-11 w-full rounded-xl bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-60"
             >
               {loading ? "Signing in…" : "Sign in"}
             </button>

@@ -11,6 +11,7 @@ import {
   BookOpen,
   BarChart3,
   FileWarning,
+  Layers,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -98,7 +99,8 @@ export function AppShell() {
       label: "Export Bill Overdue",
       match: (p: string) => p.startsWith("/export-bill-overdue"),
     },
-    { to: "/profile", icon: User, label: "Profile", match: (p: string) => p.startsWith("/profile") || p.startsWith("/bom") },
+    { to: "/bom", icon: Layers, label: "BOM Report", match: (p: string) => p.startsWith("/bom") },
+    { to: "/profile", icon: User, label: "Profile", match: (p: string) => p.startsWith("/profile") },
   ];
 
   const mobileNav = [
@@ -126,14 +128,13 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-background pb-20 md:pb-0">
-      {/* Mobile header — unchanged */}
-      <header className="sticky top-0 z-30 border-b border-border bg-surface/80 backdrop-blur-md md:hidden">
+      <header className="app-glass sticky top-0 z-30 border-b md:hidden">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link to="/dashboard" className="flex items-center gap-2.5">
             <img
               src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"}
               alt="HCP Logo"
-              className={dark ? "h-11 w-11 rounded-lg" : "h-9 w-9 rounded-lg"}
+              className={dark ? "h-11 w-11 rounded-xl shadow-lg" : "h-9 w-9 rounded-xl shadow-lg ring-1 ring-black/5"}
             />
             <div className="leading-tight">
               <div className="text-sm font-semibold">HCP</div>
@@ -161,7 +162,7 @@ export function AppShell() {
         {/* Desktop sidebar — collapsible */}
         <aside
           className={cn(
-            "fixed inset-y-0 left-0 z-40 hidden flex-col border-r border-border bg-surface/95 backdrop-blur-md transition-[width] duration-300 ease-in-out md:flex",
+            "app-sidebar-3d fixed inset-y-0 left-0 z-40 hidden flex-col border-r transition-[width] duration-300 ease-in-out md:flex",
             sidebarCollapsed ? "w-[4.5rem]" : "w-64",
           )}
         >
@@ -181,7 +182,7 @@ export function AppShell() {
               <img
                 src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"}
                 alt="HCP"
-                className="h-9 w-9 rounded-lg object-cover transition-all duration-300 ease-in-out group-hover:scale-90 group-hover:opacity-0"
+                className="h-9 w-9 rounded-xl object-cover shadow-md ring-1 ring-black/5 transition-all duration-300 ease-in-out group-hover:scale-90 group-hover:opacity-0"
               />
               <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
                 {sidebarCollapsed ? (
@@ -212,11 +213,11 @@ export function AppShell() {
                   to={n.to}
                   title={sidebarCollapsed ? n.label : undefined}
                   className={cn(
-                    "flex items-center rounded-lg py-2.5 text-sm font-medium transition-all duration-300",
+                    "flex items-center rounded-xl py-2.5 text-sm font-medium transition-all duration-300",
                     sidebarCollapsed ? "justify-center px-2" : "gap-3 px-3",
                     active
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                      ? "nav-3d-active"
+                      : "text-muted-foreground hover:-translate-y-px hover:bg-secondary/90 hover:text-foreground hover:shadow-md",
                   )}
                 >
                   <n.icon className="h-4 w-4 shrink-0" />
@@ -253,7 +254,7 @@ export function AppShell() {
                 onClick={toggleTheme}
                 title={dark ? "Light mode" : "Dark mode"}
                 className={cn(
-                  "flex items-center justify-center rounded-lg border border-border bg-background text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground",
+                  "flex items-center justify-center rounded-xl border border-border bg-background text-sm text-muted-foreground shadow-sm transition hover:-translate-y-px hover:bg-secondary hover:text-foreground hover:shadow-md",
                   sidebarCollapsed ? "h-10 w-10 p-0" : "flex-1 gap-2 px-3 py-2",
                 )}
                 aria-label="Toggle theme"
@@ -274,7 +275,7 @@ export function AppShell() {
                   navigate({ to: "/" });
                 }}
                 title="Logout"
-                className="rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                className="rounded-xl border border-border p-2 text-muted-foreground shadow-sm transition hover:-translate-y-px hover:bg-destructive/10 hover:text-destructive hover:shadow-md"
                 aria-label="Logout"
               >
                 <LogOut className="h-4 w-4" />
@@ -297,7 +298,7 @@ export function AppShell() {
       </div>
 
       {/* Mobile bottom nav — unchanged */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-8 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
+      <nav className="app-glass fixed bottom-0 left-0 right-0 z-30 grid grid-cols-8 border-t md:hidden">
         {mobileNav.map((n) => {
           const active = n.match(path);
           return (
@@ -305,11 +306,18 @@ export function AppShell() {
               key={n.to}
               to={n.to}
               className={cn(
-                "flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-2 text-[9px] font-medium tracking-tight transition-colors sm:text-[10px]",
+                "flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-1.5 text-[9px] font-medium tracking-tight transition-all sm:text-[10px]",
                 active ? "text-primary" : "text-muted-foreground",
               )}
             >
-              <n.icon className={cn("h-5 w-5 shrink-0", active && "stroke-[2.5]")} />
+              <span
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-xl transition-all",
+                  active && "nav-3d-active",
+                )}
+              >
+                <n.icon className={cn("h-4.5 w-4.5 shrink-0", active && "stroke-[2.5]")} />
+              </span>
               <span className="w-full truncate text-center leading-tight">{n.shortLabel}</span>
             </Link>
           );

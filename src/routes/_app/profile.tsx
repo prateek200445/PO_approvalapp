@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { KeyRound, LogOut, Building2, Server, ArrowLeftRight, BookOpen, Phone, Mail, Layers } from "lucide-react";
+import { KeyRound, LogOut, Building2, Server, Phone, Mail } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { ServerSettingsModal } from "@/components/ServerSettingsModal";
@@ -29,9 +29,9 @@ function Profile() {
     <div className="mx-auto max-w-2xl space-y-5">
       <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Profile</h1>
 
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+      <div className="card-3d rounded-2xl p-6">
         <div className="flex items-center gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary text-xl font-semibold text-primary-foreground">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary text-xl font-semibold text-primary-foreground btn-3d">
             {initials}
           </div>
           <div className="min-w-0">
@@ -49,7 +49,7 @@ function Profile() {
         </dl>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+      <div className="card-3d rounded-2xl p-6">
         <h2 className="text-sm font-semibold">Admin Contact</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           For queries or support, contact the admin using the details below.
@@ -82,49 +82,7 @@ function Profile() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-        <h2 className="text-sm font-semibold">Tools</h2>
-        <div className="mt-4 space-y-2">
-          <button
-            onClick={() => navigate({ to: "/bom" })}
-            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary cursor-pointer"
-          >
-            <div className="flex items-center gap-3">
-              <Layers className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <span className="text-sm font-medium">BOM Report</span>
-                <p className="text-xs text-muted-foreground">Search, view PDFs & email BOMs</p>
-              </div>
-            </div>
-          </button>
-          <button
-            onClick={() => navigate({ to: "/ledgers" })}
-            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary cursor-pointer md:hidden"
-          >
-            <div className="flex items-center gap-3">
-              <BookOpen className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <span className="text-sm font-medium">Ledgers</span>
-                <p className="text-xs text-muted-foreground">Summary & reconciliation</p>
-              </div>
-            </div>
-          </button>
-          <button
-            onClick={() => navigate({ to: "/reconciliation" })}
-            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary cursor-pointer md:hidden"
-          >
-            <div className="flex items-center gap-3">
-              <ArrowLeftRight className="h-5 w-5 text-muted-foreground" />
-              <div>
-                <span className="text-sm font-medium">Ledger Reconciliation</span>
-                <p className="text-xs text-muted-foreground">Compare two Excel ledgers</p>
-              </div>
-            </div>
-          </button>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+      <div className="card-3d rounded-2xl p-6">
         <h2 className="text-sm font-semibold">Account Actions</h2>
         <div className="mt-4 space-y-2">
           <button

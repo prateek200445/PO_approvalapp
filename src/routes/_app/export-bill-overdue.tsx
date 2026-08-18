@@ -65,7 +65,7 @@ function AmountBlock({ row }: { row: ExportBillOverdueItem }) {
 
 function MobileBillCard({ row }: { row: ExportBillOverdueItem }) {
   return (
-    <article className="rounded-xl border border-border bg-card p-3.5 shadow-sm">
+    <article className="rounded-2xl border border-border bg-card p-3.5 shadow-soft">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-sm font-semibold leading-snug">
@@ -303,8 +303,8 @@ function ExportBillOverduePage() {
   );
 
   return (
-    <div className="space-y-4 pb-20 sm:space-y-5 md:pb-2">
-      <div>
+    <div className="space-y-5 pb-20 sm:space-y-6 md:pb-2">
+      <div className="card-3d rounded-2xl p-4 sm:p-5">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
           Export Bill Overdue
         </h1>
@@ -315,7 +315,7 @@ function ExportBillOverduePage() {
       </div>
 
       <section
-        className="rounded-xl border border-border bg-card p-3 shadow-sm sm:p-4"
+        className="rounded-2xl border border-border bg-card p-3 shadow-soft sm:p-4"
         aria-label="Export bill overdue filters"
       >
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_11rem]">
@@ -423,7 +423,7 @@ function ExportBillOverduePage() {
             ))}
           </div>
         ) : !overdueQuery.isFetching && items.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-dashed border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
             {emptyMessage}
           </div>
         ) : (
@@ -438,14 +438,14 @@ function ExportBillOverduePage() {
         )}
 
         {pagination ? (
-          <div className="mt-3 overflow-hidden rounded-xl border border-border bg-card">
+          <div className="mt-3 overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
             {pagination}
           </div>
         ) : null}
       </section>
 
       {/* Desktop table */}
-      <section className="hidden overflow-hidden rounded-xl border border-border bg-card shadow-sm md:block">
+      <section className="hidden overflow-hidden rounded-2xl border border-border bg-card shadow-soft md:block">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">Overdue bills</h2>

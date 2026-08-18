@@ -56,7 +56,7 @@ const PURCHASE_PLACEHOLDER_FIELDS = [
 
 function ComingSoonSection({ title, description }: { title: string; description: string }) {
   return (
-    <section className="rounded-xl border border-dashed border-border bg-card/50 px-4 py-10 text-center shadow-sm">
+    <section className="rounded-2xl border border-dashed border-border bg-card/60 px-4 py-10 text-center shadow-soft">
       <h2 className="text-sm font-medium text-foreground">{title}</h2>
       <p className="mt-1 text-xs text-muted-foreground">{description}</p>
     </section>
@@ -225,8 +225,8 @@ function SalesDashboardPage() {
     (!isPurchase && byCountryQuery.isFetching);
 
   return (
-    <div className="space-y-4 pb-2 sm:space-y-5 md:space-y-6">
-      <div>
+    <div className="space-y-5 pb-2 sm:space-y-6 md:space-y-7">
+      <div className="card-3d rounded-2xl p-4 sm:p-5">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
           Sales Dashboard
         </h1>

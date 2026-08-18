@@ -66,7 +66,7 @@ export function SkeletonStats() {
   return (
     <>
       {[...Array(4)].map((_, i) => (
-        <div key={i} className="rounded-xl border border-border bg-card p-4 shadow-sm animate-pulse">
+        <div key={i} className="card-3d rounded-2xl p-4 animate-pulse">
           <div className="mb-3 h-9 w-9 bg-muted rounded-lg"></div>
           <div className="h-7 w-16 bg-muted rounded mb-2"></div>
           <div className="h-3 w-12 bg-muted rounded"></div>

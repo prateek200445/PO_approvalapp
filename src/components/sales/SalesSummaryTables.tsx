@@ -77,7 +77,7 @@ export function SalesSummaryTables({
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-3">
-      <section className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <section className="rounded-2xl border border-border bg-card shadow-soft overflow-hidden">
         <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Top 5 Products by Sales</h2>
         </header>
@@ -118,7 +118,7 @@ export function SalesSummaryTables({
         </footer>
       </section>
 
-      <section className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <section className="rounded-2xl border border-border bg-card shadow-soft overflow-hidden">
         <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales by Country</h2>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
@@ -188,7 +188,7 @@ export function SalesSummaryTables({
         </div>
       </section>
 
-      <section className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <section className="rounded-2xl border border-border bg-card shadow-soft overflow-hidden">
         <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales by Sub Group</h2>
           <p className="mt-0.5 text-[11px] text-muted-foreground">Excl. intercompany</p>
