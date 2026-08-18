@@ -77,8 +77,13 @@ builder.Services.AddScoped<LedgerSummaryService>();
 builder.Services.AddScoped<BomService>();
 builder.Services.Configure<FibcPlanningOptions>(builder.Configuration.GetSection("FibcPlanning"));
 builder.Services.AddScoped<IFibcPlanningRepository, FibcPlanningRepository>();
+builder.Services.AddScoped<IFibcQuotationHoldRepository, FibcQuotationHoldRepository>();
 builder.Services.AddScoped<IFibcPlanningEngine, FibcPlanningEngine>();
+builder.Services.AddScoped<IFibcCriticalShiftEngine, FibcCriticalShiftEngine>();
 builder.Services.AddScoped<FibcPlanningService>();
+builder.Services.AddScoped<FibcQuotationHoldService>();
+builder.Services.AddScoped<FibcPlanningEmailNotifier>();
+builder.Services.AddHostedService<FibcQuotationHoldExpiryReminderService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();
@@ -94,6 +99,18 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+try
+{
+    using var scope = app.Services.CreateScope();
+    var holdRepo = scope.ServiceProvider.GetRequiredService<IFibcQuotationHoldRepository>();
+    await holdRepo.EnsureSchemaAsync();
+    app.Logger.LogInformation("FibcQuotationHold schema ready.");
+}
+catch (Exception ex)
+{
+    app.Logger.LogError(ex, "Failed to initialize FibcQuotationHold tables. Quotation holds will not work until this is fixed.");
+}
 
 app.UseCors("AllowFrontend");
 

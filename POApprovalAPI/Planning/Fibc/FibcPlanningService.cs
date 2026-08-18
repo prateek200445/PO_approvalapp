@@ -7,15 +7,18 @@ public sealed class FibcPlanningService
 {
     private readonly IFibcPlanningRepository _repository;
     private readonly IFibcPlanningEngine _engine;
+    private readonly IFibcCriticalShiftEngine _criticalShiftEngine;
     private readonly FibcPlanningOptions _options;
 
     public FibcPlanningService(
         IFibcPlanningRepository repository,
         IFibcPlanningEngine engine,
+        IFibcCriticalShiftEngine criticalShiftEngine,
         IOptions<FibcPlanningOptions> options)
     {
         _repository = repository;
         _engine = engine;
+        _criticalShiftEngine = criticalShiftEngine;
         _options = options.Value;
     }
 
@@ -26,8 +29,20 @@ public sealed class FibcPlanningService
         ShiftPreference = _options.ShiftPreference,
         ActiveShifts = _options.ActiveShifts,
         AllotmentEnabled = true,
-        PreviewOnly = true,
+        PreviewOnly = !_options.AllowConfirmSave,
+        ConfirmSaveEnabled = _options.AllowConfirmSave,
+        ReplaceExistingEnabled = _options.AllowReplaceExistingPlan,
+        QuotationHoldEnabled = _options.QuotationHoldEnabled,
+        QuotationHoldDays = _options.QuotationHoldDays,
+        QuotationHoldEmailEnabled = _options.QuotationHoldEmailEnabled,
+        CriticalShiftEnabled = _options.CriticalShiftEnabled,
     };
+
+    public Task<FibcCriticalShiftResult> PreviewCriticalShiftAsync(FibcCriticalShiftRequest request, CancellationToken ct = default) =>
+        _criticalShiftEngine.PreviewCriticalShiftAsync(request, ct);
+
+    public Task<FibcCriticalShiftConfirmResult> ConfirmCriticalShiftAsync(FibcCriticalShiftRequest request, CancellationToken ct = default) =>
+        _criticalShiftEngine.ConfirmCriticalShiftAsync(request, ct);
 
     public Task<FibcOrderAllotmentContextDto?> GetOrderAllotmentContextAsync(string orderNo, CancellationToken ct = default) =>
         _repository.GetOrderAllotmentContextAsync(orderNo, ct);
@@ -64,22 +79,28 @@ public sealed class FibcPlanningService
 
         var trimmed = orderNo.Trim();
         var planLinesTask = _repository.GetOrderPlanLinesAsync(trimmed, ct);
+        var savedTask = _repository.GetSavedAllocationLinesAsync(trimmed, ct);
         var fabricTask = _repository.GetFabricRequirementsAsync(trimmed, ct);
-        await Task.WhenAll(planLinesTask, fabricTask);
+        await Task.WhenAll(planLinesTask, savedTask, fabricTask);
 
         var planLines = await planLinesTask;
+        var savedAllocations = await savedTask;
         var fabric = await fabricTask;
-        if (planLines.Count == 0 && fabric.Count == 0)
+        if (planLines.Count == 0 && savedAllocations.Count == 0 && fabric.Count == 0)
             return null;
 
         return new FibcOrderPlanDetailDto
         {
             OrderNo = trimmed,
             PlanLines = planLines,
+            SavedAllocations = savedAllocations,
             FabricRequirements = fabric,
         };
     }
 
     public Task<FibcAllotmentResult> PreviewAllotmentAsync(FibcAllotmentRequest request, CancellationToken ct = default) =>
         _engine.AllotOrderAsync(request, ct);
+
+    public Task<FibcAllotmentConfirmResult> ConfirmAllotmentAsync(FibcAllotmentRequest request, CancellationToken ct = default) =>
+        _engine.ConfirmAllotOrderAsync(request, ct);
 }

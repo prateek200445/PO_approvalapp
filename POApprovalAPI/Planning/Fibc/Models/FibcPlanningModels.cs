@@ -8,6 +8,12 @@ public sealed class FibcPlanningConfigDto
     public IReadOnlyList<string> ActiveShifts { get; set; } = Array.Empty<string>();
     public bool AllotmentEnabled { get; set; }
     public bool PreviewOnly { get; set; } = true;
+    public bool ConfirmSaveEnabled { get; set; }
+    public bool ReplaceExistingEnabled { get; set; }
+    public bool QuotationHoldEnabled { get; set; }
+    public int QuotationHoldDays { get; set; }
+    public bool QuotationHoldEmailEnabled { get; set; }
+    public bool CriticalShiftEnabled { get; set; }
 }
 
 public sealed class FibcLineConfigDto
@@ -90,6 +96,7 @@ public sealed class FibcOrderPlanDetailDto
 {
     public string OrderNo { get; set; } = "";
     public IReadOnlyList<FibcOrderPlanLineDto> PlanLines { get; set; } = Array.Empty<FibcOrderPlanLineDto>();
+    public IReadOnlyList<FibcOrderPlanLineDto> SavedAllocations { get; set; } = Array.Empty<FibcOrderPlanLineDto>();
     public IReadOnlyList<FibcFabricRequirementDto> FabricRequirements { get; set; } = Array.Empty<FibcFabricRequirementDto>();
 }
 
@@ -100,6 +107,9 @@ public sealed class FibcAllotmentRequest
     public DateTime? DispatchDate { get; set; }
     public double Quantity { get; set; }
     public string? BagType { get; set; }
+    public string? PartyName { get; set; }
+    public string? MarketingNo { get; set; }
+    public bool ReplaceExisting { get; set; }
 }
 
 public sealed class FibcOrderAllotmentContextDto
@@ -111,9 +121,10 @@ public sealed class FibcOrderAllotmentContextDto
     public double? Quantity { get; set; }
     public string? BagType { get; set; }
     public string BagTypeLabel { get; set; } = "";
+    public int ExistingAllocationCount { get; set; }
 }
 
-public sealed class FibcAllotmentResult
+public class FibcAllotmentResult
 {
     public bool Success { get; set; }
     public string Message { get; set; } = "";
@@ -128,4 +139,10 @@ public sealed class FibcAllotmentResult
     public DateTime? TargetCompletionDate { get; set; }
     public IReadOnlyList<string> Warnings { get; set; } = Array.Empty<string>();
     public IReadOnlyList<FibcSlotGridItemDto> ProposedSlots { get; set; } = Array.Empty<FibcSlotGridItemDto>();
+}
+
+public sealed class FibcAllotmentConfirmResult : FibcAllotmentResult
+{
+    public bool Saved { get; set; }
+    public int RowsInserted { get; set; }
 }

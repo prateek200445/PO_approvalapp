@@ -8,4 +8,6 @@ namespace POApprovalAPI.Planning.Fibc;
 public interface IFibcPlanningEngine
 {
     Task<FibcAllotmentResult> AllotOrderAsync(FibcAllotmentRequest request, CancellationToken ct = default);
+
+    Task<FibcAllotmentConfirmResult> ConfirmAllotOrderAsync(FibcAllotmentRequest request, CancellationToken ct = default);
 }

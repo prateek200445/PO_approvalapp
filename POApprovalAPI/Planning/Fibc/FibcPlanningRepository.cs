@@ -62,25 +62,30 @@ ORDER BY LNo, SOrderno", new { CompanyName = company }, commandTimeout: CommandT
         using var connection = _database.CreateConnection();
         var rows = (await connection.QueryAsync<SlotGridRow>(@"
 SELECT
-    CompanyNam,
-    bagtype,
-    partyname,
-    orderno,
-    Linenos,
-    sysdate,
-    alloted,
-    capacity,
-    remaining,
-    allocatedper,
-    shift,
-    MarketingNo,
-    transid,
-    Effi
-FROM vw_fibclineplanning_NEW WITH (NOLOCK)
-WHERE CompanyNam = @CompanyName
-  AND sysdate >= @DateFrom
-  AND sysdate < @InclusiveDateTo
-ORDER BY sysdate DESC, Linenos, shift", new
+    v.CompanyNam,
+    v.bagtype,
+    v.partyname,
+    v.orderno,
+    v.Linenos,
+    v.sysdate,
+    v.alloted,
+    v.capacity,
+    v.remaining,
+    v.allocatedper,
+    v.shift,
+    v.MarketingNo,
+    COALESCE(cp.TransId, v.transid) AS transid,
+    v.Effi
+FROM vw_fibclineplanning_NEW v WITH (NOLOCK)
+LEFT JOIN CapacityPlanning cp WITH (NOLOCK)
+    ON cp.CompanyNam = v.CompanyNam
+   AND cp.Linenos = v.Linenos
+   AND cp.sysdate = v.sysdate
+   AND cp.shift = v.shift
+WHERE v.CompanyNam = @CompanyName
+  AND v.sysdate >= @DateFrom
+  AND v.sysdate < @InclusiveDateTo
+ORDER BY v.sysdate DESC, v.Linenos, v.shift", new
         {
             CompanyName = company,
             DateFrom = from,
@@ -190,7 +195,8 @@ SELECT TOP 1
     MarketingInvNo,
     DespatchDate,
     TotalQty,
-    TypeofBag
+    TypeofBag,
+    BuyerName
 FROM Despatch.dbo.MarketingInvoice WITH (NOLOCK)
 WHERE BuyerOrderNo = @OrderNo
 ORDER BY DespatchDate DESC", new { OrderNo = trimmed }, commandTimeout: CommandTimeoutSeconds);
@@ -205,24 +211,86 @@ WHERE FilePONo = @OrderNo
 ORDER BY Targetdate DESC", new { OrderNo = trimmed }, commandTimeout: CommandTimeoutSeconds);
 
         if (marketing is null && bom is null)
-            return null;
+        {
+            var savedOnly = await GetSavedAllocationLinesAsync(trimmed, ct);
+            if (savedOnly.Count == 0)
+                return null;
+
+            var first = savedOnly[0];
+            return new FibcOrderAllotmentContextDto
+            {
+                OrderNo = trimmed,
+                PartyName = first.PartyName,
+                MarketingNo = null,
+                DispatchDate = null,
+                Quantity = savedOnly.Sum(s => s.Qty),
+                BagType = first.BagType,
+                BagTypeLabel = first.BagTypeLabel,
+                ExistingAllocationCount = savedOnly.Count,
+            };
+        }
 
         var bagType = bom?.BagType ?? marketing?.TypeofBag;
         var dispatchDate = marketing?.DespatchDate is { } despatch && FibcPlanningEngine.IsValidDispatchDate(despatch)
             ? despatch
             : (DateTime?)null;
         var marketingQty = marketing?.TotalQty is > 0 ? marketing.TotalQty : null;
+        var existingCount = await GetExistingAllocationCountAsync(trimmed, ct);
 
         return new FibcOrderAllotmentContextDto
         {
             OrderNo = trimmed,
-            PartyName = bom?.Customer,
+            PartyName = bom?.Customer ?? marketing?.BuyerName,
             MarketingNo = marketing?.MarketingInvNo,
             DispatchDate = dispatchDate,
             Quantity = ParseQuantity(bom?.Qty) ?? marketingQty,
             BagType = bagType,
             BagTypeLabel = BagTypeMapper.ToDisplayLabel(bagType),
+            ExistingAllocationCount = existingCount,
         };
+    }
+
+    public async Task<IReadOnlyList<FibcOrderPlanLineDto>> GetSavedAllocationLinesAsync(
+        string orderNo,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(orderNo))
+            return Array.Empty<FibcOrderPlanLineDto>();
+
+        using var connection = _database.CreateConnection();
+        var rows = await connection.QueryAsync<SavedAllocationRow>(@"
+SELECT
+    Companyname,
+    linenos,
+    partyname,
+    orderno,
+    qty,
+    sysdate,
+    shift,
+    ALLOCATEDPER,
+    PBagType
+FROM dbo.prod_fibcallocationMaster WITH (NOLOCK)
+WHERE orderno = @OrderNo
+ORDER BY sysdate, linenos, shift", new { OrderNo = orderNo.Trim() }, commandTimeout: CommandTimeoutSeconds);
+
+        return rows.Select(row =>
+        {
+            var bagType = row.PBagType ?? "";
+            return new FibcOrderPlanLineDto
+            {
+                CompanyName = row.Companyname ?? "",
+                LineNo = row.linenos ?? "",
+                PartyName = row.partyname,
+                OrderNo = row.orderno,
+                BagType = bagType,
+                BagTypeLabel = BagTypeMapper.ToDisplayLabel(bagType),
+                Qty = row.qty,
+                PlanDate = row.sysdate,
+                Shift = row.shift ?? "",
+                AllocatedPercent = row.ALLOCATEDPER,
+            };
+        }).ToList();
     }
 
     public async Task<IReadOnlyList<string>> GetDistinctShiftsAsync(
@@ -259,6 +327,420 @@ ORDER BY shift", new
             .Where(s => s.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    public async Task<int> GetExistingAllocationCountAsync(string orderNo, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(orderNo))
+            return 0;
+
+        using var connection = _database.CreateConnection();
+        return await connection.ExecuteScalarAsync<int>(@"
+SELECT COUNT(*)
+FROM dbo.prod_fibcallocationMaster WITH (NOLOCK)
+WHERE orderno = @OrderNo", new { OrderNo = orderNo.Trim() }, commandTimeout: CommandTimeoutSeconds);
+    }
+
+    public async Task<double?> GetSlotRemainingAsync(
+        string companyName,
+        string lineNo,
+        DateTime planDate,
+        string shift,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(lineNo) || string.IsNullOrWhiteSpace(shift))
+            return null;
+
+        using var connection = _database.CreateConnection();
+        return await connection.ExecuteScalarAsync<double?>(@"
+SELECT remaining
+FROM vw_fibclineplanning_NEW WITH (NOLOCK)
+WHERE CompanyNam = @CompanyName
+  AND Linenos = @LineNo
+  AND sysdate = @PlanDate
+  AND shift = @Shift", new
+        {
+            CompanyName = companyName,
+            LineNo = lineNo.Trim(),
+            PlanDate = planDate.Date,
+            Shift = shift.Trim(),
+        }, commandTimeout: CommandTimeoutSeconds);
+    }
+
+    public async Task<int?> GetCapacityTransIdAsync(
+        string companyName,
+        string lineNo,
+        DateTime planDate,
+        string shift,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(lineNo) || string.IsNullOrWhiteSpace(shift))
+            return null;
+
+        using var connection = _database.CreateConnection();
+        return await connection.ExecuteScalarAsync<int?>(@"
+SELECT TOP 1 TransId
+FROM CapacityPlanning WITH (NOLOCK)
+WHERE CompanyNam = @CompanyName
+  AND Linenos = @LineNo
+  AND sysdate = @PlanDate
+  AND shift = @Shift
+ORDER BY TransId", new
+        {
+            CompanyName = companyName,
+            LineNo = lineNo.Trim(),
+            PlanDate = planDate.Date,
+            Shift = shift.Trim(),
+        }, commandTimeout: CommandTimeoutSeconds);
+    }
+
+    public async Task<int> InsertAllocationsAsync(
+        string companyName,
+        string orderNo,
+        string? partyName,
+        string? marketingNo,
+        IReadOnlyList<FibcSlotGridItemDto> slots,
+        bool replaceExisting,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (slots.Count == 0)
+            return 0;
+
+        using var connection = _database.CreateConnection();
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            if (replaceExisting)
+            {
+                await connection.ExecuteAsync(@"
+DELETE FROM dbo.prod_fibcallocationMaster
+WHERE orderno = @OrderNo", new { OrderNo = orderNo }, transaction, commandTimeout: CommandTimeoutSeconds);
+            }
+
+            var inserted = 0;
+            foreach (var slot in slots)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var remaining = await connection.ExecuteScalarAsync<double?>(@"
+SELECT remaining
+FROM vw_fibclineplanning_NEW WITH (NOLOCK)
+WHERE CompanyNam = @CompanyName
+  AND Linenos = @LineNo
+  AND sysdate = @PlanDate
+  AND shift = @Shift", new
+                {
+                    CompanyName = companyName,
+                    LineNo = slot.LineNo,
+                    PlanDate = slot.PlanDate.Date,
+                    Shift = slot.Shift,
+                }, transaction, commandTimeout: CommandTimeoutSeconds);
+
+                if (remaining is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Capacity slot on {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} no longer exists.");
+                }
+
+                if (slot.Allotted > remaining.Value + 0.01)
+                {
+                    throw new InvalidOperationException(
+                        $"Slot {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} only has {remaining.Value:N0} remaining but {slot.Allotted:N0} was requested.");
+                }
+
+                var allocatedPercent = slot.AllocatedPercent
+                    ?? (slot.Capacity > 0 ? Math.Round(slot.Allotted / slot.Capacity * 100, 2) : 100d);
+                var efficiency = slot.Efficiency ?? 0.5d;
+
+                await connection.ExecuteAsync(@"
+INSERT INTO dbo.prod_fibcallocationMaster
+    (Companyname, linenos, partyname, orderno, qty, sysdate, ALLOCATEDPER, shift, MarketingNo, PBagType, QCapacity, Effi)
+VALUES
+    (@Companyname, @Linenos, @Partyname, @Orderno, @Qty, @Sysdate, @AllocatedPer, @Shift, @MarketingNo, @PBagType, @QCapacity, @Effi)", new
+                {
+                    Companyname = companyName,
+                    Linenos = slot.LineNo,
+                    Partyname = partyName,
+                    Orderno = orderNo,
+                    Qty = slot.Allotted,
+                    Sysdate = slot.PlanDate.Date,
+                    AllocatedPer = allocatedPercent,
+                    Shift = slot.Shift,
+                    MarketingNo = marketingNo,
+                    PBagType = slot.BagType,
+                    QCapacity = slot.Capacity,
+                    Effi = efficiency,
+                }, transaction, commandTimeout: CommandTimeoutSeconds);
+
+                inserted++;
+            }
+
+            transaction.Commit();
+            return inserted;
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    public async Task<FibcSavedAllocationRowDto?> GetSavedAllocationSlotAsync(
+        string orderNo,
+        string lineNo,
+        DateTime planDate,
+        string shift,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(orderNo))
+            return null;
+
+        using var connection = _database.CreateConnection();
+        var row = await connection.QueryFirstOrDefaultAsync<SavedAllocationRow>(@"
+SELECT TOP 1
+    Companyname,
+    linenos,
+    partyname,
+    orderno,
+    qty,
+    sysdate,
+    shift,
+    ALLOCATEDPER,
+    MarketingNo,
+    PBagType,
+    QCapacity,
+    Effi
+FROM dbo.prod_fibcallocationMaster WITH (NOLOCK)
+WHERE orderno = @OrderNo
+  AND linenos = @LineNo
+  AND sysdate = @PlanDate
+  AND shift = @Shift", new
+        {
+            OrderNo = orderNo.Trim(),
+            LineNo = lineNo.Trim(),
+            PlanDate = planDate.Date,
+            Shift = shift.Trim(),
+        }, commandTimeout: CommandTimeoutSeconds);
+
+        if (row is null)
+            return null;
+
+        return new FibcSavedAllocationRowDto
+        {
+            CompanyName = row.Companyname ?? "",
+            OrderNo = row.orderno ?? "",
+            PartyName = row.partyname,
+            MarketingNo = row.MarketingNo,
+            BagType = row.PBagType ?? "",
+            LineNo = row.linenos ?? "",
+            PlanDate = row.sysdate,
+            Shift = row.shift ?? "",
+            Qty = row.qty,
+            AllocatedPercent = row.ALLOCATEDPER,
+            Capacity = row.QCapacity,
+            Efficiency = row.Effi,
+        };
+    }
+
+    public async Task<int> DeleteAllocationSlotAsync(
+        string orderNo,
+        string lineNo,
+        DateTime planDate,
+        string shift,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        using var connection = _database.CreateConnection();
+        return await connection.ExecuteAsync(@"
+DELETE FROM dbo.prod_fibcallocationMaster
+WHERE orderno = @OrderNo
+  AND linenos = @LineNo
+  AND sysdate = @PlanDate
+  AND shift = @Shift", new
+        {
+            OrderNo = orderNo.Trim(),
+            LineNo = lineNo.Trim(),
+            PlanDate = planDate.Date,
+            Shift = shift.Trim(),
+        }, commandTimeout: CommandTimeoutSeconds);
+    }
+
+    public async Task<int> ApplyCriticalShiftPlanAsync(
+        string companyName,
+        string criticalOrderNo,
+        string? criticalPartyName,
+        string? criticalMarketingNo,
+        IReadOnlyList<FibcSlotGridItemDto> criticalSlots,
+        IReadOnlyList<FibcOrderShiftDisplacementDto> displacements,
+        bool replaceCriticalExisting,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        using var connection = _database.CreateConnection();
+        using var transaction = connection.BeginTransaction();
+        var deleted = 0;
+        var inserted = 0;
+
+        try
+        {
+            foreach (var move in displacements)
+            {
+                ct.ThrowIfCancellationRequested();
+                var saved = await connection.QueryFirstOrDefaultAsync<SavedAllocationRow>(@"
+SELECT TOP 1
+    Companyname, linenos, partyname, orderno, qty, sysdate, shift,
+    ALLOCATEDPER, MarketingNo, PBagType, QCapacity, Effi
+FROM dbo.prod_fibcallocationMaster
+WHERE orderno = @OrderNo AND linenos = @LineNo AND sysdate = @PlanDate AND shift = @Shift", new
+                {
+                    OrderNo = move.OrderNo.Trim(),
+                    LineNo = move.FromLineNo.Trim(),
+                    PlanDate = move.FromPlanDate.Date,
+                    Shift = move.FromShift.Trim(),
+                }, transaction, commandTimeout: CommandTimeoutSeconds);
+
+                if (saved is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Blocking allocation for order {move.OrderNo} on {move.FromPlanDate:yyyy-MM-dd} line {move.FromLineNo} shift {move.FromShift} no longer exists.");
+                }
+
+                var remaining = await connection.ExecuteScalarAsync<double?>(@"
+SELECT remaining
+FROM vw_fibclineplanning_NEW WITH (NOLOCK)
+WHERE CompanyNam = @CompanyName
+  AND Linenos = @LineNo
+  AND sysdate = @PlanDate
+  AND shift = @Shift", new
+                {
+                    CompanyName = companyName,
+                    LineNo = move.ToLineNo.Trim(),
+                    PlanDate = move.ToPlanDate.Date,
+                    Shift = move.ToShift.Trim(),
+                }, transaction, commandTimeout: CommandTimeoutSeconds);
+
+                if (remaining is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Target slot {move.ToPlanDate:yyyy-MM-dd} line {move.ToLineNo} shift {move.ToShift} no longer exists.");
+                }
+
+                if (move.Qty > remaining.Value + 0.01)
+                {
+                    throw new InvalidOperationException(
+                        $"Target slot only has {remaining.Value:N0} remaining but {move.Qty:N0} needed to shift order {move.OrderNo}.");
+                }
+
+                deleted += await connection.ExecuteAsync(@"
+DELETE FROM dbo.prod_fibcallocationMaster
+WHERE orderno = @OrderNo AND linenos = @LineNo AND sysdate = @PlanDate AND shift = @Shift", new
+                {
+                    OrderNo = move.OrderNo.Trim(),
+                    LineNo = move.FromLineNo.Trim(),
+                    PlanDate = move.FromPlanDate.Date,
+                    Shift = move.FromShift.Trim(),
+                }, transaction, commandTimeout: CommandTimeoutSeconds);
+
+                var allocatedPercent = move.AllocatedPercent
+                    ?? (move.Capacity > 0 ? Math.Round(move.Qty / move.Capacity * 100, 2) : saved.ALLOCATEDPER ?? 100d);
+
+                await connection.ExecuteAsync(@"
+INSERT INTO dbo.prod_fibcallocationMaster
+    (Companyname, linenos, partyname, orderno, qty, sysdate, ALLOCATEDPER, shift, MarketingNo, PBagType, QCapacity, Effi)
+VALUES
+    (@Companyname, @Linenos, @Partyname, @Orderno, @Qty, @Sysdate, @AllocatedPer, @Shift, @MarketingNo, @PBagType, @QCapacity, @Effi)", new
+                {
+                    Companyname = saved.Companyname ?? companyName,
+                    Linenos = move.ToLineNo.Trim(),
+                    Partyname = saved.partyname,
+                    Orderno = move.OrderNo.Trim(),
+                    Qty = move.Qty,
+                    Sysdate = move.ToPlanDate.Date,
+                    AllocatedPer = allocatedPercent,
+                    Shift = move.ToShift.Trim(),
+                    MarketingNo = saved.MarketingNo,
+                    PBagType = saved.PBagType ?? move.BagType,
+                    QCapacity = move.Capacity > 0 ? move.Capacity : saved.QCapacity,
+                    Effi = saved.Effi,
+                }, transaction, commandTimeout: CommandTimeoutSeconds);
+                inserted++;
+            }
+
+            if (replaceCriticalExisting)
+            {
+                deleted += await connection.ExecuteAsync(@"
+DELETE FROM dbo.prod_fibcallocationMaster
+WHERE orderno = @OrderNo", new { OrderNo = criticalOrderNo.Trim() }, transaction, commandTimeout: CommandTimeoutSeconds);
+            }
+
+            foreach (var slot in criticalSlots)
+            {
+                ct.ThrowIfCancellationRequested();
+                var remaining = await connection.ExecuteScalarAsync<double?>(@"
+SELECT remaining
+FROM vw_fibclineplanning_NEW WITH (NOLOCK)
+WHERE CompanyNam = @CompanyName
+  AND Linenos = @LineNo
+  AND sysdate = @PlanDate
+  AND shift = @Shift", new
+                {
+                    CompanyName = companyName,
+                    LineNo = slot.LineNo,
+                    PlanDate = slot.PlanDate.Date,
+                    Shift = slot.Shift,
+                }, transaction, commandTimeout: CommandTimeoutSeconds);
+
+                if (remaining is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Critical slot {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} no longer exists.");
+                }
+
+                if (slot.Allotted > remaining.Value + 0.01)
+                {
+                    throw new InvalidOperationException(
+                        $"Critical slot only has {remaining.Value:N0} remaining but {slot.Allotted:N0} requested.");
+                }
+
+                var allocatedPercent = slot.AllocatedPercent
+                    ?? (slot.Capacity > 0 ? Math.Round(slot.Allotted / slot.Capacity * 100, 2) : 100d);
+                var efficiency = slot.Efficiency ?? 0.5d;
+
+                await connection.ExecuteAsync(@"
+INSERT INTO dbo.prod_fibcallocationMaster
+    (Companyname, linenos, partyname, orderno, qty, sysdate, ALLOCATEDPER, shift, MarketingNo, PBagType, QCapacity, Effi)
+VALUES
+    (@Companyname, @Linenos, @Partyname, @Orderno, @Qty, @Sysdate, @AllocatedPer, @Shift, @MarketingNo, @PBagType, @QCapacity, @Effi)", new
+                {
+                    Companyname = companyName,
+                    Linenos = slot.LineNo,
+                    Partyname = criticalPartyName,
+                    Orderno = criticalOrderNo.Trim(),
+                    Qty = slot.Allotted,
+                    Sysdate = slot.PlanDate.Date,
+                    AllocatedPer = allocatedPercent,
+                    Shift = slot.Shift,
+                    MarketingNo = criticalMarketingNo,
+                    PBagType = slot.BagType,
+                    QCapacity = slot.Capacity,
+                    Effi = efficiency,
+                }, transaction, commandTimeout: CommandTimeoutSeconds);
+                inserted++;
+            }
+
+            transaction.Commit();
+            return inserted;
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
     }
 
     private static double? ParseQuantity(string? qtyText)
@@ -409,6 +891,23 @@ ORDER BY shift", new
         public DateTime? DespatchDate { get; set; }
         public double? TotalQty { get; set; }
         public string? TypeofBag { get; set; }
+        public string? BuyerName { get; set; }
+    }
+
+    private sealed class SavedAllocationRow
+    {
+        public string? Companyname { get; set; }
+        public string? linenos { get; set; }
+        public string? partyname { get; set; }
+        public string? orderno { get; set; }
+        public double qty { get; set; }
+        public DateTime sysdate { get; set; }
+        public string? shift { get; set; }
+        public double? ALLOCATEDPER { get; set; }
+        public string? PBagType { get; set; }
+        public string? MarketingNo { get; set; }
+        public double QCapacity { get; set; }
+        public double Effi { get; set; }
     }
 
     private sealed class BomOrderRow

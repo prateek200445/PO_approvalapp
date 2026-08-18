@@ -1,0 +1,9 @@
+{
+  "orderNo": "CRITICAL-TEST-001",
+  "quantity": 2100,
+  "bagType": "UPanel",
+  "dispatchDate": "2025-10-31",
+  "partyName": "Test Critical Co",
+  "reason": "Urgent dispatch - phase 5 test",
+  "replaceExisting": false
+}

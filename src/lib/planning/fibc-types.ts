@@ -5,6 +5,12 @@ export type FibcPlanningConfig = {
   activeShifts: string[];
   allotmentEnabled: boolean;
   previewOnly: boolean;
+  confirmSaveEnabled: boolean;
+  replaceExistingEnabled: boolean;
+  quotationHoldEnabled: boolean;
+  quotationHoldDays: number;
+  quotationHoldEmailEnabled: boolean;
+  criticalShiftEnabled: boolean;
 };
 
 export type FibcOrderAllotmentContext = {
@@ -15,6 +21,7 @@ export type FibcOrderAllotmentContext = {
   quantity: number | null;
   bagType: string | null;
   bagTypeLabel: string;
+  existingAllocationCount: number;
 };
 
 export type FibcAllotmentRequest = {
@@ -23,6 +30,9 @@ export type FibcAllotmentRequest = {
   dispatchDate?: string;
   quantity?: number;
   bagType?: string;
+  partyName?: string;
+  marketingNo?: string;
+  replaceExisting?: boolean;
 };
 
 export type FibcAllotmentResult = {
@@ -39,6 +49,68 @@ export type FibcAllotmentResult = {
   targetCompletionDate: string | null;
   warnings: string[];
   proposedSlots: FibcSlotGridItem[];
+};
+
+export type FibcAllotmentConfirmResult = FibcAllotmentResult & {
+  saved: boolean;
+  rowsInserted: number;
+};
+
+export type FibcCriticalShiftRequest = {
+  orderNo: string;
+  companyName?: string;
+  dispatchDate?: string;
+  quantity?: number;
+  bagType?: string;
+  partyName?: string;
+  marketingNo?: string;
+  replaceExisting?: boolean;
+  reason?: string;
+  /** When true, slots must fall on target completion date only (testing / strict mode). */
+  pinToTargetDate?: boolean;
+};
+
+export type FibcOrderShiftDisplacement = {
+  orderNo: string;
+  partyName: string | null;
+  bagType: string;
+  bagTypeLabel: string;
+  fromLineNo: string;
+  fromPlanDate: string;
+  fromShift: string;
+  toLineNo: string;
+  toPlanDate: string;
+  toShift: string;
+  qty: number;
+  capacity: number;
+  allocatedPercent: number | null;
+  marketingNo: string | null;
+};
+
+export type FibcCriticalShiftResult = {
+  success: boolean;
+  shiftsRequired: boolean;
+  fullyAllotted: boolean;
+  message: string;
+  orderNo: string;
+  bagType: string;
+  bagTypeLabel: string;
+  quantity: number;
+  capacityPerShift: number;
+  bufferDays: number;
+  dispatchDate: string | null;
+  targetCompletionDate: string | null;
+  pinToTargetDate: boolean;
+  warnings: string[];
+  proposedSlots: FibcSlotGridItem[];
+  displacements: FibcOrderShiftDisplacement[];
+};
+
+export type FibcCriticalShiftConfirmResult = FibcCriticalShiftResult & {
+  saved: boolean;
+  rowsInserted: number;
+  rowsDeleted: number;
+  ordersShifted: number;
 };
 
 export type FibcLineConfig = {
@@ -115,7 +187,62 @@ export type FibcFabricRequirement = {
 export type FibcOrderPlanDetail = {
   orderNo: string;
   planLines: FibcOrderPlanLine[];
+  savedAllocations: FibcOrderPlanLine[];
   fabricRequirements: FibcFabricRequirement[];
+};
+
+export type FibcQuotationHoldRequest = {
+  orderNo: string;
+  companyName?: string;
+  dispatchDate?: string;
+  quantity?: number;
+  bagType?: string;
+  partyName?: string;
+  marketingNo?: string;
+  notes?: string;
+};
+
+export type FibcQuotationHoldSlot = {
+  planDate: string;
+  lineNo: string;
+  shift: string;
+  qty: number;
+  capacity: number;
+  allocatedPercent: number | null;
+};
+
+export type FibcQuotationHold = {
+  holdId: number;
+  referenceCode: string;
+  companyName: string;
+  orderNo: string;
+  partyName: string | null;
+  marketingNo: string | null;
+  bagType: string | null;
+  bagTypeLabel: string;
+  quantity: number;
+  dispatchDate: string | null;
+  status: string;
+  notes: string | null;
+  createdAt: string;
+  expiresAt: string;
+  confirmedAt: string | null;
+  cancelledAt: string | null;
+  slots: FibcQuotationHoldSlot[];
+};
+
+export type FibcQuotationHoldResult = {
+  success: boolean;
+  message: string;
+  hold: FibcQuotationHold | null;
+};
+
+export type FibcQuotationConfirmResult = {
+  success: boolean;
+  saved: boolean;
+  message: string;
+  holdId: number;
+  rowsInserted: number;
 };
 
 export function toInputDate(value: Date): string {
@@ -242,6 +369,12 @@ export function normalizePlanningConfig(data: Record<string, unknown>): FibcPlan
     activeShifts: Array.isArray(activeShifts) ? activeShifts.map(String) : [],
     allotmentEnabled: Boolean(data.allotmentEnabled ?? data.AllotmentEnabled),
     previewOnly: Boolean(data.previewOnly ?? data.PreviewOnly ?? true),
+    confirmSaveEnabled: Boolean(data.confirmSaveEnabled ?? data.ConfirmSaveEnabled),
+    replaceExistingEnabled: Boolean(data.replaceExistingEnabled ?? data.ReplaceExistingEnabled),
+    quotationHoldEnabled: Boolean(data.quotationHoldEnabled ?? data.QuotationHoldEnabled),
+    quotationHoldDays: numField(data, "quotationHoldDays", "QuotationHoldDays") || 7,
+    quotationHoldEmailEnabled: Boolean(data.quotationHoldEmailEnabled ?? data.QuotationHoldEmailEnabled),
+    criticalShiftEnabled: Boolean(data.criticalShiftEnabled ?? data.CriticalShiftEnabled),
   };
 }
 
@@ -254,6 +387,7 @@ export function normalizeAllotmentContext(data: Record<string, unknown>): FibcOr
     quantity: optNum(data, "quantity", "Quantity"),
     bagType: optStr(data, "bagType", "BagType"),
     bagTypeLabel: strField(data, "bagTypeLabel", "BagTypeLabel"),
+    existingAllocationCount: numField(data, "existingAllocationCount", "ExistingAllocationCount"),
   };
 }
 
@@ -274,5 +408,121 @@ export function normalizeAllotmentResult(data: Record<string, unknown>): FibcAll
     targetCompletionDate: optStr(data, "targetCompletionDate", "TargetCompletionDate"),
     warnings: Array.isArray(warnings) ? warnings.map(String) : [],
     proposedSlots: proposed.map(normalizeSlotGridItem),
+  };
+}
+
+export function normalizeAllotmentConfirmResult(data: Record<string, unknown>): FibcAllotmentConfirmResult {
+  const base = normalizeAllotmentResult(data);
+  return {
+    ...base,
+    saved: Boolean(data.saved ?? data.Saved),
+    rowsInserted: numField(data, "rowsInserted", "RowsInserted"),
+  };
+}
+
+function normalizeQuotationHoldSlot(row: Record<string, unknown>): FibcQuotationHoldSlot {
+  return {
+    planDate: strField(row, "planDate", "PlanDate"),
+    lineNo: strField(row, "lineNo", "LineNo"),
+    shift: strField(row, "shift", "Shift"),
+    qty: numField(row, "qty", "Qty"),
+    capacity: numField(row, "capacity", "Capacity"),
+    allocatedPercent: optNum(row, "allocatedPercent", "AllocatedPercent"),
+  };
+}
+
+export function normalizeQuotationHold(data: Record<string, unknown>): FibcQuotationHold {
+  const slots = (data.slots ?? data.Slots ?? []) as Array<Record<string, unknown>>;
+  return {
+    holdId: numField(data, "holdId", "HoldId"),
+    referenceCode: strField(data, "referenceCode", "ReferenceCode"),
+    companyName: strField(data, "companyName", "CompanyName"),
+    orderNo: strField(data, "orderNo", "OrderNo"),
+    partyName: optStr(data, "partyName", "PartyName"),
+    marketingNo: optStr(data, "marketingNo", "MarketingNo"),
+    bagType: optStr(data, "bagType", "BagType"),
+    bagTypeLabel: strField(data, "bagTypeLabel", "BagTypeLabel"),
+    quantity: numField(data, "quantity", "Quantity"),
+    dispatchDate: optStr(data, "dispatchDate", "DispatchDate"),
+    status: strField(data, "status", "Status"),
+    notes: optStr(data, "notes", "Notes"),
+    createdAt: strField(data, "createdAt", "CreatedAt"),
+    expiresAt: strField(data, "expiresAt", "ExpiresAt"),
+    confirmedAt: optStr(data, "confirmedAt", "ConfirmedAt"),
+    cancelledAt: optStr(data, "cancelledAt", "CancelledAt"),
+    slots: slots.map(normalizeQuotationHoldSlot),
+  };
+}
+
+export function normalizeQuotationHoldResult(data: Record<string, unknown>): FibcQuotationHoldResult {
+  const holdRaw = data.hold ?? data.Hold;
+  return {
+    success: Boolean(data.success ?? data.Success),
+    message: strField(data, "message", "Message"),
+    hold: holdRaw && typeof holdRaw === "object" ? normalizeQuotationHold(holdRaw as Record<string, unknown>) : null,
+  };
+}
+
+export function normalizeQuotationConfirmResult(data: Record<string, unknown>): FibcQuotationConfirmResult {
+  return {
+    success: Boolean(data.success ?? data.Success),
+    saved: Boolean(data.saved ?? data.Saved),
+    message: strField(data, "message", "Message"),
+    holdId: numField(data, "holdId", "HoldId"),
+    rowsInserted: numField(data, "rowsInserted", "RowsInserted"),
+  };
+}
+
+function normalizeOrderShiftDisplacement(row: Record<string, unknown>): FibcOrderShiftDisplacement {
+  return {
+    orderNo: strField(row, "orderNo", "OrderNo"),
+    partyName: optStr(row, "partyName", "PartyName"),
+    bagType: strField(row, "bagType", "BagType"),
+    bagTypeLabel: strField(row, "bagTypeLabel", "BagTypeLabel"),
+    fromLineNo: strField(row, "fromLineNo", "FromLineNo"),
+    fromPlanDate: strField(row, "fromPlanDate", "FromPlanDate"),
+    fromShift: strField(row, "fromShift", "FromShift"),
+    toLineNo: strField(row, "toLineNo", "ToLineNo"),
+    toPlanDate: strField(row, "toPlanDate", "ToPlanDate"),
+    toShift: strField(row, "toShift", "ToShift"),
+    qty: numField(row, "qty", "Qty"),
+    capacity: numField(row, "capacity", "Capacity"),
+    allocatedPercent: optNum(row, "allocatedPercent", "AllocatedPercent"),
+    marketingNo: optStr(row, "marketingNo", "MarketingNo"),
+  };
+}
+
+export function normalizeCriticalShiftResult(data: Record<string, unknown>): FibcCriticalShiftResult {
+  const proposed = (data.proposedSlots ?? data.ProposedSlots ?? []) as Array<Record<string, unknown>>;
+  const displacements = (data.displacements ?? data.Displacements ?? []) as Array<Record<string, unknown>>;
+  const warnings = (data.warnings ?? data.Warnings ?? []) as unknown;
+  return {
+    success: Boolean(data.success ?? data.Success),
+    shiftsRequired: Boolean(data.shiftsRequired ?? data.ShiftsRequired),
+    fullyAllotted: Boolean(data.fullyAllotted ?? data.FullyAllotted),
+    message: strField(data, "message", "Message"),
+    orderNo: strField(data, "orderNo", "OrderNo"),
+    bagType: strField(data, "bagType", "BagType"),
+    bagTypeLabel: strField(data, "bagTypeLabel", "BagTypeLabel"),
+    quantity: numField(data, "quantity", "Quantity"),
+    capacityPerShift: numField(data, "capacityPerShift", "CapacityPerShift"),
+    bufferDays: numField(data, "bufferDays", "BufferDays"),
+    dispatchDate: optStr(data, "dispatchDate", "DispatchDate"),
+    targetCompletionDate: optStr(data, "targetCompletionDate", "TargetCompletionDate"),
+    pinToTargetDate: Boolean(data.pinToTargetDate ?? data.PinToTargetDate),
+    warnings: Array.isArray(warnings) ? warnings.map(String) : [],
+    proposedSlots: proposed.map(normalizeSlotGridItem),
+    displacements: displacements.map(normalizeOrderShiftDisplacement),
+  };
+}
+
+export function normalizeCriticalShiftConfirmResult(data: Record<string, unknown>): FibcCriticalShiftConfirmResult {
+  const base = normalizeCriticalShiftResult(data);
+  return {
+    ...base,
+    saved: Boolean(data.saved ?? data.Saved),
+    rowsInserted: numField(data, "rowsInserted", "RowsInserted"),
+    rowsDeleted: numField(data, "rowsDeleted", "RowsDeleted"),
+    ordersShifted: numField(data, "ordersShifted", "OrdersShifted"),
   };
 }
