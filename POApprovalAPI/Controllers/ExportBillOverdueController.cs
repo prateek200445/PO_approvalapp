@@ -22,14 +22,14 @@ public class ExportBillOverdueController : ControllerBase
             var companies = await _service.GetCompaniesAsync();
             return Ok(new { companies });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { message = ex.Message });
+            return StatusCode(500, new { message = "Failed to load companies." });
         }
     }
 
     /// <summary>
-    /// Outstanding group names for the Group Name dropdown (ERP CashVoucherExpenseGroupHead).
+    /// Export-relevant outstanding group names only (not the full ERP catalog).
     /// </summary>
     [HttpGet("groups")]
     public async Task<IActionResult> GetGroups()
@@ -43,9 +43,9 @@ public class ExportBillOverdueController : ControllerBase
                 defaultGroup = ExportBillOverdueService.DefaultGroupName,
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { message = ex.Message });
+            return StatusCode(500, new { message = "Failed to load groups." });
         }
     }
 
@@ -76,18 +76,16 @@ public class ExportBillOverdueController : ControllerBase
                 company = result.Company,
                 asOf = result.AsOf,
                 groupName = result.GroupName,
-                source = result.Source,
                 count = result.Items.Count,
                 totalCount = result.TotalCount,
                 page = result.Page,
                 pageSize = result.PageSize,
                 totalPages,
-                note = "ERP Outstanding Receivable; excl. IC; Amount = INR pending (>=100); foreign currency from accountbills shown under amount.",
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { message = ex.Message });
+            return StatusCode(500, new { message = "Failed to load export bill overdue." });
         }
     }
 }

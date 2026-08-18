@@ -399,8 +399,7 @@ function ExportBillOverduePage() {
       )}
       {overdueQuery.isError && (
         <p className="text-xs text-destructive" role="alert">
-          Failed to load.{" "}
-          {overdueQuery.error instanceof Error ? overdueQuery.error.message : ""}
+          Failed to load overdue bills. Please try again.
         </p>
       )}
 
