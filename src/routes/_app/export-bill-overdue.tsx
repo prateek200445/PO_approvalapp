@@ -309,13 +309,8 @@ function ExportBillOverduePage() {
           Export Bill Overdue
         </h1>
         <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-          <span className="sm:hidden">
-            Loads automatically when you change filters. First ERP load ~15–20s; later pages are instant.
-          </span>
-          <span className="hidden sm:inline">
-            Data loads automatically when filters change. First ERP load is typically ~15–20s;
-            later pages and revisits use cache and are near-instant.
-          </span>
+          Overseas receivable bills with customer, bill no/date, amount, and due date. Filters apply
+          automatically.
         </p>
       </div>
 
@@ -392,8 +387,8 @@ function ExportBillOverduePage() {
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
           {isInitialLoad
             ? isAllCompanies(company)
-              ? "Loading all companies from ERP (first time)…"
-              : "Loading overdue bills from ERP (first time — next pages will be instant)…"
+              ? "Loading all companies…"
+              : "Loading overdue bills…"
             : "Updating…"}
         </div>
       )}
