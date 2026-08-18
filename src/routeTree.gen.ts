@@ -21,6 +21,7 @@ import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
 import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
+import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppBomRouteImport } from './routes/_app/bom'
 import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
@@ -90,6 +91,11 @@ const AppHistoryRoute = AppHistoryRouteImport.update({
   path: '/history',
   getParentRoute: () => AppRoute,
 } as any)
+const AppExportBillOverdueRoute = AppExportBillOverdueRouteImport.update({
+  id: '/export-bill-overdue',
+  path: '/export-bill-overdue',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDashboardRoute = AppDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -140,6 +146,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/bom': typeof AppBomRouteWithChildren
   '/dashboard': typeof AppDashboardRoute
+  '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/ledger-summary': typeof AppLedgerSummaryRoute
@@ -161,6 +168,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof AppDashboardRoute
+  '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/ledger-summary': typeof AppLedgerSummaryRoute
@@ -185,6 +193,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/_app/bom': typeof AppBomRouteWithChildren
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/_app/history': typeof AppHistoryRoute
   '/_app/indents': typeof AppIndentsRoute
   '/_app/ledger-summary': typeof AppLedgerSummaryRoute
@@ -209,6 +218,7 @@ export interface FileRouteTypes {
     | '/'
     | '/bom'
     | '/dashboard'
+    | '/export-bill-overdue'
     | '/history'
     | '/indents'
     | '/ledger-summary'
@@ -230,6 +240,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/dashboard'
+    | '/export-bill-overdue'
     | '/history'
     | '/indents'
     | '/ledger-summary'
@@ -253,6 +264,7 @@ export interface FileRouteTypes {
     | '/_app'
     | '/_app/bom'
     | '/_app/dashboard'
+    | '/_app/export-bill-overdue'
     | '/_app/history'
     | '/_app/indents'
     | '/_app/ledger-summary'
@@ -363,6 +375,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHistoryRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/export-bill-overdue': {
+      id: '/_app/export-bill-overdue'
+      path: '/export-bill-overdue'
+      fullPath: '/export-bill-overdue'
+      preLoaderRoute: typeof AppExportBillOverdueRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/dashboard': {
       id: '/_app/dashboard'
       path: '/dashboard'
@@ -447,6 +466,7 @@ const AppBomRouteWithChildren =
 interface AppRouteChildren {
   AppBomRoute: typeof AppBomRouteWithChildren
   AppDashboardRoute: typeof AppDashboardRoute
+  AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
   AppHistoryRoute: typeof AppHistoryRoute
   AppIndentsRoute: typeof AppIndentsRoute
   AppLedgerSummaryRoute: typeof AppLedgerSummaryRoute
@@ -466,6 +486,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppBomRoute: AppBomRouteWithChildren,
   AppDashboardRoute: AppDashboardRoute,
+  AppExportBillOverdueRoute: AppExportBillOverdueRoute,
   AppHistoryRoute: AppHistoryRoute,
   AppIndentsRoute: AppIndentsRoute,
   AppLedgerSummaryRoute: AppLedgerSummaryRoute,

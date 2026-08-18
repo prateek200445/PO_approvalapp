@@ -86,7 +86,11 @@ export function AppShell() {
       to: "/ledgers",
       icon: BookOpen,
       label: "Ledgers",
-      match: (p: string) => p.startsWith("/ledgers") || p.startsWith("/ledger-summary") || p.startsWith("/reconciliation"),
+      match: (p: string) =>
+        p.startsWith("/ledgers") ||
+        p.startsWith("/ledger-summary") ||
+        p.startsWith("/reconciliation") ||
+        p.startsWith("/export-bill-overdue"),
     },
     { to: "/profile", icon: User, label: "Profile", match: (p: string) => p.startsWith("/profile") || p.startsWith("/bom") },
   ];
