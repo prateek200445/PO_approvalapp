@@ -267,4 +267,33 @@
       0 18px 32px rgba(15, 23, 42, 0.12),
       0 40px 72px rgba(37, 99, 235, 0.18) !important;
   }
+
+  @media (hover: none) {
+    .card-3d:hover {
+      transform: none;
+    }
+  }
+
+  .safe-bottom {
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+
+  .pb-action {
+    padding-bottom: calc(10.75rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  @media (min-width: 768px) {
+    .pb-action {
+      padding-bottom: 0;
+    }
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }

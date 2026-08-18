@@ -12,6 +12,7 @@ import { ApprovalDetailNav } from "@/components/ApprovalDetailNav";
 import { DmsAttachmentsSection } from "@/components/DmsAttachmentsSection";
 import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
 import { invalidateApprovalCaches, resolveNextAfterApproval } from "@/lib/approval-after-action";
+import { ApprovalCommandBar, RemarkComposer } from "@/components/ApprovalCommandBar";
 
 export const Route = createFileRoute("/_app/workorder/$poNo")({
  head: ({ params }) => ({
@@ -227,7 +228,7 @@ function WorkOrderDetails() {
   };
   if (loading) {
     return (
-      <div className="space-y-5 pb-24 md:pb-0">
+      <div className="space-y-5 pb-action">
         <SkeletonCard />
         <div className="grid gap-5 lg:grid-cols-3">
           <div className="space-y-5 lg:col-span-2">
@@ -391,7 +392,7 @@ if (!po || po.length === 0) {
   ];
 
   return (
-    <div className="space-y-5 pb-24 md:pb-0 max-w-full overflow-x-hidden min-w-0">
+    <div className="space-y-5 pb-action max-w-full overflow-x-hidden min-w-0">
       <ApprovalDetailNav
         onBack={() => navigate({ to: "/workorders" })}
         navigation={workOrderNavigation}
@@ -588,15 +589,8 @@ if (!po || po.length === 0) {
 
           <DmsAttachmentsSection purchaseCode={poNo} kind="WO" />
 
-          {/* Section D: Remarks */}
           <Section title="Remarks">
-            <textarea
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
-              rows={4}
-              placeholder="Add remarks (mandatory for rejection)…"
-              className="w-full resize-none rounded-md border border-input bg-surface p-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-            />
+            <RemarkComposer value={remarks} onChange={setRemarks} />
           </Section>
         </div>
 
@@ -635,45 +629,18 @@ if (!po || po.length === 0) {
         </div>
       </div>
 
-      {/* Action buttons */}
-      <div className="fixed inset-x-0 bottom-16 z-20 border-t border-border bg-surface/95 p-3 backdrop-blur md:static md:border-0 md:bg-transparent md:p-0">
-        <div className="mx-auto flex max-w-7xl gap-2 md:justify-end">
-          <button
-            onClick={() => navigate({ to: "/workorders" })}
-            className="hidden h-11 flex-1 rounded-md border border-input bg-surface px-4 text-sm font-medium hover:bg-secondary md:inline-flex md:flex-none md:items-center"
-          >
-            Back
-          </button>
-          <button
-            disabled={isRejecting || isApproving}
-            onClick={() => setConfirm("reject")}
-            className="h-11 flex-1 rounded-md border border-destructive/30 bg-destructive/10 px-4 text-sm font-semibold text-destructive hover:bg-destructive/20 disabled:opacity-50 disabled:cursor-not-allowed md:flex-none md:px-6"
-          >
-            {isRejecting ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Rejecting...
-              </span>
-            ) : (
-              "Reject"
-            )}
-          </button>
-          <button
-            disabled={isApproving || isRejecting}
-            onClick={handleApprove}
-            className="h-11 flex-1 rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed md:flex-none md:px-6"
-          >
-            {isApproving ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Approving...
-              </span>
-            ) : (
-              "Approve"
-            )}
-          </button>
-        </div>
-      </div>
+      <ApprovalCommandBar
+        amountLabel={formatMoney(grandTotal, currency)}
+        queueLabel={
+          workOrderNavigation.total > 1
+            ? `${workOrderNavigation.index} of ${workOrderNavigation.total} in queue`
+            : undefined
+        }
+        onApprove={handleApprove}
+        onReject={() => setConfirm("reject")}
+        isApproving={isApproving}
+        isRejecting={isRejecting}
+      />
 
       {/* Confirmation dialog */}
       {confirm === "reject" && (

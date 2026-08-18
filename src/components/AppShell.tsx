@@ -14,10 +14,37 @@ import {
   Layers,
   PanelLeftClose,
   PanelLeftOpen,
+  Hammer,
+  MoreHorizontal,
+  Search,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { cn } from "@/lib/utils";
+import { formatBadgeCount, useApprovalInbox, type InboxKind } from "@/hooks/useApprovalInbox";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { GlobalCommandPalette, SearchTrigger } from "@/components/GlobalCommandPalette";
+
+type AppPath =
+  | "/dashboard"
+  | "/pending"
+  | "/workorders"
+  | "/payments"
+  | "/indents"
+  | "/sales-dashboard"
+  | "/ledgers"
+  | "/export-bill-overdue"
+  | "/bom"
+  | "/profile";
+
+type NavItem = {
+  to: AppPath;
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  shortLabel?: string;
+  match: (p: string) => boolean;
+  badge?: InboxKind;
+};
 
 export function AppShell() {
   const { user, logout } = useAuth();
@@ -26,6 +53,8 @@ export function AppShell() {
   const path = router.location.pathname;
   const [dark, setDark] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const inbox = useApprovalInbox(user?.username);
 
   useEffect(() => {
     const stored = localStorage.getItem("po-theme");
@@ -72,62 +101,161 @@ export function AppShell() {
     setSidebarCollapsed((prev) => !prev);
   }
 
-  const desktopNav = [
-    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", match: (p: string) => p.startsWith("/dashboard") },
+  const approvalNav: NavItem[] = [
+    {
+      to: "/pending",
+      icon: ClipboardList,
+      label: "Purchase Orders",
+      shortLabel: "POs",
+      match: (p) => p.startsWith("/pending") || p.startsWith("/po/"),
+      badge: "po",
+    },
+    {
+      to: "/workorders",
+      icon: Hammer,
+      label: "Work Orders",
+      shortLabel: "WOs",
+      match: (p) => p.startsWith("/workorder"),
+      badge: "workorder",
+    },
+    {
+      to: "/payments",
+      icon: CreditCard,
+      label: "Payment Approval",
+      shortLabel: "Pay",
+      match: (p) => p.startsWith("/payment"),
+      badge: "payment",
+    },
+    {
+      to: "/indents",
+      icon: FileText,
+      label: "Indent Approval",
+      shortLabel: "Indent",
+      match: (p) => p.startsWith("/indent"),
+      badge: "indent",
+    },
+  ];
+
+  const reportNav: NavItem[] = [
     {
       to: "/sales-dashboard",
       icon: BarChart3,
       label: "Sales Dashboard",
-      match: (p: string) => p.startsWith("/sales-dashboard"),
+      match: (p) => p.startsWith("/sales-dashboard"),
     },
-    { to: "/pending", icon: ClipboardList, label: "Purchase Orders", match: (p: string) => p.startsWith("/pending") || p.startsWith("/po/") },
-    { to: "/workorders", icon: FileText, label: "Work Orders", match: (p: string) => p.startsWith("/workorder") },
-    { to: "/payments", icon: CreditCard, label: "Payment Approval", match: (p: string) => p.startsWith("/payment") },
-    { to: "/indents", icon: FileText, label: "Indent Approval", match: (p: string) => p.startsWith("/indent") },
     {
       to: "/ledgers",
       icon: BookOpen,
       label: "Ledgers",
-      match: (p: string) =>
-        p.startsWith("/ledgers") ||
-        p.startsWith("/ledger-summary") ||
-        p.startsWith("/reconciliation"),
+      match: (p) =>
+        p.startsWith("/ledgers") || p.startsWith("/ledger-summary") || p.startsWith("/reconciliation"),
     },
     {
       to: "/export-bill-overdue",
       icon: FileWarning,
       label: "Export Bill Overdue",
-      match: (p: string) => p.startsWith("/export-bill-overdue"),
+      match: (p) => p.startsWith("/export-bill-overdue"),
     },
-    { to: "/bom", icon: Layers, label: "BOM Report", match: (p: string) => p.startsWith("/bom") },
-    { to: "/profile", icon: User, label: "Profile", match: (p: string) => p.startsWith("/profile") },
+    { to: "/bom", icon: Layers, label: "BOM Report", match: (p) => p.startsWith("/bom") },
   ];
 
-  const mobileNav = [
-    { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard", shortLabel: "Home", match: (p: string) => p.startsWith("/dashboard") },
-    {
-      to: "/sales-dashboard",
-      icon: BarChart3,
-      label: "Sales Dashboard",
-      shortLabel: "Sales",
-      match: (p: string) => p.startsWith("/sales-dashboard"),
-    },
-    { to: "/pending", icon: ClipboardList, label: "Purchase Orders", shortLabel: "POs", match: (p: string) => p.startsWith("/pending") || p.startsWith("/po/") },
-    { to: "/workorders", icon: FileText, label: "Work Orders", shortLabel: "WOs", match: (p: string) => p.startsWith("/workorder") },
-    { to: "/payments", icon: CreditCard, label: "Payment Approval", shortLabel: "Pay", match: (p: string) => p.startsWith("/payment") },
-    { to: "/indents", icon: FileText, label: "Indent Approval", shortLabel: "Indent", match: (p: string) => p.startsWith("/indent") },
-    {
-      to: "/export-bill-overdue",
-      icon: FileWarning,
-      label: "Export Bill Overdue",
-      shortLabel: "Export",
-      match: (p: string) => p.startsWith("/export-bill-overdue"),
-    },
-    { to: "/profile", icon: User, label: "Profile", shortLabel: "Profile", match: (p: string) => p.startsWith("/profile") || p.startsWith("/bom") },
+  const accountNav: NavItem[] = [
+    { to: "/profile", icon: User, label: "Profile", match: (p) => p.startsWith("/profile") },
   ];
+
+  const desktopGroups: { title: string; items: NavItem[] }[] = [
+    {
+      title: "Home",
+      items: [
+        {
+          to: "/dashboard",
+          icon: LayoutDashboard,
+          label: "Dashboard",
+          match: (p) => p.startsWith("/dashboard"),
+        },
+      ],
+    },
+    { title: "Approvals", items: approvalNav },
+    { title: "Reports", items: reportNav },
+    { title: "Account", items: accountNav },
+  ];
+
+  const mobilePrimary: NavItem[] = [
+    {
+      to: "/dashboard",
+      icon: LayoutDashboard,
+      label: "Dashboard",
+      shortLabel: "Home",
+      match: (p) => p.startsWith("/dashboard"),
+    },
+    approvalNav[0],
+    approvalNav[1],
+    approvalNav[2],
+  ];
+
+  const moreItems = [approvalNav[3], ...reportNav, ...accountNav];
+  const moreActive = moreItems.some((n) => n.match(path));
+  const moreBadge = formatBadgeCount(inbox.counts.indent);
+
+  function badgeFor(kind?: InboxKind) {
+    if (!kind) return null;
+    return formatBadgeCount(inbox.counts[kind]);
+  }
+
+  function NavLink({
+    item,
+    collapsed,
+  }: {
+    item: NavItem;
+    collapsed?: boolean;
+  }) {
+    const active = item.match(path);
+    const badge = badgeFor(item.badge);
+    return (
+      <Link
+        to={item.to}
+        title={collapsed ? item.label : undefined}
+        onClick={() => setMoreOpen(false)}
+        className={cn(
+          "flex items-center rounded-xl py-2.5 text-sm font-medium transition-all duration-300",
+          collapsed ? "justify-center px-2" : "gap-3 px-3",
+          active
+            ? "nav-3d-active"
+            : "text-muted-foreground hover:-translate-y-px hover:bg-secondary/90 hover:text-foreground hover:shadow-md",
+        )}
+      >
+        <span className="relative shrink-0">
+          <item.icon className="h-4 w-4" />
+          {collapsed && badge && (
+            <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-0.5 text-[9px] font-bold text-warning-foreground">
+              {badge}
+            </span>
+          )}
+        </span>
+        <span
+          className={cn(
+            "truncate whitespace-nowrap transition-all duration-300 ease-in-out",
+            collapsed ? "max-w-0 opacity-0" : "max-w-[12rem] opacity-100",
+          )}
+        >
+          {item.label}
+        </span>
+        {!collapsed && badge && (
+          <span
+            className={cn(
+              "ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+              active ? "bg-white/20 text-primary-foreground" : "bg-warning text-warning-foreground",
+            )}
+          >
+            {badge}
+          </span>
+        )}
+      </Link>
+    );
+  }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-background pb-20 md:pb-0">
+    <div className="min-h-screen overflow-x-hidden bg-background pb-nav md:pb-0">
       <header className="app-glass sticky top-0 z-30 border-b md:hidden">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <Link to="/dashboard" className="flex items-center gap-2.5">
@@ -144,6 +272,19 @@ export function AppShell() {
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
+              onClick={() => window.dispatchEvent(new Event("po-open-search"))}
+              className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+              aria-label="Search pending"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+            {inbox.counts.total > 0 && (
+              <span className="rounded-full bg-warning px-2 py-0.5 text-[10px] font-semibold tabular-nums text-warning-foreground">
+                {formatBadgeCount(inbox.counts.total)} pending
+              </span>
+            )}
+            <button
               onClick={toggleTheme}
               className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
               aria-label="Toggle theme"
@@ -159,7 +300,6 @@ export function AppShell() {
       </header>
 
       <div className="md:flex md:min-h-screen">
-        {/* Desktop sidebar — collapsible */}
         <aside
           className={cn(
             "app-sidebar-3d fixed inset-y-0 left-0 z-40 hidden flex-col border-r transition-[width] duration-300 ease-in-out md:flex",
@@ -204,34 +344,25 @@ export function AppShell() {
             </div>
           </div>
 
-          <nav className="flex-1 space-y-1 overflow-x-hidden overflow-y-auto px-2 py-4">
-            {desktopNav.map((n) => {
-              const active = n.match(path);
-              return (
-                <Link
-                  key={n.to}
-                  to={n.to}
-                  title={sidebarCollapsed ? n.label : undefined}
+          <nav className="flex-1 space-y-4 overflow-x-hidden overflow-y-auto px-2 py-4">
+            <div className={cn(sidebarCollapsed ? "px-0" : "px-1")}>
+              <SearchTrigger collapsed={sidebarCollapsed} />
+            </div>
+            {desktopGroups.map((group) => (
+              <div key={group.title} className="space-y-1">
+                <div
                   className={cn(
-                    "flex items-center rounded-xl py-2.5 text-sm font-medium transition-all duration-300",
-                    sidebarCollapsed ? "justify-center px-2" : "gap-3 px-3",
-                    active
-                      ? "nav-3d-active"
-                      : "text-muted-foreground hover:-translate-y-px hover:bg-secondary/90 hover:text-foreground hover:shadow-md",
+                    "px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-all",
+                    sidebarCollapsed ? "sr-only" : "pb-1",
                   )}
                 >
-                  <n.icon className="h-4 w-4 shrink-0" />
-                  <span
-                    className={cn(
-                      "truncate whitespace-nowrap transition-all duration-300 ease-in-out",
-                      sidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[12rem] opacity-100",
-                    )}
-                  >
-                    {n.label}
-                  </span>
-                </Link>
-              );
-            })}
+                  {group.title}
+                </div>
+                {group.items.map((item) => (
+                  <NavLink key={item.to} item={item} collapsed={sidebarCollapsed} />
+                ))}
+              </div>
+            ))}
           </nav>
 
           <div
@@ -297,32 +428,96 @@ export function AppShell() {
         </main>
       </div>
 
-      {/* Mobile bottom nav — unchanged */}
-      <nav className="app-glass fixed bottom-0 left-0 right-0 z-30 grid grid-cols-8 border-t md:hidden">
-        {mobileNav.map((n) => {
+      <nav className="app-glass safe-bottom fixed bottom-0 left-0 right-0 z-30 grid grid-cols-5 border-t md:hidden">
+        {mobilePrimary.map((n) => {
           const active = n.match(path);
+          const badge = badgeFor(n.badge);
           return (
             <Link
               key={n.to}
               to={n.to}
               className={cn(
-                "flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-1.5 text-[9px] font-medium tracking-tight transition-all sm:text-[10px]",
+                "flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 px-1 py-1.5 text-[10px] font-medium tracking-tight",
                 active ? "text-primary" : "text-muted-foreground",
               )}
             >
               <span
                 className={cn(
-                  "flex h-8 w-8 items-center justify-center rounded-xl transition-all",
+                  "relative flex h-9 w-9 items-center justify-center rounded-xl",
                   active && "nav-3d-active",
                 )}
               >
-                <n.icon className={cn("h-4.5 w-4.5 shrink-0", active && "stroke-[2.5]")} />
+                <n.icon className={cn("h-5 w-5 shrink-0", active && "stroke-[2.5]")} />
+                {badge && (
+                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-0.5 text-[9px] font-bold text-warning-foreground">
+                    {badge}
+                  </span>
+                )}
               </span>
               <span className="w-full truncate text-center leading-tight">{n.shortLabel}</span>
             </Link>
           );
         })}
+        <button
+          type="button"
+          onClick={() => setMoreOpen(true)}
+          className={cn(
+            "flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 px-1 py-1.5 text-[10px] font-medium tracking-tight",
+            moreActive ? "text-primary" : "text-muted-foreground",
+          )}
+        >
+          <span
+            className={cn(
+              "relative flex h-9 w-9 items-center justify-center rounded-xl",
+              moreActive && "nav-3d-active",
+            )}
+          >
+            <MoreHorizontal className="h-5 w-5 shrink-0" />
+            {moreBadge && (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-0.5 text-[9px] font-bold text-warning-foreground">
+                {moreBadge}
+              </span>
+            )}
+          </span>
+          <span className="w-full truncate text-center leading-tight">More</span>
+        </button>
       </nav>
+
+      <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
+        <SheetContent side="bottom" className="safe-bottom rounded-t-2xl pb-6 md:hidden">
+          <SheetHeader>
+            <SheetTitle>More</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            {moreItems.map((item) => {
+              const active = item.match(path);
+              const badge = badgeFor(item.badge);
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  onClick={() => setMoreOpen(false)}
+                  className={cn(
+                    "flex min-h-12 items-center gap-3 rounded-xl border px-3 py-3 text-sm font-medium",
+                    active
+                      ? "border-primary/30 bg-primary/10 text-primary"
+                      : "border-border bg-card text-foreground",
+                  )}
+                >
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {badge && (
+                    <span className="rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-semibold text-warning-foreground">
+                      {badge}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        </SheetContent>
+      </Sheet>
+      <GlobalCommandPalette />
     </div>
   );
 }
