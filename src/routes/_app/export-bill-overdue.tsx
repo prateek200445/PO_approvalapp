@@ -65,7 +65,7 @@ function AmountBlock({ row }: { row: ExportBillOverdueItem }) {
 
 function MobileBillCard({ row }: { row: ExportBillOverdueItem }) {
   return (
-    <article className="rounded-xl border border-border bg-card p-3.5 shadow-sm">
+    <article className="rounded-2xl border border-border bg-card p-3.5 shadow-soft">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="truncate text-sm font-semibold leading-snug">
@@ -303,24 +303,19 @@ function ExportBillOverduePage() {
   );
 
   return (
-    <div className="space-y-4 pb-20 sm:space-y-5 md:pb-2">
-      <div>
+    <div className="space-y-5 pb-20 sm:space-y-6 md:pb-2">
+      <div className="card-3d rounded-2xl p-4 sm:p-5">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
           Export Bill Overdue
         </h1>
         <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-          <span className="sm:hidden">
-            Loads automatically when you change filters. First ERP load ~15–20s; later pages are instant.
-          </span>
-          <span className="hidden sm:inline">
-            Data loads automatically when filters change. First ERP load is typically ~15–20s;
-            later pages and revisits use cache and are near-instant.
-          </span>
+          Overseas receivable bills with customer, bill no/date, amount, and due date. Filters apply
+          automatically.
         </p>
       </div>
 
       <section
-        className="rounded-xl border border-border bg-card p-3 shadow-sm sm:p-4"
+        className="rounded-2xl border border-border bg-card p-3 shadow-soft sm:p-4"
         aria-label="Export bill overdue filters"
       >
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_11rem]">
@@ -392,15 +387,14 @@ function ExportBillOverduePage() {
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
           {isInitialLoad
             ? isAllCompanies(company)
-              ? "Loading all companies from ERP (first time)…"
-              : "Loading overdue bills from ERP (first time — next pages will be instant)…"
+              ? "Loading all companies…"
+              : "Loading overdue bills…"
             : "Updating…"}
         </div>
       )}
       {overdueQuery.isError && (
         <p className="text-xs text-destructive" role="alert">
-          Failed to load.{" "}
-          {overdueQuery.error instanceof Error ? overdueQuery.error.message : ""}
+          Failed to load overdue bills. Please try again.
         </p>
       )}
 
@@ -429,7 +423,7 @@ function ExportBillOverduePage() {
             ))}
           </div>
         ) : !overdueQuery.isFetching && items.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-dashed border-border bg-card px-4 py-10 text-center text-sm text-muted-foreground">
             {emptyMessage}
           </div>
         ) : (
@@ -444,14 +438,14 @@ function ExportBillOverduePage() {
         )}
 
         {pagination ? (
-          <div className="mt-3 overflow-hidden rounded-xl border border-border bg-card">
+          <div className="mt-3 overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
             {pagination}
           </div>
         ) : null}
       </section>
 
       {/* Desktop table */}
-      <section className="hidden overflow-hidden rounded-xl border border-border bg-card shadow-sm md:block">
+      <section className="hidden overflow-hidden rounded-2xl border border-border bg-card shadow-soft md:block">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">Overdue bills</h2>

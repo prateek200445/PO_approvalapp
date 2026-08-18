@@ -215,7 +215,7 @@ function PendingList() {
   }
 
   return (
-    <div className={`w-full min-w-0 max-w-full overflow-x-hidden space-y-5 ${selectMode && selected.size > 0 ? "pb-24 md:pb-0" : ""}`}>
+    <div className={`w-full min-w-0 max-w-full overflow-x-hidden space-y-6 ${selectMode && selected.size > 0 ? "pb-24 md:pb-0" : ""}`}>
       <div className="flex min-w-0 items-end justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
@@ -250,7 +250,7 @@ function PendingList() {
       </div>
 
       {/* Filters - Desktop Only */}
-      <div className="hidden md:flex md:flex-col md:gap-3">
+      <div className="hidden rounded-2xl border border-border bg-card p-4 shadow-soft md:flex md:flex-col md:gap-3">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -301,7 +301,7 @@ function PendingList() {
       </div>
 
       {/* Filters - Mobile Only */}
-      <div className="space-y-2 md:hidden">
+      <div className="space-y-2 rounded-2xl border border-border bg-card p-3 shadow-soft md:hidden">
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -368,7 +368,7 @@ function PendingList() {
                   type="button"
                   disabled={!canSelect}
                   onClick={() => canSelect && toggleOne(paymentNo)}
-                  className={`block w-full min-w-0 max-w-full text-left rounded-xl border bg-card p-4 shadow-sm ${
+                  className={`block w-full min-w-0 max-w-full text-left rounded-2xl border bg-card p-4 shadow-soft ${
                     isChecked ? "border-primary ring-1 ring-primary/30" : "border-border"
                   } ${!canSelect ? "opacity-50" : ""}`}
                 >
@@ -417,7 +417,7 @@ function PendingList() {
                       .filter(Boolean),
                   )
                 }
-                className="block w-full min-w-0 max-w-full rounded-xl border border-border bg-card p-4 shadow-sm active:scale-[.99]"
+                className="block w-full min-w-0 max-w-full rounded-2xl border border-border bg-card p-4 shadow-soft active:scale-[.99]"
               >
                 <div className="flex min-w-0 items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
@@ -443,7 +443,7 @@ function PendingList() {
       </div>
 
       {/* Desktop table */}
-      <div className="hidden overflow-hidden rounded-xl border border-border bg-card md:block">
+      <div className="hidden overflow-hidden rounded-2xl border border-border bg-card shadow-soft md:block">
         {isLoading ? (
           <div className="p-6">
             <SkeletonPendingList />
@@ -537,7 +537,7 @@ function PendingList() {
 
       {/* Pagination Controls */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between border-t border-border bg-card px-4 py-3 sm:px-6 rounded-b-xl">
+        <div className="flex items-center justify-between rounded-2xl border border-border bg-card px-4 py-3 shadow-soft sm:px-6">
           <div className="flex flex-1 justify-between sm:hidden">
             <button
               onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}

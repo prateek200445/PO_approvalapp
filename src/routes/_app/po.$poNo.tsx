@@ -382,7 +382,7 @@ function PODetails() {
       />
 
       {/* Header card */}
-      <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+      <div className="rounded-2xl border border-border bg-card p-5 shadow-soft">
         <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Purchase Order</div>
        <h1 className="text-xl font-semibold tracking-tight md:text-2xl">
   {poDetails.PurchaseCode}
@@ -412,7 +412,7 @@ function PODetails() {
             </p>
 
             {/* Mobile: stacked item rows */}
-            <div className="mt-4 overflow-hidden rounded-lg border border-border md:hidden">
+            <div className="mt-4 overflow-hidden rounded-xl border border-border md:hidden">
               <ul className="divide-y divide-border">
                 {po.map((item: any, index: number) => (
                   <li key={index} className="space-y-1.5 px-3 py-3">
@@ -440,7 +440,7 @@ function PODetails() {
             </div>
 
             {/* Desktop: table */}
-            <div className="mt-4 hidden overflow-x-auto rounded-lg border border-border md:block">
+            <div className="mt-4 hidden overflow-x-auto rounded-xl border border-border md:block">
               <table className="w-full text-sm">
                 <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <tr>
@@ -479,12 +479,12 @@ function PODetails() {
           {/* Section B: PDF */}
           <Section title="Purchase Order Document">
             {pdfLoading ? (
-              <div className="flex flex-col items-center justify-center p-12 bg-card/50 rounded-xl border border-border">
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-border bg-card/50 p-12">
                 <Loader2 className="h-8 w-8 animate-spin text-primary mb-3" />
                 <p className="text-sm text-muted-foreground">Loading PDF document...</p>
               </div>
             ) : pdfError ? (
-              <div className="flex flex-col items-center justify-center p-8 bg-card/50 rounded-xl border border-destructive/20 text-center">
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-destructive/20 bg-card/50 p-8 text-center">
                 <XCircle className="h-8 w-8 text-destructive mb-3" />
                 <h3 className="text-base font-semibold text-destructive mb-1">Failed to load PDF</h3>
                 <p className="text-xs text-muted-foreground max-w-sm mb-4">{pdfError}</p>
@@ -554,7 +554,7 @@ function PODetails() {
                 </div>
 
                 {/* PDF Render Canvas */}
-                <div ref={containerRef} className="w-full overflow-auto bg-muted/20 border border-border rounded-xl p-2 min-h-[400px] max-h-[600px] shadow-inner">
+                <div ref={containerRef} className="min-h-[400px] max-h-[600px] w-full overflow-auto rounded-2xl border border-border bg-muted/20 p-2 shadow-inner">
                   <PdfCanvasViewer pdfDoc={pdfDoc} pageNum={pageNum} scale={scale} />
                 </div>
               </div>
@@ -700,7 +700,7 @@ function PODetails() {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-xl border border-border bg-card">
+    <section className="rounded-2xl border border-border bg-card shadow-soft">
       <header className="border-b border-border px-5 py-3">
         <h2 className="text-sm font-semibold">{title}</h2>
       </header>

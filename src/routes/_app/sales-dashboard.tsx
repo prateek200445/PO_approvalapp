@@ -56,7 +56,7 @@ const PURCHASE_PLACEHOLDER_FIELDS = [
 
 function ComingSoonSection({ title, description }: { title: string; description: string }) {
   return (
-    <section className="rounded-xl border border-dashed border-border bg-card/50 px-4 py-10 text-center shadow-sm">
+    <section className="rounded-2xl border border-dashed border-border bg-card/60 px-4 py-10 text-center shadow-soft">
       <h2 className="text-sm font-medium text-foreground">{title}</h2>
       <p className="mt-1 text-xs text-muted-foreground">{description}</p>
     </section>
@@ -185,13 +185,6 @@ function SalesDashboardPage() {
     ? purchaseTotalsQuery.isFetching
     : salesTotalsQuery.isFetching;
   const totalsError = isPurchase ? purchaseTotalsQuery.isError : salesTotalsQuery.isError;
-  const totalsErrorMessage = isPurchase
-    ? purchaseTotalsQuery.error instanceof Error
-      ? purchaseTotalsQuery.error.message
-      : ""
-    : salesTotalsQuery.error instanceof Error
-      ? salesTotalsQuery.error.message
-      : "";
 
   const summary = useMemo<SalesDashboardSummary>(() => {
     if (isPurchase) {
@@ -232,30 +225,21 @@ function SalesDashboardPage() {
     (!isPurchase && byCountryQuery.isFetching);
 
   return (
-    <div className="space-y-4 pb-2 sm:space-y-5 md:space-y-6">
-      <div>
+    <div className="space-y-5 pb-2 sm:space-y-6 md:space-y-7">
+      <div className="card-3d rounded-2xl p-4 sm:p-5">
         <h1 className="text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
           Sales Dashboard
         </h1>
         <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
           <span className="sm:hidden">
             {isPurchase
-              ? "Live purchase KPIs & group charts from ERP."
-              : "Live sales KPIs & group charts from ERP."}
+              ? "Live purchase KPIs and group charts."
+              : "Live sales KPIs, group charts, and country breakdown."}
           </span>
           <span className="hidden sm:inline">
-            {isPurchase ? (
-              <>
-                Live KPIs, Purchase by Group/Sub Group from `vw_Purchase_EBIDTA` (excl. IC; same
-                basis as `SP_Purchase_EBIDTA`). Country breakdown is sales-only for now.
-              </>
-            ) : (
-              <>
-                Live KPIs, Sales by Group/Sub Group from `vw_Sales_EBIDTA` (excl. IC; same basis as
-                `SP_Sales_EBIDTA`), and Sales by Country from `vw_Countrywise_sales_dashboard` (excl.
-                IC). Other sections coming soon.
-              </>
-            )}
+            {isPurchase
+              ? "Live purchase KPIs and group/sub-group charts for the selected company and date range."
+              : "Live sales KPIs, group and sub-group charts, and country-wise breakdown for the selected company and date range."}
           </span>
         </p>
       </div>
@@ -269,7 +253,7 @@ function SalesDashboardPage() {
       />
 
       {companiesLoading && (
-        <p className="text-xs text-muted-foreground">Loading companies from FactoryInfo…</p>
+        <p className="text-xs text-muted-foreground">Loading companies…</p>
       )}
 
       {isRefreshing && (
@@ -278,27 +262,24 @@ function SalesDashboardPage() {
           aria-live="polite"
         >
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          {isPurchase
-            ? "Loading live purchase data from ERP…"
-            : "Loading live sales data from ERP…"}
+          {isPurchase ? "Loading purchase data…" : "Loading sales data…"}
         </div>
       )}
       {totalsError && (
         <p className="text-xs text-destructive" role="alert">
-          {isPurchase ? "Live purchase totals failed. " : "Live sales totals failed. "}
-          {totalsErrorMessage}
+          {isPurchase
+            ? "Failed to load purchase totals. Please try again."
+            : "Failed to load sales totals. Please try again."}
         </p>
       )}
       {yearlyTrendQuery.isError && (
         <p className="text-xs text-destructive" role="alert">
-          Yearly {isPurchase ? "purchase" : "sales"} trend failed.{" "}
-          {yearlyTrendQuery.error instanceof Error ? yearlyTrendQuery.error.message : ""}
+          Failed to load yearly {isPurchase ? "purchase" : "sales"} trend. Please try again.
         </p>
       )}
       {!isPurchase && byCountryQuery.isError && (
         <p className="text-xs text-destructive" role="alert">
-          Sales by country failed.{" "}
-          {byCountryQuery.error instanceof Error ? byCountryQuery.error.message : ""}
+          Failed to load sales by country. Please try again.
         </p>
       )}
 
@@ -314,7 +295,7 @@ function SalesDashboardPage() {
       {isPurchase ? (
         <ComingSoonSection
           title="Purchase by country"
-          description="No ERP purchase-by-country view (vw_Countrywise_sales_dashboard is sales-only). Group/Sub Group charts above use purchase EBIDTA."
+          description="Country-wise purchase breakdown will be added in a future update."
         />
       ) : (
         <SalesSummaryTables

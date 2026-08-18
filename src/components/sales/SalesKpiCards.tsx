@@ -30,6 +30,7 @@ type KpiConfig = {
   unavailable?: boolean;
   icon: LucideIcon;
   tone: string;
+  bar: string;
 };
 
 export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCardsProps) {
@@ -47,7 +48,8 @@ export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCards
       showChange: !noChange && !unavailableFields.includes("totalSales"),
       unavailable: unavailableFields.includes("totalSales"),
       icon: BarChart3,
-      tone: "bg-primary/10 text-primary border-primary/20",
+      tone: "bg-primary/15 text-primary border-primary/25",
+      bar: "bg-primary",
     },
     {
       id: "totalQuantity",
@@ -56,7 +58,8 @@ export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCards
       changePercent: summary.totalQuantityChangePercent,
       showChange: !noChange,
       icon: ShoppingCart,
-      tone: "bg-success/10 text-success border-success/20",
+      tone: "bg-success/15 text-success border-success/25",
+      bar: "bg-success",
     },
     {
       id: "averageRate",
@@ -68,7 +71,8 @@ export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCards
       showChange: !noChange && !unavailableFields.includes("averageRate"),
       unavailable: unavailableFields.includes("averageRate"),
       icon: FileText,
-      tone: "bg-warning/10 text-warning border-warning/20",
+      tone: "bg-warning/15 text-warning border-warning/25",
+      bar: "bg-warning",
     },
     {
       id: "gstAmount",
@@ -81,6 +85,7 @@ export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCards
       unavailable: unavailableFields.includes("gstAmount"),
       icon: Percent,
       tone: "bg-accent text-accent-foreground border-border",
+      bar: "bg-primary/60",
     },
     {
       id: "totalPurchase",
@@ -93,6 +98,7 @@ export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCards
       unavailable: unavailableFields.includes("totalPurchase"),
       icon: Download,
       tone: "bg-secondary text-secondary-foreground border-border",
+      bar: "bg-muted-foreground/40",
     },
     {
       id: "grossProfit",
@@ -102,7 +108,8 @@ export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCards
       showChange: !noChange && !noGross,
       unavailable: noGross,
       icon: TrendingUp,
-      tone: "bg-success/10 text-success border-success/20",
+      tone: "bg-success/15 text-success border-success/25",
+      bar: "bg-success",
     },
   ];
 
@@ -111,11 +118,12 @@ export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCards
       {cards.map((card) => (
         <div
           key={card.id}
-          className="rounded-xl border border-border bg-card p-3 shadow-sm sm:p-4"
+          className="card-3d overflow-hidden rounded-2xl p-3 sm:p-4"
         >
+          <div className={cn("absolute inset-x-0 top-0 h-1.5", card.bar)} />
           <div
             className={cn(
-              "mb-2 inline-flex h-8 w-8 items-center justify-center rounded-lg border sm:mb-3 sm:h-9 sm:w-9",
+              "icon-3d mb-2 inline-flex h-8 w-8 items-center justify-center rounded-xl border sm:mb-3 sm:h-9 sm:w-9",
               card.tone,
             )}
           >

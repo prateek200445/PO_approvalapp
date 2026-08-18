@@ -76,7 +76,8 @@ public class ExportBillOverdueService
 
     public async Task<IReadOnlyList<string>> GetGroupsAsync()
     {
-        const string key = "export-bill-overdue-groups-v1";
+        // Only export-relevant outstanding groups — never dump the full ERP group catalog to the UI.
+        const string key = "export-bill-overdue-groups-v2-export-only";
         if (_cache.TryGetValue(key, out IReadOnlyList<string>? cached) && cached is not null)
             return cached;
 
@@ -86,13 +87,39 @@ public class ExportBillOverdueService
               FROM CashVoucherExpenseGroupHead WITH (NOLOCK)
               WHERE OutStanding = 'Yes'
               ORDER BY ExpenseGroupHead");
-        var list = rows
+
+        var filtered = rows
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .Select(n => n.Trim())
+            .Where(IsExportReceivableGroup)
             .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        _cache.Set(key, (IReadOnlyList<string>)list, MetaCacheTtl);
-        return list;
+
+        if (!filtered.Any(g => g.Equals(DefaultGroupName, StringComparison.OrdinalIgnoreCase)))
+            filtered.Insert(0, DefaultGroupName);
+
+        _cache.Set(key, (IReadOnlyList<string>)filtered, MetaCacheTtl);
+        return filtered;
+    }
+
+    /// <summary>
+    /// Keep only overseas / export debtor-style groups for the Export Bill Overdue UI.
+    /// </summary>
+    private static bool IsExportReceivableGroup(string name)
+    {
+        var n = name.Trim();
+        if (n.Equals(DefaultGroupName, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var lower = n.ToLowerInvariant();
+        var isDebtor = lower.Contains("debtor");
+        var isOverseasOrExport =
+            lower.Contains("overseas") ||
+            lower.Contains("export") ||
+            lower.Contains("foreign");
+
+        return isDebtor && isOverseasOrExport;
     }
 
     public async Task<ExportBillOverdueResultDto> GetOverdueBillsAsync(
@@ -103,7 +130,9 @@ public class ExportBillOverdueService
         int pageSize = DefaultPageSize,
         bool refresh = false)
     {
-        var selectedGroup = string.IsNullOrWhiteSpace(groupName) ? "" : groupName.Trim();
+        var selectedGroup = string.IsNullOrWhiteSpace(groupName) ? DefaultGroupName : groupName.Trim();
+        if (!IsExportReceivableGroup(selectedGroup))
+            selectedGroup = DefaultGroupName;
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
         var offset = (page - 1) * pageSize;

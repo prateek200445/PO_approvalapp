@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { getApiUrl } from "@/lib/api-config";
 import { useEffect, useState } from "react";
-import { ClipboardList, CheckCircle2, XCircle, FileStack, ArrowRight, Clock } from "lucide-react";
+import { ClipboardList, CheckCircle2, XCircle, FileStack, Clock } from "lucide-react";
 import { formatINR } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth-context";
@@ -16,7 +16,6 @@ export const Route = createFileRoute("/_app/dashboard")({
 
 function Dashboard() {
   const { user } = useAuth();
-  const [recent] = useState<any[]>([]);
 
   // Ensure scroll to top on component mount
   useEffect(() => {
@@ -24,7 +23,7 @@ function Dashboard() {
   }, []);
 
   // Fetch dashboard stats with React Query
-  const { data: statsData, isLoading: statsLoading, isFetching: statsFetching } = useQuery({
+  const { data: statsData, isLoading: statsLoading } = useQuery({
     queryKey: ['dashboard-stats', user?.username],
     queryFn: async () => {
       if (!user?.username) throw new Error('No username');
@@ -71,32 +70,36 @@ function Dashboard() {
     label: "Pending",
     value: stats?.pending ?? 0,
     icon: Clock,
-    tone: "bg-warning/10 text-warning border-warning/20",
+    tone: "bg-warning/15 text-warning border-warning/25",
+    bar: "bg-warning",
   },
   {
     label: "Approved",
     value: stats?.approved ?? 0,
     icon: CheckCircle2,
-    tone: "bg-success/10 text-success border-success/20",
+    tone: "bg-success/15 text-success border-success/25",
+    bar: "bg-success",
   },
   {
     label: "Rejected",
     value: stats?.rejected ?? 0,
     icon: XCircle,
-    tone: "bg-destructive/10 text-destructive border-destructive/20",
+    tone: "bg-destructive/15 text-destructive border-destructive/25",
+    bar: "bg-destructive",
   },
   {
     label: "Total",
     value: stats ? (stats.pending + stats.approved + stats.rejected) : 0,
     icon: FileStack,
-    tone: "bg-primary/10 text-primary border-primary/20",
+    tone: "bg-primary/15 text-primary border-primary/25",
+    bar: "bg-primary",
   },
 ];
 
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-hidden space-y-6">
-      <div className="min-w-0">
-        <p className="text-sm text-muted-foreground">Welcome back,</p>
+      <div className="card-3d min-w-0 overflow-hidden rounded-2xl p-5">
+        <p className="text-sm font-medium text-primary">Welcome back</p>
         <h1 className="truncate text-2xl font-semibold tracking-tight md:text-3xl">{user?.name}</h1>
         <p className="mt-1 truncate text-sm text-muted-foreground">{user?.designation} · {user?.department}</p>
       </div>
@@ -107,12 +110,13 @@ function Dashboard() {
           <SkeletonStats />
         ) : (
           cards.map((c) => (
-            <div key={c.label} className="min-w-0 rounded-xl border border-border bg-card p-4 shadow-sm">
-              <div className={`mb-3 inline-flex h-9 w-9 items-center justify-center rounded-lg border ${c.tone}`}>
-                <c.icon className="h-4.5 w-4.5" />
+            <div key={c.label} className="card-3d min-w-0 overflow-hidden rounded-2xl p-4">
+              <div className={`absolute inset-x-0 top-0 h-1.5 ${c.bar}`} />
+              <div className={`mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl border icon-3d ${c.tone}`}>
+                <c.icon className="h-5 w-5" />
               </div>
               <div className="text-2xl font-semibold tabular-nums">{c.value}</div>
-              <div className="text-xs text-muted-foreground">{c.label}</div>
+              <div className="text-xs font-medium text-muted-foreground">{c.label}</div>
             </div>
           ))
         )}
@@ -120,7 +124,7 @@ function Dashboard() {
 
       {/* Quick actions */}
       <div className="grid min-w-0 grid-cols-2 gap-3">
-        <Link to="/pending" className="group flex min-w-0 items-center justify-between gap-2 rounded-xl border border-border bg-card p-4 transition hover:border-primary/40 hover:bg-secondary/40">
+        <Link to="/pending" className="card-3d group flex min-w-0 items-center justify-between gap-2 rounded-2xl p-4">
           <div className="min-w-0">
             <div className="text-xs text-muted-foreground">Action required</div>
             <div className="mt-0.5 truncate font-semibold">Pending POs</div>
@@ -132,7 +136,7 @@ function Dashboard() {
 
       <div className="grid min-w-0 gap-5">
         {/* Recent pending POs */}
-        <section className="min-w-0 overflow-hidden rounded-xl border border-border bg-card">
+        <section className="shadow-soft min-w-0 overflow-hidden rounded-2xl">
          <header className="border-b border-border px-4 py-3">
   <h2 className="text-sm font-semibold">Recent Activity</h2>
 </header> 
