@@ -114,6 +114,13 @@ export function AppShell() {
     { to: "/workorders", icon: FileText, label: "Work Orders", shortLabel: "WOs", match: (p: string) => p.startsWith("/workorder") },
     { to: "/payments", icon: CreditCard, label: "Payment Approval", shortLabel: "Pay", match: (p: string) => p.startsWith("/payment") },
     { to: "/indents", icon: FileText, label: "Indent Approval", shortLabel: "Indent", match: (p: string) => p.startsWith("/indent") },
+    {
+      to: "/export-bill-overdue",
+      icon: FileWarning,
+      label: "Export Bill Overdue",
+      shortLabel: "Export",
+      match: (p: string) => p.startsWith("/export-bill-overdue"),
+    },
     { to: "/profile", icon: User, label: "Profile", shortLabel: "Profile", match: (p: string) => p.startsWith("/profile") || p.startsWith("/bom") },
   ];
 
@@ -290,7 +297,7 @@ export function AppShell() {
       </div>
 
       {/* Mobile bottom nav — unchanged */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-7 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-30 grid grid-cols-8 border-t border-border bg-surface/95 backdrop-blur-md md:hidden">
         {mobileNav.map((n) => {
           const active = n.match(path);
           return (
