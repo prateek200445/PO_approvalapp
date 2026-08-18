@@ -10,6 +10,7 @@ import {
   CreditCard,
   BookOpen,
   BarChart3,
+  FileWarning,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -89,8 +90,13 @@ export function AppShell() {
       match: (p: string) =>
         p.startsWith("/ledgers") ||
         p.startsWith("/ledger-summary") ||
-        p.startsWith("/reconciliation") ||
-        p.startsWith("/export-bill-overdue"),
+        p.startsWith("/reconciliation"),
+    },
+    {
+      to: "/export-bill-overdue",
+      icon: FileWarning,
+      label: "Export Bill Overdue",
+      match: (p: string) => p.startsWith("/export-bill-overdue"),
     },
     { to: "/profile", icon: User, label: "Profile", match: (p: string) => p.startsWith("/profile") || p.startsWith("/bom") },
   ];
