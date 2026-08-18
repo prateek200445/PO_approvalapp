@@ -44,7 +44,23 @@ public sealed class LoomPlanningOptions
         ["CHINA"] = 108,
     };
 
+    /// <summary>Full PPM matrix when LoomSpecificationMaster is empty in ERP.</summary>
+    public LoomEmbeddedPpmEntry[] EmbeddedPpmMatrix { get; set; } = [];
+
     public bool AllowConfirmSave { get; set; }
 
     public bool AllowReplaceExistingPlan { get; set; } = true;
+
+    /// <summary>When true, confirm may UPDATE displaced blocking rows then insert new plan.</summary>
+    public bool AllowShiftOnConfirm { get; set; } = true;
+}
+
+public sealed class LoomEmbeddedPpmEntry
+{
+    public string LoomType { get; set; } = "";
+    public double GsmFrom { get; set; }
+    public double GsmTo { get; set; }
+    public double WidthFrom { get; set; }
+    public double WidthTo { get; set; }
+    public double Ppm { get; set; }
 }

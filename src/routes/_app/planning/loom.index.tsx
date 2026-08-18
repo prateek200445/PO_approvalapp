@@ -637,7 +637,6 @@ function PlanOrderPanel({
   const canConfirmSave =
     previewResult?.success &&
     previewResult.fullyAllotted &&
-    previewResult.displacements.length === 0 &&
     (!(planContext?.existingAllocationCount ?? 0) || (replaceExisting && config?.replaceExistingEnabled));
 
   return (
@@ -747,7 +746,9 @@ function PlanOrderPanel({
 
         {previewResult && previewResult.displacements.length > 0 ? (
           <div className="mt-4 overflow-x-auto">
-            <h4 className="mb-2 text-sm font-medium">Orders to shift (save blocked until applied)</h4>
+            <h4 className="mb-2 text-sm font-medium">
+              Orders to shift ({previewResult.displacements.length}) — applied on confirm save
+            </h4>
             <div className="max-h-48 overflow-y-auto rounded-lg border border-border/60">
               <table className="w-full min-w-[720px] text-left text-sm">
                 <thead>
@@ -813,8 +814,20 @@ function PlanOrderPanel({
           <AlertDialogHeader>
             <AlertDialogTitle>Save loom plan to ERP?</AlertDialogTitle>
             <AlertDialogDescription>
-              Insert {previewResult?.proposedSegments.length ?? 0} row(s) into Prod_LoomAlocationMaster for order{" "}
-              <span className="font-medium">{planOrderNo.trim() || "—"}</span>. The server re-runs preview before saving.
+              {previewResult?.displacements.length ? (
+                <>
+                  Shift {previewResult.displacements.length} blocking order(s), then insert{" "}
+                  {previewResult.proposedSegments.length} row(s) into Prod_LoomAlocationMaster for order{" "}
+                  <span className="font-medium">{planOrderNo.trim() || "—"}</span>. The server re-runs preview before
+                  saving.
+                </>
+              ) : (
+                <>
+                  Insert {previewResult?.proposedSegments.length ?? 0} row(s) into Prod_LoomAlocationMaster for order{" "}
+                  <span className="font-medium">{planOrderNo.trim() || "—"}</span>. The server re-runs preview before
+                  saving.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

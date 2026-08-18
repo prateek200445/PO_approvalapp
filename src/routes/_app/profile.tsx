@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { KeyRound, LogOut, Building2, Server, ArrowLeftRight, BookOpen, Phone, Mail, Layers, CalendarRange, Factory } from "lucide-react";
+import { KeyRound, LogOut, Building2, Server, ArrowLeftRight, BookOpen, Phone, Mail, Layers, CalendarRange, Factory, GitBranch } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { ServerSettingsModal } from "@/components/ServerSettingsModal";
@@ -118,6 +118,18 @@ function Profile() {
               <div>
                 <span className="text-sm font-medium">Loom Planning</span>
                 <p className="text-xs text-muted-foreground">Loom register, allotment preview & save</p>
+              </div>
+            </div>
+          </button>
+          <button
+            onClick={() => navigate({ to: "/planning/timeline" })}
+            className="flex w-full items-center justify-between rounded-lg border border-border bg-surface p-3 text-left hover:bg-secondary cursor-pointer"
+          >
+            <div className="flex items-center gap-3">
+              <GitBranch className="h-5 w-5 text-muted-foreground" />
+              <div>
+                <span className="text-sm font-medium">Planning Timeline</span>
+                <p className="text-xs text-muted-foreground">Loom → fabric → FIBC → dispatch in one view</p>
               </div>
             </div>
           </button>

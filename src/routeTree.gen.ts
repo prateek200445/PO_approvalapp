@@ -26,12 +26,14 @@ import { Route as AppBomRouteImport } from './routes/_app/bom'
 import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
 import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
 import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
+import { Route as AppPlanningTimelineRouteImport } from './routes/_app/planning/timeline'
 import { Route as AppPlanningLoomRouteImport } from './routes/_app/planning/loom'
 import { Route as AppPlanningFibcRouteImport } from './routes/_app/planning/fibc'
 import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
 import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
 import { Route as AppBomCustomersRouteImport } from './routes/_app/bom.customers'
 import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
+import { Route as AppPlanningTimelineIndexRouteImport } from './routes/_app/planning/timeline.index'
 import { Route as AppPlanningLoomIndexRouteImport } from './routes/_app/planning/loom.index'
 import { Route as AppPlanningFibcIndexRouteImport } from './routes/_app/planning/fibc.index'
 
@@ -119,6 +121,11 @@ const AppPoPoNoRoute = AppPoPoNoRouteImport.update({
   path: '/po/$poNo',
   getParentRoute: () => AppRoute,
 } as any)
+const AppPlanningTimelineRoute = AppPlanningTimelineRouteImport.update({
+  id: '/planning/timeline',
+  path: '/planning/timeline',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppPlanningLoomRoute = AppPlanningLoomRouteImport.update({
   id: '/planning/loom',
   path: '/planning/loom',
@@ -149,6 +156,12 @@ const AppBomSplatRoute = AppBomSplatRouteImport.update({
   path: '/$',
   getParentRoute: () => AppBomRoute,
 } as any)
+const AppPlanningTimelineIndexRoute =
+  AppPlanningTimelineIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AppPlanningTimelineRoute,
+  } as any)
 const AppPlanningLoomIndexRoute = AppPlanningLoomIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -180,11 +193,13 @@ export interface FileRoutesByFullPath {
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/planning/fibc': typeof AppPlanningFibcRouteWithChildren
   '/planning/loom': typeof AppPlanningLoomRouteWithChildren
+  '/planning/timeline': typeof AppPlanningTimelineRouteWithChildren
   '/po/$poNo': typeof AppPoPoNoRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/bom/': typeof AppBomIndexRoute
   '/planning/fibc/': typeof AppPlanningFibcIndexRoute
   '/planning/loom/': typeof AppPlanningLoomIndexRoute
+  '/planning/timeline/': typeof AppPlanningTimelineIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -208,6 +223,7 @@ export interface FileRoutesByTo {
   '/bom': typeof AppBomIndexRoute
   '/planning/fibc': typeof AppPlanningFibcIndexRoute
   '/planning/loom': typeof AppPlanningLoomIndexRoute
+  '/planning/timeline': typeof AppPlanningTimelineIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -231,11 +247,13 @@ export interface FileRoutesById {
   '/_app/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/_app/planning/fibc': typeof AppPlanningFibcRouteWithChildren
   '/_app/planning/loom': typeof AppPlanningLoomRouteWithChildren
+  '/_app/planning/timeline': typeof AppPlanningTimelineRouteWithChildren
   '/_app/po/$poNo': typeof AppPoPoNoRoute
   '/_app/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/_app/bom/': typeof AppBomIndexRoute
   '/_app/planning/fibc/': typeof AppPlanningFibcIndexRoute
   '/_app/planning/loom/': typeof AppPlanningLoomIndexRoute
+  '/_app/planning/timeline/': typeof AppPlanningTimelineIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -259,11 +277,13 @@ export interface FileRouteTypes {
     | '/payment/$paymentNo'
     | '/planning/fibc'
     | '/planning/loom'
+    | '/planning/timeline'
     | '/po/$poNo'
     | '/workorder/$poNo'
     | '/bom/'
     | '/planning/fibc/'
     | '/planning/loom/'
+    | '/planning/timeline/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -287,6 +307,7 @@ export interface FileRouteTypes {
     | '/bom'
     | '/planning/fibc'
     | '/planning/loom'
+    | '/planning/timeline'
   id:
     | '__root__'
     | '/'
@@ -309,11 +330,13 @@ export interface FileRouteTypes {
     | '/_app/payment/$paymentNo'
     | '/_app/planning/fibc'
     | '/_app/planning/loom'
+    | '/_app/planning/timeline'
     | '/_app/po/$poNo'
     | '/_app/workorder/$poNo'
     | '/_app/bom/'
     | '/_app/planning/fibc/'
     | '/_app/planning/loom/'
+    | '/_app/planning/timeline/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -442,6 +465,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppPoPoNoRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/planning/timeline': {
+      id: '/_app/planning/timeline'
+      path: '/planning/timeline'
+      fullPath: '/planning/timeline'
+      preLoaderRoute: typeof AppPlanningTimelineRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/planning/loom': {
       id: '/_app/planning/loom'
       path: '/planning/loom'
@@ -483,6 +513,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/bom/$'
       preLoaderRoute: typeof AppBomSplatRouteImport
       parentRoute: typeof AppBomRoute
+    }
+    '/_app/planning/timeline/': {
+      id: '/_app/planning/timeline/'
+      path: '/'
+      fullPath: '/planning/timeline/'
+      preLoaderRoute: typeof AppPlanningTimelineIndexRouteImport
+      parentRoute: typeof AppPlanningTimelineRoute
     }
     '/_app/planning/loom/': {
       id: '/_app/planning/loom/'
@@ -540,6 +577,17 @@ const AppPlanningLoomRouteWithChildren = AppPlanningLoomRoute._addFileChildren(
   AppPlanningLoomRouteChildren,
 )
 
+interface AppPlanningTimelineRouteChildren {
+  AppPlanningTimelineIndexRoute: typeof AppPlanningTimelineIndexRoute
+}
+
+const AppPlanningTimelineRouteChildren: AppPlanningTimelineRouteChildren = {
+  AppPlanningTimelineIndexRoute: AppPlanningTimelineIndexRoute,
+}
+
+const AppPlanningTimelineRouteWithChildren =
+  AppPlanningTimelineRoute._addFileChildren(AppPlanningTimelineRouteChildren)
+
 interface AppRouteChildren {
   AppBomRoute: typeof AppBomRouteWithChildren
   AppDashboardRoute: typeof AppDashboardRoute
@@ -557,6 +605,7 @@ interface AppRouteChildren {
   AppPaymentPaymentNoRoute: typeof AppPaymentPaymentNoRoute
   AppPlanningFibcRoute: typeof AppPlanningFibcRouteWithChildren
   AppPlanningLoomRoute: typeof AppPlanningLoomRouteWithChildren
+  AppPlanningTimelineRoute: typeof AppPlanningTimelineRouteWithChildren
   AppPoPoNoRoute: typeof AppPoPoNoRoute
   AppWorkorderPoNoRoute: typeof AppWorkorderPoNoRoute
 }
@@ -578,6 +627,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPaymentPaymentNoRoute: AppPaymentPaymentNoRoute,
   AppPlanningFibcRoute: AppPlanningFibcRouteWithChildren,
   AppPlanningLoomRoute: AppPlanningLoomRouteWithChildren,
+  AppPlanningTimelineRoute: AppPlanningTimelineRouteWithChildren,
   AppPoPoNoRoute: AppPoPoNoRoute,
   AppWorkorderPoNoRoute: AppWorkorderPoNoRoute,
 }

@@ -35,6 +35,7 @@ public sealed class LoomProposedSegmentDto
 
 public sealed class LoomOrderShiftDisplacementDto
 {
+    public int? AllocationId { get; set; }
     public int LoomNo { get; set; }
     public string OrderNo { get; set; } = "";
     public string? PartyName { get; set; }
@@ -70,6 +71,7 @@ public sealed class LoomAllotmentConfirmResult : LoomAllotmentResult
     public bool Saved { get; set; }
     public int RowsInserted { get; set; }
     public int RowsDeleted { get; set; }
+    public int OrdersShifted { get; set; }
 }
 
 public sealed class LoomOrderAllotmentContextDto

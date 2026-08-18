@@ -1,4 +1,5 @@
 using POApprovalAPI.Planning.Fibc;
+using POApprovalAPI.Planning.Integrated;
 using POApprovalAPI.Planning.Loom;
 using POApprovalAPI.Services;
 using QuestPDF.Infrastructure;
@@ -89,6 +90,7 @@ builder.Services.AddHostedService<FibcQuotationHoldExpiryReminderService>();
 builder.Services.AddScoped<ILoomPlanningRepository, LoomPlanningRepository>();
 builder.Services.AddScoped<ILoomPlanningEngine, LoomPlanningEngine>();
 builder.Services.AddScoped<LoomPlanningService>();
+builder.Services.AddScoped<IntegratedPlanningService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();

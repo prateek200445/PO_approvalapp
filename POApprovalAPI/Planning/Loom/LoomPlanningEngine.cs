@@ -50,11 +50,11 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             return result;
         }
 
-        if (preview.Displacements.Count > 0)
+        if (preview.Displacements.Count > 0 && !_options.AllowShiftOnConfirm)
         {
             result.Success = false;
             result.Message =
-                $"Cannot save yet: {preview.Displacements.Count} order(s) must be shifted first (cases ii/iii/iv). Shift handling will be added in a follow-up; adjust blocking allocations in ERP or replan.";
+                $"Cannot save: {preview.Displacements.Count} order(s) must be shifted (cases ii/iii/iv). Enable LoomPlanning:AllowShiftOnConfirm.";
             return result;
         }
 
@@ -77,6 +77,31 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
 
         try
         {
+            var distinctDisplacements = preview.Displacements
+                .GroupBy(d => $"{d.AllocationId}:{d.LoomNo}:{d.OrderNo}:{d.FromDate:yyyyMMdd}")
+                .Select(g => g.First())
+                .ToList();
+
+            if (distinctDisplacements.Count > 0)
+            {
+                var (shifted, inserted) = await _repository.ApplyLoomShiftPlanAsync(
+                    orderNo,
+                    partyName,
+                    preview.ProposedSegments,
+                    distinctDisplacements,
+                    request.ReplaceExisting && existing > 0,
+                    ct);
+
+                result.Saved = true;
+                result.RowsInserted = inserted;
+                result.RowsDeleted = request.ReplaceExisting && existing > 0 ? existing : 0;
+                result.OrdersShifted = distinctDisplacements.Select(d => d.OrderNo).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                result.Success = true;
+                result.Message =
+                    $"Saved loom plan for {orderNo}: shifted {result.OrdersShifted} order(s), inserted {inserted} row(s).";
+                return result;
+            }
+
             var rowsInserted = await _repository.InsertLoomAllocationsAsync(
                 company,
                 orderNo,
@@ -88,6 +113,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             result.Saved = true;
             result.RowsInserted = rowsInserted;
             result.RowsDeleted = request.ReplaceExisting && existing > 0 ? existing : 0;
+            result.OrdersShifted = 0;
             result.Success = true;
             result.Message = $"Saved loom plan for {orderNo}: inserted {rowsInserted} row(s) into Prod_LoomAlocationMaster.";
             return result;
@@ -186,6 +212,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
 
         var proposed = new List<LoomProposedSegmentDto>();
         var displacements = new List<LoomOrderShiftDisplacementDto>();
+        var displacementKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var remainingMeters = request.RequiredMeters;
         var usedLoomDays = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -195,7 +222,11 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
                 break;
 
             if (candidate.Displacement is not null)
-                displacements.Add(candidate.Displacement);
+            {
+                var key = $"{candidate.Displacement.AllocationId}:{candidate.Displacement.LoomNo}:{candidate.Displacement.OrderNo}:{candidate.Displacement.FromDate:yyyyMMdd}";
+                if (displacementKeys.Add(key))
+                    displacements.Add(candidate.Displacement);
+            }
 
             var segmentMeters = Math.Min(remainingMeters, candidate.MaxMetersInGap);
             var runDays = Math.Min(
@@ -248,7 +279,13 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         if (displacements.Count > 0)
         {
             warnings.Add(
-                $"{displacements.Count} displacement(s) proposed — confirm save is blocked until shift logic is applied (cases ii/iii/iv).");
+                $"{displacements.Count} displacement(s) proposed — confirm will UPDATE blocking rows in Prod_LoomAlocationMaster then insert new segments.");
+        }
+
+        var changeoverDays = CountChangeoverDays(proposed, displacements);
+        foreach (var (day, count) in changeoverDays.Where(kv => kv.Value > _options.MaxChangeoversPerDay))
+        {
+            warnings.Add($"Changeover warning: {day:yyyy-MM-dd} has {count} loom changeover(s) (limit {_options.MaxChangeoversPerDay}).");
         }
 
         if (!fullyAllotted)
@@ -423,6 +460,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         var span = (blocker.EndDate - blocker.StartDate).Days;
         return new LoomOrderShiftDisplacementDto
         {
+            AllocationId = blocker.AllocationId,
             LoomNo = loomNo,
             OrderNo = blocker.OrderNo ?? "",
             PartyName = blocker.PartyName,
@@ -432,6 +470,26 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             NewToDate = pushTo.AddDays(Math.Max(span, 0)),
             Reason = "Blocking order must move to free capacity for similar-fabric forward allotment.",
         };
+    }
+
+    private static Dictionary<DateTime, int> CountChangeoverDays(
+        IReadOnlyList<LoomProposedSegmentDto> segments,
+        IReadOnlyList<LoomOrderShiftDisplacementDto> displacements)
+    {
+        var counts = new Dictionary<DateTime, int>();
+        foreach (var seg in segments)
+        {
+            var day = seg.FromDate.Date;
+            counts.TryGetValue(day, out var c);
+            counts[day] = c + 1;
+        }
+        foreach (var d in displacements)
+        {
+            var day = d.NewFromDate.Date;
+            counts.TryGetValue(day, out var c);
+            counts[day] = c + 1;
+        }
+        return counts;
     }
 
     private static int CasePriority(LoomAllotmentCase c, DateTime startDate, bool similarAdjacent) =>
@@ -500,6 +558,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
 
                 timeline.Blocks.Add(new LoomBlock
                 {
+                    AllocationId = row.AllocationId,
                     OrderNo = row.OrderNo,
                     PartyName = row.PartyName,
                     StartDate = row.AllocationDate.Date,
@@ -546,6 +605,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         Warnings = preview.Warnings,
         ProposedSegments = preview.ProposedSegments,
         Displacements = preview.Displacements,
+        OrdersShifted = 0,
     };
 
     private sealed class SegmentCandidate
@@ -594,6 +654,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
 
     private sealed class LoomBlock
     {
+        public int AllocationId { get; set; }
         public string? OrderNo { get; set; }
         public string? PartyName { get; set; }
         public DateTime StartDate { get; set; }

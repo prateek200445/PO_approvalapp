@@ -133,6 +133,7 @@ export type LoomProposedSegment = {
 };
 
 export type LoomOrderShiftDisplacement = {
+  allocationId: number | null;
   loomNo: number;
   orderNo: string;
   partyName: string | null;
@@ -166,6 +167,7 @@ export type LoomAllotmentConfirmResult = LoomAllotmentResult & {
   saved: boolean;
   rowsInserted: number;
   rowsDeleted: number;
+  ordersShifted: number;
 };
 
 export type LoomProductionMeter = {
@@ -397,6 +399,7 @@ export function normalizeLoomAllotmentResult(data: Record<string, unknown>): Loo
       size: numField(s, "size", "Size"),
     })),
     displacements: displacements.map((d) => ({
+      allocationId: optNum(d, "allocationId", "AllocationId"),
       loomNo: numField(d, "loomNo", "LoomNo"),
       orderNo: strField(d, "orderNo", "OrderNo"),
       partyName: optStr(d, "partyName", "PartyName"),
@@ -416,5 +419,6 @@ export function normalizeLoomAllotmentConfirmResult(data: Record<string, unknown
     saved: Boolean(data.saved ?? data.Saved),
     rowsInserted: numField(data, "rowsInserted", "RowsInserted"),
     rowsDeleted: numField(data, "rowsDeleted", "RowsDeleted"),
+    ordersShifted: numField(data, "ordersShifted", "OrdersShifted"),
   };
 }

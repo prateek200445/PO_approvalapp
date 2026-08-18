@@ -361,7 +361,15 @@ ORDER BY LoomType, GSMFrom", commandTimeout: CommandTimeoutSeconds);
             WidthFrom = r.WidthFrom,
             WidthTo = r.WidthTo,
             Ppm = r.PPM,
-        }).ToList();
+        }).Concat(_options.EmbeddedPpmMatrix.Select(e => new LoomPpmSpecDto
+        {
+            LoomType = e.LoomType,
+            GsmFrom = e.GsmFrom,
+            GsmTo = e.GsmTo,
+            WidthFrom = e.WidthFrom,
+            WidthTo = e.WidthTo,
+            Ppm = e.Ppm,
+        })).ToList();
     }
 
     public async Task<IReadOnlyList<LoomFormulaDto>> GetFormulasAsync(CancellationToken ct = default)
@@ -467,6 +475,123 @@ VALUES
 
             transaction.Commit();
             return inserted;
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    public async Task<(int RowsShifted, int RowsInserted)> ApplyLoomShiftPlanAsync(
+        string orderNo,
+        string? partyName,
+        IReadOnlyList<LoomProposedSegmentDto> segments,
+        IReadOnlyList<LoomOrderShiftDisplacementDto> displacements,
+        bool replaceExisting,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        using var connection = _database.CreateConnection();
+        using var transaction = connection.BeginTransaction();
+        var shifted = 0;
+        var inserted = 0;
+
+        try
+        {
+            foreach (var move in displacements)
+            {
+                ct.ThrowIfCancellationRequested();
+                var updated = await connection.ExecuteAsync(@"
+UPDATE dbo.Prod_LoomAlocationMaster
+SET AllocationDate = @NewFromDate,
+    ToDate = @NewToDate
+WHERE SrNo = @AllocationId
+   OR (LoomNo = @LoomNo AND PONO = @OrderNo AND AllocationDate = @FromDate)",
+                    new
+                    {
+                        move.AllocationId,
+                        move.LoomNo,
+                        OrderNo = move.OrderNo.Trim(),
+                        FromDate = move.FromDate.Date,
+                        NewFromDate = move.NewFromDate.Date,
+                        NewToDate = move.NewToDate.Date,
+                    },
+                    transaction,
+                    commandTimeout: CommandTimeoutSeconds);
+
+                if (updated == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Blocking allocation for order {move.OrderNo} on loom {move.LoomNo} from {move.FromDate:yyyy-MM-dd} no longer exists.");
+                }
+
+                shifted += updated;
+            }
+
+            if (replaceExisting)
+            {
+                await connection.ExecuteAsync(@"
+DELETE FROM dbo.Prod_LoomAlocationMaster
+WHERE PONO = @OrderNo", new { OrderNo = orderNo.Trim() }, transaction, commandTimeout: CommandTimeoutSeconds);
+            }
+
+            var companyId = await connection.ExecuteScalarAsync<int?>(@"
+SELECT TOP 1 CompanyId FROM Prod_LoomAlocationMaster WITH (NOLOCK)
+WHERE CompanyId IS NOT NULL ORDER BY SrNo DESC", transaction: transaction, commandTimeout: CommandTimeoutSeconds)
+                ?? _options.DefaultCompanyId;
+
+            var recordLogId = await connection.ExecuteScalarAsync<int>(@"
+SELECT ISNULL(MAX(RecordLogId), 0) + 1 FROM Prod_LoomAlocationMaster WITH (UPDLOCK, HOLDLOCK)",
+                transaction: transaction, commandTimeout: CommandTimeoutSeconds);
+
+            foreach (var seg in segments)
+            {
+                ct.ThrowIfCancellationRequested();
+                await connection.ExecuteAsync(@"
+INSERT INTO dbo.Prod_LoomAlocationMaster
+    (CompanyId, LoomNo, ReqGSM, Color, Sector, PartyName, PONO,
+     AllocationDate, ToDate, RecordLogId, FormulaID,
+     WarpBobin, WeftBobin, Remarks, isActive, asize,
+     AllocationType, FGItemCode, CondWarp, CondWeft, MonoYarn, CondDNR, Vent)
+VALUES
+    (@CompanyId, @LoomNo, @ReqGSM, @Color, @Sector, @PartyName, @PONO,
+     @AllocationDate, @ToDate, @RecordLogId, @FormulaID,
+     @WarpBobin, @WeftBobin, @Remarks, @IsActive, @asize,
+     @AllocationType, @FGItemCode, @CondWarp, @CondWeft, @MonoYarn, @CondDNR, @Vent)",
+                    new
+                    {
+                        CompanyId = companyId,
+                        LoomNo = seg.LoomNo,
+                        ReqGSM = seg.ReqGsm,
+                        Color = "MW",
+                        Sector = "BIGBAG",
+                        PartyName = partyName ?? "",
+                        PONO = orderNo.Trim(),
+                        AllocationDate = seg.FromDate.Date,
+                        ToDate = seg.ToDate.Date,
+                        RecordLogId = recordLogId++,
+                        FormulaID = seg.FormulaId ?? 0,
+                        WarpBobin = "",
+                        WeftBobin = "",
+                        Remarks = "0",
+                        IsActive = "Yes",
+                        asize = seg.Size,
+                        AllocationType = $"WEB-{seg.AllotmentCase}",
+                        FGItemCode = "WIP00023",
+                        CondWarp = "",
+                        CondWeft = "",
+                        MonoYarn = "",
+                        CondDNR = 0,
+                        Vent = 0d,
+                    },
+                    transaction,
+                    commandTimeout: CommandTimeoutSeconds);
+                inserted++;
+            }
+
+            transaction.Commit();
+            return (shifted, inserted);
         }
         catch
         {
