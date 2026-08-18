@@ -46,6 +46,7 @@ builder.Services.AddScoped<PoApprovalService>();
 builder.Services.AddScoped<WorkOrderApprovalService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<SalesDashboardService>();
+builder.Services.AddScoped<ExportBillOverdueService>();
 builder.Services.AddScoped<ExcelLedgerService>();
 builder.Services.AddScoped<LedgerSummaryService>();
 
