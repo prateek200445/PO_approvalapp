@@ -70,7 +70,7 @@ export function ApprovalCommandBar({
   }, [disabled, isApproving, isRejecting, onApprove, onReject]);
 
   return (
-    <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom,0px))] z-20 border-t border-border bg-surface/95 p-3 backdrop-blur md:static md:bottom-auto md:border-0 md:bg-transparent md:p-0">
+    <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-surface/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] backdrop-blur md:static md:bottom-auto md:border-0 md:bg-transparent md:p-0 md:pb-0">
       <div className="mx-auto flex max-w-7xl flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0 text-xs text-muted-foreground">
           {amountLabel && (

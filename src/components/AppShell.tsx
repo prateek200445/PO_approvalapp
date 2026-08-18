@@ -15,7 +15,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Hammer,
-  MoreHorizontal,
+  Menu,
   Search,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
@@ -53,7 +53,7 @@ export function AppShell() {
   const path = router.location.pathname;
   const [dark, setDark] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const inbox = useApprovalInbox(user?.username);
 
   useEffect(() => {
@@ -86,6 +86,7 @@ export function AppShell() {
     };
 
     scrollToTop();
+    setMenuOpen(false);
     const timer = setTimeout(scrollToTop, 100);
     return () => clearTimeout(timer);
   }, [path]);
@@ -180,23 +181,6 @@ export function AppShell() {
     { title: "Account", items: accountNav },
   ];
 
-  const mobilePrimary: NavItem[] = [
-    {
-      to: "/dashboard",
-      icon: LayoutDashboard,
-      label: "Dashboard",
-      shortLabel: "Home",
-      match: (p) => p.startsWith("/dashboard"),
-    },
-    approvalNav[0],
-    approvalNav[1],
-    approvalNav[2],
-  ];
-
-  const moreItems = [approvalNav[3], ...reportNav, ...accountNav];
-  const moreActive = moreItems.some((n) => n.match(path));
-  const moreBadge = formatBadgeCount(inbox.counts.indent);
-
   function badgeFor(kind?: InboxKind) {
     if (!kind) return null;
     return formatBadgeCount(inbox.counts[kind]);
@@ -215,7 +199,7 @@ export function AppShell() {
       <Link
         to={item.to}
         title={collapsed ? item.label : undefined}
-        onClick={() => setMoreOpen(false)}
+        onClick={() => setMenuOpen(false)}
         className={cn(
           "flex items-center rounded-xl py-2.5 text-sm font-medium transition-all duration-300",
           collapsed ? "justify-center px-2" : "gap-3 px-3",
@@ -255,22 +239,37 @@ export function AppShell() {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-background pb-nav md:pb-0">
+    <div className="min-h-screen overflow-x-hidden bg-background">
       <header className="app-glass sticky top-0 z-30 border-b md:hidden">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-          <Link to="/dashboard" className="flex items-center gap-2.5">
-            <img
-              src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"}
-              alt="HCP Logo"
-              className={dark ? "h-11 w-11 rounded-xl shadow-lg" : "h-9 w-9 rounded-xl shadow-lg ring-1 ring-black/5"}
-            />
-            <div className="leading-tight">
-              <div className="text-sm font-semibold">HCP</div>
-              <div className="text-[11px] text-muted-foreground">Approvals Portal</div>
-            </div>
-          </Link>
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              className="relative rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+              aria-label="Open menu"
+            >
+              <Menu className="h-5 w-5" />
+              {inbox.counts.total > 0 && (
+                <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-0.5 text-[9px] font-bold text-warning-foreground">
+                  {formatBadgeCount(inbox.counts.total)}
+                </span>
+              )}
+            </button>
+            <Link to="/dashboard" className="flex min-w-0 items-center gap-2.5">
+              <img
+                src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"}
+                alt="HCP Logo"
+                className={dark ? "h-10 w-10 rounded-xl shadow-lg" : "h-9 w-9 rounded-xl shadow-lg ring-1 ring-black/5"}
+              />
+              <div className="leading-tight">
+                <div className="text-sm font-semibold">HCP</div>
+                <div className="text-[11px] text-muted-foreground">Approvals Portal</div>
+              </div>
+            </Link>
+          </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => window.dispatchEvent(new Event("po-open-search"))}
@@ -279,11 +278,6 @@ export function AppShell() {
             >
               <Search className="h-4 w-4" />
             </button>
-            {inbox.counts.total > 0 && (
-              <span className="rounded-full bg-warning px-2 py-0.5 text-[10px] font-semibold tabular-nums text-warning-foreground">
-                {formatBadgeCount(inbox.counts.total)} pending
-              </span>
-            )}
             <button
               onClick={toggleTheme}
               className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -291,10 +285,6 @@ export function AppShell() {
             >
               {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </button>
-            <div className="hidden text-right text-xs leading-tight sm:block">
-              <div className="font-medium">{user?.name}</div>
-              <div className="text-muted-foreground">{user?.role}</div>
-            </div>
           </div>
         </div>
       </header>
@@ -428,92 +418,71 @@ export function AppShell() {
         </main>
       </div>
 
-      <nav className="app-glass safe-bottom fixed bottom-0 left-0 right-0 z-30 grid grid-cols-5 border-t md:hidden">
-        {mobilePrimary.map((n) => {
-          const active = n.match(path);
-          const badge = badgeFor(n.badge);
-          return (
-            <Link
-              key={n.to}
-              to={n.to}
-              className={cn(
-                "flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 px-1 py-1.5 text-[10px] font-medium tracking-tight",
-                active ? "text-primary" : "text-muted-foreground",
-              )}
-            >
-              <span
-                className={cn(
-                  "relative flex h-9 w-9 items-center justify-center rounded-xl",
-                  active && "nav-3d-active",
-                )}
-              >
-                <n.icon className={cn("h-5 w-5 shrink-0", active && "stroke-[2.5]")} />
-                {badge && (
-                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-0.5 text-[9px] font-bold text-warning-foreground">
-                    {badge}
+      <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
+        <SheetContent
+          side="left"
+          className="app-sidebar-3d flex w-[min(18.5rem,88vw)] flex-col gap-0 p-0 sm:max-w-none md:hidden"
+        >
+          <SheetHeader className="border-b border-border px-4 py-4 pr-12 text-left">
+            <SheetTitle className="flex items-center gap-3 text-base font-semibold">
+              <img
+                src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"}
+                alt=""
+                className={dark ? "h-9 w-9 rounded-xl shadow-md" : "h-9 w-9 rounded-xl shadow-md ring-1 ring-black/5"}
+              />
+              <span className="leading-tight">
+                Menu
+                {inbox.counts.total > 0 && (
+                  <span className="ml-2 align-middle text-[11px] font-semibold text-muted-foreground">
+                    {formatBadgeCount(inbox.counts.total)} pending
                   </span>
                 )}
               </span>
-              <span className="w-full truncate text-center leading-tight">{n.shortLabel}</span>
-            </Link>
-          );
-        })}
-        <button
-          type="button"
-          onClick={() => setMoreOpen(true)}
-          className={cn(
-            "flex min-h-12 min-w-0 flex-col items-center justify-center gap-0.5 px-1 py-1.5 text-[10px] font-medium tracking-tight",
-            moreActive ? "text-primary" : "text-muted-foreground",
-          )}
-        >
-          <span
-            className={cn(
-              "relative flex h-9 w-9 items-center justify-center rounded-xl",
-              moreActive && "nav-3d-active",
-            )}
-          >
-            <MoreHorizontal className="h-5 w-5 shrink-0" />
-            {moreBadge && (
-              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-0.5 text-[9px] font-bold text-warning-foreground">
-                {moreBadge}
-              </span>
-            )}
-          </span>
-          <span className="w-full truncate text-center leading-tight">More</span>
-        </button>
-      </nav>
-
-      <Sheet open={moreOpen} onOpenChange={setMoreOpen}>
-        <SheetContent side="bottom" className="safe-bottom rounded-t-2xl pb-6 md:hidden">
-          <SheetHeader>
-            <SheetTitle>More</SheetTitle>
+            </SheetTitle>
           </SheetHeader>
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            {moreItems.map((item) => {
-              const active = item.match(path);
-              const badge = badgeFor(item.badge);
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  onClick={() => setMoreOpen(false)}
-                  className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-xl border px-3 py-3 text-sm font-medium",
-                    active
-                      ? "border-primary/30 bg-primary/10 text-primary"
-                      : "border-border bg-card text-foreground",
-                  )}
-                >
-                  <item.icon className="h-4 w-4 shrink-0" />
-                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  {badge && (
-                    <span className="rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-semibold text-warning-foreground">
-                      {badge}
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
+
+          <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
+            <div className="px-1" onClick={() => setMenuOpen(false)}>
+              <SearchTrigger />
+            </div>
+            {desktopGroups.map((group) => (
+              <div key={group.title} className="space-y-1">
+                <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {group.title}
+                </div>
+                {group.items.map((item) => (
+                  <NavLink key={item.to} item={item} />
+                ))}
+              </div>
+            ))}
+          </nav>
+
+          <div className="space-y-3 border-t border-border px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">{user?.name}</div>
+              <div className="truncate text-xs text-muted-foreground">{user?.role}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleTheme}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-sm text-muted-foreground shadow-sm"
+                aria-label="Toggle theme"
+              >
+                {dark ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
+                {dark ? "Light" : "Dark"}
+              </button>
+              <button
+                onClick={() => {
+                  setMenuOpen(false);
+                  logout();
+                  navigate({ to: "/" });
+                }}
+                className="rounded-xl border border-border p-2 text-muted-foreground shadow-sm"
+                aria-label="Logout"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </SheetContent>
       </Sheet>

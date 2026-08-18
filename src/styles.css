@@ -229,6 +229,33 @@
       0 1px 0 rgba(255, 255, 255, 0.55) inset,
       0 8px 16px rgba(15, 23, 42, 0.08);
   }
+
+  @media (max-width: 767px) {
+    html:not(.dark) {
+      --background: oklch(1 0 0);
+      --surface: oklch(1 0 0);
+      --card: oklch(1 0 0);
+      --popover: oklch(1 0 0);
+      --secondary: oklch(0.97 0.006 245);
+      --muted: oklch(0.97 0.006 245);
+    }
+
+    html:not(.dark) body {
+      background-color: #fff;
+      background-image: none;
+    }
+
+    html:not(.dark) .app-glass {
+      background: #fff;
+      backdrop-filter: none;
+      box-shadow: 0 1px 0 rgba(15, 23, 42, 0.06);
+    }
+
+    html:not(.dark) .app-sidebar-3d {
+      background: #fff;
+      box-shadow: 12px 0 32px rgba(15, 23, 42, 0.08);
+    }
+  }
 }
 
 @layer utilities {
@@ -256,6 +283,23 @@
       0 32px 64px rgba(0, 0, 0, 0.32) !important;
   }
 
+  @media (max-width: 767px) {
+    html:not(.dark) .card-3d,
+    html:not(.dark) .shadow-soft {
+      background: #fff !important;
+      background-image: none !important;
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, 1) inset,
+        0 8px 20px rgba(15, 23, 42, 0.06) !important;
+    }
+
+    html:not(.dark) .card-3d:hover {
+      box-shadow:
+        0 1px 0 rgba(255, 255, 255, 1) inset,
+        0 10px 24px rgba(15, 23, 42, 0.08) !important;
+    }
+  }
+
   .card-3d {
     transition: transform 180ms ease, box-shadow 220ms ease;
   }
@@ -279,7 +323,7 @@
   }
 
   .pb-action {
-    padding-bottom: calc(10.75rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(7.25rem + env(safe-area-inset-bottom, 0px));
   }
 
   @media (min-width: 768px) {
