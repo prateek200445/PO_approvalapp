@@ -14,6 +14,7 @@ public sealed class FibcPlanningConfigDto
     public int QuotationHoldDays { get; set; }
     public bool QuotationHoldEmailEnabled { get; set; }
     public bool CriticalShiftEnabled { get; set; }
+    public bool CriticalShiftEmailEnabled { get; set; }
 }
 
 public sealed class FibcLineConfigDto

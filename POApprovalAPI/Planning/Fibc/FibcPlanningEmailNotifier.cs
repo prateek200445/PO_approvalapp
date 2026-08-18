@@ -84,8 +84,76 @@ public sealed class FibcPlanningEmailNotifier
         return SendAsync(subject, body);
     }
 
+    public Task NotifyCriticalShiftConfirmedAsync(
+        FibcCriticalShiftConfirmResult result,
+        FibcCriticalShiftRequest request,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!IsCriticalShiftEnabled())
+            return Task.CompletedTask;
+
+        var subject = $"FIBC critical shift saved — Order {result.OrderNo} ({result.OrdersShifted} order(s) moved)";
+        var dispatch = result.DispatchDate?.ToString("yyyy-MM-dd") ?? "—";
+        var target = result.TargetCompletionDate?.ToString("yyyy-MM-dd") ?? "—";
+        var reason = string.IsNullOrWhiteSpace(request.Reason) ? "—" : request.Reason.Trim();
+
+        var body =
+            $"A critical order shift was confirmed and saved to prod_fibcallocationMaster.\n\n" +
+            $"Critical order:  {result.OrderNo}\n" +
+            $"Customer:        {request.PartyName ?? "—"}\n" +
+            $"Bag type:        {result.BagTypeLabel}\n" +
+            $"Quantity:        {result.Quantity:N0} pcs\n" +
+            $"Dispatch:        {dispatch}\n" +
+            $"Target complete: {target}\n" +
+            $"Pin to target:   {(result.PinToTargetDate ? "Yes" : "No")}\n" +
+            $"Reason:          {reason}\n" +
+            $"Company:         {request.CompanyName ?? _options.DefaultCompanyName}\n\n" +
+            $"Orders shifted:  {result.OrdersShifted}\n" +
+            $"Rows inserted:   {result.RowsInserted}\n" +
+            $"Rows deleted:    {result.RowsDeleted}\n\n" +
+            "Displaced orders:\n" +
+            BuildDisplacementLines(result.Displacements) +
+            "\nCritical order slots:\n" +
+            BuildCriticalSlotLines(result.ProposedSlots) +
+            "\n— FIBC Line Planning (automated)";
+
+        return SendCriticalShiftAsync(subject, body);
+    }
+
     private bool IsEnabled() =>
         _options.QuotationHoldEmailEnabled && _options.QuotationHoldNotifyTo.Length > 0;
+
+    private bool IsCriticalShiftEnabled()
+    {
+        if (!_options.CriticalShiftEmailEnabled)
+            return false;
+
+        var to = ResolveCriticalShiftRecipients();
+        return !string.IsNullOrWhiteSpace(to);
+    }
+
+    private string ResolveCriticalShiftRecipients()
+    {
+        var primary = _options.CriticalShiftNotifyTo.Where(e => !string.IsNullOrWhiteSpace(e)).ToArray();
+        if (primary.Length > 0)
+            return string.Join(";", primary);
+
+        return string.Join(";", _options.QuotationHoldNotifyTo.Where(e => !string.IsNullOrWhiteSpace(e)));
+    }
+
+    private Task SendCriticalShiftAsync(string subject, string body)
+    {
+        var to = ResolveCriticalShiftRecipients();
+        if (string.IsNullOrWhiteSpace(to))
+            return Task.CompletedTask;
+
+        var cc = string.IsNullOrWhiteSpace(_options.CriticalShiftNotifyCc)
+            ? _options.QuotationHoldNotifyCc
+            : _options.CriticalShiftNotifyCc;
+
+        return _emailService.SendMail(to, subject, body, cc: cc);
+    }
 
     private Task SendAsync(string subject, string body)
     {
@@ -119,5 +187,23 @@ public sealed class FibcPlanningEmailNotifier
 
         return string.Join("\n", slots.Select(s =>
             $"  • {s.PlanDate:yyyy-MM-dd}  Line {s.LineNo}  Shift {s.Shift}  {s.Qty:N0} pcs"));
+    }
+
+    private static string BuildDisplacementLines(IReadOnlyList<FibcOrderShiftDisplacementDto> displacements)
+    {
+        if (displacements.Count == 0)
+            return "  (none)\n";
+
+        return string.Join("\n", displacements.Select(d =>
+            $"  • {d.OrderNo} ({d.PartyName ?? "—"}): {d.FromPlanDate:yyyy-MM-dd} L{d.FromLineNo} {d.FromShift} → {d.ToPlanDate:yyyy-MM-dd} L{d.ToLineNo} {d.ToShift}  {d.Qty:N0} pcs"));
+    }
+
+    private static string BuildCriticalSlotLines(IReadOnlyList<FibcSlotGridItemDto> slots)
+    {
+        if (slots.Count == 0)
+            return "  (none)\n";
+
+        return string.Join("\n", slots.Select(s =>
+            $"  • {s.PlanDate:yyyy-MM-dd}  Line {s.LineNo}  Shift {s.Shift}  {s.Allotted:N0} pcs"));
     }
 }

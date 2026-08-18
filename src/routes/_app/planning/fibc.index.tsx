@@ -187,6 +187,8 @@ function FibcPlanningPage() {
               <dd className="font-medium">{config.quotationHoldEmailEnabled ? "Enabled" : "Disabled"}</dd>
               <dt className="text-muted-foreground">Critical order shift</dt>
               <dd className="font-medium">{config.criticalShiftEnabled ? "Enabled" : "Disabled"}</dd>
+              <dt className="text-muted-foreground">Critical shift email</dt>
+              <dd className="font-medium">{config.criticalShiftEmailEnabled ? "Enabled" : "Disabled"}</dd>
             </dl>
           ) : (
             <p className="text-sm text-muted-foreground">Loading config…</p>
@@ -853,7 +855,8 @@ function CriticalOrderPanel({
         {previewResult && previewResult.displacements.length > 0 ? (
           <div className="mt-4 overflow-x-auto">
             <h4 className="mb-2 text-sm font-medium">Orders to shift</h4>
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <div className="max-h-72 overflow-y-auto rounded-lg border border-border/60">
+              <table className="w-full min-w-[900px] text-left text-sm">
               <thead>
                 <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
                   <th className="px-2 py-2 font-medium">Order</th>
@@ -880,6 +883,7 @@ function CriticalOrderPanel({
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         ) : null}
 

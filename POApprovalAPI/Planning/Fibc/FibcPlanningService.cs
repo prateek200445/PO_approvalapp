@@ -36,6 +36,7 @@ public sealed class FibcPlanningService
         QuotationHoldDays = _options.QuotationHoldDays,
         QuotationHoldEmailEnabled = _options.QuotationHoldEmailEnabled,
         CriticalShiftEnabled = _options.CriticalShiftEnabled,
+        CriticalShiftEmailEnabled = _options.CriticalShiftEmailEnabled,
     };
 
     public Task<FibcCriticalShiftResult> PreviewCriticalShiftAsync(FibcCriticalShiftRequest request, CancellationToken ct = default) =>

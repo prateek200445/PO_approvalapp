@@ -18,17 +18,20 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
     private readonly IFibcPlanningRepository _repository;
     private readonly IFibcPlanningEngine _planningEngine;
     private readonly IFibcQuotationHoldRepository _holdRepository;
+    private readonly FibcPlanningEmailNotifier _emailNotifier;
     private readonly FibcPlanningOptions _options;
 
     public FibcCriticalShiftEngine(
         IFibcPlanningRepository repository,
         IFibcPlanningEngine planningEngine,
         IFibcQuotationHoldRepository holdRepository,
+        FibcPlanningEmailNotifier emailNotifier,
         IOptions<FibcPlanningOptions> options)
     {
         _repository = repository;
         _planningEngine = planningEngine;
         _holdRepository = holdRepository;
+        _emailNotifier = emailNotifier;
         _options = options.Value;
     }
 
@@ -369,6 +372,16 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
             result.Success = true;
             result.Message =
                 $"Saved critical plan for {orderNo}: shifted {result.OrdersShifted} order(s), inserted {rowsInserted} row(s).";
+
+            try
+            {
+                await _emailNotifier.NotifyCriticalShiftConfirmedAsync(result, request, ct);
+            }
+            catch
+            {
+                // Email failure must not roll back a successful ERP save.
+            }
+
             return result;
         }
         catch (Exception ex)

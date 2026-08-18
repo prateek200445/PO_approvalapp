@@ -45,4 +45,14 @@ public sealed class FibcPlanningOptions
 
     /// <summary>Max days to search forward when relocating a displaced order.</summary>
     public int CriticalShiftMaxForwardDays { get; set; } = 60;
+
+    /// <summary>When true, sends email after a critical shift is confirmed and saved to ERP.</summary>
+    public bool CriticalShiftEmailEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Primary recipients for critical shift alerts. When empty, falls back to QuotationHoldNotifyTo.
+    /// </summary>
+    public string[] CriticalShiftNotifyTo { get; set; } = [];
+
+    public string? CriticalShiftNotifyCc { get; set; }
 }

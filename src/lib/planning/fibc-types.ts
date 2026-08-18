@@ -11,6 +11,7 @@ export type FibcPlanningConfig = {
   quotationHoldDays: number;
   quotationHoldEmailEnabled: boolean;
   criticalShiftEnabled: boolean;
+  criticalShiftEmailEnabled: boolean;
 };
 
 export type FibcOrderAllotmentContext = {
@@ -375,6 +376,7 @@ export function normalizePlanningConfig(data: Record<string, unknown>): FibcPlan
     quotationHoldDays: numField(data, "quotationHoldDays", "QuotationHoldDays") || 7,
     quotationHoldEmailEnabled: Boolean(data.quotationHoldEmailEnabled ?? data.QuotationHoldEmailEnabled),
     criticalShiftEnabled: Boolean(data.criticalShiftEnabled ?? data.CriticalShiftEnabled),
+    criticalShiftEmailEnabled: Boolean(data.criticalShiftEmailEnabled ?? data.CriticalShiftEmailEnabled),
   };
 }
 
