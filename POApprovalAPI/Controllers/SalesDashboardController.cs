@@ -14,13 +14,62 @@ public class SalesDashboardController : ControllerBase
         _salesDashboard = salesDashboard;
     }
 
+    [HttpGet("overview")]
+    public async Task<IActionResult> GetOverview(
+        [FromQuery] string company = "All Companies",
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] string category = "Sales",
+        [FromQuery] bool refresh = false)
+    {
+        try
+        {
+            if (!string.Equals(category, "Sales", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(category, "Purchase", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { message = "category must be Sales or Purchase." });
+            }
+
+            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
+            var to = dateTo ?? DateTime.Today;
+            var data = await _salesDashboard.GetOverviewAsync(category, company, from, to, refresh);
+            var totals = data.Totals;
+            return Ok(new
+            {
+                totalSales = totals.TotalSales,
+                totalPurchase = totals.TotalPurchase,
+                totalQuantity = totals.TotalQuantity,
+                averageRate = totals.AverageRate,
+                byGroup = totals.ByGroup,
+                bySubGroup = totals.BySubGroup,
+                trend = data.Trend,
+                byCountry = data.ByCountry,
+                countryPeriodLabel = data.CountryPeriodLabel,
+                exportCustomers = data.ExportCustomers,
+                suppliers = data.Suppliers,
+                company,
+                category,
+                dateFrom = from.ToString("yyyy-MM-dd"),
+                dateTo = to.ToString("yyyy-MM-dd"),
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
     [HttpGet("companies")]
     public async Task<IActionResult> GetCompanies()
     {
         try
         {
-            var companies = await _salesDashboard.GetCompaniesAsync();
-            return Ok(new { companies });
+            var options = await _salesDashboard.GetCompanyOptionsAsync();
+            var companies = options
+                .Where(o => o.Kind != "group")
+                .Select(o => o.Value)
+                .ToList();
+            return Ok(new { companies, options });
         }
         catch (Exception ex)
         {
@@ -189,8 +238,75 @@ public class SalesDashboardController : ControllerBase
                 periodLabel = result.PeriodLabel,
                 groupNames = result.GroupNames,
                 top,
-                source = "vw_Countrywise_sales_dashboard",
-                note = "SUM(Value) by Country; Value = Amount - DebitNote; excl. intercompany in view; FY totals via InvYear; company maps to FactoryInfo.GroupName.",
+                source = string.IsNullOrWhiteSpace(result.Source)
+                    ? "vw_Countrywise_sales_dashboard"
+                    : result.Source,
+                note = "SUM(Value) by Country; Value = Amount - DebitNote; excl. intercompany in view; FY totals via InvYear; company maps to CompanyName and/or GroupName.",
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Top 5 export customers (non-India), excl. intercompany.
+    /// </summary>
+    [HttpGet("top-export-customers")]
+    public async Task<IActionResult> GetTopExportCustomers(
+        [FromQuery] string company = "All Companies",
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] int top = 5)
+    {
+        try
+        {
+            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
+            var to = dateTo ?? DateTime.Today;
+            var result = await _salesDashboard.GetTopExportCustomersAsync(company, from, to, top);
+            return Ok(new
+            {
+                items = result.Items,
+                company,
+                dateFrom = from.ToString("yyyy-MM-dd"),
+                dateTo = to.ToString("yyyy-MM-dd"),
+                top,
+                source = result.Source,
+                note = "Top export customers excl. India and intercompany.",
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Top 5 suppliers from vw_Purchase_EBIDTA, excl. InterGroup='Intergroup'.
+    /// </summary>
+    [HttpGet("top-suppliers")]
+    public async Task<IActionResult> GetTopSuppliers(
+        [FromQuery] string company = "All Companies",
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] int top = 5,
+        [FromQuery] bool refresh = false)
+    {
+        try
+        {
+            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
+            var to = dateTo ?? DateTime.Today;
+            var result = await _salesDashboard.GetTopSuppliersAsync(company, from, to, top, refresh);
+            return Ok(new
+            {
+                items = result.Items,
+                company,
+                dateFrom = from.ToString("yyyy-MM-dd"),
+                dateTo = to.ToString("yyyy-MM-dd"),
+                top,
+                source = result.Source,
+                note = "Top suppliers excl. InterGroup='Intergroup'.",
             });
         }
         catch (Exception ex)

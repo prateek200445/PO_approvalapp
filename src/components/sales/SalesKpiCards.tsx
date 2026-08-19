@@ -1,6 +1,5 @@
 import type { SalesDashboardSummary } from "@/lib/sales-dashboard-types";
 import {
-  formatChangePercent,
   formatSalesCurrency,
   formatSalesQuantity,
   formatSalesRate,
@@ -9,117 +8,44 @@ import {
   BarChart3,
   ShoppingCart,
   FileText,
-  Percent,
-  Download,
-  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface SalesKpiCardsProps {
   summary: SalesDashboardSummary;
-  unavailableFields?: string[];
+  isPurchase?: boolean;
 }
 
-type KpiConfig = {
-  id: string;
-  label: string;
-  displayValue: string;
-  changePercent: number;
-  showChange: boolean;
-  unavailable?: boolean;
-  icon: LucideIcon;
-  tone: string;
-  bar: string;
-};
-
-export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCardsProps) {
-  const noChange = unavailableFields.includes("changePercents");
-  const noGross = unavailableFields.includes("grossProfit");
-
-  const cards: KpiConfig[] = [
+export function SalesKpiCards({ summary, isPurchase }: SalesKpiCardsProps) {
+  const cards: { label: string; value: string; icon: LucideIcon; tone: string; bar: string }[] = [
     {
-      id: "totalSales",
-      label: "Total Sales",
-      displayValue: unavailableFields.includes("totalSales")
-        ? "—"
-        : formatSalesCurrency(summary.totalSales),
-      changePercent: summary.totalSalesChangePercent,
-      showChange: !noChange && !unavailableFields.includes("totalSales"),
-      unavailable: unavailableFields.includes("totalSales"),
+      label: isPurchase ? "Total Purchase" : "Total Sales",
+      value: formatSalesCurrency(isPurchase ? summary.totalPurchase : summary.totalSales),
       icon: BarChart3,
       tone: "bg-primary/15 text-primary border-primary/25",
       bar: "bg-primary",
     },
     {
-      id: "totalQuantity",
       label: "Total Quantity",
-      displayValue: formatSalesQuantity(summary.totalQuantity),
-      changePercent: summary.totalQuantityChangePercent,
-      showChange: !noChange,
+      value: formatSalesQuantity(summary.totalQuantity),
       icon: ShoppingCart,
       tone: "bg-success/15 text-success border-success/25",
       bar: "bg-success",
     },
     {
-      id: "averageRate",
       label: "Average Rate",
-      displayValue: unavailableFields.includes("averageRate")
-        ? "—"
-        : formatSalesRate(summary.averageRate),
-      changePercent: summary.averageRateChangePercent,
-      showChange: !noChange && !unavailableFields.includes("averageRate"),
-      unavailable: unavailableFields.includes("averageRate"),
+      value: formatSalesRate(summary.averageRate),
       icon: FileText,
       tone: "bg-warning/15 text-warning border-warning/25",
       bar: "bg-warning",
     },
-    {
-      id: "gstAmount",
-      label: "GST Amount",
-      displayValue: unavailableFields.includes("gstAmount")
-        ? "—"
-        : formatSalesCurrency(summary.gstAmount),
-      changePercent: summary.gstAmountChangePercent,
-      showChange: !noChange && !unavailableFields.includes("gstAmount"),
-      unavailable: unavailableFields.includes("gstAmount"),
-      icon: Percent,
-      tone: "bg-accent text-accent-foreground border-border",
-      bar: "bg-primary/60",
-    },
-    {
-      id: "totalPurchase",
-      label: "Total Purchase",
-      displayValue: unavailableFields.includes("totalPurchase")
-        ? "—"
-        : formatSalesCurrency(summary.totalPurchase),
-      changePercent: summary.totalPurchaseChangePercent,
-      showChange: !noChange && !unavailableFields.includes("totalPurchase"),
-      unavailable: unavailableFields.includes("totalPurchase"),
-      icon: Download,
-      tone: "bg-secondary text-secondary-foreground border-border",
-      bar: "bg-muted-foreground/40",
-    },
-    {
-      id: "grossProfit",
-      label: "Gross Profit",
-      displayValue: noGross ? "—" : formatSalesCurrency(summary.grossProfit),
-      changePercent: summary.grossProfitChangePercent,
-      showChange: !noChange && !noGross,
-      unavailable: noGross,
-      icon: TrendingUp,
-      tone: "bg-success/15 text-success border-success/25",
-      bar: "bg-success",
-    },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 xl:grid-cols-6 md:gap-4">
+    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3 md:gap-4">
       {cards.map((card) => (
-        <div
-          key={card.id}
-          className="card-3d overflow-hidden rounded-2xl p-3 sm:p-4"
-        >
+        <div key={card.label} className="card-3d overflow-hidden rounded-2xl p-3 sm:p-4">
           <div className={cn("absolute inset-x-0 top-0 h-1.5", card.bar)} />
           <div
             className={cn(
@@ -131,26 +57,8 @@ export function SalesKpiCards({ summary, unavailableFields = [] }: SalesKpiCards
           </div>
           <div className="text-[11px] text-muted-foreground sm:text-xs">{card.label}</div>
           <div className="mt-1 text-base font-semibold tabular-nums leading-tight break-words sm:text-lg md:text-xl">
-            {card.displayValue}
+            {card.value}
           </div>
-          {card.unavailable ? (
-            <div className="mt-1.5 text-[11px] text-muted-foreground sm:mt-2 sm:text-xs">
-              Coming soon
-            </div>
-          ) : card.showChange ? (
-            <div
-              className={cn(
-                "mt-1.5 text-[11px] font-medium tabular-nums sm:mt-2 sm:text-xs",
-                card.changePercent >= 0 ? "text-success" : "text-destructive",
-              )}
-            >
-              {formatChangePercent(card.changePercent)} vs last period
-            </div>
-          ) : (
-            <div className="mt-1.5 text-[11px] text-muted-foreground sm:mt-2 sm:text-xs">
-              Period comparison pending
-            </div>
-          )}
         </div>
       ))}
     </div>

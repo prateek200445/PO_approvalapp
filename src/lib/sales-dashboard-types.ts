@@ -4,11 +4,25 @@ export type SalesTrendPeriod = "Last 6 Months" | "Last 12 Months";
 
 export interface SalesDashboardFilters {
   company: string;
+  companyValues: string[];
   dateFrom: string;
   dateTo: string;
   view: SalesReportView;
   category: SalesReportCategory;
   trendPeriod: SalesTrendPeriod;
+}
+
+export interface SalesCompanyOption {
+  value: string;
+  label: string;
+  kind: "all" | "group" | "company";
+}
+
+export interface RankedPartyItem {
+  rank: number;
+  name: string;
+  country?: string | null;
+  amount: number;
 }
 
 export interface SalesDashboardSummary {

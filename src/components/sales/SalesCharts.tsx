@@ -2,7 +2,6 @@ import type {
   SalesByGroupItem,
   SalesBySubGroupItem,
   SalesTrendItem,
-  SalesTrendPeriod,
 } from "@/lib/sales-dashboard-types";
 import { formatCrores, formatSalesCurrency } from "@/lib/sales-dashboard-api";
 import {
@@ -36,9 +35,6 @@ interface SalesChartsProps {
   bySubGroup: SalesBySubGroupItem[];
   trend?: SalesTrendItem[];
   trendLoading?: boolean;
-  /** Kept for filter state compatibility. */
-  trendPeriod?: SalesTrendPeriod;
-  onTrendPeriodChange?: (period: SalesTrendPeriod) => void;
 }
 
 export function SalesCharts({

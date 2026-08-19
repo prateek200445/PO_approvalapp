@@ -1,27 +1,19 @@
-import type { SalesDashboardFilters, SalesReportCategory, SalesReportView } from "@/lib/sales-dashboard-types";
+import type { SalesCompanyOption, SalesDashboardFilters, SalesReportCategory } from "@/lib/sales-dashboard-types";
 import { indianFyDateRange, indianFyStartYear } from "@/lib/sales-dashboard-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface SalesFiltersProps {
-  companies: string[];
+  companyOptions: SalesCompanyOption[];
+  companiesLoading?: boolean;
   filters: SalesDashboardFilters;
   isRefreshing?: boolean;
   onChange: (next: Partial<SalesDashboardFilters>) => void;
   onRefresh: () => void;
 }
-
-const VIEWS: SalesReportView[] = ["Summary", "Detail", "Date Summary"];
 
 type FyPreset = "current" | "previous" | "custom";
 
@@ -39,7 +31,8 @@ function detectFyPreset(dateFrom: string, dateTo: string): FyPreset {
 }
 
 export function SalesFilters({
-  companies,
+  companyOptions,
+  companiesLoading,
   filters,
   isRefreshing,
   onChange,
@@ -64,22 +57,31 @@ export function SalesFilters({
     >
       <div className="flex flex-col gap-3">
         <div className="min-w-0 space-y-1.5">
-          <Label htmlFor="sales-company">Company</Label>
-          <Select
-            value={filters.company}
-            onValueChange={(company) => onChange({ company })}
+          <Label htmlFor="sales-company">Company group</Label>
+          <select
+            id="sales-company"
+            value={filters.company || "All Companies"}
+            disabled={companiesLoading}
+            onChange={(e) => {
+              const company = e.target.value || "All Companies";
+              onChange({
+                company,
+                companyValues: company === "All Companies" ? [] : [company],
+              });
+            }}
+            className="h-11 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
           >
-            <SelectTrigger id="sales-company" className="h-11 w-full bg-background text-sm">
-              <SelectValue placeholder="Select company" />
-            </SelectTrigger>
-            <SelectContent className="max-h-[50vh]">
-              {companies.map((c, index) => (
-                <SelectItem key={`${index}-${c}`} value={c} className="text-sm">
-                  {c}
-                </SelectItem>
+            <option value="All Companies">
+              {companiesLoading ? "Loading…" : "All Companies"}
+            </option>
+            {companyOptions
+              .filter((o) => o.kind === "group")
+              .map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
               ))}
-            </SelectContent>
-          </Select>
+          </select>
         </div>
 
         <fieldset className="space-y-1.5">
@@ -139,33 +141,6 @@ export function SalesFilters({
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-          <fieldset className="min-w-0 flex-1 space-y-1.5">
-            <legend className="text-sm font-medium leading-none">View</legend>
-            <div
-              className="flex w-full overflow-x-auto rounded-md border border-border p-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-              role="radiogroup"
-              aria-label="Report view"
-            >
-              {VIEWS.map((view) => (
-                <button
-                  key={view}
-                  type="button"
-                  role="radio"
-                  aria-checked={filters.view === view}
-                  onClick={() => onChange({ view })}
-                  className={cn(
-                    "shrink-0 flex-1 rounded-sm px-2.5 py-2 text-xs font-medium transition-colors sm:flex-none sm:px-3 sm:text-sm",
-                    filters.view === view
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
-                  )}
-                >
-                  {view}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-
           <fieldset className="space-y-1.5">
             <legend className="text-sm font-medium leading-none">Category</legend>
             <div
@@ -197,7 +172,7 @@ export function SalesFilters({
             type="button"
             onClick={onRefresh}
             disabled={isRefreshing}
-            className="h-11 w-full sm:w-auto"
+            className="h-11 w-full sm:ml-auto sm:w-auto"
             aria-label="Refresh sales dashboard"
           >
             <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
