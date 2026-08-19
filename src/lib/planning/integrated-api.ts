@@ -1,4 +1,4 @@
-import { getApiUrl } from "@/lib/api-config";
+import { planningOrderUrl } from "@/lib/planning/planning-order-url";
 import { normalizeIntegratedOrderTimeline, type IntegratedOrderTimeline } from "@/lib/planning/integrated-types";
 
 async function parseJson<T>(res: Response): Promise<T> {
@@ -10,8 +10,7 @@ async function parseJson<T>(res: Response): Promise<T> {
 }
 
 export async function fetchIntegratedOrderTimeline(orderNo: string): Promise<IntegratedOrderTimeline> {
-  const trimmed = orderNo.trim();
-  const res = await fetch(getApiUrl(`/api/planning/orders/${encodeURIComponent(trimmed)}/timeline`));
+  const res = await fetch(planningOrderUrl("/api/planning/orders/timeline", orderNo));
   const data = await parseJson<Record<string, unknown>>(res);
   return normalizeIntegratedOrderTimeline(data);
 }

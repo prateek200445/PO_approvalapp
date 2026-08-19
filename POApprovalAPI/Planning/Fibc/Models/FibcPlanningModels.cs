@@ -111,6 +111,10 @@ public sealed class FibcAllotmentRequest
     public string? PartyName { get; set; }
     public string? MarketingNo { get; set; }
     public bool ReplaceExisting { get; set; }
+    /// <summary>OrderWise (default) or SlotWise.</summary>
+    public string? AllotmentMode { get; set; }
+    /// <summary>Normal, Single, Double, or Triple dust capacity.</summary>
+    public string? DustLevel { get; set; }
 }
 
 public sealed class FibcOrderAllotmentContextDto
@@ -138,6 +142,10 @@ public class FibcAllotmentResult
     public int BufferDays { get; set; }
     public DateTime? DispatchDate { get; set; }
     public DateTime? TargetCompletionDate { get; set; }
+    public string AllotmentMode { get; set; } = "OrderWise";
+    public string DustLevel { get; set; } = "Normal";
+    public double RejectionPercentApplied { get; set; }
+    public bool UsedSyntheticGrid { get; set; }
     public IReadOnlyList<string> Warnings { get; set; } = Array.Empty<string>();
     public IReadOnlyList<FibcSlotGridItemDto> ProposedSlots { get; set; } = Array.Empty<FibcSlotGridItemDto>();
 }

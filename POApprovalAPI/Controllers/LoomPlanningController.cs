@@ -81,11 +81,14 @@ public class LoomPlanningController : ControllerBase
         }
     }
 
-    [HttpGet("orders/{orderNo}")]
-    public async Task<IActionResult> GetOrderPlan(string orderNo, CancellationToken ct)
+    [HttpGet("orders/plan")]
+    public async Task<IActionResult> GetOrderPlan([FromQuery] string orderNo, CancellationToken ct)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
             var detail = await _service.GetOrderPlanAsync(orderNo, ct);
             if (detail is null)
                 return NotFound(new { message = "No loom allocation or BOM fabric data found for this order." });
@@ -98,11 +101,14 @@ public class LoomPlanningController : ControllerBase
         }
     }
 
-    [HttpGet("orders/{orderNo}/context")]
-    public async Task<IActionResult> GetOrderContext(string orderNo, CancellationToken ct)
+    [HttpGet("orders/context")]
+    public async Task<IActionResult> GetOrderContext([FromQuery] string orderNo, CancellationToken ct)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
             var context = await _service.GetOrderContextAsync(orderNo, ct);
             if (context is null)
                 return NotFound(new { message = "No marketing or loom allocation data found for this order." });
@@ -115,11 +121,14 @@ public class LoomPlanningController : ControllerBase
         }
     }
 
-    [HttpGet("orders/{orderNo}/allotment-context")]
-    public async Task<IActionResult> GetOrderAllotmentContext(string orderNo, CancellationToken ct)
+    [HttpGet("orders/allotment-context")]
+    public async Task<IActionResult> GetOrderAllotmentContext([FromQuery] string orderNo, CancellationToken ct)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
             var context = await _service.GetOrderAllotmentContextAsync(orderNo, ct);
             if (context is null)
                 return NotFound(new { message = "No marketing, BOM, or loom data found for this order." });

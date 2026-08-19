@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Options;
 using POApprovalAPI.Planning.Loom.Models;
+using POApprovalAPI.Planning.Setup;
+using POApprovalAPI.Planning.Setup.Models;
 
 namespace POApprovalAPI.Planning.Loom;
 
@@ -9,11 +11,19 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
     private static readonly DateTime MinValidDate = new(2000, 1, 1);
 
     private readonly ILoomPlanningRepository _repository;
+    private readonly PlanningRuntimeContextLoader _runtimeLoader;
+    private readonly IPlanningSetupRepository _setup;
     private readonly LoomPlanningOptions _options;
 
-    public LoomPlanningEngine(ILoomPlanningRepository repository, IOptions<LoomPlanningOptions> options)
+    public LoomPlanningEngine(
+        ILoomPlanningRepository repository,
+        PlanningRuntimeContextLoader runtimeLoader,
+        IPlanningSetupRepository setup,
+        IOptions<LoomPlanningOptions> options)
     {
         _repository = repository;
+        _runtimeLoader = runtimeLoader;
+        _setup = setup;
         _options = options.Value;
     }
 
@@ -55,6 +65,16 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             result.Success = false;
             result.Message =
                 $"Cannot save: {preview.Displacements.Count} order(s) must be shifted (cases ii/iii/iv). Enable LoomPlanning:AllowShiftOnConfirm.";
+            return result;
+        }
+
+        var changeoverDays = CountChangeoverDays(preview.ProposedSegments, preview.Displacements);
+        var overLimit = changeoverDays.Where(kv => kv.Value > _options.MaxChangeoversPerDay).ToList();
+        if (overLimit.Count > 0)
+        {
+            result.Success = false;
+            result.Message =
+                $"Cannot save: {overLimit.Count} day(s) exceed max {_options.MaxChangeoversPerDay} changeover(s)/day (first: {overLimit[0].Key:yyyy-MM-dd} has {overLimit[0].Value}).";
             return result;
         }
 
@@ -151,28 +171,37 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             return Fail(orderNo, "Fabric requirement date is required (FIBC fabric-ready date).");
 
         var fabricCompletion = fabricRequirementDate.Value.Date.AddDays(-_options.FabricBufferDays);
-        var earliestStart = fabricCompletion.AddDays(-_options.MaxPlanningHorizonDays);
-        if (earliestStart < DateTime.Today)
-            earliestStart = DateTime.Today;
+        var horizonStart = fabricCompletion.AddDays(-_options.MaxPlanningHorizonDays);
+        var allocationLoadFrom = horizonStart.AddDays(-Math.Max(0, _options.AllocationLookbackDays));
+        var planningEarliestStart = horizonStart;
+        if (planningEarliestStart < DateTime.Today)
+            planningEarliestStart = DateTime.Today;
 
-        if (fabricCompletion < earliestStart)
+        if (fabricCompletion < planningEarliestStart)
             return Fail(orderNo, $"Fabric completion date {fabricCompletion:yyyy-MM-dd} is before earliest planning window.");
 
+        var runtime = await _runtimeLoader.LoadAsync(company, ct);
+        var preferenceChart = await _setup.GetLoomPreferenceChartAsync(company, ct);
+
         var loomsTask = _repository.GetLoomMasterAsync(company, ct);
-        var allocationsTask = _repository.GetPlanningAllocationsAsync(earliestStart, fabricCompletion, company, ct);
+        var allocationsTask = _repository.GetPlanningAllocationsAsync(allocationLoadFrom, fabricCompletion, company, ct);
         var ppmTask = _repository.GetPpmSpecsAsync(ct);
         var formulasTask = _repository.GetFormulasAsync(ct);
         await Task.WhenAll(loomsTask, allocationsTask, ppmTask, formulasTask);
 
         var looms = (await loomsTask).Where(l => !l.IsFrozen).ToList();
+        var poolNos = runtime.GetPlanningLoomNos();
+        if (runtime.LoomPool.Any(l => l.PoolId.HasValue || l.IncludeInPlanning))
+            looms = looms.Where(l => poolNos.Contains(l.LoomNo)).ToList();
+
         if (looms.Count == 0)
-            return Fail(orderNo, $"No active looms found for company '{company}'.");
+            return Fail(orderNo, $"No active looms in planning pool for company '{company}'. Configure Loom Pool in Planning Setup.");
 
         var allocations = await allocationsTask;
         var ppmSpecs = await ppmTask;
         var formulas = await formulasTask;
 
-        var timelines = BuildTimelines(looms, allocations, orderNo);
+        var timelines = BuildTimelines(looms, allocations, orderNo, planningEarliestStart, fabricCompletion);
         var candidates = new List<SegmentCandidate>();
 
         foreach (var loom in looms)
@@ -181,12 +210,22 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             var ppm = ResolvePpm(loom, request.ReqGsm, request.Size, ppmSpecs);
             var formula = ResolveFormula(request.Size, request.ReqGsm, formulas);
             var weftMesh = formula?.WeftMesh ?? _options.DefaultWeftMesh;
-            var metersPerDay = LoomMeterCalculator.CalculateMetersPerDay(ppm, weftMesh, _options.DefaultEfficiency);
+            var poolEntry = runtime.GetLoomPoolEntry(loom.LoomNo);
+            var winder = ParseWinderCategory(poolEntry?.WinderCategory);
+            var metersPerDay = LoomMeterCalculator.CalculateMetersPerDay(ppm, weftMesh, _options.DefaultEfficiency, winder);
             if (metersPerDay <= 0)
                 continue;
 
-            EvaluateSimilarForwardCases(loom, timeline, request, fabricCompletion, earliestStart, metersPerDay, formula, candidates);
-            EvaluateBackwardChangeoverCases(loom, timeline, request, fabricCompletion, earliestStart, metersPerDay, formula, candidates);
+            var loomScore = LoomPreferenceScorer.Score(
+                request.ReqGsm,
+                request.Size,
+                poolEntry,
+                loom.LoomSpecification,
+                loom.Make,
+                preferenceChart);
+            EvaluateSimilarForwardCases(loom, timeline, request, fabricCompletion, planningEarliestStart, metersPerDay, formula, candidates, loomScore);
+            EvaluateCaseIvScenarios(loom, timeline, request, fabricCompletion, planningEarliestStart, metersPerDay, formula, candidates, loomScore);
+            EvaluateBackwardChangeoverCases(loom, timeline, request, fabricCompletion, planningEarliestStart, metersPerDay, formula, candidates, poolEntry, loom, preferenceChart);
         }
 
         if (candidates.Count == 0)
@@ -203,7 +242,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
                 FabricBufferDays = _options.FabricBufferDays,
                 FabricRequirementDate = fabricRequirementDate,
                 FabricCompletionDate = fabricCompletion,
-                EarliestStartDate = earliestStart,
+                EarliestStartDate = planningEarliestStart,
                 Warnings = warnings,
             };
         }
@@ -285,7 +324,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         var changeoverDays = CountChangeoverDays(proposed, displacements);
         foreach (var (day, count) in changeoverDays.Where(kv => kv.Value > _options.MaxChangeoversPerDay))
         {
-            warnings.Add($"Changeover warning: {day:yyyy-MM-dd} has {count} loom changeover(s) (limit {_options.MaxChangeoversPerDay}).");
+            warnings.Add($"Changeover blocked on save: {day:yyyy-MM-dd} has {count} changeover(s) (max {_options.MaxChangeoversPerDay}/day).");
         }
 
         if (!fullyAllotted)
@@ -314,7 +353,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             FabricBufferDays = _options.FabricBufferDays,
             FabricRequirementDate = fabricRequirementDate,
             FabricCompletionDate = fabricCompletion,
-            EarliestStartDate = earliestStart,
+            EarliestStartDate = planningEarliestStart,
             Warnings = warnings,
             ProposedSegments = proposed,
             Displacements = displacements,
@@ -329,10 +368,16 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         DateTime earliestStart,
         double metersPerDay,
         LoomFormulaDto? formula,
-        List<SegmentCandidate> candidates)
+        List<SegmentCandidate> candidates,
+        int loomPreferenceScore)
     {
-        foreach (var gap in timeline.Gaps.Where(g => g.From <= fabricCompletion))
+        foreach (var gap in timeline.Gaps.Where(g => g.From <= fabricCompletion && g.To >= earliestStart))
         {
+            var effectiveFrom = gap.From < earliestStart ? earliestStart : gap.From;
+            var effectiveTo = gap.To > fabricCompletion ? fabricCompletion : gap.To;
+            if (effectiveTo < effectiveFrom)
+                continue;
+
             var adjacent = timeline.Blocks
                 .Where(b => b.EndDate.AddDays(1) == gap.From || b.StartDate == gap.To.AddDays(1))
                 .ToList();
@@ -367,28 +412,28 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
                 var follower = adjacent.First(b => b.StartDate == gap.To.AddDays(1));
                 displacement = BuildDisplacement(loom.LoomNo, follower, gap.To.AddDays(_options.MaxDaysPerLoomSegment + 1));
             }
-            else if (timeline.Blocks.Any(b =>
-                         LoomFabricMatcher.IsSimilarFabric(request.ReqGsm, request.Size, b.ReqGsm, b.Size, _options.GsmMatchTolerance, _options.WidthMatchTolerance) &&
-                         gap.From > b.EndDate && gap.To < timeline.Blocks.Where(x => x.StartDate > b.EndDate).Select(x => x.StartDate).DefaultIfEmpty(fabricCompletion).Min().AddDays(-1)))
+            else if (adjacent.Count == 0)
             {
-                caseType = LoomAllotmentCase.CaseIV;
+                // Open loom / greenfield gap within the planning window.
+                caseType = LoomAllotmentCase.CaseI;
+                similarBefore = false;
             }
             else
                 continue;
 
-            var gapDays = (gap.To - gap.From).Days + 1;
+            var gapDays = (effectiveTo - effectiveFrom).Days + 1;
             var maxMeters = gapDays * metersPerDay;
             if (maxMeters <= 0)
                 continue;
 
             candidates.Add(new SegmentCandidate
             {
-                Priority = CasePriority(caseType, gap.From, similarBefore),
+                Priority = CasePriority(caseType, effectiveFrom, similarBefore) + loomPreferenceScore,
                 LoomNo = loom.LoomNo,
                 LoomCode = loom.LoomCode,
                 LoomSpecification = loom.LoomSpecification,
-                FromDate = gap.From,
-                ToDate = gap.To,
+                FromDate = effectiveFrom,
+                ToDate = effectiveTo,
                 MaxMetersInGap = maxMeters,
                 MetersPerDay = metersPerDay,
                 Case = caseType,
@@ -396,6 +441,96 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
                 IsBackward = false,
                 Displacement = displacement,
             });
+        }
+    }
+
+    private void EvaluateCaseIvScenarios(
+        LoomMasterDto loom,
+        LoomTimeline timeline,
+        LoomAllotmentRequest request,
+        DateTime fabricCompletion,
+        DateTime earliestStart,
+        double metersPerDay,
+        LoomFormulaDto? formula,
+        List<SegmentCandidate> candidates,
+        int loomPreferenceScore)
+    {
+        var ordered = timeline.Blocks.OrderBy(b => b.StartDate).ToList();
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var block = ordered[i];
+            if (!LoomFabricMatcher.IsSimilarFabric(
+                    request.ReqGsm, request.Size, block.ReqGsm, block.Size,
+                    _options.GsmMatchTolerance, _options.WidthMatchTolerance))
+                continue;
+
+            var prevEnd = i > 0 ? ordered[i - 1].EndDate : earliestStart.AddDays(-1);
+            var nextStart = i < ordered.Count - 1
+                ? ordered[i + 1].StartDate
+                : fabricCompletion.AddDays(1);
+
+            var beforeStart = prevEnd.AddDays(1);
+            var beforeEnd = block.StartDate.AddDays(-1);
+            var afterStart = block.EndDate.AddDays(1);
+            var afterEnd = nextStart.AddDays(-1);
+            if (afterEnd > fabricCompletion)
+                afterEnd = fabricCompletion;
+
+            var freeDaysBefore = beforeEnd >= beforeStart ? (beforeEnd - beforeStart).Days + 1 : 0;
+            var freeDaysAfter = afterEnd >= afterStart ? (afterEnd - afterStart).Days + 1 : 0;
+
+            if (freeDaysAfter <= 0)
+                continue;
+
+            var freeDayScore = freeDaysBefore + freeDaysAfter;
+            var metersAfter = freeDaysAfter * metersPerDay;
+            var metersBefore = freeDaysBefore * metersPerDay;
+            var needsBefore = request.RequiredMeters > metersAfter + MeterEpsilon && freeDaysBefore > 0;
+
+            LoomOrderShiftDisplacementDto? displacement = null;
+            if (needsBefore)
+            {
+                displacement = BuildDisplacement(loom.LoomNo, block, afterEnd.AddDays(1));
+                displacement.Reason =
+                    "Case iv: similar-fabric block shifted after combined before+after allotment.";
+            }
+
+            var casePriority = CasePriority(LoomAllotmentCase.CaseIV, afterStart, true) + loomPreferenceScore - freeDayScore;
+
+            candidates.Add(new SegmentCandidate
+            {
+                Priority = casePriority,
+                LoomNo = loom.LoomNo,
+                LoomCode = loom.LoomCode,
+                LoomSpecification = loom.LoomSpecification,
+                FromDate = afterStart,
+                ToDate = afterEnd,
+                MaxMetersInGap = metersAfter,
+                MetersPerDay = metersPerDay,
+                Case = LoomAllotmentCase.CaseIV,
+                FormulaId = formula?.FormulaId,
+                IsBackward = false,
+                Displacement = displacement,
+            });
+
+            if (needsBefore)
+            {
+                candidates.Add(new SegmentCandidate
+                {
+                    Priority = casePriority + 1,
+                    LoomNo = loom.LoomNo,
+                    LoomCode = loom.LoomCode,
+                    LoomSpecification = loom.LoomSpecification,
+                    FromDate = beforeStart,
+                    ToDate = beforeEnd,
+                    MaxMetersInGap = metersBefore,
+                    MetersPerDay = metersPerDay,
+                    Case = LoomAllotmentCase.CaseIV,
+                    FormulaId = formula?.FormulaId,
+                    IsBackward = false,
+                    Displacement = displacement,
+                });
+            }
         }
     }
 
@@ -407,11 +542,32 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         DateTime earliestStart,
         double metersPerDay,
         LoomFormulaDto? formula,
-        List<SegmentCandidate> candidates)
+        List<SegmentCandidate> candidates,
+        PlanningLoomPoolDto? poolEntry,
+        LoomMasterDto loomMaster,
+        IReadOnlyList<PlanningLoomPreferenceChartDto> preferenceChart)
     {
-        var lastBlock = timeline.Blocks.LastOrDefault();
-        var loomGsm = lastBlock?.ReqGsm ?? request.ReqGsm;
-        var loomWidth = lastBlock?.Size ?? request.Size;
+        if (timeline.Blocks.Count == 0)
+        {
+            AddBackwardSegmentCandidate(
+                loom,
+                timeline,
+                request,
+                fabricCompletion,
+                earliestStart,
+                metersPerDay,
+                formula,
+                candidates,
+                poolEntry,
+                loomMaster,
+                preferenceChart,
+                LoomAllotmentCase.CaseI);
+            return;
+        }
+
+        var lastBlock = timeline.Blocks.OrderBy(b => b.StartDate).Last();
+        var loomGsm = lastBlock.ReqGsm;
+        var loomWidth = lastBlock.Size;
 
         var caseType = LoomFabricMatcher.ClassifyChangeoverCase(
             request.ReqGsm, request.Size, loomGsm, loomWidth,
@@ -420,23 +576,64 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         if (caseType == LoomAllotmentCase.CaseI)
             return;
 
+        AddBackwardSegmentCandidate(
+            loom,
+            timeline,
+            request,
+            fabricCompletion,
+            earliestStart,
+            metersPerDay,
+            formula,
+            candidates,
+            poolEntry,
+            loomMaster,
+            preferenceChart,
+            caseType);
+    }
+
+    private void AddBackwardSegmentCandidate(
+        LoomMasterDto loom,
+        LoomTimeline timeline,
+        LoomAllotmentRequest request,
+        DateTime fabricCompletion,
+        DateTime earliestStart,
+        double metersPerDay,
+        LoomFormulaDto? formula,
+        List<SegmentCandidate> candidates,
+        PlanningLoomPoolDto? poolEntry,
+        LoomMasterDto loomMaster,
+        IReadOnlyList<PlanningLoomPreferenceChartDto> preferenceChart,
+        LoomAllotmentCase caseType)
+    {
+        var changeoverScore = LoomPreferenceScorer.Score(
+            request.ReqGsm,
+            request.Size,
+            poolEntry,
+            loomMaster.LoomSpecification,
+            loomMaster.Make,
+            preferenceChart,
+            caseType);
+
         var freeDays = CountFreeDaysBackward(timeline, fabricCompletion, earliestStart);
         if (freeDays <= 0)
             return;
 
+        var adjustedMetersPerDay = ApplyChangeoverDeduction(metersPerDay, caseType);
         var runDays = Math.Min(freeDays, _options.MaxDaysPerLoomSegment);
-        var maxMeters = runDays * metersPerDay;
+        var maxMeters = runDays * adjustedMetersPerDay;
+        if (maxMeters <= 0)
+            return;
 
         candidates.Add(new SegmentCandidate
         {
-            Priority = CasePriority(caseType, fabricCompletion, false) + 10,
+            Priority = CasePriority(caseType, fabricCompletion, false) + changeoverScore,
             LoomNo = loom.LoomNo,
             LoomCode = loom.LoomCode,
             LoomSpecification = loom.LoomSpecification,
             FromDate = fabricCompletion.AddDays(-(runDays - 1)),
             ToDate = fabricCompletion,
             MaxMetersInGap = maxMeters,
-            MetersPerDay = metersPerDay,
+            MetersPerDay = adjustedMetersPerDay,
             Case = caseType,
             FormulaId = formula?.FormulaId,
             IsBackward = true,
@@ -505,6 +702,28 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             _ => 500,
         };
 
+    private static LoomWinderCategory ParseWinderCategory(string? category) =>
+        category?.Trim() switch
+        {
+            "FlatDouble" => LoomWinderCategory.FlatDouble,
+            "FlatTriple" => LoomWinderCategory.FlatTriple,
+            _ => LoomWinderCategory.Tube,
+        };
+
+    private static double ApplyChangeoverDeduction(double metersPerDay, LoomAllotmentCase caseType)
+    {
+        var hoursLost = caseType switch
+        {
+            LoomAllotmentCase.CaseV => 3.0,
+            LoomAllotmentCase.CaseVI => 5.0,
+            LoomAllotmentCase.CaseVII => 8.0,
+            _ => 0.0,
+        };
+        if (hoursLost <= 0)
+            return metersPerDay;
+        return metersPerDay * Math.Max(0.25, 1.0 - hoursLost / 24.0);
+    }
+
     private double ResolvePpm(LoomMasterDto loom, double gsm, double width, IReadOnlyList<LoomPpmSpecDto> specs)
     {
         var spec = specs.FirstOrDefault(s =>
@@ -537,9 +756,12 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
     private static Dictionary<int, LoomTimeline> BuildTimelines(
         IReadOnlyList<LoomMasterDto> looms,
         IReadOnlyList<LoomAllocationGridItemDto> allocations,
-        string excludeOrderNo)
+        string excludeOrderNo,
+        DateTime planningEarliestStart,
+        DateTime fabricCompletion)
     {
         var result = looms.ToDictionary(l => l.LoomNo, l => new LoomTimeline { LoomNo = l.LoomNo });
+        var gapHorizonEnd = fabricCompletion.AddDays(Math.Max(14, (fabricCompletion - planningEarliestStart).Days));
 
         foreach (var group in allocations
                      .Where(a => a.IsActive)
@@ -568,11 +790,11 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
                 });
             }
 
-            timeline.BuildGaps();
+            timeline.BuildGaps(planningEarliestStart, gapHorizonEnd);
         }
 
         foreach (var timeline in result.Values)
-            timeline.BuildGaps();
+            timeline.BuildGaps(planningEarliestStart, gapHorizonEnd);
 
         return result;
     }
@@ -630,12 +852,12 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         public List<LoomBlock> Blocks { get; } = [];
         public List<DateGap> Gaps { get; } = [];
 
-        public void BuildGaps()
+        public void BuildGaps(DateTime planningEarliestStart, DateTime gapHorizonEnd)
         {
             Gaps.Clear();
             if (Blocks.Count == 0)
             {
-                Gaps.Add(new DateGap { From = DateTime.Today, To = DateTime.Today.AddDays(60) });
+                Gaps.Add(new DateGap { From = planningEarliestStart, To = gapHorizonEnd });
                 return;
             }
 
@@ -648,7 +870,12 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
                     Gaps.Add(new DateGap { From = gapStart, To = gapEnd });
             }
 
-            Gaps.Add(new DateGap { From = ordered[^1].EndDate.AddDays(1), To = ordered[^1].EndDate.AddDays(45) });
+            var trailingStart = ordered[^1].EndDate.AddDays(1);
+            Gaps.Add(new DateGap
+            {
+                From = trailingStart,
+                To = trailingStart > gapHorizonEnd ? trailingStart : gapHorizonEnd,
+            });
         }
     }
 

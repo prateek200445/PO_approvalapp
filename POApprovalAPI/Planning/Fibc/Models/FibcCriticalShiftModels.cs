@@ -17,6 +17,11 @@ public sealed class FibcCriticalShiftRequest
     /// Optional — not default production behaviour; useful for testing displacement scenarios.
     /// </summary>
     public bool PinToTargetDate { get; set; }
+
+    /// <summary>OrderWise (default) or SlotWise — matches standard FIBC planner.</summary>
+    public string? AllotmentMode { get; set; }
+
+    public string? DustLevel { get; set; }
 }
 
 public sealed class FibcOrderShiftDisplacementDto

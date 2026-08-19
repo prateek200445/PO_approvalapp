@@ -55,4 +55,12 @@ public sealed class FibcPlanningOptions
     public string[] CriticalShiftNotifyTo { get; set; } = [];
 
     public string? CriticalShiftNotifyCc { get; set; }
+
+    /// <summary>When true, sends email after a standard FIBC allotment is confirmed and saved to ERP.</summary>
+    public bool ConfirmAllotmentEmailEnabled { get; set; } = true;
+
+    /// <summary>Primary recipients (line incharge / FIBC head). Falls back to QuotationHoldNotifyTo when empty.</summary>
+    public string[] ConfirmAllotmentNotifyTo { get; set; } = [];
+
+    public string? ConfirmAllotmentNotifyCc { get; set; }
 }

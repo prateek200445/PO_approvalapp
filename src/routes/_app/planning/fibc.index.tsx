@@ -100,11 +100,19 @@ function FibcPlanningPage() {
   const {
     data: orderDetail,
     isFetching: loadingOrder,
+    isError: orderDetailError,
+    error: orderDetailErr,
   } = useQuery({
     queryKey: ["fibc-order", selectedOrder],
     queryFn: () => fetchFibcOrderPlan(selectedOrder!),
     enabled: Boolean(selectedOrder),
+    retry: false,
   });
+
+  useEffect(() => {
+    if (!orderDetailError || !orderDetailErr) return;
+    toast.error(orderDetailErr.message || "Failed to load order planning data.");
+  }, [orderDetailError, orderDetailErr]);
 
   const { data: activeShifts = [] } = useQuery({
     queryKey: ["fibc-shifts", dateFrom, dateTo, company],
@@ -242,6 +250,7 @@ function FibcPlanningPage() {
           orderNo={selectedOrder}
           detail={orderDetail}
           loading={loadingOrder}
+          error={orderDetailError ? (orderDetailErr as Error)?.message : undefined}
           onClose={() => setSelectedOrder(null)}
         />
       ) : null}
@@ -290,17 +299,27 @@ function PlanOrderPanel({
   const [previewResult, setPreviewResult] = useState<FibcAllotmentResult | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [replaceExisting, setReplaceExisting] = useState(false);
+  const [allotmentMode, setAllotmentMode] = useState<"OrderWise" | "SlotWise">("OrderWise");
+  const [dustLevel, setDustLevel] = useState<"Normal" | "Single" | "Double" | "Triple">("Normal");
   const [contextOrderNo, setContextOrderNo] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const {
     data: planContext,
     isFetching: loadingPlanContext,
+    isError: planContextError,
+    error: planContextErr,
   } = useQuery({
     queryKey: ["fibc-plan-context", contextOrderNo],
     queryFn: () => fetchFibcOrderAllotmentContext(contextOrderNo!),
     enabled: Boolean(contextOrderNo),
+    retry: false,
   });
+
+  useEffect(() => {
+    if (!planContextError || !planContextErr) return;
+    toast.error(planContextErr.message || "Failed to load order context.");
+  }, [planContextError, planContextErr]);
 
   useEffect(() => {
     if (!planContext) return;
@@ -370,6 +389,8 @@ function PlanOrderPanel({
       partyName: planContext?.partyName ?? undefined,
       marketingNo: planContext?.marketingNo ?? undefined,
       replaceExisting: replaceExisting,
+      allotmentMode,
+      dustLevel,
     };
   }
 
@@ -380,6 +401,7 @@ function PlanOrderPanel({
       return;
     }
     setContextOrderNo(trimmed);
+    void queryClient.invalidateQueries({ queryKey: ["fibc-plan-context", trimmed] });
   }
 
   function handlePreviewAllotment() {
@@ -468,6 +490,32 @@ function PlanOrderPanel({
                 placeholder="From marketing invoice if loaded"
               />
             </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1.5 text-sm">
+                <span className="text-xs font-medium text-muted-foreground">Allotment mode</span>
+                <select
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={allotmentMode}
+                  onChange={(e) => setAllotmentMode(e.target.value as "OrderWise" | "SlotWise")}
+                >
+                  <option value="OrderWise">Order-wise (one line first)</option>
+                  <option value="SlotWise">Slot-wise (spread lines)</option>
+                </select>
+              </label>
+              <label className="space-y-1.5 text-sm">
+                <span className="text-xs font-medium text-muted-foreground">Dust capacity</span>
+                <select
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  value={dustLevel}
+                  onChange={(e) => setDustLevel(e.target.value as "Normal" | "Single" | "Double" | "Triple")}
+                >
+                  <option value="Normal">Normal</option>
+                  <option value="Single">Single dust</option>
+                  <option value="Double">Double dust</option>
+                  <option value="Triple">Triple dust</option>
+                </select>
+              </label>
+            </div>
             {planContext?.partyName ? (
               <p className="text-xs text-muted-foreground">Customer: {planContext.partyName}</p>
             ) : null}
@@ -595,11 +643,22 @@ function CriticalOrderPanel({
   const [contextOrderNo, setContextOrderNo] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  const { data: planContext, isFetching: loadingPlanContext } = useQuery({
+  const {
+    data: planContext,
+    isFetching: loadingPlanContext,
+    isError: planContextError,
+    error: planContextErr,
+  } = useQuery({
     queryKey: ["fibc-critical-context", contextOrderNo],
     queryFn: () => fetchFibcOrderAllotmentContext(contextOrderNo!),
     enabled: Boolean(contextOrderNo),
+    retry: false,
   });
+
+  useEffect(() => {
+    if (!planContextError || !planContextErr) return;
+    toast.error(planContextErr.message || "Failed to load order context.");
+  }, [planContextError, planContextErr]);
 
   useEffect(() => {
     if (!planContext) return;
@@ -681,6 +740,7 @@ function CriticalOrderPanel({
       return;
     }
     setContextOrderNo(trimmed);
+    void queryClient.invalidateQueries({ queryKey: ["fibc-critical-context", trimmed] });
   }
 
   function handlePreview() {
@@ -962,11 +1022,22 @@ function QuotationHoldPanel({
     staleTime: 1000 * 30,
   });
 
-  const { data: holdContext, isFetching: loadingHoldContext } = useQuery({
+  const {
+    data: holdContext,
+    isFetching: loadingHoldContext,
+    isError: holdContextError,
+    error: holdContextErr,
+  } = useQuery({
     queryKey: ["fibc-hold-context", contextOrderNo],
     queryFn: () => fetchFibcOrderAllotmentContext(contextOrderNo!),
     enabled: Boolean(contextOrderNo),
+    retry: false,
   });
+
+  useEffect(() => {
+    if (!holdContextError || !holdContextErr) return;
+    toast.error(holdContextErr.message || "Failed to load order context.");
+  }, [holdContextError, holdContextErr]);
 
   useEffect(() => {
     if (!holdContext) return;
@@ -1038,6 +1109,7 @@ function QuotationHoldPanel({
       return;
     }
     setContextOrderNo(trimmed);
+    void queryClient.invalidateQueries({ queryKey: ["fibc-hold-context", trimmed] });
   }
 
   function handleCreateHold() {
@@ -1594,11 +1666,13 @@ function OrderDetailPanel({
   orderNo,
   detail,
   loading,
+  error,
   onClose,
 }: {
   orderNo: string;
   detail: Awaited<ReturnType<typeof fetchFibcOrderPlan>> | undefined;
   loading: boolean;
+  error?: string;
   onClose: () => void;
 }) {
   return (
@@ -1622,6 +1696,8 @@ function OrderDetailPanel({
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading order…
             </div>
+          ) : error ? (
+            <p className="py-8 text-sm text-destructive">{error}</p>
           ) : !detail ? (
             <p className="py-8 text-sm text-muted-foreground">No planning data found for this order.</p>
           ) : (

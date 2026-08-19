@@ -34,6 +34,8 @@ export type FibcAllotmentRequest = {
   partyName?: string;
   marketingNo?: string;
   replaceExisting?: boolean;
+  allotmentMode?: "OrderWise" | "SlotWise";
+  dustLevel?: "Normal" | "Single" | "Double" | "Triple";
 };
 
 export type FibcAllotmentResult = {
@@ -48,6 +50,9 @@ export type FibcAllotmentResult = {
   bufferDays: number;
   dispatchDate: string | null;
   targetCompletionDate: string | null;
+  allotmentMode?: string;
+  dustLevel?: string;
+  rejectionPercentApplied?: number;
   warnings: string[];
   proposedSlots: FibcSlotGridItem[];
 };
@@ -408,6 +413,9 @@ export function normalizeAllotmentResult(data: Record<string, unknown>): FibcAll
     bufferDays: numField(data, "bufferDays", "BufferDays"),
     dispatchDate: optStr(data, "dispatchDate", "DispatchDate"),
     targetCompletionDate: optStr(data, "targetCompletionDate", "TargetCompletionDate"),
+    allotmentMode: optStr(data, "allotmentMode", "AllotmentMode") ?? "OrderWise",
+    dustLevel: optStr(data, "dustLevel", "DustLevel") ?? "Normal",
+    rejectionPercentApplied: optNum(data, "rejectionPercentApplied", "RejectionPercentApplied") ?? undefined,
     warnings: Array.isArray(warnings) ? warnings.map(String) : [],
     proposedSlots: proposed.map(normalizeSlotGridItem),
   };

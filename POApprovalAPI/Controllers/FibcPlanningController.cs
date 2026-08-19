@@ -59,11 +59,14 @@ public class FibcPlanningController : ControllerBase
         }
     }
 
-    [HttpGet("orders/{orderNo}")]
-    public async Task<IActionResult> GetOrderPlan(string orderNo, CancellationToken ct)
+    [HttpGet("orders/plan")]
+    public async Task<IActionResult> GetOrderPlan([FromQuery] string orderNo, CancellationToken ct)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
             var detail = await _service.GetOrderPlanAsync(orderNo, ct);
             if (detail is null)
                 return NotFound(new { message = "No planning or BOM data found for this order." });
@@ -76,11 +79,14 @@ public class FibcPlanningController : ControllerBase
         }
     }
 
-    [HttpGet("orders/{orderNo}/context")]
-    public async Task<IActionResult> GetOrderAllotmentContext(string orderNo, CancellationToken ct)
+    [HttpGet("orders/context")]
+    public async Task<IActionResult> GetOrderAllotmentContext([FromQuery] string orderNo, CancellationToken ct)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
             var context = await _service.GetOrderAllotmentContextAsync(orderNo, ct);
             if (context is null)
                 return NotFound(new { message = "No marketing or BOM data found for this order." });

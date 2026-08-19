@@ -3,7 +3,7 @@ namespace POApprovalAPI.Planning.Fibc;
 /// <summary>
 /// Line + shift preference order from requirements (C before B before A; line order per bag family).
 /// </summary>
-internal static class LinePreferenceHelper
+public static class LinePreferenceHelper
 {
     private static readonly Dictionary<string, int[]> LinesByBagFamily = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -23,7 +23,8 @@ internal static class LinePreferenceHelper
 
         return lineBagType.Contains(erpFamily, StringComparison.OrdinalIgnoreCase)
             || (erpFamily.Equals("UPanel", StringComparison.OrdinalIgnoreCase)
-                && lineBagType.Contains("Upanel", StringComparison.OrdinalIgnoreCase))
+                && (lineBagType.Contains("Upanel", StringComparison.OrdinalIgnoreCase)
+                    || lineBagType.Contains("Double Loop", StringComparison.OrdinalIgnoreCase)))
             || (erpFamily.Equals("Buffle", StringComparison.OrdinalIgnoreCase)
                 && (lineBagType.Contains("Buffle", StringComparison.OrdinalIgnoreCase)
                     || lineBagType.Contains("Baffle", StringComparison.OrdinalIgnoreCase)))

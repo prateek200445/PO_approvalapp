@@ -542,11 +542,29 @@ function PlanOrderPanel({
   const [contextOrderNo, setContextOrderNo] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
-  const { data: planContext, isFetching: loadingPlanContext } = useQuery({
+  const {
+    data: planContext,
+    isFetching: loadingPlanContext,
+    isError: planContextError,
+    error: planContextErr,
+  } = useQuery({
     queryKey: ["loom-plan-context", contextOrderNo],
     queryFn: () => fetchLoomOrderAllotmentContext(contextOrderNo!),
     enabled: Boolean(contextOrderNo),
+    retry: false,
   });
+
+  useEffect(() => {
+    if (!planContextError || !planContextErr) return;
+    toast.error(planContextErr.message || "Failed to load order context.");
+  }, [planContextError, planContextErr]);
+
+  function triggerContextLoad(orderNo: string) {
+    const trimmed = orderNo.trim();
+    if (!trimmed) return;
+    setContextOrderNo(trimmed);
+    void queryClient.invalidateQueries({ queryKey: ["loom-plan-context", trimmed] });
+  }
 
   useEffect(() => {
     if (!planContext) return;
@@ -654,10 +672,7 @@ function PlanOrderPanel({
                 value={planOrderNo}
                 onChange={(e) => setPlanOrderNo(e.target.value)}
                 placeholder="Buyer order number"
-                onBlur={() => {
-                  const t = planOrderNo.trim();
-                  if (t) setContextOrderNo(t);
-                }}
+                onBlur={() => triggerContextLoad(planOrderNo)}
               />
             </label>
             <div className="grid gap-3 sm:grid-cols-2">

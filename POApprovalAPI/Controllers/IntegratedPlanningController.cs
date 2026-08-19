@@ -14,11 +14,14 @@ public class IntegratedPlanningController : ControllerBase
         _service = service;
     }
 
-    [HttpGet("orders/{orderNo}/timeline")]
-    public async Task<IActionResult> GetOrderTimeline(string orderNo, CancellationToken ct)
+    [HttpGet("orders/timeline")]
+    public async Task<IActionResult> GetOrderTimeline([FromQuery] string orderNo, CancellationToken ct)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
             var timeline = await _service.GetOrderTimelineAsync(orderNo, ct);
             if (timeline is null)
                 return NotFound(new { message = "No planning data found for this order." });

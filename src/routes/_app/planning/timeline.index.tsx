@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Factory, Layers, Loader2, Search, Truck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PlanningPageHeader, PlanningPageShell, PlanningPanel } from "@/components/planning/planning-ui";
 import { Button } from "@/components/ui/button";
@@ -30,12 +30,17 @@ function IntegratedPlanningPage() {
   const [orderNo, setOrderNo] = useState("");
   const [searchOrder, setSearchOrder] = useState<string | null>(null);
 
-  const { data, isLoading, isFetching, error } = useQuery({
+  const { data, isLoading, isFetching, isError, error } = useQuery({
     queryKey: ["integrated-timeline", searchOrder],
     queryFn: () => fetchIntegratedOrderTimeline(searchOrder!),
     enabled: Boolean(searchOrder),
     retry: false,
   });
+
+  useEffect(() => {
+    if (!isError || !error) return;
+    toast.error((error as Error).message || "Failed to load timeline.");
+  }, [isError, error]);
 
   const handleSearch = () => {
     const trimmed = orderNo.trim();
@@ -77,8 +82,8 @@ function IntegratedPlanningPage() {
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading planning data…
         </div>
-      ) : error ? (
-        <PlanningPanel>
+      ) : isError ? (
+        <PlanningPanel title="Could not load timeline">
           <p className="text-sm text-destructive">{(error as Error).message || "Could not load timeline."}</p>
         </PlanningPanel>
       ) : data ? (

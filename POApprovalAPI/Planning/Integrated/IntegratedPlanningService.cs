@@ -1,9 +1,11 @@
 using Microsoft.Extensions.Options;
+using POApprovalAPI.Planning.Execution;
 using POApprovalAPI.Planning.Fibc;
 using POApprovalAPI.Planning.Fibc.Models;
 using POApprovalAPI.Planning.Integrated.Models;
 using POApprovalAPI.Planning.Loom;
 using POApprovalAPI.Planning.Loom.Models;
+using POApprovalAPI.Planning.Setup;
 
 namespace POApprovalAPI.Planning.Integrated;
 
@@ -13,15 +15,21 @@ public sealed class IntegratedPlanningService
 
     private readonly FibcPlanningService _fibc;
     private readonly LoomPlanningService _loom;
+    private readonly ExecutionPlanningService _execution;
+    private readonly PlanningRuntimeContextLoader _runtimeLoader;
     private readonly LoomPlanningOptions _loomOptions;
 
     public IntegratedPlanningService(
         FibcPlanningService fibc,
         LoomPlanningService loom,
+        ExecutionPlanningService execution,
+        PlanningRuntimeContextLoader runtimeLoader,
         IOptions<LoomPlanningOptions> loomOptions)
     {
         _fibc = fibc;
         _loom = loom;
+        _execution = execution;
+        _runtimeLoader = runtimeLoader;
         _loomOptions = loomOptions.Value;
     }
 
@@ -90,6 +98,34 @@ public sealed class IntegratedPlanningService
             warnings.Add("No loom allocations found for this order.");
         if (!hasFibc)
             warnings.Add("No FIBC line plan found for this order.");
+
+        try
+        {
+            var exec = await _execution.GetOrderExecutionAsync(trimmed, _loomOptions.DefaultCompanyName, ct);
+            if (exec.BailingGap > 0)
+                warnings.Add($"Bailing gap: {exec.BailingGap:N0} pcs produced but not bailed.");
+            foreach (var s in exec.ReplanSuggestions)
+                warnings.Add(s);
+        }
+        catch
+        {
+            // Non-fatal — timeline still useful without execution data
+        }
+
+        if (fibcCtx?.PartyName is not null || hasFibc)
+        {
+            try
+            {
+                var company = _loomOptions.DefaultCompanyName;
+                var runtime = await _runtimeLoader.LoadAsync(company, ct);
+                if (runtime.LoomPool.Any(l => l.PoolId.HasValue) && !hasLoom)
+                    warnings.Add("Loom pool is configured but this order has no loom plan — fabric may be missing.");
+            }
+            catch
+            {
+                // ignore
+            }
+        }
 
         var milestones = BuildMilestones(loomStart, loomEnd, fabricRequirementDate, fibcStart, fibcEnd, dispatchDate, loomAllocations, fibcLines);
 

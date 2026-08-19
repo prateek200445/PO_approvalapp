@@ -1,4 +1,5 @@
 import { getApiUrl } from "@/lib/api-config";
+import { planningOrderUrl } from "@/lib/planning/planning-order-url";
 import {
   normalizeLoomAllotmentConfirmResult,
   normalizeLoomAllotmentContext,
@@ -97,8 +98,7 @@ export async function fetchLoomPpmSpecs(): Promise<LoomPpmSpec[]> {
 }
 
 export async function fetchLoomOrderPlan(orderNo: string): Promise<LoomOrderPlanDetail> {
-  const encoded = encodeURIComponent(orderNo.trim());
-  const res = await fetch(getApiUrl(`/api/planning/loom/orders/${encoded}`));
+  const res = await fetch(planningOrderUrl("/api/planning/loom/orders/plan", orderNo));
   const data = await parseJson<Record<string, unknown>>(res);
 
   const allocations = (data.allocations ?? data.Allocations ?? []) as Array<Record<string, unknown>>;
@@ -139,15 +139,13 @@ export async function fetchLoomOrderPlan(orderNo: string): Promise<LoomOrderPlan
 }
 
 export async function fetchLoomOrderContext(orderNo: string): Promise<LoomOrderContext> {
-  const encoded = encodeURIComponent(orderNo.trim());
-  const res = await fetch(getApiUrl(`/api/planning/loom/orders/${encoded}/context`));
+  const res = await fetch(planningOrderUrl("/api/planning/loom/orders/context", orderNo));
   const data = await parseJson<Record<string, unknown>>(res);
   return normalizeLoomOrderContext(data);
 }
 
 export async function fetchLoomOrderAllotmentContext(orderNo: string): Promise<LoomOrderAllotmentContext> {
-  const encoded = encodeURIComponent(orderNo.trim());
-  const res = await fetch(getApiUrl(`/api/planning/loom/orders/${encoded}/allotment-context`));
+  const res = await fetch(planningOrderUrl("/api/planning/loom/orders/allotment-context", orderNo));
   const data = await parseJson<Record<string, unknown>>(res);
   return normalizeLoomAllotmentContext(data);
 }

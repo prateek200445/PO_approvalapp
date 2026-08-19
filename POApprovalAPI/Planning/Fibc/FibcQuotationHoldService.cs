@@ -292,6 +292,7 @@ public sealed class FibcQuotationHoldService
                 hold.MarketingNo,
                 gridSlots,
                 replaceExisting && existing > 0,
+                allowSyntheticSlots: false,
                 ct);
 
             await _holdRepository.MarkHoldConfirmedAsync(holdId, ct);

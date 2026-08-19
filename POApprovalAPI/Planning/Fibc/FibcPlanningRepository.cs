@@ -172,7 +172,7 @@ ORDER BY Heading", new { OrderNo = orderNo.Trim() }, commandTimeout: CommandTime
             TargetDate = row.Targetdate,
             Heading = row.Heading ?? "",
             Gsm = row.GSM ?? "",
-            FabricSize = row.FabricSize,
+            FabricSize = ParseNullableDouble(row.FabricSize),
             TotalMtr = row.TotalMtr,
             TotalKg = row.Totalkg,
         }).ToList();
@@ -404,6 +404,7 @@ ORDER BY TransId", new
         string? marketingNo,
         IReadOnlyList<FibcSlotGridItemDto> slots,
         bool replaceExisting,
+        bool allowSyntheticSlots = false,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -442,8 +443,15 @@ WHERE CompanyNam = @CompanyName
 
                 if (remaining is null)
                 {
-                    throw new InvalidOperationException(
-                        $"Capacity slot on {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} no longer exists.");
+                    if (!allowSyntheticSlots)
+                    {
+                        throw new InvalidOperationException(
+                            $"Capacity slot on {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} no longer exists.");
+                    }
+
+                    remaining = slot.Remaining + slot.Allotted;
+                    if (remaining <= 0)
+                        remaining = slot.Capacity;
                 }
 
                 if (slot.Allotted > remaining.Value + 0.01)
@@ -752,6 +760,15 @@ VALUES
         return double.TryParse(cleaned, out var value) ? value : null;
     }
 
+    private static double? ParseNullableDouble(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var cleaned = value.Trim().Replace(",", "");
+        return double.TryParse(cleaned, out var parsed) ? parsed : null;
+    }
+
     private string ResolveCompany(string? companyName) =>
         string.IsNullOrWhiteSpace(companyName) ? _options.DefaultCompanyName : companyName.Trim();
 
@@ -879,7 +896,7 @@ VALUES
         public DateTime? Targetdate { get; set; }
         public string? Heading { get; set; }
         public string? GSM { get; set; }
-        public double? FabricSize { get; set; }
+        public string? FabricSize { get; set; }
         public double? TotalMtr { get; set; }
         public double? Totalkg { get; set; }
     }

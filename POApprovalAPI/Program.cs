@@ -1,6 +1,8 @@
+using POApprovalAPI.Planning.Execution;
 using POApprovalAPI.Planning.Fibc;
 using POApprovalAPI.Planning.Integrated;
 using POApprovalAPI.Planning.Loom;
+using POApprovalAPI.Planning.Setup;
 using POApprovalAPI.Services;
 using QuestPDF.Infrastructure;
 using POApprovalAPI.Interfaces;
@@ -91,6 +93,10 @@ builder.Services.AddScoped<ILoomPlanningRepository, LoomPlanningRepository>();
 builder.Services.AddScoped<ILoomPlanningEngine, LoomPlanningEngine>();
 builder.Services.AddScoped<LoomPlanningService>();
 builder.Services.AddScoped<IntegratedPlanningService>();
+builder.Services.AddScoped<IPlanningSetupRepository, PlanningSetupRepository>();
+builder.Services.AddScoped<PlanningSetupService>();
+builder.Services.AddScoped<PlanningRuntimeContextLoader>();
+builder.Services.AddScoped<ExecutionPlanningService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();
@@ -113,10 +119,14 @@ try
     var holdRepo = scope.ServiceProvider.GetRequiredService<IFibcQuotationHoldRepository>();
     await holdRepo.EnsureSchemaAsync();
     app.Logger.LogInformation("FibcQuotationHold schema ready.");
+
+    var setupRepo = scope.ServiceProvider.GetRequiredService<IPlanningSetupRepository>();
+    await setupRepo.EnsureSchemaAsync();
+    app.Logger.LogInformation("Planning setup schema ready.");
 }
 catch (Exception ex)
 {
-    app.Logger.LogError(ex, "Failed to initialize FibcQuotationHold tables. Quotation holds will not work until this is fixed.");
+    app.Logger.LogError(ex, "Failed to initialize planning portal tables. Quotation holds / setup may not work until this is fixed.");
 }
 
 app.UseCors("AllowFrontend");

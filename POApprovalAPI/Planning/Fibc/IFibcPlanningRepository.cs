@@ -57,6 +57,7 @@ public interface IFibcPlanningRepository
         string? marketingNo,
         IReadOnlyList<FibcSlotGridItemDto> slots,
         bool replaceExisting,
+        bool allowSyntheticSlots = false,
         CancellationToken ct = default);
 
     Task<FibcSavedAllocationRowDto?> GetSavedAllocationSlotAsync(

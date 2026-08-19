@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using POApprovalAPI.Planning.Fibc.Models;
+using POApprovalAPI.Planning.Setup;
 
 namespace POApprovalAPI.Planning.Fibc;
 
@@ -11,22 +12,27 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
 
     private readonly IFibcPlanningRepository _repository;
     private readonly IFibcQuotationHoldRepository _holdRepository;
+    private readonly PlanningRuntimeContextLoader _runtimeLoader;
+    private readonly FibcPlanningEmailNotifier _emailNotifier;
     private readonly FibcPlanningOptions _options;
 
     public FibcPlanningEngine(
         IFibcPlanningRepository repository,
         IFibcQuotationHoldRepository holdRepository,
+        PlanningRuntimeContextLoader runtimeLoader,
+        FibcPlanningEmailNotifier emailNotifier,
         IOptions<FibcPlanningOptions> options)
     {
         _repository = repository;
         _holdRepository = holdRepository;
+        _runtimeLoader = runtimeLoader;
+        _emailNotifier = emailNotifier;
         _options = options.Value;
     }
 
     public async Task<FibcAllotmentResult> AllotOrderAsync(FibcAllotmentRequest request, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        var warnings = new List<string>();
         var orderNo = request.OrderNo.Trim();
         var company = string.IsNullOrWhiteSpace(request.CompanyName)
             ? _options.DefaultCompanyName
@@ -47,18 +53,17 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
         if (dispatchDate is null)
             return Fail(orderNo, "Dispatch date is required. Provide it or ensure a marketing invoice exists for this order.");
 
-        var lines = await _repository.GetLineConfigAsync(company, ct);
-        var eligibleLines = lines
-            .Where(l => LinePreferenceHelper.LineSupportsBagFamily(l.BagType, erpFamily))
-            .ToList();
+        var runtime = await _runtimeLoader.LoadAsync(company, ct);
+        var erpLines = await _repository.GetLineConfigAsync(company, ct);
 
-        if (eligibleLines.Count == 0)
-            return Fail(orderNo, $"No production lines configured for bag family '{BagTypeMapper.ToDisplayLabel(erpFamily)}'.");
+        var bufferDays = runtime.Factory.DefaultDispatchBufferDays > 0
+            ? runtime.Factory.DefaultDispatchBufferDays
+            : _options.DispatchBufferDays;
 
-        var preferredLineNos = LinePreferenceHelper.GetPreferredLines(erpFamily);
-
-        var bufferDays = _options.DispatchBufferDays;
-        var lineBuffer = eligibleLines.Where(l => l.BufferDaysCheck > 0).Select(l => l.BufferDaysCheck).DefaultIfEmpty(bufferDays).Max();
+        var lineBuffer = runtime.Lines.Where(l => l.BufferDaysOverride > 0).Select(l => l.BufferDaysOverride!.Value)
+            .Concat(erpLines.Where(l => l.BufferDaysCheck > 0).Select(l => l.BufferDaysCheck))
+            .DefaultIfEmpty(bufferDays)
+            .Max();
         bufferDays = Math.Max(bufferDays, lineBuffer);
 
         var targetDate = dispatchDate.Value.AddDays(-bufferDays);
@@ -71,115 +76,54 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
         var grid = await gridTask;
         var activeShifts = FilterShifts(await shiftsTask, grid.Items);
         if (activeShifts.Count == 0)
+            activeShifts = OrderShifts(_options.ShiftPreference, _options.ActiveShifts.ToList());
+
+        if (activeShifts.Count == 0)
             return Fail(orderNo, "No shift capacity found in CapacityPlanning for the selected date range.");
+
+        var usedSyntheticGrid = false;
+        if (!FibcSyntheticGridBuilder.HasSlotsInWindow(grid, lookbackFrom, targetDate))
+        {
+            grid = FibcSyntheticGridBuilder.BuildForWindow(
+                lookbackFrom, targetDate, company, activeShifts, runtime, erpLines, erpFamily);
+            usedSyntheticGrid = grid.Items.Count > 0;
+        }
+
+        if (usedSyntheticGrid && grid.Items.Count == 0)
+            return Fail(orderNo, "No production lines configured for this bag type in portal setup.");
 
         var holdReservations = _options.QuotationHoldEnabled
             ? await _holdRepository.GetActiveHoldReservationsAsync(company, lookbackFrom, targetDate, ct: ct)
             : Array.Empty<FibcHoldReservationDto>();
         var heldBySlot = BuildHeldQtyMap(holdReservations);
-
-        var capacityPerShift = ResolveGridCapacityPerShift(grid.Items, erpFamily, eligibleLines, preferredLineNos, lines);
-        if (capacityPerShift <= 0)
-            return Fail(orderNo, "Could not determine shift capacity from the planning grid.");
-
         var shiftPreference = OrderShifts(_options.ShiftPreference, activeShifts);
-        var slotsRequired = quantity / capacityPerShift;
 
-        var proposed = new List<FibcSlotGridItemDto>();
-        var usedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var lineRotation = 0;
-        var remainingQty = quantity;
+        var result = FibcAllotmentPlanner.Plan(
+            request,
+            runtime,
+            context,
+            erpFamily,
+            quantity,
+            dispatchDate.Value,
+            bufferDays,
+            targetDate,
+            lookbackFrom,
+            grid,
+            activeShifts,
+            shiftPreference,
+            heldBySlot,
+            erpLines);
 
-        for (var day = targetDate; day >= lookbackFrom && remainingQty > SlotEpsilon; day = day.AddDays(-1))
+        if (usedSyntheticGrid && result.Success)
         {
-            var daySlots = grid.Items
-                .Where(s => s.PlanDate.Date == day.Date)
-                .Where(s => BagTypeMapper.NormalizeErpFamily(s.BagType).Equals(erpFamily, StringComparison.OrdinalIgnoreCase))
-                .Where(s => IsEligibleLine(s.LineNo, eligibleLines))
-                .Where(s => GetEffectiveRemaining(s, heldBySlot) > SlotEpsilon)
-                .Where(s => activeShifts.Contains(s.Shift, StringComparer.OrdinalIgnoreCase))
-                .Where(s => !usedKeys.Contains(SlotKey(s)))
-                .OrderBy(s => LinePreferenceHelper.GetPreferenceRank(erpFamily, ParseLineNo(s.LineNo), s.Shift, shiftPreference))
-                .ThenBy(s => RotatedLineRank(preferredLineNos, ParseLineNo(s.LineNo), lineRotation))
-                .ToList();
-
-            foreach (var slot in daySlots)
-            {
-                if (remainingQty <= SlotEpsilon)
-                    break;
-
-                var effectiveRemaining = GetEffectiveRemaining(slot, heldBySlot);
-                var allotQty = Math.Round(Math.Min(remainingQty, Math.Min(slot.Capacity, effectiveRemaining)), 2);
-                if (allotQty <= SlotEpsilon)
-                    continue;
-
-                var isPartial = allotQty < slot.Capacity - SlotEpsilon;
-                var allocatedPercent = slot.Capacity > 0
-                    ? Math.Round(allotQty / slot.Capacity * 100, 2)
-                    : 100d;
-
-                proposed.Add(new FibcSlotGridItemDto
-                {
-                    CompanyName = slot.CompanyName,
-                    BagType = slot.BagType,
-                    BagTypeLabel = slot.BagTypeLabel,
-                    PartyName = context?.PartyName,
-                    OrderNo = orderNo,
-                    LineNo = slot.LineNo,
-                    PlanDate = slot.PlanDate,
-                    Allotted = allotQty,
-                    Capacity = slot.Capacity,
-                    Remaining = Math.Max(0, effectiveRemaining - allotQty),
-                    AllocatedPercent = allocatedPercent,
-                    Shift = slot.Shift,
-                    MarketingNo = context?.MarketingNo,
-                    TransId = slot.TransId,
-                    Efficiency = slot.Efficiency,
-                    UtilizationPercent = slot.Capacity > 0 ? Math.Round(allotQty / slot.Capacity * 100, 2) : 0,
-                    OccupancyStatus = isPartial ? "partial" : "full",
-                });
-
-                usedKeys.Add(SlotKey(slot));
-                lineRotation++;
-                remainingQty = Math.Round(remainingQty - allotQty, 2);
-            }
+            var warnings = result.Warnings.ToList();
+            warnings.Insert(0,
+                "ERP capacity grid has no rows for this dispatch window; preview uses portal line capacities (A/B shifts).");
+            result.Warnings = warnings;
         }
 
-        if (remainingQty > SlotEpsilon && holdReservations.Count > 0)
-        {
-            warnings.Add("Some capacity may be reserved by active quotation holds.");
-        }
-
-        if (remainingQty > SlotEpsilon)
-        {
-            warnings.Add(
-                $"Could not allot remaining {remainingQty:N0} pcs between {lookbackFrom:yyyy-MM-dd} and {targetDate:yyyy-MM-dd}. Free more capacity or extend the lookback window.");
-        }
-
-        var success = proposed.Count > 0;
-        var fullyAllotted = remainingQty <= SlotEpsilon;
-        var message = success
-            ? fullyAllotted
-                ? $"Preview: {proposed.Count} slot(s) proposed ({quantity:N0} pcs) ending by {targetDate:yyyy-MM-dd} ({bufferDays}-day buffer before dispatch)."
-                : $"Partial preview: {proposed.Count} slot(s) proposed but {remainingQty:N0} pcs still unallocated."
-            : "No free slots found in the lookback window for this bag type.";
-
-        return new FibcAllotmentResult
-        {
-            Success = success,
-            Message = message,
-            OrderNo = orderNo,
-            BagType = erpFamily,
-            BagTypeLabel = BagTypeMapper.ToDisplayLabel(erpFamily),
-            Quantity = quantity,
-            CapacityPerShift = capacityPerShift,
-            SlotsRequired = Math.Round(slotsRequired, 3),
-            BufferDays = bufferDays,
-            DispatchDate = dispatchDate,
-            TargetCompletionDate = targetDate,
-            Warnings = warnings,
-            ProposedSlots = proposed,
-        };
+        result.UsedSyntheticGrid = usedSyntheticGrid;
+        return result;
     }
 
     public async Task<FibcAllotmentConfirmResult> ConfirmAllotOrderAsync(
@@ -240,23 +184,32 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
 
         foreach (var slot in preview.ProposedSlots)
         {
-            var remaining = await _repository.GetSlotRemainingAsync(
-                company,
-                slot.LineNo,
-                slot.PlanDate,
-                slot.Shift,
-                ct);
-            if (remaining is null)
-            {
-                result.Success = false;
-                result.Message =
-                    $"Cannot save: capacity slot on {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} no longer exists.";
-                return result;
-            }
-
             var key = ReservationKey(slot.PlanDate, slot.LineNo, slot.Shift);
             var otherHeld = heldBySlot.GetValueOrDefault(key);
-            var available = remaining.Value - otherHeld;
+            double available;
+
+            if (preview.UsedSyntheticGrid)
+            {
+                available = PreviewSlotAvailable(slot) - otherHeld;
+            }
+            else
+            {
+                var remaining = await _repository.GetSlotRemainingAsync(
+                    company,
+                    slot.LineNo,
+                    slot.PlanDate,
+                    slot.Shift,
+                    ct);
+                if (remaining is null)
+                {
+                    result.Success = false;
+                    result.Message =
+                        $"Cannot save: capacity slot on {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} no longer exists.";
+                    return result;
+                }
+
+                available = remaining.Value - otherHeld;
+            }
 
             if (slot.Allotted > available + SlotEpsilon)
             {
@@ -280,12 +233,23 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
                 marketingNo,
                 preview.ProposedSlots,
                 request.ReplaceExisting && existing > 0,
+                allowSyntheticSlots: preview.UsedSyntheticGrid,
                 ct);
 
             result.Saved = true;
             result.RowsInserted = rows;
             result.Success = true;
-            result.Message = $"Saved {rows} allocation row(s) for order {preview.OrderNo} ({preview.Quantity:N0} pcs).";
+            result.Message = $"Saved {rows} allocation row(s) for order {preview.OrderNo} ({preview.Quantity:N0} pcs, {preview.AllotmentMode}).";
+
+            try
+            {
+                await _emailNotifier.NotifyAllotmentConfirmedAsync(result, request, ct);
+            }
+            catch
+            {
+                // Email failure must not roll back a successful ERP save.
+            }
+
             return result;
         }
         catch (Exception ex)
@@ -295,6 +259,15 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
             result.Message = $"Save failed: {ex.Message}";
             return result;
         }
+    }
+
+    private static double PreviewSlotAvailable(FibcSlotGridItemDto slot)
+    {
+        var fromPreview = slot.Remaining + slot.Allotted;
+        if (fromPreview > SlotEpsilon)
+            return fromPreview;
+
+        return slot.Capacity > SlotEpsilon ? slot.Capacity : 0;
     }
 
     private static FibcAllotmentConfirmResult ToConfirmResult(FibcAllotmentResult preview) => new()
@@ -310,6 +283,10 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
         BufferDays = preview.BufferDays,
         DispatchDate = preview.DispatchDate,
         TargetCompletionDate = preview.TargetCompletionDate,
+        AllotmentMode = preview.AllotmentMode,
+        DustLevel = preview.DustLevel,
+        RejectionPercentApplied = preview.RejectionPercentApplied,
+        UsedSyntheticGrid = preview.UsedSyntheticGrid,
         Warnings = preview.Warnings,
         ProposedSlots = preview.ProposedSlots,
         Saved = false,
@@ -329,34 +306,6 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
 
     internal static bool IsValidDispatchDate(DateTime date) => date.Date >= MinValidDispatchDate;
 
-    private static double ResolveGridCapacityPerShift(
-        IReadOnlyList<FibcSlotGridItemDto> gridItems,
-        string erpFamily,
-        IReadOnlyList<FibcLineConfigDto> eligibleLines,
-        IReadOnlyList<int> preferredLineNos,
-        IReadOnlyList<FibcLineConfigDto> allLines)
-    {
-        var capacities = gridItems
-            .Where(s => BagTypeMapper.NormalizeErpFamily(s.BagType).Equals(erpFamily, StringComparison.OrdinalIgnoreCase))
-            .Where(s => IsEligibleLine(s.LineNo, eligibleLines))
-            .Where(s => s.Capacity > 0)
-            .Select(s => s.Capacity)
-            .ToList();
-
-        if (capacities.Count > 0)
-            return capacities.GroupBy(c => c).OrderByDescending(g => g.Count()).First().Key;
-
-        var lineMasterCapacity = allLines
-            .Where(l => preferredLineNos.Contains(l.LineNo))
-            .Select(l => (double)l.BagCapacity)
-            .FirstOrDefault(c => c > 0);
-
-        if (lineMasterCapacity > 0)
-            return lineMasterCapacity;
-
-        return eligibleLines.Max(l => (double)l.BagCapacity);
-    }
-
     private static FibcAllotmentResult Fail(string orderNo, string message) => new()
     {
         Success = false,
@@ -373,21 +322,6 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
         return null;
     }
 
-    private static bool IsEligibleLine(string lineNoText, IReadOnlyList<FibcLineConfigDto> eligibleLines)
-    {
-        var lineNo = ParseLineNo(lineNoText);
-        return eligibleLines.Any(l => l.LineNo == lineNo);
-    }
-
-    private static int ParseLineNo(string lineNoText)
-    {
-        var digits = new string(lineNoText.Where(char.IsDigit).ToArray());
-        return int.TryParse(digits, out var n) ? n : -1;
-    }
-
-    private static string SlotKey(FibcSlotGridItemDto slot) =>
-        $"{slot.PlanDate:yyyy-MM-dd}|{slot.LineNo}|{slot.Shift}|{slot.BagType}";
-
     private static string ReservationKey(DateTime planDate, string lineNo, string shift) =>
         $"{planDate:yyyy-MM-dd}|{lineNo}|{shift}";
 
@@ -400,22 +334,6 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
             map[key] = map.GetValueOrDefault(key) + r.Qty;
         }
         return map;
-    }
-
-    private static double GetEffectiveRemaining(FibcSlotGridItemDto slot, IReadOnlyDictionary<string, double> heldBySlot)
-    {
-        var key = ReservationKey(slot.PlanDate, slot.LineNo, slot.Shift);
-        var held = heldBySlot.GetValueOrDefault(key);
-        return Math.Max(0, slot.Remaining - held);
-    }
-
-    private static int RotatedLineRank(IReadOnlyList<int> preferredLines, int lineNo, int rotation)
-    {
-        var index = preferredLines.Count == 0 ? -1 : preferredLines.ToList().IndexOf(lineNo);
-        if (index < 0)
-            return 100;
-
-        return (index - (rotation % preferredLines.Count) + preferredLines.Count) % preferredLines.Count;
     }
 
     private IReadOnlyList<string> FilterShifts(IReadOnlyList<string> fromCapacity, IReadOnlyList<FibcSlotGridItemDto> gridItems)

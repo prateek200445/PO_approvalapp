@@ -1,4 +1,5 @@
 import { getApiUrl } from "@/lib/api-config";
+import { planningOrderUrl } from "@/lib/planning/planning-order-url";
 import {
   normalizeAllotmentContext,
   normalizeAllotmentConfirmResult,
@@ -64,8 +65,7 @@ export async function fetchFibcSlotGrid(options: {
 }
 
 export async function fetchFibcOrderPlan(orderNo: string): Promise<FibcOrderPlanDetail> {
-  const encoded = encodeURIComponent(orderNo.trim());
-  const res = await fetch(getApiUrl(`/api/planning/fibc/orders/${encoded}`));
+  const res = await fetch(planningOrderUrl("/api/planning/fibc/orders/plan", orderNo));
   const data = await parseJson<Record<string, unknown>>(res);
 
   const planLines = (data.planLines ?? data.PlanLines ?? []) as Array<Record<string, unknown>>;
@@ -95,8 +95,7 @@ export async function fetchFibcOrderPlan(orderNo: string): Promise<FibcOrderPlan
 }
 
 export async function fetchFibcOrderAllotmentContext(orderNo: string): Promise<FibcOrderAllotmentContext> {
-  const encoded = encodeURIComponent(orderNo.trim());
-  const res = await fetch(getApiUrl(`/api/planning/fibc/orders/${encoded}/context`));
+  const res = await fetch(planningOrderUrl("/api/planning/fibc/orders/context", orderNo));
   const data = await parseJson<Record<string, unknown>>(res);
   return normalizeAllotmentContext(data);
 }
@@ -141,6 +140,8 @@ function buildAllotmentBody(request: FibcAllotmentRequest) {
     partyName: request.partyName,
     marketingNo: request.marketingNo,
     replaceExisting: request.replaceExisting ?? false,
+    allotmentMode: request.allotmentMode ?? "OrderWise",
+    dustLevel: request.dustLevel ?? "Normal",
   };
 }
 

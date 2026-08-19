@@ -121,6 +121,70 @@ public sealed class FibcPlanningEmailNotifier
         return SendCriticalShiftAsync(subject, body);
     }
 
+    public Task NotifyAllotmentConfirmedAsync(
+        FibcAllotmentConfirmResult result,
+        FibcAllotmentRequest request,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!IsConfirmAllotmentEnabled())
+            return Task.CompletedTask;
+
+        var subject = $"FIBC plan confirmed — Order {result.OrderNo} ({result.RowsInserted} slot(s) saved)";
+        var dispatch = result.DispatchDate?.ToString("yyyy-MM-dd") ?? "—";
+        var target = result.TargetCompletionDate?.ToString("yyyy-MM-dd") ?? "—";
+
+        var body =
+            $"A FIBC line plan was confirmed and saved to prod_fibcallocationMaster.\n\n" +
+            $"Order:           {result.OrderNo}\n" +
+            $"Customer:        {request.PartyName ?? "—"}\n" +
+            $"Marketing:       {request.MarketingNo ?? "—"}\n" +
+            $"Bag type:        {result.BagTypeLabel}\n" +
+            $"Quantity:        {result.Quantity:N0} pcs\n" +
+            $"Allotment mode:  {result.AllotmentMode}\n" +
+            $"Dust level:      {result.DustLevel}\n" +
+            $"Rejection %:     {result.RejectionPercentApplied:N1}\n" +
+            $"Dispatch:        {dispatch}\n" +
+            $"Target complete: {target}\n" +
+            $"Company:         {request.CompanyName ?? _options.DefaultCompanyName}\n\n" +
+            $"Rows inserted:   {result.RowsInserted}\n\n" +
+            "Proposed slots:\n" +
+            BuildCriticalSlotLines(result.ProposedSlots) +
+            "\n— FIBC Line Planning (automated)";
+
+        return SendConfirmAllotmentAsync(subject, body);
+    }
+
+    private bool IsConfirmAllotmentEnabled()
+    {
+        if (!_options.ConfirmAllotmentEmailEnabled)
+            return false;
+
+        return !string.IsNullOrWhiteSpace(ResolveConfirmAllotmentRecipients());
+    }
+
+    private string ResolveConfirmAllotmentRecipients()
+    {
+        var primary = _options.ConfirmAllotmentNotifyTo.Where(e => !string.IsNullOrWhiteSpace(e)).ToArray();
+        if (primary.Length > 0)
+            return string.Join(";", primary);
+
+        return string.Join(";", _options.QuotationHoldNotifyTo.Where(e => !string.IsNullOrWhiteSpace(e)));
+    }
+
+    private Task SendConfirmAllotmentAsync(string subject, string body)
+    {
+        var to = ResolveConfirmAllotmentRecipients();
+        if (string.IsNullOrWhiteSpace(to))
+            return Task.CompletedTask;
+
+        var cc = string.IsNullOrWhiteSpace(_options.ConfirmAllotmentNotifyCc)
+            ? _options.QuotationHoldNotifyCc
+            : _options.ConfirmAllotmentNotifyCc;
+
+        return _emailService.SendMail(to, subject, body, cc: cc);
+    }
+
     private bool IsEnabled() =>
         _options.QuotationHoldEmailEnabled && _options.QuotationHoldNotifyTo.Length > 0;
 

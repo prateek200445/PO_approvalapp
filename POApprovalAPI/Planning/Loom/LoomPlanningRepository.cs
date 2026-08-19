@@ -187,7 +187,7 @@ ORDER BY Heading", new { OrderNo = orderNo.Trim() }, commandTimeout: CommandTime
             TargetDate = row.Targetdate,
             Heading = row.Heading ?? "",
             Gsm = row.GSM ?? "",
-            FabricSize = row.FabricSize,
+            FabricSize = ParseNullableDouble(row.FabricSize),
             TotalMtr = row.TotalMtr,
             TotalKg = row.Totalkg,
         }).ToList();
@@ -282,8 +282,52 @@ WHERE PONO = @OrderNo
         string? companyName,
         CancellationToken ct = default)
     {
-        var grid = await GetAllocationGridAsync(dateFrom, dateTo, companyName, ct);
-        return grid.Items;
+        ct.ThrowIfCancellationRequested();
+        var company = ResolveCompany(companyName);
+        var from = dateFrom.Date;
+        var to = dateTo.Date;
+        if (from > to)
+            (from, to) = (to, from);
+
+        var inclusiveDateTo = to.AddDays(1);
+
+        using var connection = _database.CreateConnection();
+        // Include rows that started before @DateFrom but still overlap the planning window (adjacency / Case i–iv).
+        var rows = (await connection.QueryAsync<AllocationGridRow>(@"
+SELECT
+    a.SrNo,
+    a.LoomNo,
+    m.CompanyName,
+    m.LoomCode,
+    m.LoomSpecification,
+    a.PartyName,
+    a.PONO,
+    a.AllocationDate,
+    a.ToDate,
+    a.ReqGSM,
+    a.asize,
+    a.AllocationType,
+    a.Color,
+    a.Sector,
+    a.Remarks,
+    a.isActive
+FROM Prod_LoomAlocationMaster a WITH (NOLOCK)
+INNER JOIN NewMISLoomMaster m WITH (NOLOCK)
+    ON m.LoomNo = a.LoomNo
+   AND m.CompanyName = @CompanyName
+WHERE a.AllocationDate < @InclusiveDateTo
+  AND (
+        a.AllocationDate >= @DateFrom
+        OR COALESCE(a.ToDate, a.AllocationDate) >= @DateFrom
+      )
+ORDER BY a.AllocationDate DESC, a.LoomNo", new
+        {
+            CompanyName = company,
+            DateFrom = from,
+            InclusiveDateTo = inclusiveDateTo,
+        }, commandTimeout: CommandTimeoutSeconds)).ToList();
+
+        return rows.Select(MapAllocationGridItem).ToList();
     }
 
     public async Task<LoomProductionMeterGridResult> GetProductionMetersAsync(
@@ -718,7 +762,7 @@ WHERE PONO = @OrderNo
         public DateTime? Targetdate { get; set; }
         public string? Heading { get; set; }
         public string? GSM { get; set; }
-        public double? FabricSize { get; set; }
+        public string? FabricSize { get; set; }
         public double? TotalMtr { get; set; }
         public double? Totalkg { get; set; }
     }
@@ -763,5 +807,14 @@ WHERE PONO = @OrderNo
         public double? WarpMesh { get; set; }
         public double? WeftMesh { get; set; }
         public string? FormulaName { get; set; }
+    }
+
+    private static double? ParseNullableDouble(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var cleaned = value.Trim().Replace(",", "");
+        return double.TryParse(cleaned, out var parsed) ? parsed : null;
     }
 }

@@ -23,6 +23,9 @@ public static class BagTypeMapper
         if (ErpFamilyToLabel.TryGetValue(trimmed, out var label))
             return label;
 
+        if (trimmed.Contains("Double Loop", StringComparison.OrdinalIgnoreCase))
+            return "U-Panel";
+
         if (trimmed.Contains("UPanel", StringComparison.OrdinalIgnoreCase) ||
             trimmed.Contains("U-Panel", StringComparison.OrdinalIgnoreCase))
             return "U-Panel";
@@ -49,6 +52,9 @@ public static class BagTypeMapper
             if (trimmed.Equals(key, StringComparison.OrdinalIgnoreCase))
                 return key.Equals("Upanel", StringComparison.OrdinalIgnoreCase) ? "UPanel" : key;
         }
+
+        if (trimmed.Contains("Double Loop", StringComparison.OrdinalIgnoreCase))
+            return "UPanel";
 
         if (trimmed.Contains("UPanel", StringComparison.OrdinalIgnoreCase) ||
             trimmed.Contains("Upanel", StringComparison.OrdinalIgnoreCase))

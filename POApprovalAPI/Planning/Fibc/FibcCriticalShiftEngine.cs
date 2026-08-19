@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Options;
 using POApprovalAPI.Planning.Fibc.Models;
+using POApprovalAPI.Planning.Setup;
+using POApprovalAPI.Planning.Setup.Models;
 
 namespace POApprovalAPI.Planning.Fibc;
 
@@ -18,6 +20,7 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
     private readonly IFibcPlanningRepository _repository;
     private readonly IFibcPlanningEngine _planningEngine;
     private readonly IFibcQuotationHoldRepository _holdRepository;
+    private readonly PlanningRuntimeContextLoader _runtimeLoader;
     private readonly FibcPlanningEmailNotifier _emailNotifier;
     private readonly FibcPlanningOptions _options;
 
@@ -25,12 +28,14 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
         IFibcPlanningRepository repository,
         IFibcPlanningEngine planningEngine,
         IFibcQuotationHoldRepository holdRepository,
+        PlanningRuntimeContextLoader runtimeLoader,
         FibcPlanningEmailNotifier emailNotifier,
         IOptions<FibcPlanningOptions> options)
     {
         _repository = repository;
         _planningEngine = planningEngine;
         _holdRepository = holdRepository;
+        _runtimeLoader = runtimeLoader;
         _emailNotifier = emailNotifier;
         _options = options.Value;
     }
@@ -62,12 +67,45 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
         var lookbackFrom = targetDate.AddDays(-MaxLookbackDays);
         var forwardDays = _options.CriticalShiftMaxForwardDays > 0 ? _options.CriticalShiftMaxForwardDays : 60;
         var gridDateTo = targetDate.AddDays(forwardDays);
+        var allotmentMode = NormalizeAllotmentMode(request.AllotmentMode);
 
-        var lines = await _repository.GetLineConfigAsync(company, ct);
-        var eligibleLines = lines
-            .Where(l => LinePreferenceHelper.LineSupportsBagFamily(l.BagType, erpFamily))
+        var runtime = await _runtimeLoader.LoadAsync(company, ct);
+        var erpLines = await _repository.GetLineConfigAsync(company, ct);
+        var eligiblePortalLines = runtime.Lines
+            .Where(l => runtime.LineSupportsBagFamily(l, l.ErpBagType, erpFamily))
             .ToList();
-        var preferredLineNos = LinePreferenceHelper.GetPreferredLines(erpFamily);
+        if (eligiblePortalLines.Count == 0)
+        {
+            eligiblePortalLines = erpLines
+                .Where(l => LinePreferenceHelper.LineSupportsBagFamily(l.BagType, erpFamily))
+                .Select(l => new PlanningLineConfigDto
+                {
+                    LineNo = l.LineNo,
+                    ErpBagType = l.BagType,
+                    AllowedBagFamilies = PlanningSetupHelpers.InferBagFamilies(l.BagType),
+                    CapacityNormal = l.BagCapacity,
+                    IsActive = true,
+                    PreferenceOrder = l.LineNo,
+                })
+                .ToList();
+        }
+
+        var eligibleLines = eligiblePortalLines
+            .Select(l => new FibcLineConfigDto
+            {
+                LineNo = l.LineNo,
+                BagType = l.ErpBagType ?? "",
+                BagCapacity = l.CapacityNormal ?? l.ErpBagCapacity ?? 0,
+            })
+            .ToList();
+        var preferredLineNos = runtime.GetPreferredLines(erpFamily);
+        if (preferredLineNos.Count == 0)
+            preferredLineNos = eligiblePortalLines.Select(l => l.LineNo).Distinct().OrderBy(n => n).ToList();
+
+        var backlogRemaining = runtime.BacklogByLineShift.ToDictionary(
+            kv => kv.Key,
+            kv => kv.Value,
+            StringComparer.OrdinalIgnoreCase);
 
         var grid = await _repository.GetSlotGridAsync(lookbackFrom, gridDateTo, company, ct);
         var activeShifts = grid.Items
@@ -90,6 +128,9 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
         var displacements = new List<FibcOrderShiftDisplacementDto>();
         var movedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var warnings = new List<string>(initialPreview.Warnings);
+
+        if (backlogRemaining.Values.Sum() > SlotEpsilon)
+            warnings.Add($"Open backlog reserves {backlogRemaining.Values.Sum():N0} pcs on line+shift before critical allotment.");
 
         if (pinToTargetDate)
         {
@@ -134,7 +175,9 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
                 activeShifts,
                 initialPreview.CapacityPerShift,
                 contextParty: request.PartyName,
-                targetDateOnly: true);
+                targetDateOnly: true,
+                allotmentMode: allotmentMode,
+                backlogRemaining: CloneBacklogRemaining(backlogRemaining));
 
             var targetShortfall = RemainingQty(initialPreview.Quantity, targetBeforeShift);
             if (targetShortfall <= SlotEpsilon)
@@ -182,7 +225,9 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
                         preferredLineNos,
                         activeShifts,
                         initialPreview.CapacityPerShift,
-                        request.PartyName) <= SlotEpsilon)
+                        request.PartyName,
+                        allotmentMode,
+                        backlogRemaining) <= SlotEpsilon)
                     break;
             }
             else if (RemainingAfterDisplacements(initialPreview.Quantity, displacements, initialPreview.ProposedSlots) <= SlotEpsilon)
@@ -257,7 +302,9 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
             activeShifts,
             initialPreview.CapacityPerShift,
             contextParty: request.PartyName,
-            targetDateOnly: pinToTargetDate);
+            targetDateOnly: pinToTargetDate,
+            allotmentMode: allotmentMode,
+            backlogRemaining: CloneBacklogRemaining(backlogRemaining));
 
         var remaining = RemainingQty(initialPreview.Quantity, proposed);
         var fullyAllotted = remaining <= SlotEpsilon;
@@ -447,6 +494,8 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
         PartyName = request.PartyName,
         MarketingNo = request.MarketingNo,
         ReplaceExisting = request.ReplaceExisting,
+        AllotmentMode = request.AllotmentMode,
+        DustLevel = request.DustLevel,
     };
 
     private static double RemainingQty(FibcAllotmentResult preview) =>
@@ -468,7 +517,9 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
         IReadOnlyList<int> preferredLineNos,
         IReadOnlyList<string> activeShifts,
         double capacityPerShift,
-        string? contextParty)
+        string? contextParty,
+        string allotmentMode,
+        Dictionary<string, double> backlogRemaining)
     {
         var proposed = AllotOnVirtualGrid(
             orderNo,
@@ -484,7 +535,9 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
             activeShifts,
             capacityPerShift,
             contextParty,
-            targetDateOnly: true);
+            targetDateOnly: true,
+            allotmentMode: allotmentMode,
+            backlogRemaining: CloneBacklogRemaining(backlogRemaining));
         return RemainingQty(quantity, proposed);
     }
 
@@ -515,14 +568,59 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
         IReadOnlyList<string> activeShifts,
         double capacityPerShift,
         string? contextParty,
-        bool targetDateOnly = false)
+        bool targetDateOnly = false,
+        string allotmentMode = "OrderWise",
+        Dictionary<string, double>? backlogRemaining = null)
     {
         var shiftPreference = _options.ShiftPreference;
         var proposed = new List<FibcSlotGridItemDto>();
         var usedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var lineRotation = 0;
         var remainingQty = quantity;
         var dayStop = targetDateOnly ? targetDate : lookbackFrom;
+        var backlog = backlogRemaining ?? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        var orderWise = !string.Equals(allotmentMode, "SlotWise", StringComparison.OrdinalIgnoreCase);
+        var lineRotation = 0;
+
+        if (orderWise)
+        {
+            foreach (var lineNo in preferredLineNos)
+            {
+                if (remainingQty <= SlotEpsilon)
+                    break;
+
+                if (!eligibleLines.Any(l => l.LineNo == lineNo))
+                    continue;
+
+                for (var day = targetDate; day >= dayStop && remainingQty > SlotEpsilon; day = day.AddDays(-1))
+                {
+                    var daySlots = gridItems
+                        .Where(s => s.PlanDate.Date == day.Date)
+                        .Where(s => ParseLineNo(s.LineNo) == lineNo)
+                        .Where(s => BagTypeMapper.NormalizeErpFamily(s.BagType).Equals(erpFamily, StringComparison.OrdinalIgnoreCase))
+                        .Where(s => GetVirtualRemaining(virtualRemaining, s.PlanDate, s.LineNo, s.Shift) > SlotEpsilon)
+                        .Where(s => activeShifts.Contains(s.Shift, StringComparer.OrdinalIgnoreCase))
+                        .Where(s => !usedKeys.Contains(SlotKey(s.PlanDate, s.LineNo, s.Shift)))
+                        .OrderBy(s => LinePreferenceHelper.GetPreferenceRank(erpFamily, lineNo, s.Shift, shiftPreference))
+                        .ToList();
+
+                    foreach (var slot in daySlots)
+                    {
+                        if (remainingQty <= SlotEpsilon)
+                            break;
+
+                        if (!TryAllotVirtualSlot(slot, orderNo, company, contextParty, virtualRemaining, backlog, remainingQty,
+                                out var item, out var allotQty))
+                            continue;
+
+                        proposed.Add(item);
+                        usedKeys.Add(SlotKey(slot.PlanDate, slot.LineNo, slot.Shift));
+                        remainingQty = Math.Round(remainingQty - allotQty, 2);
+                    }
+                }
+            }
+
+            return proposed;
+        }
 
         for (var day = targetDate; day >= dayStop && remainingQty > SlotEpsilon; day = day.AddDays(-1))
         {
@@ -542,35 +640,11 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
                 if (remainingQty <= SlotEpsilon)
                     break;
 
-                var effectiveRemaining = GetVirtualRemaining(virtualRemaining, slot.PlanDate, slot.LineNo, slot.Shift);
-                var allotQty = Math.Round(Math.Min(remainingQty, Math.Min(slot.Capacity, effectiveRemaining)), 2);
-                if (allotQty <= SlotEpsilon)
+                if (!TryAllotVirtualSlot(slot, orderNo, company, contextParty, virtualRemaining, backlog, remainingQty,
+                        out var item, out var allotQty))
                     continue;
 
-                var allocatedPercent = slot.Capacity > 0
-                    ? Math.Round(allotQty / slot.Capacity * 100, 2)
-                    : 100d;
-
-                proposed.Add(new FibcSlotGridItemDto
-                {
-                    CompanyName = company,
-                    BagType = slot.BagType,
-                    BagTypeLabel = slot.BagTypeLabel,
-                    PartyName = contextParty,
-                    OrderNo = orderNo,
-                    LineNo = slot.LineNo,
-                    PlanDate = slot.PlanDate,
-                    Allotted = allotQty,
-                    Capacity = slot.Capacity,
-                    Remaining = Math.Max(0, effectiveRemaining - allotQty),
-                    AllocatedPercent = allocatedPercent,
-                    Shift = slot.Shift,
-                    Efficiency = slot.Efficiency,
-                    UtilizationPercent = slot.Capacity > 0 ? Math.Round(allotQty / slot.Capacity * 100, 2) : 0,
-                    OccupancyStatus = allotQty < slot.Capacity - SlotEpsilon ? "partial" : "full",
-                });
-
-                ApplyVirtualMove(virtualRemaining, slot.PlanDate, slot.LineNo, slot.Shift, allotQty, add: false);
+                proposed.Add(item);
                 usedKeys.Add(SlotKey(slot.PlanDate, slot.LineNo, slot.Shift));
                 lineRotation++;
                 remainingQty = Math.Round(remainingQty - allotQty, 2);
@@ -578,6 +652,86 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
         }
 
         return proposed;
+    }
+
+    private static bool TryAllotVirtualSlot(
+        FibcSlotGridItemDto slot,
+        string orderNo,
+        string company,
+        string? contextParty,
+        Dictionary<string, double> virtualRemaining,
+        Dictionary<string, double> backlogRemaining,
+        double remainingQty,
+        out FibcSlotGridItemDto item,
+        out double allotQty)
+    {
+        item = slot;
+        allotQty = 0;
+
+        var lineNo = ParseLineNo(slot.LineNo);
+        var effectiveRemaining = GetVirtualRemaining(virtualRemaining, slot.PlanDate, slot.LineNo, slot.Shift);
+        var lineShiftKey = PlanningRuntimeContext.LineShiftKey(lineNo, slot.Shift);
+        var backlogReserve = backlogRemaining.GetValueOrDefault(lineShiftKey);
+        if (backlogReserve > SlotEpsilon)
+        {
+            var consume = Math.Min(backlogReserve, slot.Capacity);
+            backlogRemaining[lineShiftKey] = Math.Round(backlogReserve - consume, 2);
+            effectiveRemaining = Math.Max(0, effectiveRemaining - consume);
+        }
+
+        if (effectiveRemaining <= SlotEpsilon)
+            return false;
+
+        allotQty = Math.Round(Math.Min(remainingQty, Math.Min(slot.Capacity, effectiveRemaining)), 2);
+        if (allotQty <= SlotEpsilon)
+            return false;
+
+        var allocatedPercent = slot.Capacity > 0
+            ? Math.Round(allotQty / slot.Capacity * 100, 2)
+            : 100d;
+
+        item = new FibcSlotGridItemDto
+        {
+            CompanyName = company,
+            BagType = slot.BagType,
+            BagTypeLabel = slot.BagTypeLabel,
+            PartyName = contextParty,
+            OrderNo = orderNo,
+            LineNo = slot.LineNo,
+            PlanDate = slot.PlanDate,
+            Allotted = allotQty,
+            Capacity = slot.Capacity,
+            Remaining = Math.Max(0, effectiveRemaining - allotQty),
+            AllocatedPercent = allocatedPercent,
+            Shift = slot.Shift,
+            Efficiency = slot.Efficiency,
+            UtilizationPercent = slot.Capacity > 0 ? Math.Round(allotQty / slot.Capacity * 100, 2) : 0,
+            OccupancyStatus = allotQty < slot.Capacity - SlotEpsilon ? "partial" : "full",
+        };
+
+        ApplyVirtualMove(virtualRemaining, slot.PlanDate, slot.LineNo, slot.Shift, allotQty, add: false);
+        return true;
+    }
+
+    private static Dictionary<string, double> CloneBacklogRemaining(IReadOnlyDictionary<string, double> source) =>
+        source.ToDictionary(static kv => kv.Key, static kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+
+    private static string NormalizeAllotmentMode(string? mode)
+    {
+        if (string.Equals(mode, "SlotWise", StringComparison.OrdinalIgnoreCase))
+            return "SlotWise";
+        return "OrderWise";
+    }
+
+    private static string NormalizeDustLevel(string? dust)
+    {
+        if (string.IsNullOrWhiteSpace(dust))
+            return "Normal";
+        var d = dust.Trim();
+        if (d.StartsWith("Single", StringComparison.OrdinalIgnoreCase)) return "Single";
+        if (d.StartsWith("Double", StringComparison.OrdinalIgnoreCase)) return "Double";
+        if (d.StartsWith("Triple", StringComparison.OrdinalIgnoreCase)) return "Triple";
+        return "Normal";
     }
 
     private FibcSlotGridItemDto? FindForwardAlternativeSlot(

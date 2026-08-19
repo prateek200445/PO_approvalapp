@@ -13,6 +13,11 @@ public sealed class LoomPlanningOptions
     /// <summary>Do not plan more than this many days before fabric completion date.</summary>
     public int MaxPlanningHorizonDays { get; set; } = 30;
 
+    /// <summary>
+    /// Extra days before the planning horizon when loading ERP allocations for adjacency / similar-fabric matching.
+    /// </summary>
+    public int AllocationLookbackDays { get; set; } = 14;
+
     /// <summary>Max consecutive days on one loom before spilling to another.</summary>
     public int MaxDaysPerLoomSegment { get; set; } = 14;
 
