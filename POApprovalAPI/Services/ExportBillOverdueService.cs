@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Globalization;
+using ClosedXML.Excel;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
@@ -17,8 +19,10 @@ public class ExportBillOverdueService
     public const int MaxPageSize = 200;
     private const int CommandTimeoutSeconds = 120;
     private const double MinPendingInr = 100;
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(60);
-    private static readonly TimeSpan MetaCacheTtl = TimeSpan.FromHours(2);
+    /// <summary>Only bills with BillDate on or after this FY start (1 April 2026).</summary>
+    private static readonly DateTime MinBillDate = new(2026, 4, 1);
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(4);
+    private static readonly TimeSpan MetaCacheTtl = TimeSpan.FromHours(6);
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> LoadLocks = new();
 
     private readonly DatabaseService _database;
@@ -32,46 +36,61 @@ public class ExportBillOverdueService
 
     public async Task<IReadOnlyList<string>> GetCompaniesAsync()
     {
-        const string key = "export-bill-overdue-companies-v1";
+        const string key = "export-bill-overdue-companies-v2";
         if (_cache.TryGetValue(key, out IReadOnlyList<string>? cached) && cached is not null)
             return cached;
 
-        using var connection = _database.CreateConnection();
-        var rows = await connection.QueryAsync<string>(
-            @"SELECT Name
-              FROM FactoryInfo WITH (NOLOCK)
-              ORDER BY Name");
-        var list = rows
-            .Where(n => !string.IsNullOrWhiteSpace(n))
-            .Select(n => n.Trim())
+        var factories = await GetFactoryRowsAsync();
+        var list = factories
+            .Select(f => f.Name)
+            .Where(n => n.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         _cache.Set(key, (IReadOnlyList<string>)list, MetaCacheTtl);
+        return list;
+    }
 
-        // Warm the usual export filter in the background so the first UI load is cache-hit.
-        var preferred = list.FirstOrDefault(c =>
-            c.Equals("HCP Plastene Bulkpack Ltd", StringComparison.OrdinalIgnoreCase))
-            ?? list.FirstOrDefault(c =>
-                !c.Contains("(All)", StringComparison.OrdinalIgnoreCase) &&
-                !c.Equals("All Companies", StringComparison.OrdinalIgnoreCase));
-        if (!string.IsNullOrWhiteSpace(preferred))
+    /// <summary>
+    /// Company dropdown with FactoryInfo groups first (same G-{group} pattern as Ledger Summary).
+    /// </summary>
+    public async Task<IReadOnlyList<ExportCompanyOptionDto>> GetCompanyOptionsAsync()
+    {
+        const string key = "export-bill-overdue-company-options-v1";
+        if (_cache.TryGetValue(key, out IReadOnlyList<ExportCompanyOptionDto>? cached) && cached is not null)
+            return cached;
+
+        var factories = await GetFactoryRowsAsync();
+        var options = new List<ExportCompanyOptionDto>();
+
+        var groups = factories
+            .Select(f => f.GroupName)
+            .Where(g => g.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var group in groups)
         {
-            var company = preferred;
-            var asOf = DateTime.Today;
-            _ = Task.Run(async () =>
+            options.Add(new ExportCompanyOptionDto
             {
-                try
-                {
-                    await GetOverdueBillsAsync(company, asOf, DefaultGroupName, 1, DefaultPageSize);
-                }
-                catch
-                {
-                    // Warm is best-effort.
-                }
+                Value = $"G-{group}",
+                Label = $"{group} (Group)",
+                Kind = "group",
             });
         }
 
-        return list;
+        foreach (var factory in factories.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            options.Add(new ExportCompanyOptionDto
+            {
+                Value = $"C-{factory.SrNo}",
+                Label = factory.Name,
+                Kind = "company",
+            });
+        }
+
+        _cache.Set(key, (IReadOnlyList<ExportCompanyOptionDto>)options, MetaCacheTtl);
+        return options;
     }
 
     public async Task<IReadOnlyList<string>> GetGroupsAsync()
@@ -139,12 +158,16 @@ public class ExportBillOverdueService
 
         var companyLabel = string.IsNullOrWhiteSpace(company) ? "All Companies" : company.Trim();
         var asOfDate = asOf.Date;
-        var cacheKey = $"export-bill-overdue-v11|{companyLabel}|{asOfDate:yyyy-MM-dd}|{selectedGroup}";
+        var universeKey = UniverseCacheKey(asOfDate, selectedGroup);
 
         if (refresh)
-            _cache.Remove(cacheKey);
+        {
+            _cache.Remove(universeKey);
+            _cache.Remove(universeKey + "|xlsx-v3");
+        }
 
-        var rows = await GetOrLoadRowsAsync(cacheKey, companyLabel, asOfDate, selectedGroup);
+        var universe = await GetOrLoadRowsAsync(universeKey, asOfDate, selectedGroup);
+        var rows = await FilterRowsByCompanyAsync(universe, companyLabel);
         var total = rows.Count;
         var pageItems = rows.Skip(offset).Take(pageSize).ToList();
 
@@ -161,9 +184,242 @@ public class ExportBillOverdueService
         };
     }
 
+    /// <summary>
+    /// Preload companies, groups, and today's All-Companies overdue list so the UI is a cache hit.
+    /// </summary>
+    public async Task WarmDefaultCachesAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await GetCompanyOptionsAsync();
+        cancellationToken.ThrowIfCancellationRequested();
+        await GetGroupsAsync();
+        cancellationToken.ThrowIfCancellationRequested();
+        await GetCompaniesAsync();
+        cancellationToken.ThrowIfCancellationRequested();
+        await GetOverdueBillsAsync("All Companies", DateTime.Today, DefaultGroupName, 1, DefaultPageSize);
+    }
+
+    private static string UniverseCacheKey(DateTime asOfDate, string selectedGroup) =>
+        $"export-bill-overdue-v18|{asOfDate:yyyy-MM-dd}|{selectedGroup}";
+
+    public async Task<byte[]> BuildExportAsync(
+        string company,
+        DateTime asOf,
+        string? groupName)
+    {
+        var selectedGroup = string.IsNullOrWhiteSpace(groupName) ? DefaultGroupName : groupName.Trim();
+        if (!IsExportReceivableGroup(selectedGroup))
+            selectedGroup = DefaultGroupName;
+
+        var companyLabel = string.IsNullOrWhiteSpace(company) ? "All Companies" : company.Trim();
+        var asOfDate = asOf.Date;
+        var universeKey = UniverseCacheKey(asOfDate, selectedGroup);
+        var excelKey = $"{universeKey}|{companyLabel}|xlsx-v4";
+        if (_cache.TryGetValue(excelKey, out byte[]? cachedExcel) && cachedExcel is { Length: > 0 })
+            return cachedExcel;
+
+        var universe = await GetOrLoadRowsAsync(universeKey, asOfDate, selectedGroup);
+        var rows = await FilterRowsByCompanyAsync(universe, companyLabel);
+        var bytes = BuildAttractiveWorkbook(rows, companyLabel, selectedGroup, asOfDate);
+        _cache.Set(excelKey, bytes, TimeSpan.FromMinutes(30));
+        return bytes;
+    }
+
+    private static byte[] BuildAttractiveWorkbook(
+        List<ExportBillOverdueItemDto> rows,
+        string companyLabel,
+        string selectedGroup,
+        DateTime asOfDate)
+    {
+        var displayGroup = companyLabel.StartsWith("G-", StringComparison.OrdinalIgnoreCase)
+            ? companyLabel[2..] + " (Group)"
+            : companyLabel;
+        var totalAmount = rows.Sum(r => r.BillAmount);
+        var totalPending = rows.Sum(r => r.PendingAmount);
+
+        using var workbook = new XLWorkbook();
+        var sheet = workbook.Worksheets.Add("Overdue bills");
+        sheet.Style.Font.FontName = "Calibri";
+        sheet.Style.Font.FontSize = 11;
+        sheet.ShowGridLines = false;
+
+        var navy = XLColor.FromHtml("#0B3A5B");
+        var headerBlue = XLColor.FromHtml("#1565A8");
+        var gold = XLColor.FromHtml("#C9A227");
+        var kpiFill = XLColor.FromHtml("#F4F8FC");
+
+        sheet.Range(1, 1, 1, 10).Merge();
+        var title = sheet.Cell(1, 1);
+        title.Value = "EXPORT BILL OVERDUE";
+        title.Style.Font.Bold = true;
+        title.Style.Font.FontSize = 20;
+        title.Style.Font.FontColor = XLColor.White;
+        title.Style.Fill.BackgroundColor = navy;
+        title.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+        title.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        title.Style.Alignment.Indent = 1;
+        sheet.Row(1).Height = 32;
+
+        sheet.Range(2, 1, 2, 10).Merge();
+        var subtitle = sheet.Cell(2, 1);
+        subtitle.Value = $"Overseas receivables  ·  Bills dated 01-Apr-2026 onwards  ·  Generated {DateTime.Now:dd-MMM-yyyy HH:mm}";
+        subtitle.Style.Font.FontColor = XLColor.White;
+        subtitle.Style.Font.FontSize = 10;
+        subtitle.Style.Fill.BackgroundColor = headerBlue;
+        subtitle.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        subtitle.Style.Alignment.Indent = 1;
+        sheet.Row(2).Height = 20;
+
+        sheet.Range(3, 1, 3, 10).Merge();
+        sheet.Cell(3, 1).Style.Fill.BackgroundColor = gold;
+        sheet.Row(3).Height = 4;
+
+        WriteKpi(sheet, 5, 1, "Company group", displayGroup, navy, kpiFill, 2);
+        WriteKpi(sheet, 5, 3, "Ledger group", selectedGroup, navy, kpiFill, 2);
+        WriteKpi(sheet, 5, 5, "As of date", asOfDate.ToString("dd-MMM-yyyy"), navy, kpiFill, 1);
+        WriteKpi(sheet, 5, 6, "Bills", rows.Count.ToString("N0"), navy, kpiFill, 1);
+        WriteKpi(sheet, 5, 7, "Total amount (INR)", totalAmount, navy, kpiFill, 2);
+        WriteKpi(sheet, 5, 9, "Pending (INR)", totalPending, navy, kpiFill, 2);
+
+        const int headerRow = 8;
+        var headers = new[]
+        {
+            "Company", "Customer name", "Bill no", "Bill date",
+            "Amount (INR)", "Currency", "Foreign amount", "Due date", "Overdue days", "Pending (INR)",
+        };
+        for (var i = 0; i < headers.Length; i++)
+            sheet.Cell(headerRow, i + 1).Value = headers[i];
+
+        var data = rows.Select(r => new object?[]
+        {
+            r.CompanyName,
+            string.IsNullOrWhiteSpace(r.CustomerName) ? r.LedgerName : r.CustomerName,
+            r.BillNo,
+            ParseIsoDate(r.BillDate),
+            r.BillAmount,
+            r.BillCurrency,
+            r.ForeignAmount > 0 ? r.ForeignAmount : null,
+            ParseIsoDate(r.DueDate),
+            r.OverdueDays,
+            r.PendingAmount,
+        });
+        if (rows.Count > 0)
+            sheet.Cell(headerRow + 1, 1).InsertData(data);
+
+        var lastDataRow = headerRow + Math.Max(rows.Count, 1);
+        if (rows.Count > 0)
+        {
+            var tableRange = sheet.Range(headerRow, 1, lastDataRow, headers.Length);
+            var table = tableRange.CreateTable("OverdueBills");
+            table.Theme = XLTableTheme.TableStyleMedium2;
+            table.ShowAutoFilter = true;
+            table.ShowTotalsRow = true;
+            table.Field("Company").TotalsRowLabel = "Total";
+            table.Field("Amount (INR)").TotalsRowFunction = XLTotalsRowFunction.Sum;
+            table.Field("Foreign amount").TotalsRowFunction = XLTotalsRowFunction.Sum;
+            table.Field("Pending (INR)").TotalsRowFunction = XLTotalsRowFunction.Sum;
+            table.Field("Overdue days").TotalsRowFunction = XLTotalsRowFunction.Average;
+        }
+
+        var headerRange = sheet.Range(headerRow, 1, headerRow, headers.Length);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Font.FontColor = XLColor.White;
+        headerRange.Style.Fill.BackgroundColor = navy;
+        headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        headerRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        sheet.Row(headerRow).Height = 22;
+
+        if (rows.Count > 0)
+        {
+            sheet.Range(headerRow + 1, 5, lastDataRow, 5).Style.NumberFormat.Format = "#,##0.00";
+            sheet.Range(headerRow + 1, 7, lastDataRow, 7).Style.NumberFormat.Format = "#,##0.00";
+            sheet.Range(headerRow + 1, 10, lastDataRow, 10).Style.NumberFormat.Format = "#,##0.00";
+            sheet.Range(headerRow + 1, 4, lastDataRow, 4).Style.DateFormat.Format = "dd-mmm-yyyy";
+            sheet.Range(headerRow + 1, 8, lastDataRow, 8).Style.DateFormat.Format = "dd-mmm-yyyy";
+            sheet.Range(headerRow + 1, 5, lastDataRow, 5).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+            sheet.Range(headerRow + 1, 7, lastDataRow, 7).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+            sheet.Range(headerRow + 1, 9, lastDataRow, 10).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+            sheet.Range(headerRow + 1, 6, lastDataRow, 6).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            sheet.Range(headerRow + 1, 9, lastDataRow, 9).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        }
+
+        sheet.Column(1).Width = 28;
+        sheet.Column(2).Width = 34;
+        sheet.Column(3).Width = 22;
+        sheet.Column(4).Width = 14;
+        sheet.Column(5).Width = 16;
+        sheet.Column(6).Width = 11;
+        sheet.Column(7).Width = 16;
+        sheet.Column(8).Width = 14;
+        sheet.Column(9).Width = 14;
+        sheet.Column(10).Width = 16;
+
+        sheet.SheetView.FreezeRows(headerRow);
+        sheet.SheetView.FreezeColumns(2);
+        sheet.PageSetup.PageOrientation = XLPageOrientation.Landscape;
+        sheet.PageSetup.FitToPages(1, 0);
+        sheet.PageSetup.Header.Left.AddText("Export Bill Overdue");
+        sheet.PageSetup.Footer.Right.AddText("Page &P of &N");
+
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
+    }
+
+    private static void WriteKpi(
+        IXLWorksheet sheet,
+        int row,
+        int col,
+        string label,
+        object value,
+        XLColor navy,
+        XLColor fill,
+        int mergeCols)
+    {
+        var lastCol = col + mergeCols - 1;
+        sheet.Range(row, col, row, lastCol).Merge();
+        sheet.Range(row + 1, col, row + 1, lastCol).Merge();
+        var labelCell = sheet.Cell(row, col);
+        labelCell.Value = label.ToUpperInvariant();
+        labelCell.Style.Font.FontSize = 8;
+        labelCell.Style.Font.Bold = true;
+        labelCell.Style.Font.FontColor = navy;
+        labelCell.Style.Fill.BackgroundColor = fill;
+        labelCell.Style.Alignment.Indent = 1;
+        var valueCell = sheet.Cell(row + 1, col);
+        if (value is double d)
+        {
+            valueCell.Value = d;
+            valueCell.Style.NumberFormat.Format = "#,##0.00";
+        }
+        else
+        {
+            valueCell.Value = Convert.ToString(value) ?? "";
+        }
+        valueCell.Style.Font.Bold = true;
+        valueCell.Style.Font.FontSize = 12;
+        valueCell.Style.Font.FontColor = navy;
+        valueCell.Style.Fill.BackgroundColor = fill;
+        valueCell.Style.Alignment.Indent = 1;
+        sheet.Range(row, col, row + 1, lastCol).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        sheet.Range(row, col, row + 1, lastCol).Style.Border.OutsideBorderColor = XLColor.FromHtml("#D5E3EF");
+        sheet.Row(row).Height = 16;
+        sheet.Row(row + 1).Height = 22;
+    }
+
+    private static DateTime? ParseIsoDate(string iso)
+    {
+        if (string.IsNullOrWhiteSpace(iso) || iso.StartsWith("1900-01-01", StringComparison.Ordinal))
+            return null;
+        if (DateTime.TryParseExact(iso, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+            return d.Date;
+        if (DateTime.TryParse(iso, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+            return parsed.Date;
+        return null;
+    }
+
     private async Task<List<ExportBillOverdueItemDto>> GetOrLoadRowsAsync(
         string cacheKey,
-        string companyLabel,
         DateTime asOfDate,
         string selectedGroup)
     {
@@ -177,7 +433,7 @@ public class ExportBillOverdueService
             if (_cache.TryGetValue(cacheKey, out cached) && cached is not null)
                 return cached;
 
-            var loaded = await LoadAllRowsAsync(companyLabel, asOfDate, selectedGroup);
+            var loaded = await LoadAllRowsAsync(asOfDate, selectedGroup);
             _cache.Set(cacheKey, loaded, new MemoryCacheEntryOptions
             {
                 AbsoluteExpirationRelativeToNow = CacheTtl,
@@ -190,62 +446,42 @@ public class ExportBillOverdueService
         }
     }
 
+    private async Task<List<ExportBillOverdueItemDto>> FilterRowsByCompanyAsync(
+        List<ExportBillOverdueItemDto> universe,
+        string companyLabel)
+    {
+        if (string.IsNullOrWhiteSpace(companyLabel) ||
+            companyLabel.Equals("All Companies", StringComparison.OrdinalIgnoreCase) ||
+            companyLabel.Contains("(All)", StringComparison.OrdinalIgnoreCase))
+            return universe;
+
+        var names = await ResolveSelectedCompaniesAsync(companyLabel);
+        if (names.Count == 0)
+            return new List<ExportBillOverdueItemDto>();
+
+        var set = names.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return universe.Where(r => set.Contains(r.CompanyName)).ToList();
+    }
+
     private async Task<List<ExportBillOverdueItemDto>> LoadAllRowsAsync(
-        string companyLabel,
         DateTime asOfDate,
         string selectedGroup)
     {
-        // Load once (cached): IC ledger keys + RBI rates for foreign display.
+        var factories = await GetFactoryRowsAsync();
+        if (factories.Count == 0)
+            return new List<ExportBillOverdueItemDto>();
+
         var icTask = GetIntercompanyExclusionAsync();
         var fxTask = GetFxRatesAsync(asOfDate);
-        await Task.WhenAll(icTask, fxTask);
-        var ic = icTask.Result;
-        var fx = fxTask.Result;
-
-        var isAllCompanies =
-            string.IsNullOrWhiteSpace(companyLabel) ||
-            companyLabel.Equals("All Companies", StringComparison.OrdinalIgnoreCase) ||
-            companyLabel.Contains("(All)", StringComparison.OrdinalIgnoreCase);
-
-        List<ExportBillOverdueItemDto> rows;
-        if (!isAllCompanies)
-        {
-            using var connection = _database.CreateConnection();
-            var companyId = await ResolveCompanyIdAsync(connection, companyLabel);
-            if (companyId is null or 0)
-                return new List<ExportBillOverdueItemDto>();
-
-            rows = await QueryCompanyFastAsync(connection, companyId.Value, asOfDate, selectedGroup);
-        }
-        else
-        {
-            var allCompanies = await GetCompaniesAsync();
-            var selected = allCompanies
-                .Where(c => !string.IsNullOrWhiteSpace(c))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            // Cap parallelism so SQL Server isn't flooded.
-            var bags = new ConcurrentBag<List<ExportBillOverdueItemDto>>();
-            await Parallel.ForEachAsync(
-                selected,
-                new ParallelOptions { MaxDegreeOfParallelism = 4 },
-                async (companyName, _) =>
-                {
-                    using var connection = _database.CreateConnection();
-                    var companyId = await ResolveCompanyIdAsync(connection, companyName);
-                    if (companyId is null or 0)
-                        return;
-                    var batch = await QueryCompanyFastAsync(
-                        connection, companyId.Value, asOfDate, selectedGroup);
-                    bags.Add(batch);
-                });
-
-            rows = bags.SelectMany(b => b).ToList();
-        }
+        var rowsTask = QueryAllSelectedAsync(asOfDate, selectedGroup);
+        await Task.WhenAll(icTask, fxTask, rowsTask);
+        var ic = await icTask;
+        var fx = await fxTask;
+        var rows = await rowsTask;
 
         return rows
             .Where(r => !IsIntercompanyRow(r, ic))
+            .Where(r => IsBillOnOrAfterMinDate(r.BillDate))
             .Select(r => ApplyForeignAmount(r, fx))
             .OrderByDescending(r => r.OverdueDays)
             .ThenBy(r => r.LedgerName, StringComparer.OrdinalIgnoreCase)
@@ -253,33 +489,92 @@ public class ExportBillOverdueService
             .ToList();
     }
 
-    private async Task<int?> ResolveCompanyIdAsync(SqlConnection connection, string companyName)
+    private async Task<IReadOnlyList<FactoryRow>> GetFactoryRowsAsync()
     {
-        var key = $"export-company-id|{companyName}";
-        if (_cache.TryGetValue(key, out int cachedId) && cachedId > 0)
-            return cachedId;
+        const string key = "export-bill-overdue-factory-rows-v1";
+        if (_cache.TryGetValue(key, out IReadOnlyList<FactoryRow>? cached) && cached is not null)
+            return cached;
 
-        var companyId = await connection.ExecuteScalarAsync<int?>(
-            @"SELECT TOP 1 SrNo
-              FROM FactoryInfo WITH (NOLOCK)
-              WHERE Name = @CompanyName",
-            new { CompanyName = companyName });
+        using var connection = _database.CreateConnection();
+        var rows = (await connection.QueryAsync<FactoryRow>(
+            @"SELECT fi.srno AS SrNo,
+                     LTRIM(RTRIM(fi.Name)) AS Name,
+                     LTRIM(RTRIM(ISNULL(fi.GroupName, N''))) AS GroupName
+              FROM FactoryInfo fi WITH (NOLOCK)
+              WHERE ISNULL(fi.Name, '') <> ''
+              ORDER BY fi.Name")).ToList();
 
-        if (companyId is > 0)
-            _cache.Set(key, companyId.Value, MetaCacheTtl);
+        _cache.Set(key, (IReadOnlyList<FactoryRow>)rows, MetaCacheTtl);
+        return rows;
+    }
 
-        return companyId;
+    private async Task<List<string>> ResolveSelectedCompaniesAsync(string companyLabel)
+    {
+        var factories = await GetFactoryRowsAsync();
+        var allNames = factories
+            .Select(f => f.Name)
+            .Where(n => n.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var tokens = (companyLabel ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(t => t.Length > 0)
+            .ToList();
+
+        if (tokens.Count == 0)
+            return new List<string>();
+
+        if (tokens.Any(t =>
+                t.Equals("All Companies", StringComparison.OrdinalIgnoreCase) ||
+                t.Contains("(All)", StringComparison.OrdinalIgnoreCase)))
+            return allNames;
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in tokens)
+        {
+            if (token.StartsWith("G-", StringComparison.OrdinalIgnoreCase))
+            {
+                var group = token[2..].Trim();
+                foreach (var factory in factories.Where(f =>
+                    f.GroupName.Equals(group, StringComparison.OrdinalIgnoreCase)))
+                    names.Add(factory.Name);
+                continue;
+            }
+
+            if (token.StartsWith("C-", StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(token[2..].Trim(), out var companyId) &&
+                companyId > 0)
+            {
+                var factory = factories.FirstOrDefault(f => f.SrNo == companyId);
+                if (factory is not null && factory.Name.Length > 0)
+                    names.Add(factory.Name);
+                continue;
+            }
+
+            var named = factories.FirstOrDefault(f =>
+                f.Name.Equals(token, StringComparison.OrdinalIgnoreCase));
+            if (named is not null)
+                names.Add(named.Name);
+        }
+
+        return names.ToList();
+    }
+
+    private async Task<List<ExportBillOverdueItemDto>> QueryAllSelectedAsync(
+        DateTime asOf,
+        string groupName)
+    {
+        using var connection = _database.CreateConnection();
+        return await QueryCompaniesFastAsync(connection, asOf, groupName);
     }
 
     /// <summary>
     /// Slim query close to ERP FrmReceivable: no per-row IC / currency_rbi joins.
-    /// Group filter is pushed into the innermost FROM so we never aggregate
-    /// domestic / other-group ledgers for Debtors-Overseas style loads.
-    /// Pending = ABS(SUM(amount)) with Forex treated as 0 (Rs calc).
+    /// One All-Companies scan; G-{group} slices FactoryInfo names in memory.
     /// </summary>
-    private static async Task<List<ExportBillOverdueItemDto>> QueryCompanyFastAsync(
+    private static async Task<List<ExportBillOverdueItemDto>> QueryCompaniesFastAsync(
         SqlConnection connection,
-        int companyId,
         DateTime asOf,
         string groupName)
     {
@@ -321,7 +616,7 @@ FROM (
         v1.companyname AS CompanyName,
         v1.ledgername AS LedgerName,
         CASE WHEN ISNULL(v1.billno, '') = '' THEN 'On Account' ELSE v1.billno END AS billno,
-        CASE WHEN ISNULL(v1.billno, '') = '' THEN CAST('1900-01-01' AS datetime) ELSE v2.billdate END AS BillDate,
+        COALESCE(v2.billdate, v1.voucherdate) AS BillDate,
         CASE WHEN ISNULL(v1.billno, '') = '' THEN CAST('1900-01-01' AS datetime) ELSE v2.duedate END AS DueDate,
         ISNULL(NULLIF(LTRIM(RTRIM(v2.BillCurrency)), ''), ISNULL(NULLIF(LTRIM(RTRIM(v1.Currency)), ''), 'Rs.')) AS DisplayCurrency,
         ISNULL(v1.amount, 0) AS amount
@@ -334,21 +629,24 @@ FROM (
        AND v1.CompanyName = v2.CompanyName
        AND v1.ledgerid = v2.LedgerId
     WHERE v1.isbillwise = 'yes'
-      AND v1.companyid = @CompanyId
+      AND v1.voucherdate >= @MinBillDate
       AND v1.voucherdate <= @AsOf
+      AND (
+            v2.billdate >= @MinBillDate
+         OR (v2.billdate IS NULL AND v1.voucherdate >= @MinBillDate)
+      )
 ) AS t1
 GROUP BY CompanyName, LedgerName, billno, BillDate, DueDate, DisplayCurrency
-HAVING ROUND(ABS(SUM(amount)), 3) >= @MinPending
-ORDER BY OverdueDays DESC, LedgerName, BillNo";
+HAVING ROUND(ABS(SUM(amount)), 3) >= @MinPending";
 
         var rows = await connection.QueryAsync<ExportBillOverdueRow>(
             sql,
             new
             {
-                CompanyId = companyId,
                 AsOf = asOf,
                 GroupName = groupName,
                 MinPending = MinPendingInr,
+                MinBillDate,
             },
             commandTimeout: CommandTimeoutSeconds);
 
@@ -464,6 +762,15 @@ INNER JOIN LedgerMaster l WITH (NOLOCK) ON icl.LedgerId = l.srno",
         return row;
     }
 
+    private static bool IsBillOnOrAfterMinDate(string billDate)
+    {
+        if (string.IsNullOrWhiteSpace(billDate) || billDate.StartsWith("1900-01-01", StringComparison.Ordinal))
+            return false;
+        if (DateTime.TryParse(billDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+            return parsed.Date >= MinBillDate;
+        return string.CompareOrdinal(billDate.Trim(), "2026-04-01") >= 0;
+    }
+
     private static bool IsInr(string currency) =>
         string.IsNullOrWhiteSpace(currency) ||
         currency.StartsWith("Rs", StringComparison.OrdinalIgnoreCase) ||
@@ -500,6 +807,13 @@ INNER JOIN LedgerMaster l WITH (NOLOCK) ON icl.LedgerId = l.srno",
         public double ForeignAmount { get; set; }
     }
 
+    private sealed class FactoryRow
+    {
+        public int SrNo { get; set; }
+        public string Name { get; set; } = "";
+        public string GroupName { get; set; } = "";
+    }
+
     private sealed class FxRates
     {
         public double Dollar { get; set; } = 1;
@@ -507,6 +821,13 @@ INNER JOIN LedgerMaster l WITH (NOLOCK) ON icl.LedgerId = l.srno",
         public double Pound { get; set; } = 1;
         public double CHF { get; set; } = 1;
     }
+}
+
+public class ExportCompanyOptionDto
+{
+    public string Value { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string Kind { get; set; } = "company";
 }
 
 public class ExportBillOverdueItemDto

@@ -44,9 +44,9 @@ public class SalesDashboardService
     {
         "Amount", "AccessableValue", "TaxableAmount", "BillAMount", "BillAmount", "NetAmount",
     };
-    private static readonly TimeSpan ResultCacheTtl = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan ResultCacheTtl = TimeSpan.FromHours(4);
     private static readonly TimeSpan SupplierCacheTtl = TimeSpan.FromHours(4);
-    private static readonly TimeSpan MetaCacheTtl = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan MetaCacheTtl = TimeSpan.FromHours(6);
     private static readonly SemaphoreSlim FactoryLock = new(1, 1);
     private const int QueryTimeoutSeconds = 90;
     private const int PartyQueryTimeoutSeconds = 180;
@@ -142,7 +142,7 @@ public class SalesDashboardService
     }
 
     /// <summary>
-    /// Preload default All-Companies current-FY sales so the first page open is a cache hit.
+    /// Preload default All-Companies current-FY universe so every G-{group} slice is a cache hit.
     /// </summary>
     public async Task WarmDefaultCachesAsync(CancellationToken cancellationToken = default)
     {
@@ -163,6 +163,15 @@ public class SalesDashboardService
         {
             // KPIs/charts can still be served from overview cache if suppliers is slow.
         }
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            await GetOverviewAsync("Purchase", "All Companies", from, today);
+        }
+        catch (Exception)
+        {
+            // Sales widgets can still be served if purchase warmup is slow.
+        }
     }
 
     public async Task<SalesOverviewDto> GetOverviewAsync(
@@ -173,40 +182,79 @@ public class SalesDashboardService
         bool refresh = false)
     {
         var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
-        var key = $"sales-overview-v2:{category}:{company}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
-        return await CachedAsync(key, refresh, async () =>
-        {
-            if (isPurchase)
-            {
-                // Sequential on the same purchase view so queries share SQL buffer cache
-                // instead of stampeding it in parallel.
-                var purchaseTotals = await GetPurchaseTotalsAsync(company, dateFrom, dateTo, refresh);
-                var purchaseTrend = await GetPurchaseYearlyTrendAsync(company, dateTo, 5, refresh);
-                var purchaseSuppliers = await GetTopSuppliersAsync(company, dateFrom, dateTo, 5, refresh);
-                return new SalesOverviewDto
-                {
-                    Totals = purchaseTotals,
-                    Trend = purchaseTrend,
-                    Suppliers = purchaseSuppliers.Items,
-                };
-            }
+        var universe = await GetOrLoadUniverseAsync(category, dateFrom, dateTo, refresh);
+        var slice = await ResolveSliceCompaniesAsync(company);
+        var totals = AggregateTotals(universe.Leaves, category, slice, universe.ElapsedSeconds);
+        var trend = AggregateTrend(universe.Trend, universe.TrendRanges, slice);
 
-            // Country view is cheap and independent. EBIDTA scans run one after another
-            // so they reuse the SQL buffer pool. Suppliers (purchase view) load separately.
-            var countryTask = GetSalesByCountryAsync(company, dateFrom, dateTo, 5, refresh);
-            var salesTotals = await GetSalesTotalsAsync(company, dateFrom, dateTo, refresh);
-            var exportCustomers = await GetTopExportCustomersAsync(company, dateFrom, dateTo, 5, refresh);
-            var salesTrend = await GetSalesYearlyTrendAsync(company, dateTo, 5, refresh);
-            var country = await countryTask;
+        if (isPurchase)
+        {
+            var suppliers = await GetTopSuppliersAsync(company, dateFrom, dateTo, 5, refresh);
             return new SalesOverviewDto
             {
-                Totals = salesTotals,
-                Trend = salesTrend,
-                ByCountry = country.ByCountry,
-                CountryPeriodLabel = country.PeriodLabel,
-                ExportCustomers = exportCustomers.Items,
+                Totals = totals,
+                Trend = trend,
+                Suppliers = suppliers.Items,
             };
-        });
+        }
+
+        return new SalesOverviewDto
+        {
+            Totals = totals,
+            Trend = trend,
+            ByCountry = AggregateCountries(universe.Countries, slice, 5),
+            CountryPeriodLabel = universe.CountryPeriodLabel,
+            ExportCustomers = AggregateParties(universe.ExportCustomers, slice, 5),
+        };
+    }
+
+    private Task<SalesUniverse> GetOrLoadUniverseAsync(
+        string category,
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool refresh)
+    {
+        var selectedCategory = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase)
+            ? "Purchase"
+            : "Sales";
+        var key = $"sales-universe-v1:{selectedCategory}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        return CachedAsync(key, refresh, () => LoadUniverseCoreAsync(selectedCategory, dateFrom, dateTo));
+    }
+
+    private async Task<SalesUniverse> LoadUniverseCoreAsync(
+        string category,
+        DateTime dateFrom,
+        DateTime dateTo)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
+
+        // One All-Companies EBIDTA scan, then trend on the same view (shared buffer).
+        var leaves = await LoadEbidtaLeavesAsync(category, dateFrom, dateTo);
+        var (trend, ranges) = await LoadTrendLeavesAsync(category, dateTo, 5);
+
+        var universe = new SalesUniverse
+        {
+            Leaves = leaves,
+            Trend = trend,
+            TrendRanges = ranges,
+        };
+
+        if (!isPurchase)
+        {
+            var invYears = GetInvYearsOverlapping(dateFrom, dateTo).ToList();
+            universe.InvYears = invYears;
+            universe.CountryPeriodLabel = FormatPeriodLabel(invYears);
+            var (countries, exportCustomers, geoSource) = await LoadSalesGeoUniverseAsync(dateFrom, dateTo);
+            universe.Countries = countries;
+            universe.ExportCustomers = exportCustomers;
+            universe.CountrySource = geoSource;
+            universe.ExportSource = geoSource;
+        }
+
+        sw.Stop();
+        universe.ElapsedSeconds = sw.Elapsed.TotalSeconds;
+        return universe;
     }
 
     /// <summary>
@@ -217,15 +265,16 @@ public class SalesDashboardService
     /// SP_Sales_EBIDTA itself has no IC filter / param ? country chart uses the same IC flag
     /// via vw_Countrywise_sales_dashboard (IsInterCompany != 'yes').
     /// </summary>
-    public Task<SalesTotalsDto> GetSalesTotalsAsync(
+    public async Task<SalesTotalsDto> GetSalesTotalsAsync(
         string company,
         DateTime dateFrom,
         DateTime dateTo,
-        bool refresh = false) =>
-        CachedAsync(
-            $"sales-totals:{company}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}",
-            refresh,
-            () => GetEbidtaTotalsAsync("Sales", company, dateFrom, dateTo));
+        bool refresh = false)
+    {
+        var universe = await GetOrLoadUniverseAsync("Sales", dateFrom, dateTo, refresh);
+        var slice = await ResolveSliceCompaniesAsync(company);
+        return AggregateTotals(universe.Leaves, "Sales", slice, universe.ElapsedSeconds);
+    }
 
     /// <summary>
     /// Total Purchase + Quantity + Average Rate + byGroup/bySubGroup.
@@ -233,118 +282,50 @@ public class SalesDashboardService
     /// but excludes intercompany: InterGroup &lt;&gt; 'Intergroup'
     /// (vw_Purchase_EBIDTA maps CommonLedgerMaster.IsInterCompany='yes' ? InterGroup='Intergroup').
     /// </summary>
-    public Task<SalesTotalsDto> GetPurchaseTotalsAsync(
+    public async Task<SalesTotalsDto> GetPurchaseTotalsAsync(
         string company,
         DateTime dateFrom,
         DateTime dateTo,
-        bool refresh = false) =>
-        CachedAsync(
-            $"sales-purchase:{company}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}",
-            refresh,
-            () => GetEbidtaTotalsAsync("Purchase", company, dateFrom, dateTo));
+        bool refresh = false)
+    {
+        var universe = await GetOrLoadUniverseAsync("Purchase", dateFrom, dateTo, refresh);
+        var slice = await ResolveSliceCompaniesAsync(company);
+        return AggregateTotals(universe.Leaves, "Purchase", slice, universe.ElapsedSeconds);
+    }
 
     /// <summary>
-    /// Shared EBIDTA totals for Sales or Purchase (same column shape / IC filter).
+    /// All-Companies EBIDTA leaves with CompanyName so G- groups can slice in memory.
+    /// No TVP join — one scan serves every company group.
     /// </summary>
-    private async Task<SalesTotalsDto> GetEbidtaTotalsAsync(
+    private async Task<List<EbidtaLeaf>> LoadEbidtaLeavesAsync(
         string category,
-        string company,
         DateTime dateFrom,
         DateTime dateTo)
     {
         var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
-        var column1 = isPurchase ? "Purchase" : "Sales";
         var viewName = isPurchase ? "vw_Purchase_EBIDTA" : "vw_Sales_EBIDTA";
-        var procedureName = isPurchase ? "SP_Purchase_EBIDTA" : "SP_Sales_EBIDTA";
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
         using var connection = _database.CreateConnection();
-
-        var selectedCompanies = await ResolveSelectedCompaniesAsync(company);
-        var isAll = IsAllCompaniesSelection(company);
-        var companyJoin = isAll ? "" : "INNER JOIN @companyname C ON C.StringValue = CompanyName";
-
         var sql = $@"
 SELECT
-    N'{column1}' AS Column1,
+    LTRIM(RTRIM(ISNULL(CompanyName, N''))) AS CompanyName,
     InterGroup,
     Groupname,
     SubGroupName,
     ROUND(SUM(Amount), 0) AS Amount,
-    ROUND(SUM(netwt), 0) AS Netwt,
-    CASE WHEN SUM(netwt) != 0
-         THEN FORMAT(ROUND(ROUND(SUM(Amount), 0) / ROUND(SUM(netwt), 0), 2), '#.00')
-         ELSE FORMAT(0, '#.00') END AS PerKg,
-    FORMAT(ROUND(SUM(SGSTAmount), 2), '#.00') AS SGSTAmount
+    ROUND(SUM(netwt), 0) AS Netwt
 FROM dbo.{viewName} WITH (NOLOCK)
-{companyJoin}
 WHERE invdate BETWEEN @DateFrom AND @DateTo
   AND InterGroup <> N'Intergroup'
-GROUP BY GROUPING SETS ((InterGroup, Groupname, SubGroupName), (InterGroup), ())
-ORDER BY InterGroup, Groupname, SubGroupName";
+GROUP BY GROUPING SETS (
+  (CompanyName, InterGroup, Groupname, SubGroupName)
+)";
 
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        command.CommandType = CommandType.Text;
-        command.CommandTimeout = QueryTimeoutSeconds;
-
-        if (!isAll)
-        {
-            var typeName = await ResolveCompanyTableTypeAsync(connection, procedureName);
-            AddCompanyTvp(command, typeName, BuildCompanyTvp(selectedCompanies));
-        }
-
-        command.Parameters.Add("@DateFrom", SqlDbType.Date).Value = dateFrom.Date;
-        command.Parameters.Add("@DateTo", SqlDbType.Date).Value = dateTo.Date;
-
-        var dataSet = new DataSet();
-        using (var adapter = new SqlDataAdapter((SqlCommand)command))
-        {
-            adapter.Fill(dataSet);
-        }
-
-        sw.Stop();
-
-        if (dataSet.Tables.Count == 0 || dataSet.Tables[0].Rows.Count == 0)
-        {
-            return new SalesTotalsDto { ElapsedSeconds = sw.Elapsed.TotalSeconds };
-        }
-
-        var table = dataSet.Tables[0];
-        var columns = table.Columns.Cast<DataColumn>().Select(c => c.ColumnName).ToList();
-        var amountCol = ResolveSalesColumn(table);
-        if (amountCol == null)
-        {
-            throw new InvalidOperationException(
-                $"{viewName} (excl. IC) returned no recognizable Amount column. Columns: " +
-                string.Join(", ", columns));
-        }
-
-        var qtyCol = ResolveQuantityColumn(table);
-        var rateCol = ResolveRateColumn(table);
-
-        // Same row shape as SP_*_EBIDTA ERP grid (IC already filtered out):
-        // Column1, InterGroup, Groupname, SubGroupName, Amount, Netwt, PerKg, SGSTAmount
-        // Grand total: Column1=Sales|Purchase, InterGroup blank, Groupname blank
-        var totals = ResolveEbidtaGrandTotals(table, amountCol, qtyCol, rateCol, column1);
-        var (byGroup, bySubGroup) = BuildEbidtaBreakdowns(table, amountCol, qtyCol, column1);
-
-        return new SalesTotalsDto
-        {
-            TotalSales = isPurchase ? 0 : totals.Amount,
-            TotalPurchase = isPurchase ? totals.Amount : 0,
-            TotalQuantity = totals.Quantity,
-            AverageRate = totals.AverageRate,
-            SalesColumn = amountCol.ColumnName,
-            QuantityColumn = qtyCol?.ColumnName ?? "",
-            RateColumn = rateCol?.ColumnName ?? "",
-            Method = totals.Method + "_ExclIntercompany",
-            RowCount = table.Rows.Count,
-            Columns = columns,
-            ElapsedSeconds = sw.Elapsed.TotalSeconds,
-            ByGroup = byGroup,
-            BySubGroup = bySubGroup,
-        };
+        var rows = await connection.QueryAsync<EbidtaLeaf>(
+            sql,
+            new { DateFrom = dateFrom.Date, DateTo = dateTo.Date },
+            commandTimeout: QueryTimeoutSeconds);
+        return rows.ToList();
     }
 
     /// <summary> Backward-compatible wrapper. </summary>
@@ -360,120 +341,71 @@ ORDER BY InterGroup, Groupname, SubGroupName";
     /// <summary>
     /// Year-by-year Total Sales for Sales Trend chart.
     /// Each point = excl-IC Sales grand-total Amount (vw_Sales_EBIDTA, same as GetSalesTotalsAsync)
-    /// for that Indian FY (Apr?Mar). Current FY is capped at <paramref name="asOf"/>.
+    /// for that Indian FY (Apr–Mar). Current FY is capped at <paramref name="asOf"/>.
     /// </summary>
-    public Task<List<SalesTrendDto>> GetSalesYearlyTrendAsync(
+    public async Task<List<SalesTrendDto>> GetSalesYearlyTrendAsync(
         string company,
         DateTime asOf,
         int years = 5,
-        bool refresh = false) =>
-        CachedAsync(
-            $"sales-trend:Sales:{company}:{asOf:yyyy-MM-dd}:{years}",
-            refresh,
-            () => GetEbidtaYearlyTrendAsync("Sales", company, asOf, years));
+        bool refresh = false)
+    {
+        var fyStart = asOf.Month >= 4 ? new DateTime(asOf.Year, 4, 1) : new DateTime(asOf.Year - 1, 4, 1);
+        var universe = await GetOrLoadUniverseAsync("Sales", fyStart, asOf, refresh);
+        var slice = await ResolveSliceCompaniesAsync(company);
+        return TakeTrendYears(AggregateTrend(universe.Trend, universe.TrendRanges, slice), years);
+    }
 
     /// <summary>
     /// Year-by-year Total Purchase for trend chart (vw_Purchase_EBIDTA, excl. IC).
     /// </summary>
-    public Task<List<SalesTrendDto>> GetPurchaseYearlyTrendAsync(
+    public async Task<List<SalesTrendDto>> GetPurchaseYearlyTrendAsync(
         string company,
         DateTime asOf,
         int years = 5,
-        bool refresh = false) =>
-        CachedAsync(
-            $"sales-trend:Purchase:{company}:{asOf:yyyy-MM-dd}:{years}",
-            refresh,
-            () => GetEbidtaYearlyTrendAsync("Purchase", company, asOf, years));
+        bool refresh = false)
+    {
+        var fyStart = asOf.Month >= 4 ? new DateTime(asOf.Year, 4, 1) : new DateTime(asOf.Year - 1, 4, 1);
+        var universe = await GetOrLoadUniverseAsync("Purchase", fyStart, asOf, refresh);
+        var slice = await ResolveSliceCompaniesAsync(company);
+        return TakeTrendYears(AggregateTrend(universe.Trend, universe.TrendRanges, slice), years);
+    }
 
-    private async Task<List<SalesTrendDto>> GetEbidtaYearlyTrendAsync(
+    private async Task<(List<TrendLeaf> Rows, List<TrendRange> Ranges)> LoadTrendLeavesAsync(
         string category,
-        string company,
         DateTime asOf,
-        int years = 5)
+        int years)
     {
         years = Math.Clamp(years, 1, 8);
         var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
         var viewName = isPurchase ? "vw_Purchase_EBIDTA" : "vw_Sales_EBIDTA";
-        var procedureName = isPurchase ? "SP_Purchase_EBIDTA" : "SP_Sales_EBIDTA";
-
-        var currentFyStartYear = asOf.Month >= 4 ? asOf.Year : asOf.Year - 1;
-        var ranges = new List<(int StartYear, string Period, DateTime From, DateTime To)>();
-        for (var i = years - 1; i >= 0; i--)
-        {
-            var startYear = currentFyStartYear - i;
-            var from = new DateTime(startYear, 4, 1);
-            if (from > asOf)
-                continue;
-
-            var to = new DateTime(startYear + 1, 3, 31);
-            if (to > asOf)
-                to = asOf;
-
-            var label = $"FY {startYear % 100:D2}-{(startYear + 1) % 100:D2}";
-            ranges.Add((startYear, label, from, to));
-        }
-
+        var ranges = BuildTrendRanges(asOf, years);
         if (ranges.Count == 0)
-            return new List<SalesTrendDto>();
+            return (new List<TrendLeaf>(), ranges);
 
         using var connection = _database.CreateConnection();
-        if (connection.State != ConnectionState.Open)
-            connection.Open();
-
-        var selectedCompanies = await ResolveSelectedCompaniesAsync(company);
-        if (selectedCompanies.Count == 0)
-            return ranges.Select(r => new SalesTrendDto { Period = r.Period, Amount = 0 }).ToList();
-
-        var isAll = IsAllCompaniesSelection(company);
-        var companyJoin = isAll ? "" : "INNER JOIN @companyname C ON C.StringValue = v.CompanyName";
         var sql = $@"
 SELECT
+    LTRIM(RTRIM(ISNULL(v.CompanyName, N''))) AS CompanyName,
     CASE WHEN DATEPART(MONTH, v.invdate) >= 4 THEN YEAR(v.invdate) ELSE YEAR(v.invdate) - 1 END AS FyStart,
     ROUND(SUM(v.Amount), 0) AS Amount
 FROM dbo.{viewName} v WITH (NOLOCK)
-{companyJoin}
 WHERE v.invdate BETWEEN @DateFrom AND @DateTo
   AND v.InterGroup <> N'Intergroup'
-GROUP BY CASE WHEN DATEPART(MONTH, v.invdate) >= 4 THEN YEAR(v.invdate) ELSE YEAR(v.invdate) - 1 END";
+GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
+    CASE WHEN DATEPART(MONTH, v.invdate) >= 4 THEN YEAR(v.invdate) ELSE YEAR(v.invdate) - 1 END";
 
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        command.CommandType = CommandType.Text;
-        command.CommandTimeout = QueryTimeoutSeconds;
-
-        if (!isAll)
-        {
-            var typeName = await ResolveCompanyTableTypeAsync(connection, procedureName);
-            AddCompanyTvp(command, typeName, BuildCompanyTvp(selectedCompanies));
-        }
-        command.Parameters.Add("@DateFrom", SqlDbType.Date).Value = ranges[0].From.Date;
-        command.Parameters.Add("@DateTo", SqlDbType.Date).Value = asOf.Date;
-
-        var byFy = new Dictionary<int, double>();
-        using (var reader = await command.ExecuteReaderAsync())
-        {
-            while (await reader.ReadAsync())
-            {
-                var fy = reader["FyStart"] is DBNull ? 0 : Convert.ToInt32(reader["FyStart"]);
-                var amount = reader["Amount"] is DBNull ? 0 : Convert.ToDouble(reader["Amount"]);
-                byFy[fy] = amount;
-            }
-        }
-
-        return ranges
-            .Select(r => new SalesTrendDto
-            {
-                Period = r.Period,
-                Amount = byFy.TryGetValue(r.StartYear, out var amount) ? amount : 0,
-            })
-            .ToList();
+        var rows = (await connection.QueryAsync<TrendLeaf>(
+            sql,
+            new { DateFrom = ranges[0].From.Date, DateTo = asOf.Date },
+            commandTimeout: QueryTimeoutSeconds)).ToList();
+        return (rows, ranges);
     }
 
     /// <summary>
     /// Top export countries from SalesVoucher BillAmount (same grain as the country dashboard view).
     /// Excludes India and intercompany buyers (CommonLedgerMaster.IsInterCompany = yes).
     /// </summary>
-    public Task<SalesByCountryResultDto> GetSalesByCountryAsync(
+    public async Task<SalesByCountryResultDto> GetSalesByCountryAsync(
         string company,
         DateTime dateFrom,
         DateTime dateTo,
@@ -483,80 +415,45 @@ GROUP BY CASE WHEN DATEPART(MONTH, v.invdate) >= 4 THEN YEAR(v.invdate) ELSE YEA
         if (top <= 0)
             top = 5;
         top = Math.Clamp(top, 1, 100);
-        return CachedAsync(
-            $"sales-country-noin:{company}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}:{top}",
-            refresh,
-            () => LoadSalesByCountryCore(company, dateFrom, dateTo, top));
-    }
-
-    private async Task<SalesByCountryResultDto> LoadSalesByCountryCore(
-        string company,
-        DateTime dateFrom,
-        DateTime dateTo,
-        int top)
-    {
-        var invYears = GetInvYearsOverlapping(dateFrom, dateTo).ToList();
-        var periodLabel = FormatPeriodLabel(invYears);
-        var selectedCompanies = await ResolveSelectedCompaniesAsync(company);
-        var isAll = IsAllCompaniesSelection(company);
-
-        if (invYears.Count == 0 || (!isAll && selectedCompanies.Count == 0))
-        {
-            return new SalesByCountryResultDto
-            {
-                ByCountry = new List<SalesByCountryDto>(),
-                InvYears = invYears,
-                PeriodLabel = periodLabel,
-                Source = "SalesVoucher",
-            };
-        }
-
-        List<SalesByCountryDto> rows;
-        var source = "SalesVoucher";
-        var fromVoucher = await TryGetSalesByCountryFromVoucherAsync(
-            selectedCompanies, isAll, dateFrom, dateTo, top);
-        if (fromVoucher != null)
-        {
-            rows = fromVoucher;
-        }
-        else
-        {
-            rows = await GetSalesByCountryFromEbidtaAsync(
-                selectedCompanies,
-                isAll,
-                dateFrom,
-                dateTo,
-                top);
-            source = "vw_Sales_EBIDTA";
-        }
-
-        for (var i = 0; i < rows.Count; i++)
-        {
-            rows[i].Rank = i + 1;
-            rows[i].CountryName = string.IsNullOrWhiteSpace(rows[i].CountryName)
-                ? "Unknown"
-                : rows[i].CountryName.Trim();
-        }
-
+        var universe = await GetOrLoadUniverseAsync("Sales", dateFrom, dateTo, refresh);
+        var slice = await ResolveSliceCompaniesAsync(company);
         return new SalesByCountryResultDto
         {
-            ByCountry = rows,
-            InvYears = invYears,
-            PeriodLabel = periodLabel,
-            Source = source,
+            ByCountry = AggregateCountries(universe.Countries, slice, top),
+            InvYears = universe.InvYears,
+            PeriodLabel = universe.CountryPeriodLabel,
+            Source = universe.CountrySource,
         };
     }
 
     /// <summary>
-    /// Country totals from SalesVoucher, excluding intercompany the same way as Total Sales:
-    /// CommonLedgerMaster.IsInterCompany is yes, and buyers that are FactoryInfo companies.
+    /// One All-Companies voucher/EBIDTA scan with CompanyName. Country pie and export
+    /// customers are both derived in memory after a group slice.
     /// </summary>
-    private async Task<List<SalesByCountryDto>?> TryGetSalesByCountryFromVoucherAsync(
-        IReadOnlyList<string> selectedCompanies,
-        bool isAll,
+    private async Task<(List<CountryLeaf> Countries, List<PartyLeaf> ExportCustomers, string Source)> LoadSalesGeoUniverseAsync(
         DateTime dateFrom,
-        DateTime dateTo,
-        int top)
+        DateTime dateTo)
+    {
+        var fromVoucher = await TryLoadExportPartyLeavesFromVoucherAsync(dateFrom, dateTo);
+        var source = fromVoucher != null ? "SalesVoucher" : "vw_Sales_EBIDTA";
+        var parties = fromVoucher ?? await LoadExportPartyLeavesFromEbidtaAsync(dateFrom, dateTo);
+        var countries = parties
+            .GroupBy(
+                p => (Company: p.CompanyName, Country: string.IsNullOrWhiteSpace(p.Country) ? "Unknown" : p.Country.Trim()),
+                t => t.Amount)
+            .Select(g => new CountryLeaf
+            {
+                CompanyName = g.Key.Company,
+                CountryName = g.Key.Country,
+                SalesAmount = g.Sum(),
+            })
+            .ToList();
+        return (countries, parties, source);
+    }
+
+    private async Task<List<PartyLeaf>?> TryLoadExportPartyLeavesFromVoucherAsync(
+        DateTime dateFrom,
+        DateTime dateTo)
     {
         using var connection = _database.CreateConnection();
         if (connection.State != ConnectionState.Open)
@@ -570,12 +467,13 @@ GROUP BY CASE WHEN DATEPART(MONTH, v.invdate) >= 4 THEN YEAR(v.invdate) ELSE YEA
         var masterCols = await GetViewColumnsAsync(connection, "CommonLedgerMaster");
         var countryCol = FirstExisting(masterCols, CountryColumnCandidates);
         var icCol = FirstExisting(masterCols, new[] { "IsInterCompany" });
-        if (partyCol == null || dateCol == null || amountCol == null || countryCol == null)
+        if (partyCol == null || dateCol == null || amountCol == null || countryCol == null || companyCol == null)
             return null;
 
         var partySql = Bracket(partyCol);
         var dateSql = Bracket(dateCol);
         var amountSql = Bracket(amountCol);
+        var companySql = Bracket(companyCol);
         var countrySql = Bracket(countryCol);
         var countryExpr = $@"CASE
             WHEN LOWER(LTRIM(RTRIM(cm.{countrySql}))) IN (N'india', N'in', N'ind', N'bharat')
@@ -583,10 +481,6 @@ GROUP BY CASE WHEN DATEPART(MONTH, v.invdate) >= 4 THEN YEAR(v.invdate) ELSE YEA
                 THEN N'India'
             ELSE UPPER(LTRIM(RTRIM(cm.{countrySql})))
         END";
-
-        var companyJoin = isAll || companyCol == null
-            ? ""
-            : $"INNER JOIN @companyname C ON C.StringValue = pv.{Bracket(companyCol)}";
         var icFilter = icCol == null
             ? ""
             : $"AND {InterCompanyNotYes($"cm.{Bracket(icCol)}")}";
@@ -598,13 +492,14 @@ GROUP BY CASE WHEN DATEPART(MONTH, v.invdate) >= 4 THEN YEAR(v.invdate) ELSE YEA
   )";
 
         var sql = $@"
-SELECT TOP (@Top)
-    {countryExpr} AS CountryName,
-    ROUND(SUM(CAST(pv.{amountSql} AS float)), 0) AS SalesAmount
+SELECT
+    LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))) AS CompanyName,
+    LTRIM(RTRIM(pv.{partySql})) AS Name,
+    MAX({countryExpr}) AS Country,
+    ROUND(SUM(CAST(pv.{amountSql} AS float)), 0) AS Amount
 FROM dbo.SalesVoucher pv WITH (NOLOCK)
 INNER JOIN dbo.CommonLedgerMaster cm WITH (NOLOCK)
     ON cm.LedgerName = pv.{partySql}
-{companyJoin}
 WHERE pv.{dateSql} BETWEEN @DateFrom AND @DateTo
   AND pv.{partySql} IS NOT NULL
   AND pv.{partySql} <> N''
@@ -612,71 +507,41 @@ WHERE pv.{dateSql} BETWEEN @DateFrom AND @DateTo
   AND {ExportCountryPredicate($"cm.{countrySql}")}
   {icFilter}
   {sisterFilter}
-GROUP BY {countryExpr}
-ORDER BY SalesAmount DESC";
+GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), LTRIM(RTRIM(pv.{partySql}))";
 
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        command.CommandType = CommandType.Text;
-        command.CommandTimeout = 45;
-
-        if (!isAll && companyCol != null)
-        {
-            var typeName = await ResolveCompanyTableTypeAsync(connection, "SP_Sales_EBIDTA");
-            AddCompanyTvp(command, typeName, BuildCompanyTvp(selectedCompanies));
-        }
-        command.Parameters.Add("@DateFrom", SqlDbType.Date).Value = dateFrom.Date;
-        command.Parameters.Add("@DateTo", SqlDbType.Date).Value = dateTo.Date;
-        command.Parameters.Add("@Top", SqlDbType.Int).Value = top;
-
-        var rows = new List<SalesByCountryDto>();
         try
         {
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-            {
-                rows.Add(new SalesByCountryDto
-                {
-                    CountryName = reader["CountryName"] is DBNull
-                        ? "Unknown"
-                        : Convert.ToString(reader["CountryName"]) ?? "Unknown",
-                    SalesAmount = reader["SalesAmount"] is DBNull ? 0 : Convert.ToDouble(reader["SalesAmount"]),
-                });
-            }
+            var rows = await connection.QueryAsync<PartyLeaf>(
+                sql,
+                new { DateFrom = dateFrom.Date, DateTo = dateTo.Date },
+                commandTimeout: QueryTimeoutSeconds);
+            return rows.ToList();
         }
         catch (SqlException)
         {
             return null;
         }
-
-        return rows;
     }
 
-    /// <summary>
-    /// Fallback country totals from vw_Sales_EBIDTA (InterGroup &lt;&gt; Intergroup).
-    /// </summary>
-    private async Task<List<SalesByCountryDto>> GetSalesByCountryFromEbidtaAsync(
-        IReadOnlyList<string> selectedCompanies,
-        bool isAll,
+    private async Task<List<PartyLeaf>> LoadExportPartyLeavesFromEbidtaAsync(
         DateTime dateFrom,
-        DateTime dateTo,
-        int top)
+        DateTime dateTo)
     {
-        if (!isAll && selectedCompanies.Count == 0)
-            return new List<SalesByCountryDto>();
-
         using var connection = _database.CreateConnection();
         if (connection.State != ConnectionState.Open)
             connection.Open();
 
         var ebidtaCols = await GetViewColumnsAsync(connection, "vw_Sales_EBIDTA");
+        var partyCol = FirstExisting(ebidtaCols, PartyColumnCandidates)
+            ?? FirstExisting(ebidtaCols, PurchasePartyColumnCandidates);
         var ebidtaCountry = FirstExisting(ebidtaCols, CountryColumnCandidates);
-        var partyCol = FirstExisting(ebidtaCols, PurchasePartyColumnCandidates)
-            ?? FirstExisting(ebidtaCols, PartyColumnCandidates);
         var masterCols = await GetViewColumnsAsync(connection, "CommonLedgerMaster");
         var ledgerCountry = FirstExisting(masterCols, CountryColumnCandidates);
         var icCol = FirstExisting(masterCols, new[] { "IsInterCompany" });
+        if (partyCol == null)
+            return new List<PartyLeaf>();
 
+        var partySql = Bracket(partyCol);
         string countryExpr;
         var joinLedger = "";
         var extraIc = "";
@@ -689,9 +554,10 @@ ORDER BY SalesAmount DESC";
                 ELSE UPPER(LTRIM(RTRIM(v.{Bracket(ebidtaCountry)})))
             END";
             extraIc += $@"
-  AND LTRIM(RTRIM(ISNULL(v.{Bracket(ebidtaCountry)}, N''))) <> N''";
+  AND LTRIM(RTRIM(ISNULL(v.{Bracket(ebidtaCountry)}, N''))) <> N''
+  AND {ExportCountryPredicate("v." + Bracket(ebidtaCountry))}";
         }
-        else if (partyCol != null && ledgerCountry != null)
+        else if (ledgerCountry != null)
         {
             countryExpr = $@"CASE
                 WHEN LOWER(LTRIM(RTRIM(m.{Bracket(ledgerCountry)}))) IN (N'india', N'in', N'ind', N'bharat')
@@ -701,74 +567,49 @@ ORDER BY SalesAmount DESC";
             END";
             joinLedger = $@"
 INNER JOIN CommonLedgerMaster m WITH (NOLOCK)
-    ON m.LedgerName = v.{Bracket(partyCol)}";
+    ON m.LedgerName = v.{partySql}";
             extraIc = icCol == null
                 ? $@"AND {ExportCountryPredicate($"m.{Bracket(ledgerCountry)}")}"
                 : $"AND {InterCompanyNotYes($"m.{Bracket(icCol)}")} AND {ExportCountryPredicate($"m.{Bracket(ledgerCountry)}")}";
         }
         else
         {
-            return new List<SalesByCountryDto>();
+            return new List<PartyLeaf>();
         }
 
-        var companyJoin = isAll ? "" : "INNER JOIN @companyname C ON C.StringValue = v.CompanyName";
-        var sisterFilter = partyCol == null
-            ? ""
-            : $@"
+        var sisterFilter = $@"
   AND NOT EXISTS (
         SELECT 1 FROM dbo.FactoryInfo fi WITH (NOLOCK)
-        WHERE fi.Name = v.{Bracket(partyCol)}
+        WHERE fi.Name = v.{partySql}
   )";
 
         var sql = $@"
-SELECT TOP (@Top)
-    {countryExpr} AS CountryName,
-    ROUND(SUM(v.Amount), 0) AS SalesAmount
+SELECT
+    LTRIM(RTRIM(ISNULL(v.CompanyName, N''))) AS CompanyName,
+    LTRIM(RTRIM(v.{partySql})) AS Name,
+    MAX({countryExpr}) AS Country,
+    ROUND(SUM(v.Amount), 0) AS Amount
 FROM dbo.vw_Sales_EBIDTA v WITH (NOLOCK)
-{companyJoin}
 {joinLedger}
 WHERE v.invdate BETWEEN @DateFrom AND @DateTo
   AND v.InterGroup <> N'Intergroup'
+  AND v.{partySql} IS NOT NULL
+  AND v.{partySql} <> N''
   {extraIc}
   {sisterFilter}
-GROUP BY {countryExpr}
-ORDER BY SalesAmount DESC";
+GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), LTRIM(RTRIM(v.{partySql}))";
 
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        command.CommandType = CommandType.Text;
-        command.CommandTimeout = QueryTimeoutSeconds;
-
-        if (!isAll)
-        {
-            var typeName = await ResolveCompanyTableTypeAsync(connection, "SP_Sales_EBIDTA");
-            AddCompanyTvp(command, typeName, BuildCompanyTvp(selectedCompanies));
-        }
-        command.Parameters.Add("@DateFrom", SqlDbType.Date).Value = dateFrom.Date;
-        command.Parameters.Add("@DateTo", SqlDbType.Date).Value = dateTo.Date;
-        command.Parameters.Add("@Top", SqlDbType.Int).Value = top;
-
-        var rows = new List<SalesByCountryDto>();
-        using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            rows.Add(new SalesByCountryDto
-            {
-                CountryName = reader["CountryName"] is DBNull
-                    ? "India"
-                    : Convert.ToString(reader["CountryName"]) ?? "India",
-                SalesAmount = reader["SalesAmount"] is DBNull ? 0 : Convert.ToDouble(reader["SalesAmount"]),
-            });
-        }
-
-        return rows;
+        var rows = await connection.QueryAsync<PartyLeaf>(
+            sql,
+            new { DateFrom = dateFrom.Date, DateTo = dateTo.Date },
+            commandTimeout: QueryTimeoutSeconds);
+        return rows.ToList();
     }
 
     /// <summary>
     /// Top export customers (non-India), excl. intercompany.
-    /// Prefers vw_Countrywise_sales_dashboard when a party column exists; otherwise vw_Sales_EBIDTA.
     /// </summary>
-    public Task<RankedPartyResultDto> GetTopExportCustomersAsync(
+    public async Task<RankedPartyResultDto> GetTopExportCustomersAsync(
         string company,
         DateTime dateFrom,
         DateTime dateTo,
@@ -776,92 +617,15 @@ ORDER BY SalesAmount DESC";
         bool refresh = false)
     {
         top = ClampTop(top);
-        return CachedAsync(
-            $"sales-export:{company}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}:{top}",
-            refresh,
-            () => LoadTopExportCustomersCore(company, dateFrom, dateTo, top));
-    }
-
-    private async Task<RankedPartyResultDto> LoadTopExportCustomersCore(
-        string company,
-        DateTime dateFrom,
-        DateTime dateTo,
-        int top)
-    {
-        using var connection = _database.CreateConnection();
-
-        var countryViewCols = await GetViewColumnsAsync(connection, "vw_Countrywise_sales_dashboard");
-        var countryPartyCol = FirstExisting(countryViewCols, PartyColumnCandidates);
-        var countryCol = FirstExisting(countryViewCols, CountryColumnCandidates);
-
-        if (countryPartyCol != null && countryCol != null)
-        {
-            var isAll = IsAllCompaniesSelection(company);
-            var selectedCompanies = await ResolveSelectedCompaniesAsync(company);
-            var invYears = GetInvYearsOverlapping(dateFrom, dateTo).ToList();
-            var companyFilter = isAll
-                ? null
-                : await ResolveCountryViewCompanyFilterAsync(connection, selectedCompanies, invYears);
-            if (invYears.Count == 0 || (!isAll && selectedCompanies.Count == 0))
-            {
-                return EmptyRanked("vw_Countrywise_sales_dashboard", countryPartyCol, countryCol);
-            }
-
-            var partySql = Bracket(countryPartyCol);
-            var countrySql = Bracket(countryCol);
-            var sql = isAll
-                ? $@"
-SELECT TOP (@Top)
-    LTRIM(RTRIM({partySql})) AS Name,
-    MAX(LTRIM(RTRIM({countrySql}))) AS Country,
-    SUM(CAST(Value AS float)) AS Amount
-FROM dbo.vw_Countrywise_sales_dashboard WITH (NOLOCK)
-WHERE InvYear IN @InvYears
-  AND LTRIM(RTRIM(ISNULL({partySql}, N''))) <> N''
-  AND {ExportCountryPredicate(countrySql)}
-GROUP BY LTRIM(RTRIM({partySql}))
-ORDER BY Amount DESC"
-                : $@"
-SELECT TOP (@Top)
-    LTRIM(RTRIM({partySql})) AS Name,
-    MAX(LTRIM(RTRIM({countrySql}))) AS Country,
-    SUM(CAST(Value AS float)) AS Amount
-FROM dbo.vw_Countrywise_sales_dashboard WITH (NOLOCK)
-WHERE InvYear IN @InvYears
-  AND {companyFilter!.Sql}
-  AND LTRIM(RTRIM(ISNULL({partySql}, N''))) <> N''
-  AND {ExportCountryPredicate(countrySql)}
-GROUP BY LTRIM(RTRIM({partySql}))
-ORDER BY Amount DESC";
-
-            var rows = (await connection.QueryAsync<RankedPartyDto>(
-                sql,
-                isAll
-                    ? (object)new { Top = top, InvYears = invYears }
-                    : new
-                    {
-                        Top = top,
-                        InvYears = invYears,
-                        GroupNames = NonEmptyInList(companyFilter!.GroupNames),
-                        CompanyNames = NonEmptyInList(companyFilter.CompanyNames),
-                    })).ToList();
-            return ToRankedResult(rows, "vw_Countrywise_sales_dashboard", countryPartyCol, countryCol);
-        }
-
-        var ebidta = await GetTopPartiesFromEbidtaAsync(
-            "Sales",
-            company,
-            dateFrom,
-            dateTo,
-            top,
-            exportOnly: true);
-        return ebidta;
+        var universe = await GetOrLoadUniverseAsync("Sales", dateFrom, dateTo, refresh);
+        var slice = await ResolveSliceCompaniesAsync(company);
+        return ToRankedResult(AggregateParties(universe.ExportCustomers, slice, top), universe.ExportSource, "", "");
     }
 
     /// <summary>
     /// Top suppliers from PurchaseVoucher (fast), excl. intercompany. Falls back to vw_Purchase_EBIDTA.
     /// </summary>
-    public Task<RankedPartyResultDto> GetTopSuppliersAsync(
+    public async Task<RankedPartyResultDto> GetTopSuppliersAsync(
         string company,
         DateTime dateFrom,
         DateTime dateTo,
@@ -869,29 +633,31 @@ ORDER BY Amount DESC";
         bool refresh = false)
     {
         top = ClampTop(top);
-        return CachedAsync(
-            $"sales-suppliers:{company}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}:{top}",
-            refresh,
-            async () =>
-            {
-                var fast = await TryGetTopSuppliersFromVoucherAsync(company, dateFrom, dateTo, top);
-                if (fast != null)
-                    return fast;
-                return await GetTopPartiesFromEbidtaAsync(
-                    "Purchase", company, dateFrom, dateTo, top, exportOnly: false);
-            },
-            SupplierCacheTtl);
+        var leaves = await GetOrLoadSupplierUniverseAsync(dateFrom, dateTo, refresh);
+        var slice = await ResolveSliceCompaniesAsync(company);
+        return ToRankedResult(AggregateParties(leaves, slice, top), "PurchaseVoucher", "", null);
     }
 
-    /// <summary>
-    /// Direct PurchaseVoucher aggregate — same grain as country sales (voucher + ledger IC flag).
-    /// Avoids scanning vw_Purchase_EBIDTA (~80s).
-    /// </summary>
-    private async Task<RankedPartyResultDto?> TryGetTopSuppliersFromVoucherAsync(
-        string company,
+    private Task<List<PartyLeaf>> GetOrLoadSupplierUniverseAsync(
         DateTime dateFrom,
         DateTime dateTo,
-        int top)
+        bool refresh)
+    {
+        var key = $"sales-suppliers-universe-v1:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        return CachedAsync(key, refresh, () => LoadSupplierLeavesAsync(dateFrom, dateTo), SupplierCacheTtl);
+    }
+
+    private async Task<List<PartyLeaf>> LoadSupplierLeavesAsync(DateTime dateFrom, DateTime dateTo)
+    {
+        var fromVoucher = await TryLoadSupplierLeavesFromVoucherAsync(dateFrom, dateTo);
+        if (fromVoucher != null)
+            return fromVoucher;
+        return await LoadSupplierLeavesFromEbidtaAsync(dateFrom, dateTo);
+    }
+
+    private async Task<List<PartyLeaf>?> TryLoadSupplierLeavesFromVoucherAsync(
+        DateTime dateFrom,
+        DateTime dateTo)
     {
         using var connection = _database.CreateConnection();
         if (connection.State != ConnectionState.Open)
@@ -902,17 +668,8 @@ ORDER BY Amount DESC";
         var dateCol = FirstExisting(cols, DateColumnCandidates);
         var amountCol = FirstExisting(cols, AmountColumnCandidates);
         var companyCol = FirstExisting(cols, CompanyColumnCandidates);
-        if (partyCol == null || dateCol == null || amountCol == null)
+        if (partyCol == null || dateCol == null || amountCol == null || companyCol == null)
             return null;
-
-        var isAll = IsAllCompaniesSelection(company);
-        List<string> selectedCompanies = new();
-        if (!isAll)
-        {
-            selectedCompanies = await ResolveSelectedCompaniesAsync(company);
-            if (selectedCompanies.Count == 0 || companyCol == null)
-                return EmptyRanked("PurchaseVoucher", partyCol, null);
-        }
 
         var masterCols = await GetViewColumnsAsync(connection, "CommonLedgerMaster");
         var icCol = FirstExisting(masterCols, new[] { "IsInterCompany" });
@@ -920,6 +677,7 @@ ORDER BY Amount DESC";
         var partySql = Bracket(partyCol);
         var dateSql = Bracket(dateCol);
         var amountSql = Bracket(amountCol);
+        var companySql = Bracket(companyCol);
 
         string icJoin = "";
         string icFilter;
@@ -943,159 +701,259 @@ INNER JOIN dbo.CommonLedgerMaster cm WITH (NOLOCK)
             icFilter = "";
         }
 
-        var companyJoin = isAll || companyCol == null
-            ? ""
-            : $"INNER JOIN @companyname C ON C.StringValue = pv.{Bracket(companyCol)}";
-
         var sql = $@"
-SELECT TOP (@Top)
+SELECT
+    LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))) AS CompanyName,
     MAX(pv.{partySql}) AS Name,
     CAST(NULL AS nvarchar(200)) AS Country,
     ROUND(SUM(CAST(pv.{amountSql} AS float)), 0) AS Amount
 FROM dbo.PurchaseVoucher pv WITH (NOLOCK)
-{companyJoin}
 {icJoin}
 WHERE pv.{dateSql} BETWEEN @DateFrom AND @DateTo
   AND pv.{partySql} IS NOT NULL
   AND pv.{partySql} <> N''
   {icFilter}
-GROUP BY pv.{partySql}
-ORDER BY Amount DESC";
+GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), pv.{partySql}";
 
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        command.CommandType = CommandType.Text;
-        command.CommandTimeout = 45;
-
-        if (!isAll && companyCol != null)
-        {
-            var typeName = await ResolveCompanyTableTypeAsync(connection, "SP_Purchase_EBIDTA");
-            AddCompanyTvp(command, typeName, BuildCompanyTvp(selectedCompanies));
-        }
-        command.Parameters.Add("@DateFrom", SqlDbType.Date).Value = dateFrom.Date;
-        command.Parameters.Add("@DateTo", SqlDbType.Date).Value = dateTo.Date;
-        command.Parameters.Add("@Top", SqlDbType.Int).Value = top;
-
-        var rows = new List<RankedPartyDto>();
         try
         {
-            using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-            {
-                rows.Add(new RankedPartyDto
-                {
-                    Name = (reader["Name"] is DBNull ? "" : Convert.ToString(reader["Name"]) ?? "").Trim(),
-                    Amount = reader["Amount"] is DBNull ? 0 : Convert.ToDouble(reader["Amount"]),
-                });
-            }
+            var rows = await connection.QueryAsync<PartyLeaf>(
+                sql,
+                new { DateFrom = dateFrom.Date, DateTo = dateTo.Date },
+                commandTimeout: QueryTimeoutSeconds);
+            return rows.ToList();
         }
         catch (SqlException)
         {
             return null;
         }
-
-        return ToRankedResult(rows, "PurchaseVoucher", partyCol, null);
     }
 
-    private async Task<RankedPartyResultDto> GetTopPartiesFromEbidtaAsync(
-        string category,
-        string company,
+    private async Task<List<PartyLeaf>> LoadSupplierLeavesFromEbidtaAsync(
         DateTime dateFrom,
-        DateTime dateTo,
-        int top,
-        bool exportOnly)
+        DateTime dateTo)
     {
         using var connection = _database.CreateConnection();
         if (connection.State != ConnectionState.Open)
             connection.Open();
 
-        var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
-        var viewName = isPurchase ? "vw_Purchase_EBIDTA" : "vw_Sales_EBIDTA";
-        var procedureName = isPurchase ? "SP_Purchase_EBIDTA" : "SP_Sales_EBIDTA";
-        var cols = await GetViewColumnsAsync(connection, viewName);
-        var partyCol = isPurchase
-            ? FirstExisting(cols, PurchasePartyColumnCandidates) ?? FirstExisting(cols, PartyColumnCandidates)
-            : FirstExisting(cols, PartyColumnCandidates);
-        var countryCol = FirstExisting(cols, CountryColumnCandidates);
+        var cols = await GetViewColumnsAsync(connection, "vw_Purchase_EBIDTA");
+        var partyCol = FirstExisting(cols, PurchasePartyColumnCandidates) ?? FirstExisting(cols, PartyColumnCandidates);
         if (partyCol == null)
-            return new RankedPartyResultDto
-            {
-                Items = new List<RankedPartyDto>(),
-                Source = viewName,
-                PartyColumn = "",
-                CountryColumn = countryCol ?? "",
-                Columns = cols.OrderBy(c => c).ToList(),
-            };
-
-        var isAll = IsAllCompaniesSelection(company);
-        var selectedCompanies = isAll
-            ? new List<string>()
-            : await ResolveSelectedCompaniesAsync(company);
-        if (!isAll && selectedCompanies.Count == 0)
-            return EmptyRanked(viewName, partyCol, countryCol);
+            return new List<PartyLeaf>();
 
         var partySql = Bracket(partyCol);
-        var countrySelect = countryCol == null
-            ? "CAST(NULL AS nvarchar(200))"
-            : $"MAX(v.{Bracket(countryCol)})";
-        var exportJoin = "";
-        var exportFilter = "";
-        if (exportOnly)
-        {
-            if (countryCol != null)
-            {
-                exportFilter = $" AND {ExportCountryPredicate("v." + Bracket(countryCol))}";
-            }
-            else
-            {
-                exportJoin = await BuildExportLedgerJoinAsync(connection, partySql);
-            }
-        }
-
-        var companyJoin = isAll ? "" : "INNER JOIN @companyname C ON C.StringValue = v.CompanyName";
         var sql = $@"
-SELECT TOP (@Top)
+SELECT
+    LTRIM(RTRIM(ISNULL(v.CompanyName, N''))) AS CompanyName,
     MAX(v.{partySql}) AS Name,
-    {countrySelect} AS Country,
+    CAST(NULL AS nvarchar(200)) AS Country,
     ROUND(SUM(v.Amount), 0) AS Amount
-FROM dbo.{viewName} v WITH (NOLOCK)
-{companyJoin}
-{exportJoin}
+FROM dbo.vw_Purchase_EBIDTA v WITH (NOLOCK)
 WHERE v.invdate BETWEEN @DateFrom AND @DateTo
   AND v.InterGroup <> N'Intergroup'
   AND v.{partySql} IS NOT NULL
   AND v.{partySql} <> N''
-  {exportFilter}
-GROUP BY v.{partySql}
-ORDER BY Amount DESC";
+GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), v.{partySql}";
 
-        using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        command.CommandType = CommandType.Text;
-        command.CommandTimeout = PartyQueryTimeoutSeconds;
+        var rows = await connection.QueryAsync<PartyLeaf>(
+            sql,
+            new { DateFrom = dateFrom.Date, DateTo = dateTo.Date },
+            commandTimeout: PartyQueryTimeoutSeconds);
+        return rows.ToList();
+    }
 
-        if (!isAll)
+    private async Task<HashSet<string>?> ResolveSliceCompaniesAsync(string company)
+    {
+        if (IsAllCompaniesSelection(company))
+            return null;
+
+        var names = await ResolveSelectedCompaniesAsync(company);
+        return names.Count == 0
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : names.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static IEnumerable<T> FilterByCompany<T>(
+        IEnumerable<T> rows,
+        HashSet<string>? companies,
+        Func<T, string> companyOf)
+    {
+        if (companies == null)
+            return rows;
+        if (companies.Count == 0)
+            return Array.Empty<T>();
+        return rows.Where(r => companies.Contains(companyOf(r)));
+    }
+
+    private static SalesTotalsDto AggregateTotals(
+        IReadOnlyList<EbidtaLeaf> leaves,
+        string category,
+        HashSet<string>? companies,
+        double elapsedSeconds)
+    {
+        var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
+        var rows = FilterByCompany(leaves, companies, r => r.CompanyName)
+            .Where(r => !r.InterGroup.Equals("Intergroup", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var amount = rows.Sum(r => r.Amount);
+        var qty = rows.Sum(r => r.Netwt);
+        var rate = qty > 0 ? amount / qty : 0;
+
+        var groupMap = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        var subMap = new Dictionary<string, (double Amount, double Qty)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
         {
-            var typeName = await ResolveCompanyTableTypeAsync(connection, procedureName);
-            AddCompanyTvp(command, typeName, BuildCompanyTvp(selectedCompanies));
-        }
-        command.Parameters.Add("@DateFrom", SqlDbType.Date).Value = dateFrom.Date;
-        command.Parameters.Add("@DateTo", SqlDbType.Date).Value = dateTo.Date;
-        command.Parameters.Add("@Top", SqlDbType.Int).Value = top;
-
-        var rows = new List<RankedPartyDto>();
-        using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            rows.Add(new RankedPartyDto
+            var group = (row.Groupname ?? "").Trim();
+            var sub = (row.SubGroupName ?? "").Trim();
+            if (group.Length > 0)
             {
-                Name = (reader["Name"] is DBNull ? "" : Convert.ToString(reader["Name"]) ?? "").Trim(),
-                Country = reader["Country"] is DBNull ? null : Convert.ToString(reader["Country"])?.Trim(),
-                Amount = reader["Amount"] is DBNull ? 0 : Convert.ToDouble(reader["Amount"]),
+                groupMap.TryGetValue(group, out var gAmt);
+                groupMap[group] = gAmt + row.Amount;
+            }
+            if (sub.Length > 0)
+            {
+                subMap.TryGetValue(sub, out var s);
+                subMap[sub] = (s.Amount + row.Amount, s.Qty + row.Netwt);
+            }
+        }
+
+        var groupTotal = groupMap.Values.Sum();
+        return new SalesTotalsDto
+        {
+            TotalSales = isPurchase ? 0 : amount,
+            TotalPurchase = isPurchase ? amount : 0,
+            TotalQuantity = qty,
+            AverageRate = rate,
+            SalesColumn = "Amount",
+            QuantityColumn = "Netwt",
+            RateColumn = "PerKg",
+            Method = $"{category}_UniverseSlice_ExclIntercompany",
+            RowCount = rows.Count,
+            Columns = new List<string> { "CompanyName", "InterGroup", "Groupname", "SubGroupName", "Amount", "Netwt" },
+            ElapsedSeconds = elapsedSeconds,
+            ByGroup = groupMap
+                .OrderByDescending(kv => kv.Value)
+                .Select(kv => new SalesByGroupDto
+                {
+                    GroupName = kv.Key,
+                    Amount = kv.Value,
+                    Percentage = groupTotal > 0 ? Math.Round(kv.Value / groupTotal * 100, 1) : 0,
+                })
+                .ToList(),
+            BySubGroup = subMap
+                .OrderByDescending(kv => kv.Value.Amount)
+                .Select(kv => new SalesBySubGroupDto
+                {
+                    SubGroupName = kv.Key,
+                    SalesAmount = kv.Value.Amount,
+                    Quantity = kv.Value.Qty,
+                })
+                .ToList(),
+        };
+    }
+
+    private static List<SalesTrendDto> AggregateTrend(
+        IReadOnlyList<TrendLeaf> leaves,
+        IReadOnlyList<TrendRange> ranges,
+        HashSet<string>? companies)
+    {
+        var rows = FilterByCompany(leaves, companies, r => r.CompanyName);
+        var byFy = rows
+            .GroupBy(r => r.FyStart)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Amount));
+        return ranges
+            .Select(r => new SalesTrendDto
+            {
+                Period = r.Period,
+                Amount = byFy.TryGetValue(r.StartYear, out var amount) ? amount : 0,
+            })
+            .ToList();
+    }
+
+    private static List<SalesTrendDto> TakeTrendYears(List<SalesTrendDto> trend, int years)
+    {
+        years = Math.Clamp(years, 1, 8);
+        return trend.Count <= years ? trend : trend.Skip(trend.Count - years).ToList();
+    }
+
+    private static List<TrendRange> BuildTrendRanges(DateTime asOf, int years)
+    {
+        var currentFyStartYear = asOf.Month >= 4 ? asOf.Year : asOf.Year - 1;
+        var ranges = new List<TrendRange>();
+        for (var i = years - 1; i >= 0; i--)
+        {
+            var startYear = currentFyStartYear - i;
+            var from = new DateTime(startYear, 4, 1);
+            if (from > asOf)
+                continue;
+
+            var to = new DateTime(startYear + 1, 3, 31);
+            if (to > asOf)
+                to = asOf;
+
+            ranges.Add(new TrendRange
+            {
+                StartYear = startYear,
+                Period = $"FY {startYear % 100:D2}-{(startYear + 1) % 100:D2}",
+                From = from,
+                To = to,
             });
         }
 
-        return ToRankedResult(rows, viewName, partyCol, countryCol);
+        return ranges;
+    }
+
+    private static List<SalesByCountryDto> AggregateCountries(
+        IReadOnlyList<CountryLeaf> leaves,
+        HashSet<string>? companies,
+        int top)
+    {
+        return FilterByCompany(leaves, companies, r => r.CompanyName)
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.CountryName) ? "Unknown" : r.CountryName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g => new SalesByCountryDto
+            {
+                CountryName = g.First().CountryName.Trim().Length == 0 ? "Unknown" : g.First().CountryName.Trim(),
+                SalesAmount = g.Sum(x => x.SalesAmount),
+            })
+            .OrderByDescending(r => r.SalesAmount)
+            .Take(top)
+            .Select((r, i) =>
+            {
+                r.Rank = i + 1;
+                return r;
+            })
+            .ToList();
+    }
+
+    private static List<RankedPartyDto> AggregateParties(
+        IReadOnlyList<PartyLeaf> leaves,
+        HashSet<string>? companies,
+        int top)
+    {
+        return FilterByCompany(leaves, companies, r => r.CompanyName)
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.Name) ? "Unknown" : r.Name.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g =>
+            {
+                var country = g
+                    .Select(x => x.Country)
+                    .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
+                return new RankedPartyDto
+                {
+                    Name = g.Key,
+                    Country = string.IsNullOrWhiteSpace(country) ? null : country.Trim(),
+                    Amount = g.Sum(x => x.Amount),
+                };
+            })
+            .OrderByDescending(r => r.Amount)
+            .Take(top)
+            .Select((r, i) =>
+            {
+                r.Rank = i + 1;
+                return r;
+            })
+            .ToList();
     }
 
     /// <summary>Indian FY labels (yy-yy+1) that overlap [dateFrom, dateTo].</summary>
@@ -2250,6 +2108,60 @@ INNER JOIN (
         public int SrNo { get; set; }
         public string Name { get; set; } = "";
         public string GroupName { get; set; } = "";
+    }
+
+    private sealed class SalesUniverse
+    {
+        public List<EbidtaLeaf> Leaves { get; set; } = new();
+        public List<TrendLeaf> Trend { get; set; } = new();
+        public List<TrendRange> TrendRanges { get; set; } = new();
+        public List<CountryLeaf> Countries { get; set; } = new();
+        public List<PartyLeaf> ExportCustomers { get; set; } = new();
+        public string CountryPeriodLabel { get; set; } = "";
+        public List<string> InvYears { get; set; } = new();
+        public string CountrySource { get; set; } = "";
+        public string ExportSource { get; set; } = "";
+        public double ElapsedSeconds { get; set; }
+    }
+
+    private sealed class EbidtaLeaf
+    {
+        public string CompanyName { get; set; } = "";
+        public string InterGroup { get; set; } = "";
+        public string Groupname { get; set; } = "";
+        public string SubGroupName { get; set; } = "";
+        public double Amount { get; set; }
+        public double Netwt { get; set; }
+    }
+
+    private sealed class TrendLeaf
+    {
+        public string CompanyName { get; set; } = "";
+        public int FyStart { get; set; }
+        public double Amount { get; set; }
+    }
+
+    private sealed class TrendRange
+    {
+        public int StartYear { get; set; }
+        public string Period { get; set; } = "";
+        public DateTime From { get; set; }
+        public DateTime To { get; set; }
+    }
+
+    private sealed class CountryLeaf
+    {
+        public string CompanyName { get; set; } = "";
+        public string CountryName { get; set; } = "";
+        public double SalesAmount { get; set; }
+    }
+
+    private sealed class PartyLeaf
+    {
+        public string CompanyName { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? Country { get; set; }
+        public double Amount { get; set; }
     }
 }
 

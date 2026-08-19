@@ -1,15 +1,17 @@
 namespace POApprovalAPI.Services;
 
-/// <summary>Preloads default Sales Dashboard ERP aggregates and refreshes them on a timer.</summary>
-public sealed class SalesDashboardCacheWarmupService : BackgroundService
+/// <summary>
+/// Keeps Export Bill Overdue All-Companies data hot so the first UI open is a cache hit.
+/// </summary>
+public sealed class ExportBillOverdueCacheWarmupService : BackgroundService
 {
     private static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(10);
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<SalesDashboardCacheWarmupService> _logger;
+    private readonly ILogger<ExportBillOverdueCacheWarmupService> _logger;
 
-    public SalesDashboardCacheWarmupService(
+    public ExportBillOverdueCacheWarmupService(
         IServiceScopeFactory scopeFactory,
-        ILogger<SalesDashboardCacheWarmupService> logger)
+        ILogger<ExportBillOverdueCacheWarmupService> logger)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
@@ -22,13 +24,13 @@ public sealed class SalesDashboardCacheWarmupService : BackgroundService
             try
             {
                 using var scope = _scopeFactory.CreateScope();
-                var sales = scope.ServiceProvider.GetRequiredService<SalesDashboardService>();
-                await sales.WarmDefaultCachesAsync(stoppingToken);
-                _logger.LogInformation("Sales dashboard caches warmed.");
+                var service = scope.ServiceProvider.GetRequiredService<ExportBillOverdueService>();
+                await service.WarmDefaultCachesAsync(stoppingToken);
+                _logger.LogInformation("Export bill overdue caches warmed.");
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Sales dashboard cache warmup failed (will load on first request).");
+                _logger.LogWarning(ex, "Export bill overdue cache warmup failed (will load on first request).");
             }
 
             try
