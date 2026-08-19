@@ -230,6 +230,11 @@
       0 8px 16px rgba(15, 23, 42, 0.08);
   }
 
+  .login-page {
+    background: #fff;
+    color: #171717;
+  }
+
   @media (max-width: 767px) {
     html:not(.dark) {
       --background: oklch(1 0 0);
