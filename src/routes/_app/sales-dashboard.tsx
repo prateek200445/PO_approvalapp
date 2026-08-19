@@ -47,7 +47,7 @@ function SalesDashboardPage() {
   const { data: companyList, isLoading: companiesLoading } = useQuery({
     queryKey: ["sales-dashboard-companies"],
     queryFn: getSalesCompanies,
-    staleTime: 30 * 60_000,
+    staleTime: 60 * 60_000,
   });
 
   const overviewQuery = useQuery({
@@ -71,10 +71,11 @@ function SalesDashboardPage() {
       if (isPurchase) bypassCacheRef.current = false;
       return data;
     },
-    staleTime: 2 * 60_000,
-    gcTime: 30 * 60_000,
+    staleTime: 60 * 60_000,
+    gcTime: 4 * 60 * 60_000,
     placeholderData: keepPreviousData,
     retry: 1,
+    refetchOnWindowFocus: false,
   });
 
   const suppliersQuery = useQuery({
@@ -97,6 +98,7 @@ function SalesDashboardPage() {
     },
     staleTime: 60 * 60_000,
     gcTime: 4 * 60 * 60_000,
+    placeholderData: keepPreviousData,
     retry: 1,
   });
 
@@ -148,7 +150,7 @@ function SalesDashboardPage() {
         }}
       />
 
-      {overviewQuery.isFetching && (
+      {overviewQuery.isFetching && !overview && (
         <div
           className="flex items-center gap-2 text-xs text-muted-foreground"
           aria-live="polite"

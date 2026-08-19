@@ -79,6 +79,7 @@ builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();
 builder.Services.AddHostedService<SalesDashboardCacheWarmupService>();
+builder.Services.AddHostedService<ExportBillOverdueCacheWarmupService>();
 
 builder.Services.AddCors(options =>
 {

@@ -4,6 +4,12 @@ export const DEFAULT_EXPORT_GROUP = "Debtors-Overseas";
 export const DEFAULT_PAGE_SIZE = 25;
 export const PAGE_SIZES = [25, 50, 100] as const;
 
+export interface ExportCompanyOption {
+  value: string;
+  label: string;
+  kind: "all" | "group" | "company";
+}
+
 export interface ExportBillOverdueItem {
   companyName: string;
   ledgerName: string;
@@ -57,22 +63,40 @@ function str(v: unknown): string {
   return v == null ? "" : String(v);
 }
 
-export async function getExportBillOverdueCompanies(): Promise<string[]> {
+export async function getExportBillOverdueCompanies(): Promise<{
+  names: string[];
+  options: ExportCompanyOption[];
+}> {
   const response = await fetch(getExportApiUrl("/api/ExportBillOverdue/companies"));
   const payload = (await response.json()) as {
     companies?: string[];
     Companies?: string[];
+    options?: Array<Record<string, unknown>>;
+    Options?: Array<Record<string, unknown>>;
     message?: string;
   };
   if (!response.ok) {
     throw new Error(payload.message || "Failed to load companies");
   }
-  const names = payload.companies ?? payload.Companies ?? [];
-  const unique = Array.from(
-    new Set(names.map((c) => String(c).trim()).filter(Boolean)),
+  const names = Array.from(
+    new Set((payload.companies ?? payload.Companies ?? []).map((c) => String(c).trim()).filter(Boolean)),
   );
-  // Prefer single-company first — All Companies is slow (every plant).
-  return [...unique.filter((c) => c !== "All Companies"), "All Companies"];
+
+  const rawOptions = payload.options ?? payload.Options ?? [];
+  const options: ExportCompanyOption[] =
+    rawOptions.length > 0
+      ? rawOptions.map((o) => ({
+          value: str(o.value ?? o.Value),
+          label: str(o.label ?? o.Label) || str(o.value ?? o.Value),
+          kind: (str(o.kind ?? o.Kind).toLowerCase() as ExportCompanyOption["kind"]) || "company",
+        }))
+      : names.map((value) => ({
+          value,
+          label: value,
+          kind: "company" as const,
+        }));
+
+  return { names, options };
 }
 
 export async function getExportBillOverdueGroups(): Promise<string[]> {
@@ -189,4 +213,43 @@ export function isAllCompanies(company: string): boolean {
     company.toLowerCase() === "all companies" ||
     company.toLowerCase().includes("(all)")
   );
+}
+
+export function isCompanyGroup(company: string): boolean {
+  return company.trim().toUpperCase().startsWith("G-");
+}
+
+export async function downloadExportBillOverdueExcel(filters: {
+  company: string;
+  asOf: string;
+  groupName: string;
+}): Promise<string> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    asOf: filters.asOf,
+    groupName: filters.groupName,
+  });
+  const response = await fetch(getExportApiUrl(`/api/ExportBillOverdue/excel?${params}`));
+  if (!response.ok) {
+    let message = "Failed to export overdue bills";
+    try {
+      const payload = (await response.json()) as { message?: string };
+      if (payload.message) message = payload.message;
+    } catch {
+      // keep default
+    }
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  const fileName =
+    response.headers.get("content-disposition")?.match(/filename="?([^"]+)"?/i)?.[1] ||
+    `export-bill-overdue-${filters.asOf}.xlsx`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+  return fileName;
 }
