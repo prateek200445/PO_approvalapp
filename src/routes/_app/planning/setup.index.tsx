@@ -32,14 +32,19 @@ import {
   savePlanningTeamFactors,
   searchPlanningFactories,
 } from "@/lib/planning/setup-api";
-import type {
-  PlanningDowntime,
-  PlanningLoomPreferenceChart,
-  PlanningFactoryConfig,
-  PlanningFactoryOption,
-  PlanningLineConfig,
-  PlanningLoomPool,
-  PlanningTeamFactor,
+import {
+  LOOM_POOL_INCLUDE_MODES,
+  applyLoomPoolIncludeMode,
+  inferLoomPoolIncludeMode,
+  loomIncludedForPoolMode,
+  type LoomPoolIncludeMode,
+  type PlanningDowntime,
+  type PlanningFactoryConfig,
+  type PlanningFactoryOption,
+  type PlanningLineConfig,
+  type PlanningLoomPool,
+  type PlanningLoomPreferenceChart,
+  type PlanningTeamFactor,
 } from "@/lib/planning/setup-types";
 
 export const Route = createFileRoute("/_app/planning/setup/")({
@@ -60,6 +65,7 @@ function PlanningSetupPage() {
   const [factorDraft, setFactorDraft] = useState<PlanningTeamFactor[]>([]);
   const [factoryDraft, setFactoryDraft] = useState<PlanningFactoryConfig | null>(null);
   const [loomFilter, setLoomFilter] = useState("");
+  const [poolIncludeMode, setPoolIncludeMode] = useState<LoomPoolIncludeMode>("DomesticOnly");
   const [backlogForm, setBacklogForm] = useState({ lineNo: 1, shift: "A", orderNo: "", backlogQty: "", reason: "" });
   const [downtimeForm, setDowntimeForm] = useState({
     planDate: new Date().toISOString().slice(0, 10),
@@ -133,6 +139,7 @@ function PlanningSetupPage() {
 
   useEffect(() => {
     setLoomDraft(looms);
+    if (looms.length > 0) setPoolIncludeMode(inferLoomPoolIncludeMode(looms));
   }, [looms]);
 
   useEffect(() => {
@@ -292,14 +299,9 @@ function PlanningSetupPage() {
     setLoomDraft((prev) => prev.map((l) => (l.loomNo === loomNo ? { ...l, ...patch } : l)));
   };
 
-  const bulkLoomInclude = (include: boolean, purpose?: string) => {
-    setLoomDraft((prev) =>
-      prev.map((l) => ({
-        ...l,
-        includeInPlanning: include,
-        poolPurpose: purpose ?? l.poolPurpose,
-      })),
-    );
+  const handlePoolIncludeModeChange = (mode: LoomPoolIncludeMode) => {
+    setPoolIncludeMode(mode);
+    setLoomDraft((prev) => applyLoomPoolIncludeMode(prev, mode));
   };
 
   const updateFactor = (index: number, patch: Partial<PlanningTeamFactor>) => {
@@ -572,13 +574,21 @@ function PlanningSetupPage() {
             title="Loom planning pool"
             subtitle={`${loomStats.included} of ${loomStats.total} looms included for planning`}
             headerRight={
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={() => bulkLoomInclude(true, "DomesticFibc")}>
-                  Include all domestic
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => bulkLoomInclude(false, "Export")}>
-                  Exclude all (export)
-                </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="whitespace-nowrap">Planning pool</span>
+                  <select
+                    className="h-8 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+                    value={poolIncludeMode}
+                    onChange={(e) => handlePoolIncludeModeChange(e.target.value as LoomPoolIncludeMode)}
+                  >
+                    {LOOM_POOL_INCLUDE_MODES.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <Button size="sm" onClick={() => saveLoomsMut.mutate()} disabled={saveLoomsMut.isPending}>
                   {saveLoomsMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   Save pool
@@ -586,6 +596,10 @@ function PlanningSetupPage() {
               </div>
             }
           >
+            <p className="mb-3 text-xs text-muted-foreground">
+              Tag each loom as DomesticFibc or Export in the Purpose column, then choose which group is included above.
+              Maintenance and Other are always excluded unless you manually check Include.
+            </p>
             <Input
               className="mb-4 max-w-sm"
               placeholder="Filter looms…"
@@ -632,7 +646,13 @@ function PlanningSetupPage() {
                           <select
                             className="h-8 rounded-md border border-input bg-background px-2 text-xs"
                             value={loom.poolPurpose}
-                            onChange={(e) => updateLoom(loom.loomNo, { poolPurpose: e.target.value })}
+                            onChange={(e) => {
+                              const poolPurpose = e.target.value;
+                              updateLoom(loom.loomNo, {
+                                poolPurpose,
+                                includeInPlanning: loomIncludedForPoolMode(poolPurpose, poolIncludeMode),
+                              });
+                            }}
                           >
                             {(constants?.poolPurposes ?? ["DomesticFibc", "Export", "Other", "Maintenance"]).map((p) => (
                               <option key={p} value={p}>

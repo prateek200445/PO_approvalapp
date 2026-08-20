@@ -316,3 +316,50 @@ export function normalizeRecalculateResult(data: Record<string, unknown>): Recal
     factors: factors.map(normalizeTeamFactor),
   };
 }
+
+/** Which loom purpose tags are included in the planning pool (Setup → Loom pool filter). */
+export type LoomPoolIncludeMode = "DomesticOnly" | "ExportOnly" | "Both";
+
+export const LOOM_POOL_INCLUDE_MODES: { value: LoomPoolIncludeMode; label: string }[] = [
+  { value: "DomesticOnly", label: "Domestic only" },
+  { value: "ExportOnly", label: "Export only" },
+  { value: "Both", label: "Domestic + export" },
+];
+
+export function normalizeLoomPoolPurpose(purpose: string | null | undefined): string {
+  const p = (purpose ?? "DomesticFibc").trim();
+  return p || "DomesticFibc";
+}
+
+/** Whether a loom purpose tag should be included for the given pool filter mode. */
+export function loomIncludedForPoolMode(purpose: string | null | undefined, mode: LoomPoolIncludeMode): boolean {
+  const p = normalizeLoomPoolPurpose(purpose);
+  return mode === "Both"
+    ? p === "DomesticFibc" || p === "Export"
+    : mode === "ExportOnly"
+      ? p === "Export"
+      : p === "DomesticFibc";
+}
+
+export function applyLoomPoolIncludeMode(
+  looms: PlanningLoomPool[],
+  mode: LoomPoolIncludeMode,
+): PlanningLoomPool[] {
+  return looms.map((l) => ({
+    ...l,
+    includeInPlanning: loomIncludedForPoolMode(l.poolPurpose, mode),
+  }));
+}
+
+/** Infer filter mode from current include flags (for dropdown initial value after load). */
+export function inferLoomPoolIncludeMode(looms: PlanningLoomPool[]): LoomPoolIncludeMode {
+  const included = looms.filter((l) => l.includeInPlanning);
+  if (included.length === 0) return "DomesticOnly";
+
+  const hasDomestic = included.some((l) => normalizeLoomPoolPurpose(l.poolPurpose) === "DomesticFibc");
+  const hasExport = included.some((l) => normalizeLoomPoolPurpose(l.poolPurpose) === "Export");
+
+  if (hasDomestic && hasExport) return "Both";
+  if (hasExport && !hasDomestic) return "ExportOnly";
+  return "DomesticOnly";
+}
