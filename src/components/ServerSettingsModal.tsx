@@ -126,11 +126,12 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
               type="text" 
               value={url} 
               onChange={(e) => setUrl(e.target.value)} 
-              placeholder="e.g. http://192.168.0.188:5000" 
+              placeholder="e.g. http://localhost:5115" 
               className="h-10 w-full rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 transition-all font-mono"
             />
             <p className="text-[11px] text-muted-foreground">
-              Current default: <span className="font-mono text-primary select-all">Relative to Site (/api)</span>
+              Local dev default:{" "}
+              <span className="font-mono text-primary select-all">http://localhost:5115</span>
             </p>
           </div>
 

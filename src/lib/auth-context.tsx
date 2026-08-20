@@ -28,7 +28,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const raw = localStorage.getItem(KEY) ?? sessionStorage.getItem(KEY);
 
       if (raw) {
-        setUser(JSON.parse(raw));
+        const parsed = JSON.parse(raw) as Partial<AuthUser>;
+        const username = parsed.username ?? parsed.name;
+        if (username) {
+          setUser({
+            username,
+            name: parsed.name ?? username,
+            designation: parsed.designation ?? "",
+            department: parsed.department ?? "",
+            role: parsed.role ?? "Director",
+          });
+        }
       }
     } catch {
       // ignore storage errors
@@ -73,22 +83,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error("Invalid Username or Password");
     }
 
-    const authority = Number(data.authority);
+    const authority = Number(data.authority ?? data.Authority);
+    const resolvedUsername = String(
+      data.userName ?? data.UserName ?? username,
+    ).trim();
 
-const u: AuthUser = {
-  username: data.UserName,
-  name: data.UserName,
-  designation: String(authority),
-  department: data.Deptt ?? "",
-  role:
-    authority === 1
-      ? "HOD"
-      : authority === 2
-      ? "Purchase Head"
-      : authority === 3
-      ? "Finance Manager"
-      : "Director",
-};
+    const u: AuthUser = {
+      username: resolvedUsername,
+      name: resolvedUsername,
+      designation: String(authority),
+      department: data.deptt ?? data.Deptt ?? "",
+      role:
+        authority === 1
+          ? "HOD"
+          : authority === 2
+            ? "Purchase Head"
+            : authority === 3
+              ? "Finance Manager"
+              : "Director",
+    };
 
     setUser(u);
 

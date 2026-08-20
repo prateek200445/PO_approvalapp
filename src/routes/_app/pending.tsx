@@ -46,7 +46,7 @@ function PendingList() {
 
   const debouncedAmount = useDebounce(amount, 500);
 
-  const { data: pendingPOsData, isLoading, refetch } = useQuery({
+  const { data: pendingPOsData, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["pending-list", user?.username, debouncedAmount, filterType],
     queryFn: async () => {
       if (!user?.username) throw new Error("No username");
@@ -246,6 +246,28 @@ function PendingList() {
           </button>
         </div>
       </div>
+
+      {isError ? (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <p className="font-medium">Could not load purchase orders from the API.</p>
+          <p className="mt-1 text-xs opacity-90">
+            {(error as Error)?.message || "Request failed"} — API base:{" "}
+            <span className="font-mono">{getApiUrl("/api/PO/pending")}</span>
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Local dev: run API with <span className="font-mono">dotnet run</span> in POApprovalAPI (port 5115).
+            Clear Profile → Server Settings → reset URL, or set{" "}
+            <span className="font-mono">http://localhost:5115</span>.
+          </p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="mt-2 text-xs font-medium underline"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
 
       {/* Filters - Desktop Only */}
       <div className="hidden md:flex md:flex-col md:gap-3">
