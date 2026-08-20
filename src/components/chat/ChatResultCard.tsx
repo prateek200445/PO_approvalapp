@@ -48,6 +48,11 @@ interface ChatResultCardProps {
 const PREVIEW_ROWS = 6;
 const PREVIEW_TABLE_ROWS = 8;
 
+/** Title already states a count — skip the large hero block on mobile to save space. */
+function titleAlreadyShowsCount(title: string): boolean {
+  return /\bfound\b[\s\S]*?[\d,]+/i.test(title) || /[\d,]+\s+matching/i.test(title);
+}
+
 export function ChatResultCard({
   response,
   answer,
@@ -81,6 +86,7 @@ export function ChatResultCard({
     : response.rows.slice(0, mode === "table" ? PREVIEW_TABLE_ROWS : PREVIEW_ROWS);
 
   const rowLabel = formatRowCountBadge(response);
+  const hideHeroOnMobile = titleAlreadyShowsCount(title);
 
   async function copySql() {
     try {
@@ -143,7 +149,7 @@ export function ChatResultCard({
         <div className={cn("h-1 w-full bg-gradient-to-r", theme.accent)} />
 
         {/* Header */}
-        <header className="relative flex flex-wrap items-start justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
+        <header className="relative flex flex-wrap items-start justify-between gap-2 border-b border-white/[0.06] px-3 py-2.5 md:gap-3 md:px-5 md:py-4">
           <div className="min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <span
@@ -171,9 +177,9 @@ export function ChatResultCard({
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            <div className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-right">
-              <p className="text-[10px] uppercase tracking-widest text-slate-500">Records</p>
-              <p className="text-lg font-semibold tabular-nums leading-none text-white">
+            <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 text-right md:rounded-xl md:px-3 md:py-2">
+              <p className="text-[9px] uppercase tracking-widest text-slate-500 md:text-[10px]">Records</p>
+              <p className="text-sm font-semibold tabular-nums leading-none text-white md:text-lg">
                 {rowLabel}
               </p>
             </div>
@@ -182,7 +188,7 @@ export function ChatResultCard({
                 type="button"
                 onClick={onSelect}
                 className={cn(
-                  "flex h-10 w-10 items-center justify-center rounded-xl border transition-colors",
+                  "flex h-8 w-8 items-center justify-center rounded-lg border transition-colors md:h-10 md:w-10 md:rounded-xl",
                   selected
                     ? "border-cyan-400/40 bg-cyan-500/15 text-cyan-300"
                     : "border-white/[0.08] bg-white/[0.03] text-slate-400 hover:border-white/20 hover:text-white",
@@ -196,12 +202,12 @@ export function ChatResultCard({
         </header>
 
         {/* Answer */}
-        <section className="relative px-5 pt-5">
-          <h3 className="text-xl font-semibold leading-snug tracking-tight text-white md:text-[1.35rem]">
+        <section className="relative px-3 pt-3 md:px-5 md:pt-5">
+          <h3 className="text-[15px] font-semibold leading-snug tracking-tight text-white md:text-[1.35rem]">
             <InlineMarkdown text={title} />
           </h3>
           {body && (
-            <div className="mt-3 text-[15px] leading-relaxed text-slate-200/95">
+            <div className="mt-2 text-sm leading-relaxed text-slate-200/95 md:mt-3 md:text-[15px]">
               <FormattedAnswer text={body} variant="highlight" />
             </div>
           )}
@@ -209,7 +215,7 @@ export function ChatResultCard({
 
         {/* User-facing note (no table/SQL names) */}
         {displayWarning && (
-          <div className="relative mx-5 mt-4 flex gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.07] px-4 py-3">
+          <div className="relative mx-3 mt-3 flex gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.07] px-3 py-2.5 md:mx-5 md:mt-4 md:gap-3 md:px-4 md:py-3">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
             <div>
               <p className="text-xs font-medium text-emerald-300">Note</p>
@@ -221,10 +227,12 @@ export function ChatResultCard({
         )}
 
         {/* Data body */}
-        <section className="relative px-5 py-5">
+        <section className="relative px-3 py-3 md:px-5 md:py-5">
           {mode === "empty" && <EmptyState />}
           {mode === "summary" && hero && (
-            <SummaryHero label={hero.label} value={hero.value} kind={hero.kind} />
+            <div className={cn(hideHeroOnMobile && "hidden md:block")}>
+              <SummaryHero label={hero.label} value={hero.value} kind={hero.kind} />
+            </div>
           )}
           {mode === "summary" && !hero && columns.length > 0 && (
             <KeyValueGrid row={response.rows[0]} columns={columns} />
@@ -246,7 +254,7 @@ export function ChatResultCard({
         {/* Expand + footer actions */}
         {response.rows.length >
           (mode === "table" ? PREVIEW_TABLE_ROWS : PREVIEW_ROWS) && (
-          <div className="px-5 pb-2">
+          <div className="px-3 pb-2 md:px-5">
             <button
               type="button"
               onClick={() => setShowAll((v) => !v)}
@@ -267,7 +275,7 @@ export function ChatResultCard({
           </div>
         )}
 
-        <footer className="relative flex flex-wrap items-center gap-2 border-t border-white/[0.06] px-5 py-3.5">
+        <footer className="relative flex flex-wrap items-center gap-1.5 border-t border-white/[0.06] px-3 py-2.5 md:gap-2 md:px-5 md:py-3.5">
           {(response.rows.length > 0 || (needsServerExport && response.sql)) && (
             <ActionButton
               icon={<Download className="h-3.5 w-3.5" />}
@@ -297,7 +305,7 @@ export function ChatResultCard({
         </footer>
 
         {showSql && response.sql && (
-          <div className="border-t border-white/[0.06] px-5 py-4">
+          <div className="border-t border-white/[0.06] px-3 py-3 md:px-5 md:py-4">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
               Generated query
             </p>
@@ -343,12 +351,12 @@ function LiveBadge() {
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-10 text-center">
-      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-800/80 ring-1 ring-white/10">
-        <SearchX className="h-7 w-7 text-slate-500" />
+    <div className="flex flex-col items-center rounded-xl border border-dashed border-white/10 bg-white/[0.02] px-4 py-6 text-center md:rounded-2xl md:px-6 md:py-10">
+      <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-slate-800/80 ring-1 ring-white/10 md:mb-4 md:h-14 md:w-14 md:rounded-2xl">
+        <SearchX className="h-5 w-5 text-slate-500 md:h-7 md:w-7" />
       </div>
-      <p className="text-base font-medium text-slate-200">No matching records</p>
-      <p className="mt-2 max-w-sm text-sm leading-relaxed text-slate-500">
+      <p className="text-sm font-medium text-slate-200 md:text-base">No matching records</p>
+      <p className="mt-1.5 max-w-sm text-xs leading-relaxed text-slate-500 md:mt-2 md:text-sm">
         The query ran successfully but returned zero rows. Filters may be too strict, or
         nothing is recorded for this period.
       </p>
@@ -366,19 +374,21 @@ function SummaryHero({
   kind: string;
 }) {
   return (
-    <div className="rounded-2xl border border-white/[0.08] bg-gradient-to-br from-white/[0.06] to-white/[0.02] px-6 py-8 text-center">
-      <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
+    <div className="rounded-xl border border-white/[0.08] bg-gradient-to-br from-white/[0.06] to-white/[0.02] px-4 py-4 text-center md:rounded-2xl md:px-6 md:py-8">
+      <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-slate-500 md:text-xs md:tracking-[0.2em]">
         {label}
       </p>
       <p
         className={cn(
-          "mt-3 font-semibold tabular-nums tracking-tight text-white",
-          kind === "currency" ? "text-4xl md:text-5xl" : "text-3xl md:text-4xl",
+          "mt-2 font-semibold tabular-nums tracking-tight text-white md:mt-3",
+          kind === "currency"
+            ? "text-2xl md:text-5xl"
+            : "text-xl md:text-4xl",
         )}
       >
         {value}
       </p>
-      <div className="mx-auto mt-4 flex h-1 w-16 overflow-hidden rounded-full bg-white/10">
+      <div className="mx-auto mt-2 flex h-1 w-12 overflow-hidden rounded-full bg-white/10 md:mt-4 md:w-16">
         <div className={cn("h-full w-full rounded-full bg-gradient-to-r", "from-cyan-400 to-violet-500")} />
       </div>
     </div>
@@ -393,21 +403,21 @@ function KeyValueGrid({
   columns: string[];
 }) {
   return (
-    <dl className="grid gap-3 sm:grid-cols-2">
+    <dl className="grid gap-2 sm:grid-cols-2 md:gap-3">
       {columns.map((col) => {
         const cell = formatCellValue(col, row[col]);
         return (
           <div
             key={col}
-            className="rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3"
+            className="rounded-lg border border-white/[0.06] bg-white/[0.03] px-3 py-2 md:rounded-xl md:px-4 md:py-3"
           >
             <dt className="text-[10px] font-medium uppercase tracking-wider text-slate-500">
               {humanizeColumn(col)}
             </dt>
             <dd
               className={cn(
-                "mt-1 text-sm font-medium text-slate-100",
-                cell.kind === "currency" && "text-lg tabular-nums text-emerald-300",
+                "mt-0.5 text-sm font-medium text-slate-100 md:mt-1",
+                cell.kind === "currency" && "text-base tabular-nums text-emerald-300 md:text-lg",
                 cell.kind === "document" && "font-mono text-cyan-200/90",
               )}
             >
@@ -434,7 +444,7 @@ function RankedList({
   startIndex: number;
 }) {
   return (
-    <ul className="space-y-2">
+    <ul className="space-y-1.5 md:space-y-2">
       {rows.map((row, i) => {
         const rank = startIndex + i + 1;
         const primaryCell = formatCellValue(primary, row[primary]);
@@ -443,9 +453,9 @@ function RankedList({
         return (
           <li
             key={i}
-            className="group flex gap-3 rounded-xl border border-white/[0.06] bg-white/[0.025] px-4 py-3 transition-colors hover:border-white/12 hover:bg-white/[0.04]"
+            className="group flex gap-2.5 rounded-lg border border-white/[0.06] bg-white/[0.025] px-3 py-2 transition-colors hover:border-white/12 hover:bg-white/[0.04] md:gap-3 md:rounded-xl md:px-4 md:py-3"
           >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-xs font-bold tabular-nums text-slate-400 group-hover:text-cyan-300">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white/[0.06] text-[11px] font-bold tabular-nums text-slate-400 group-hover:text-cyan-300 md:h-8 md:w-8 md:rounded-lg md:text-xs">
               {rank}
             </span>
             <div className="min-w-0 flex-1">
@@ -583,7 +593,7 @@ function ActionButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-medium transition-all",
+        "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-all md:gap-2 md:rounded-xl md:px-3.5 md:py-2 md:text-xs",
         primary &&
           "border border-cyan-400/30 bg-gradient-to-r from-cyan-500/20 to-violet-500/20 text-cyan-100 hover:from-cyan-500/30 hover:to-violet-500/30",
         !primary &&

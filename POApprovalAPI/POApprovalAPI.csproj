@@ -7,6 +7,14 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);Scripts/**</DefaultItemExcludes>
   </PropertyGroup>
 
+  <!-- DemoDataCheck is a separate console project; exclude its sources and obj/bin from web compile -->
+  <ItemGroup>
+    <Compile Remove="Scripts\DemoDataCheck\**" />
+    <Content Remove="Scripts\DemoDataCheck\**" />
+    <EmbeddedResource Remove="Scripts\DemoDataCheck\**" />
+    <None Remove="Scripts\DemoDataCheck\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="ClosedXML" Version="0.105.1" />
     <PackageReference Include="Dapper" Version="2.1.79" />
