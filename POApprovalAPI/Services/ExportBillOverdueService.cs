@@ -163,7 +163,8 @@ public class ExportBillOverdueService
         if (refresh)
         {
             _cache.Remove(universeKey);
-            _cache.Remove(universeKey + "|xlsx-v3");
+            _cache.Remove($"{universeKey}|{companyLabel}|xlsx-v4");
+            _cache.Remove($"{universeKey}|All Companies|xlsx-v4");
         }
 
         var universe = await GetOrLoadRowsAsync(universeKey, asOfDate, selectedGroup);
@@ -197,10 +198,12 @@ public class ExportBillOverdueService
         await GetCompaniesAsync();
         cancellationToken.ThrowIfCancellationRequested();
         await GetOverdueBillsAsync("All Companies", DateTime.Today, DefaultGroupName, 1, DefaultPageSize);
+        cancellationToken.ThrowIfCancellationRequested();
+        await GetOverdueBillsAsync("All Companies", DateTime.Today.AddDays(-1), DefaultGroupName, 1, DefaultPageSize);
     }
 
     private static string UniverseCacheKey(DateTime asOfDate, string selectedGroup) =>
-        $"export-bill-overdue-v18|{asOfDate:yyyy-MM-dd}|{selectedGroup}";
+        $"export-bill-overdue-v19|{asOfDate:yyyy-MM-dd}|{selectedGroup}";
 
     public async Task<byte[]> BuildExportAsync(
         string company,
@@ -637,7 +640,12 @@ FROM (
       )
 ) AS t1
 GROUP BY CompanyName, LedgerName, billno, BillDate, DueDate, DisplayCurrency
-HAVING ROUND(ABS(SUM(amount)), 3) >= @MinPending";
+HAVING ROUND(ABS(SUM(amount)), 3) >= @MinPending
+   AND CASE
+        WHEN DueDate = '1900-01-01' THEN 0
+        WHEN DATEDIFF(DAY, DueDate, @AsOf) < 0 THEN 0
+        ELSE DATEDIFF(DAY, DueDate, @AsOf)
+      END > 0";
 
         var rows = await connection.QueryAsync<ExportBillOverdueRow>(
             sql,

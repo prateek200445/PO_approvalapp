@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
@@ -9,7 +9,9 @@ import { SalesSummaryTables } from "@/components/sales/SalesSummaryTables";
 import {
   DEFAULT_SALES_FILTERS,
   getSalesCompanies,
-  getSalesOverview,
+  getSalesKpis,
+  getSalesTables,
+  getSalesYearlyTrend,
   getTopSuppliers,
 } from "@/lib/sales-dashboard-api";
 import type {
@@ -37,6 +39,14 @@ const EMPTY_SUMMARY: SalesDashboardSummary = {
   grossProfitChangePercent: 0,
 };
 
+const queryOptions = {
+  staleTime: 60 * 60_000,
+  gcTime: 4 * 60 * 60_000,
+  placeholderData: keepPreviousData,
+  retry: 1 as const,
+  refetchOnWindowFocus: false,
+};
+
 function SalesDashboardPage() {
   const [filters, setFilters] = useState<SalesDashboardFilters>(DEFAULT_SALES_FILTERS);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -50,32 +60,61 @@ function SalesDashboardPage() {
     staleTime: 60 * 60_000,
   });
 
-  const overviewQuery = useQuery({
+  const kpisQuery = useQuery({
     queryKey: [
-      "sales-overview",
+      "sales-kpis",
       filters.category,
       companyFilter,
       filters.dateFrom,
       filters.dateTo,
       refreshToken,
     ],
-    queryFn: async () => {
-      const refresh = bypassCacheRef.current;
-      const data = await getSalesOverview({
+    queryFn: () =>
+      getSalesKpis({
         company: companyFilter,
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
         category: filters.category,
-        refresh,
-      });
-      if (isPurchase) bypassCacheRef.current = false;
-      return data;
-    },
-    staleTime: 60 * 60_000,
-    gcTime: 4 * 60 * 60_000,
-    placeholderData: keepPreviousData,
-    retry: 1,
-    refetchOnWindowFocus: false,
+        refresh: bypassCacheRef.current,
+      }),
+    ...queryOptions,
+  });
+
+  const trendQuery = useQuery({
+    queryKey: [
+      "sales-trend",
+      filters.category,
+      companyFilter,
+      filters.dateTo,
+      refreshToken,
+    ],
+    queryFn: () =>
+      getSalesYearlyTrend({
+        company: companyFilter,
+        dateTo: filters.dateTo,
+        category: filters.category,
+        refresh: bypassCacheRef.current,
+      }),
+    ...queryOptions,
+  });
+
+  const tablesQuery = useQuery({
+    queryKey: [
+      "sales-tables",
+      companyFilter,
+      filters.dateFrom,
+      filters.dateTo,
+      refreshToken,
+    ],
+    queryFn: () =>
+      getSalesTables({
+        company: companyFilter,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        refresh: bypassCacheRef.current,
+      }),
+    enabled: !isPurchase,
+    ...queryOptions,
   });
 
   const suppliersQuery = useQuery({
@@ -86,46 +125,64 @@ function SalesDashboardPage() {
       filters.dateTo,
       refreshToken,
     ],
-    queryFn: async () => {
-      const items = await getTopSuppliers({
+    queryFn: () =>
+      getTopSuppliers({
         company: companyFilter,
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
         refresh: bypassCacheRef.current,
-      });
-      bypassCacheRef.current = false;
-      return items;
-    },
-    staleTime: 60 * 60_000,
-    gcTime: 4 * 60 * 60_000,
-    placeholderData: keepPreviousData,
-    retry: 1,
+      }),
+    enabled: isPurchase,
+    ...queryOptions,
   });
 
+  useEffect(() => {
+    if (
+      kpisQuery.isFetching ||
+      trendQuery.isFetching ||
+      tablesQuery.isFetching ||
+      suppliersQuery.isFetching
+    ) {
+      return;
+    }
+    bypassCacheRef.current = false;
+  }, [
+    kpisQuery.isFetching,
+    trendQuery.isFetching,
+    tablesQuery.isFetching,
+    suppliersQuery.isFetching,
+  ]);
+
   const companyOptions = companyList?.options ?? [];
-  const overview = overviewQuery.data;
+  const kpis = kpisQuery.data;
 
   function patchFilters(next: Partial<SalesDashboardFilters>) {
     setFilters((prev) => ({ ...prev, ...next }));
   }
 
   const summary = useMemo<SalesDashboardSummary>(() => {
-    if (!overview) return EMPTY_SUMMARY;
+    if (!kpis) return EMPTY_SUMMARY;
     if (isPurchase) {
       return {
         ...EMPTY_SUMMARY,
-        totalPurchase: overview.totalPurchase,
-        totalQuantity: overview.totalQuantity,
-        averageRate: overview.averageRate,
+        totalPurchase: kpis.totalPurchase,
+        totalQuantity: kpis.totalQuantity,
+        averageRate: kpis.averageRate,
       };
     }
     return {
       ...EMPTY_SUMMARY,
-      totalSales: overview.totalSales,
-      totalQuantity: overview.totalQuantity,
-      averageRate: overview.averageRate,
+      totalSales: kpis.totalSales,
+      totalQuantity: kpis.totalQuantity,
+      averageRate: kpis.averageRate,
     };
-  }, [isPurchase, overview]);
+  }, [isPurchase, kpis]);
+
+  const isRefreshing =
+    kpisQuery.isFetching ||
+    trendQuery.isFetching ||
+    tablesQuery.isFetching ||
+    suppliersQuery.isFetching;
 
   return (
     <div className="space-y-5 pb-2 sm:space-y-6 md:space-y-7">
@@ -142,7 +199,7 @@ function SalesDashboardPage() {
         companyOptions={companyOptions}
         companiesLoading={companiesLoading}
         filters={filters}
-        isRefreshing={overviewQuery.isFetching || suppliersQuery.isFetching}
+        isRefreshing={isRefreshing}
         onChange={patchFilters}
         onRefresh={() => {
           bypassCacheRef.current = true;
@@ -150,40 +207,56 @@ function SalesDashboardPage() {
         }}
       />
 
-      {overviewQuery.isFetching && !overview && (
+      {kpisQuery.isFetching && !kpis && (
         <div
           className="flex items-center gap-2 text-xs text-muted-foreground"
           aria-live="polite"
         >
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          Loading {isPurchase ? "purchase" : "sales"} data…
+          Loading {isPurchase ? "purchase" : "sales"} totals…
         </div>
       )}
-      {overviewQuery.isError && (
+      {isRefreshing && kpis && (
+        <div
+          className="flex items-center gap-2 text-xs text-muted-foreground"
+          aria-live="polite"
+        >
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+          Updating charts and tables…
+        </div>
+      )}
+      {kpisQuery.isError && (
         <p className="text-xs text-destructive" role="alert">
           Failed to load dashboard data. Please try again.
         </p>
       )}
 
-      <SalesKpiCards summary={summary} isPurchase={isPurchase} />
+      <SalesKpiCards
+        summary={summary}
+        isPurchase={isPurchase}
+        loading={kpisQuery.isFetching && !kpis}
+      />
 
       <SalesCharts
-        byGroup={overview?.byGroup ?? []}
-        bySubGroup={overview?.bySubGroup ?? []}
-        trend={overview?.trend ?? []}
-        trendLoading={overviewQuery.isFetching && !overview}
+        byGroup={kpis?.byGroup ?? []}
+        bySubGroup={kpis?.bySubGroup ?? []}
+        trend={trendQuery.data ?? []}
+        trendLoading={trendQuery.isFetching && !trendQuery.data}
+        groupsLoading={kpisQuery.isFetching && !kpis}
       />
 
       <SalesSummaryTables
-        exportCustomers={overview?.exportCustomers ?? []}
-        suppliers={
-          isPurchase ? (overview?.suppliers ?? []) : (suppliersQuery.data ?? [])
-        }
-        byCountry={overview?.byCountry ?? []}
-        countryPeriodLabel={overview?.countryPeriodLabel}
+        exportCustomers={tablesQuery.data?.exportCustomers ?? []}
+        suppliers={isPurchase ? (suppliersQuery.data ?? []) : []}
+        byCountry={tablesQuery.data?.byCountry ?? []}
+        countryPeriodLabel={tablesQuery.data?.countryPeriodLabel}
         isPurchase={isPurchase}
-        suppliersLoading={suppliersQuery.isFetching && !suppliersQuery.data}
-        totalSales={overview?.totalSales ?? 0}
+        suppliersLoading={
+          isPurchase
+            ? suppliersQuery.isFetching && !suppliersQuery.data
+            : tablesQuery.isFetching && !tablesQuery.data
+        }
+        totalSales={kpis?.totalSales ?? 0}
       />
     </div>
   );

@@ -9,7 +9,7 @@ import {
   getExportBillOverdueCompanies,
   getExportBillOverdueGroups,
 } from "@/lib/export-bill-overdue-api";
-import { DEFAULT_SALES_FILTERS, getSalesCompanies, getSalesOverview, getTopSuppliers } from "@/lib/sales-dashboard-api";
+import { DEFAULT_SALES_FILTERS, getSalesCompanies, getSalesKpis, getSalesTables, getSalesYearlyTrend } from "@/lib/sales-dashboard-api";
 
 export const Route = createFileRoute("/_app")({
   beforeLoad: () => {
@@ -63,7 +63,7 @@ function AppLayout() {
     });
     void queryClient.prefetchQuery({
       queryKey: [
-        "sales-overview",
+        "sales-kpis",
         DEFAULT_SALES_FILTERS.category,
         DEFAULT_SALES_FILTERS.company,
         DEFAULT_SALES_FILTERS.dateFrom,
@@ -71,7 +71,7 @@ function AppLayout() {
         0,
       ],
       queryFn: () =>
-        getSalesOverview({
+        getSalesKpis({
           company: DEFAULT_SALES_FILTERS.company,
           dateFrom: DEFAULT_SALES_FILTERS.dateFrom,
           dateTo: DEFAULT_SALES_FILTERS.dateTo,
@@ -81,19 +81,35 @@ function AppLayout() {
     });
     void queryClient.prefetchQuery({
       queryKey: [
-        "sales-suppliers",
+        "sales-trend",
+        DEFAULT_SALES_FILTERS.category,
+        DEFAULT_SALES_FILTERS.company,
+        DEFAULT_SALES_FILTERS.dateTo,
+        0,
+      ],
+      queryFn: () =>
+        getSalesYearlyTrend({
+          company: DEFAULT_SALES_FILTERS.company,
+          dateTo: DEFAULT_SALES_FILTERS.dateTo,
+          category: DEFAULT_SALES_FILTERS.category,
+        }),
+      staleTime,
+    });
+    void queryClient.prefetchQuery({
+      queryKey: [
+        "sales-tables",
         DEFAULT_SALES_FILTERS.company,
         DEFAULT_SALES_FILTERS.dateFrom,
         DEFAULT_SALES_FILTERS.dateTo,
         0,
       ],
       queryFn: () =>
-        getTopSuppliers({
+        getSalesTables({
           company: DEFAULT_SALES_FILTERS.company,
           dateFrom: DEFAULT_SALES_FILTERS.dateFrom,
           dateTo: DEFAULT_SALES_FILTERS.dateTo,
         }),
-      staleTime: 60 * 60_000,
+      staleTime,
     });
   }, [queryClient]);
 

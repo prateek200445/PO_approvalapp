@@ -81,13 +81,14 @@ public class SalesDashboardController : ControllerBase
     public async Task<IActionResult> GetTotalSales(
         [FromQuery] string company = "All Companies",
         [FromQuery] DateTime? dateFrom = null,
-        [FromQuery] DateTime? dateTo = null)
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] bool refresh = false)
     {
         try
         {
             var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
             var to = dateTo ?? DateTime.Today;
-            var totals = await _salesDashboard.GetSalesTotalsAsync(company, from, to);
+            var totals = await _salesDashboard.GetSalesTotalsAsync(company, from, to, refresh);
 
             return Ok(new
             {
@@ -126,13 +127,14 @@ public class SalesDashboardController : ControllerBase
     public async Task<IActionResult> GetTotalPurchase(
         [FromQuery] string company = "All Companies",
         [FromQuery] DateTime? dateFrom = null,
-        [FromQuery] DateTime? dateTo = null)
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] bool refresh = false)
     {
         try
         {
             var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
             var to = dateTo ?? DateTime.Today;
-            var totals = await _salesDashboard.GetPurchaseTotalsAsync(company, from, to);
+            var totals = await _salesDashboard.GetPurchaseTotalsAsync(company, from, to, refresh);
 
             return Ok(new
             {
@@ -172,7 +174,8 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] string company = "All Companies",
         [FromQuery] DateTime? asOf = null,
         [FromQuery] int years = 5,
-        [FromQuery] string category = "Sales")
+        [FromQuery] string category = "Sales",
+        [FromQuery] bool refresh = false)
     {
         try
         {
@@ -185,8 +188,8 @@ public class SalesDashboardController : ControllerBase
             var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
             var through = asOf ?? DateTime.Today;
             var trend = isPurchase
-                ? await _salesDashboard.GetPurchaseYearlyTrendAsync(company, through, years)
-                : await _salesDashboard.GetSalesYearlyTrendAsync(company, through, years);
+                ? await _salesDashboard.GetPurchaseYearlyTrendAsync(company, through, years, refresh)
+                : await _salesDashboard.GetSalesYearlyTrendAsync(company, through, years, refresh);
 
             var source = isPurchase ? "vw_Purchase_EBIDTA" : "vw_Sales_EBIDTA";
             var label = isPurchase ? "Purchase" : "Sales";
@@ -220,13 +223,14 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] string company = "All Companies",
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
-        [FromQuery] int top = 5)
+        [FromQuery] int top = 5,
+        [FromQuery] bool refresh = false)
     {
         try
         {
             var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
             var to = dateTo ?? DateTime.Today;
-            var result = await _salesDashboard.GetSalesByCountryAsync(company, from, to, top);
+            var result = await _salesDashboard.GetSalesByCountryAsync(company, from, to, top, refresh);
 
             return Ok(new
             {
@@ -258,13 +262,14 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] string company = "All Companies",
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
-        [FromQuery] int top = 5)
+        [FromQuery] int top = 5,
+        [FromQuery] bool refresh = false)
     {
         try
         {
             var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
             var to = dateTo ?? DateTime.Today;
-            var result = await _salesDashboard.GetTopExportCustomersAsync(company, from, to, top);
+            var result = await _salesDashboard.GetTopExportCustomersAsync(company, from, to, top, refresh);
             return Ok(new
             {
                 items = result.Items,

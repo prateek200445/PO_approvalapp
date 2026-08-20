@@ -153,25 +153,23 @@ public class SalesDashboardService
 
         await GetCompanyOptionsAsync();
         cancellationToken.ThrowIfCancellationRequested();
-        await GetOverviewAsync("Sales", "All Companies", from, today);
-        cancellationToken.ThrowIfCancellationRequested();
+
+        var salesWarm = GetOverviewAsync("Sales", "All Companies", from, today);
+        var purchaseWarm = GetOverviewAsync("Purchase", "All Companies", from, today);
+        var suppliersWarm = GetTopSuppliersAsync("All Companies", from, today, 5);
         try
         {
-            await GetTopSuppliersAsync("All Companies", from, today, 5);
+            await salesWarm;
         }
         catch (Exception)
         {
-            // KPIs/charts can still be served from overview cache if suppliers is slow.
+            // First user request will load Sales if warmup fails.
         }
+
         cancellationToken.ThrowIfCancellationRequested();
-        try
-        {
-            await GetOverviewAsync("Purchase", "All Companies", from, today);
-        }
-        catch (Exception)
-        {
-            // Sales widgets can still be served if purchase warmup is slow.
-        }
+        try { await suppliersWarm; } catch (Exception) { }
+        cancellationToken.ThrowIfCancellationRequested();
+        try { await purchaseWarm; } catch (Exception) { }
     }
 
     public async Task<SalesOverviewDto> GetOverviewAsync(
@@ -189,12 +187,10 @@ public class SalesDashboardService
 
         if (isPurchase)
         {
-            var suppliers = await GetTopSuppliersAsync(company, dateFrom, dateTo, 5, refresh);
             return new SalesOverviewDto
             {
                 Totals = totals,
                 Trend = trend,
-                Suppliers = suppliers.Items,
             };
         }
 
@@ -208,53 +204,100 @@ public class SalesDashboardService
         };
     }
 
-    private Task<SalesUniverse> GetOrLoadUniverseAsync(
+    private static string NormalizeCategory(string category) =>
+        category.Equals("Purchase", StringComparison.OrdinalIgnoreCase) ? "Purchase" : "Sales";
+
+    private Task<List<EbidtaLeaf>> GetOrLoadLeavesAsync(
         string category,
         DateTime dateFrom,
         DateTime dateTo,
         bool refresh)
     {
-        var selectedCategory = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase)
-            ? "Purchase"
-            : "Sales";
-        var key = $"sales-universe-v1:{selectedCategory}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
-        return CachedAsync(key, refresh, () => LoadUniverseCoreAsync(selectedCategory, dateFrom, dateTo));
+        var selected = NormalizeCategory(category);
+        var key = $"sales-leaves-v1:{selected}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        return CachedAsync(key, refresh, () => LoadEbidtaLeavesAsync(selected, dateFrom, dateTo));
     }
 
-    private async Task<SalesUniverse> LoadUniverseCoreAsync(
+    private Task<TrendBundle> GetOrLoadTrendAsync(
         string category,
-        DateTime dateFrom,
-        DateTime dateTo)
+        DateTime asOf,
+        int years,
+        bool refresh)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
-
-        // One All-Companies EBIDTA scan, then trend on the same view (shared buffer).
-        var leaves = await LoadEbidtaLeavesAsync(category, dateFrom, dateTo);
-        var (trend, ranges) = await LoadTrendLeavesAsync(category, dateTo, 5);
-
-        var universe = new SalesUniverse
+        years = Math.Clamp(years, 1, 8);
+        var selected = NormalizeCategory(category);
+        var key = $"sales-trend-v1:{selected}:{asOf:yyyy-MM-dd}:{years}";
+        return CachedAsync(key, refresh, async () =>
         {
-            Leaves = leaves,
-            Trend = trend,
-            TrendRanges = ranges,
-        };
+            var (rows, ranges) = await LoadTrendLeavesAsync(selected, asOf, years);
+            return new TrendBundle { Rows = rows, Ranges = ranges };
+        });
+    }
 
-        if (!isPurchase)
+    private Task<GeoBundle> GetOrLoadGeoAsync(
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool refresh)
+    {
+        var key = $"sales-geo-v1:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        return CachedAsync(key, refresh, async () =>
         {
             var invYears = GetInvYearsOverlapping(dateFrom, dateTo).ToList();
-            universe.InvYears = invYears;
-            universe.CountryPeriodLabel = FormatPeriodLabel(invYears);
             var (countries, exportCustomers, geoSource) = await LoadSalesGeoUniverseAsync(dateFrom, dateTo);
-            universe.Countries = countries;
-            universe.ExportCustomers = exportCustomers;
-            universe.CountrySource = geoSource;
-            universe.ExportSource = geoSource;
+            return new GeoBundle
+            {
+                Countries = countries,
+                ExportCustomers = exportCustomers,
+                Source = geoSource,
+                InvYears = invYears,
+                CountryPeriodLabel = FormatPeriodLabel(invYears),
+            };
+        });
+    }
+
+    private async Task<SalesUniverse> GetOrLoadUniverseAsync(
+        string category,
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool refresh)
+    {
+        var selectedCategory = NormalizeCategory(category);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var leavesTask = GetOrLoadLeavesAsync(selectedCategory, dateFrom, dateTo, refresh);
+        var trendTask = GetOrLoadTrendAsync(selectedCategory, dateTo, 5, refresh);
+
+        if (selectedCategory == "Purchase")
+        {
+            await Task.WhenAll(leavesTask, trendTask);
+            var trend = await trendTask;
+            sw.Stop();
+            return new SalesUniverse
+            {
+                Leaves = await leavesTask,
+                Trend = trend.Rows,
+                TrendRanges = trend.Ranges,
+                ElapsedSeconds = sw.Elapsed.TotalSeconds,
+            };
         }
 
+        var geoTask = GetOrLoadGeoAsync(dateFrom, dateTo, refresh);
+        await Task.WhenAll(leavesTask, trendTask, geoTask);
+        var salesTrend = await trendTask;
+        var geo = await geoTask;
         sw.Stop();
-        universe.ElapsedSeconds = sw.Elapsed.TotalSeconds;
-        return universe;
+        return new SalesUniverse
+        {
+            Leaves = await leavesTask,
+            Trend = salesTrend.Rows,
+            TrendRanges = salesTrend.Ranges,
+            Countries = geo.Countries,
+            ExportCustomers = geo.ExportCustomers,
+            CountryPeriodLabel = geo.CountryPeriodLabel,
+            InvYears = geo.InvYears,
+            CountrySource = geo.Source,
+            ExportSource = geo.Source,
+            ElapsedSeconds = sw.Elapsed.TotalSeconds,
+        };
     }
 
     /// <summary>
@@ -271,9 +314,11 @@ public class SalesDashboardService
         DateTime dateTo,
         bool refresh = false)
     {
-        var universe = await GetOrLoadUniverseAsync("Sales", dateFrom, dateTo, refresh);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var leaves = await GetOrLoadLeavesAsync("Sales", dateFrom, dateTo, refresh);
+        sw.Stop();
         var slice = await ResolveSliceCompaniesAsync(company);
-        return AggregateTotals(universe.Leaves, "Sales", slice, universe.ElapsedSeconds);
+        return AggregateTotals(leaves, "Sales", slice, sw.Elapsed.TotalSeconds);
     }
 
     /// <summary>
@@ -288,9 +333,11 @@ public class SalesDashboardService
         DateTime dateTo,
         bool refresh = false)
     {
-        var universe = await GetOrLoadUniverseAsync("Purchase", dateFrom, dateTo, refresh);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var leaves = await GetOrLoadLeavesAsync("Purchase", dateFrom, dateTo, refresh);
+        sw.Stop();
         var slice = await ResolveSliceCompaniesAsync(company);
-        return AggregateTotals(universe.Leaves, "Purchase", slice, universe.ElapsedSeconds);
+        return AggregateTotals(leaves, "Purchase", slice, sw.Elapsed.TotalSeconds);
     }
 
     /// <summary>
@@ -349,10 +396,9 @@ GROUP BY GROUPING SETS (
         int years = 5,
         bool refresh = false)
     {
-        var fyStart = asOf.Month >= 4 ? new DateTime(asOf.Year, 4, 1) : new DateTime(asOf.Year - 1, 4, 1);
-        var universe = await GetOrLoadUniverseAsync("Sales", fyStart, asOf, refresh);
+        var bundle = await GetOrLoadTrendAsync("Sales", asOf, years, refresh);
         var slice = await ResolveSliceCompaniesAsync(company);
-        return TakeTrendYears(AggregateTrend(universe.Trend, universe.TrendRanges, slice), years);
+        return TakeTrendYears(AggregateTrend(bundle.Rows, bundle.Ranges, slice), years);
     }
 
     /// <summary>
@@ -364,10 +410,9 @@ GROUP BY GROUPING SETS (
         int years = 5,
         bool refresh = false)
     {
-        var fyStart = asOf.Month >= 4 ? new DateTime(asOf.Year, 4, 1) : new DateTime(asOf.Year - 1, 4, 1);
-        var universe = await GetOrLoadUniverseAsync("Purchase", fyStart, asOf, refresh);
+        var bundle = await GetOrLoadTrendAsync("Purchase", asOf, years, refresh);
         var slice = await ResolveSliceCompaniesAsync(company);
-        return TakeTrendYears(AggregateTrend(universe.Trend, universe.TrendRanges, slice), years);
+        return TakeTrendYears(AggregateTrend(bundle.Rows, bundle.Ranges, slice), years);
     }
 
     private async Task<(List<TrendLeaf> Rows, List<TrendRange> Ranges)> LoadTrendLeavesAsync(
@@ -415,14 +460,14 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
         if (top <= 0)
             top = 5;
         top = Math.Clamp(top, 1, 100);
-        var universe = await GetOrLoadUniverseAsync("Sales", dateFrom, dateTo, refresh);
+        var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh);
         var slice = await ResolveSliceCompaniesAsync(company);
         return new SalesByCountryResultDto
         {
-            ByCountry = AggregateCountries(universe.Countries, slice, top),
-            InvYears = universe.InvYears,
-            PeriodLabel = universe.CountryPeriodLabel,
-            Source = universe.CountrySource,
+            ByCountry = AggregateCountries(geo.Countries, slice, top),
+            InvYears = geo.InvYears,
+            PeriodLabel = geo.CountryPeriodLabel,
+            Source = geo.Source,
         };
     }
 
@@ -617,9 +662,9 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), LTRIM(RTRIM(v.{partySql}))";
         bool refresh = false)
     {
         top = ClampTop(top);
-        var universe = await GetOrLoadUniverseAsync("Sales", dateFrom, dateTo, refresh);
+        var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh);
         var slice = await ResolveSliceCompaniesAsync(company);
-        return ToRankedResult(AggregateParties(universe.ExportCustomers, slice, top), universe.ExportSource, "", "");
+        return ToRankedResult(AggregateParties(geo.ExportCustomers, slice, top), geo.Source, "", "");
     }
 
     /// <summary>
@@ -2108,6 +2153,21 @@ INNER JOIN (
         public int SrNo { get; set; }
         public string Name { get; set; } = "";
         public string GroupName { get; set; } = "";
+    }
+
+    private sealed class TrendBundle
+    {
+        public List<TrendLeaf> Rows { get; set; } = new();
+        public List<TrendRange> Ranges { get; set; } = new();
+    }
+
+    private sealed class GeoBundle
+    {
+        public List<CountryLeaf> Countries { get; set; } = new();
+        public List<PartyLeaf> ExportCustomers { get; set; } = new();
+        public string Source { get; set; } = "";
+        public List<string> InvYears { get; set; } = new();
+        public string CountryPeriodLabel { get; set; } = "";
     }
 
     private sealed class SalesUniverse

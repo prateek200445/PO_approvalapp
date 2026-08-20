@@ -100,17 +100,12 @@ export async function getSalesCompanies(): Promise<{
   return { names: uniqueNames, options };
 }
 
-function mapTotalsBreakdown(payload: {
-  byGroup?: Array<Record<string, unknown>>;
-  ByGroup?: Array<Record<string, unknown>>;
-  bySubGroup?: Array<Record<string, unknown>>;
-  BySubGroup?: Array<Record<string, unknown>>;
-}): {
+function mapTotalsBreakdown(payload: Record<string, unknown>): {
   byGroup: SalesByGroupItem[];
   bySubGroup: SalesBySubGroupItem[];
 } {
-  const byGroupRaw = payload.byGroup ?? payload.ByGroup ?? [];
-  const bySubGroupRaw = payload.bySubGroup ?? payload.BySubGroup ?? [];
+  const byGroupRaw = (payload.byGroup ?? payload.ByGroup ?? []) as Array<Record<string, unknown>>;
+  const bySubGroupRaw = (payload.bySubGroup ?? payload.BySubGroup ?? []) as Array<Record<string, unknown>>;
   return {
     byGroup: byGroupRaw.map((g) => ({
       groupName: str(g.groupName ?? g.GroupName),
@@ -122,6 +117,116 @@ function mapTotalsBreakdown(payload: {
       quantity: num(s.quantity ?? s.Quantity),
       salesAmount: num(s.salesAmount ?? s.SalesAmount),
     })),
+  };
+}
+
+/** KPI cards + group charts. Does not wait for the 5-year trend or country tables. */
+export async function getSalesKpis(filters: {
+  company: string;
+  dateFrom: string;
+  dateTo: string;
+  category: "Sales" | "Purchase";
+  refresh?: boolean;
+}): Promise<{
+  totalSales: number;
+  totalPurchase: number;
+  totalQuantity: number;
+  averageRate: number;
+  byGroup: SalesByGroupItem[];
+  bySubGroup: SalesBySubGroupItem[];
+}> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    refresh: filters.refresh ? "true" : "false",
+  });
+  const path =
+    filters.category === "Purchase"
+      ? `/api/SalesDashboard/total-purchase?${params}`
+      : `/api/SalesDashboard/total-sales?${params}`;
+  const response = await fetch(getSalesApiUrl(path));
+  const payload = (await response.json()) as Record<string, unknown> & { message?: string };
+  if (!response.ok) {
+    throw new Error(payload.message || "Failed to load dashboard totals");
+  }
+  const breakdown = mapTotalsBreakdown(payload);
+  return {
+    totalSales: num(payload.totalSales ?? payload.TotalSales),
+    totalPurchase: num(payload.totalPurchase ?? payload.TotalPurchase),
+    totalQuantity: num(payload.totalQuantity ?? payload.TotalQuantity),
+    averageRate: num(payload.averageRate ?? payload.AverageRate),
+    ...breakdown,
+  };
+}
+
+export async function getSalesYearlyTrend(filters: {
+  company: string;
+  dateTo: string;
+  category: "Sales" | "Purchase";
+  refresh?: boolean;
+}): Promise<SalesTrendItem[]> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    asOf: filters.dateTo,
+    years: "5",
+    category: filters.category,
+    refresh: filters.refresh ? "true" : "false",
+  });
+  const response = await fetch(getSalesApiUrl(`/api/SalesDashboard/yearly-trend?${params}`));
+  const payload = (await response.json()) as Record<string, unknown> & { message?: string };
+  if (!response.ok) {
+    throw new Error(payload.message || "Failed to load yearly trend");
+  }
+  const trendRaw = (payload.trend ?? payload.Trend ?? []) as Array<Record<string, unknown>>;
+  return trendRaw.map((t) => ({
+    period: str(t.period ?? t.Period),
+    amount: num(t.amount ?? t.Amount),
+  }));
+}
+
+export async function getSalesTables(filters: {
+  company: string;
+  dateFrom: string;
+  dateTo: string;
+  refresh?: boolean;
+}): Promise<{
+  byCountry: SalesByCountryItem[];
+  countryPeriodLabel: string;
+  exportCustomers: RankedPartyItem[];
+}> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    top: "5",
+    refresh: filters.refresh ? "true" : "false",
+  });
+  const [countryRes, customersRes] = await Promise.all([
+    fetch(getSalesApiUrl(`/api/SalesDashboard/by-country?${params}`)),
+    fetch(getSalesApiUrl(`/api/SalesDashboard/top-export-customers?${params}`)),
+  ]);
+  const countryPayload = (await countryRes.json()) as Record<string, unknown> & { message?: string };
+  const customersPayload = (await customersRes.json()) as Record<string, unknown> & { message?: string };
+  if (!countryRes.ok) {
+    throw new Error(countryPayload.message || "Failed to load country sales");
+  }
+  if (!customersRes.ok) {
+    throw new Error(customersPayload.message || "Failed to load export customers");
+  }
+  const countryRaw = (countryPayload.byCountry ?? countryPayload.ByCountry ?? []) as Array<
+    Record<string, unknown>
+  >;
+  return {
+    byCountry: countryRaw.map((c, i) => ({
+      rank: num(c.rank ?? c.Rank) || i + 1,
+      countryName: str(c.countryName ?? c.CountryName) || "Unknown",
+      salesAmount: num(c.salesAmount ?? c.SalesAmount),
+    })),
+    countryPeriodLabel: str(countryPayload.periodLabel ?? countryPayload.PeriodLabel ?? countryPayload.countryPeriodLabel ?? countryPayload.CountryPeriodLabel),
+    exportCustomers: mapRankedParties({
+      items: (customersPayload.items ?? customersPayload.Items) as Array<Record<string, unknown>> | undefined,
+    }),
   };
 }
 

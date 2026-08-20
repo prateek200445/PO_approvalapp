@@ -146,6 +146,7 @@ export function SalesSummaryTables({
             subtitle="Excl. India and intercompany"
             nameHeader="Customer"
             items={exportCustomers}
+            loading={suppliersLoading}
           />
         )}
 
@@ -160,7 +161,11 @@ export function SalesSummaryTables({
               </p>
             </header>
             <div className="p-3 sm:p-4">
-              {byCountry.length === 0 ? (
+              {suppliersLoading && byCountry.length === 0 ? (
+                <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground sm:aspect-square sm:h-auto sm:max-h-[240px]">
+                  Loading…
+                </div>
+              ) : byCountry.length === 0 ? (
                 <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground sm:aspect-square sm:h-auto sm:max-h-[240px]">
                   No country sales for this filter
                 </div>

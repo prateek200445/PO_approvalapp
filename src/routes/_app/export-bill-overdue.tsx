@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Loader2 } from "lucide-react";
+import { Download, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import {
   DEFAULT_EXPORT_GROUP,
@@ -187,6 +187,8 @@ function ExportBillOverduePage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(DEFAULT_PAGE_SIZE);
   const [exporting, setExporting] = useState(false);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const bypassCacheRef = useRef(false);
 
   const { data: companyPayload, isLoading: companiesLoading } = useQuery({
     queryKey: ["export-bill-overdue-companies"],
@@ -251,15 +253,20 @@ function ExportBillOverduePage() {
   const filtersReady = Boolean(company && groupName && asOf);
 
   const overdueQuery = useQuery({
-    queryKey: ["export-bill-overdue", "from-2026-04-01", company, groupName, asOf, page, pageSize],
-    queryFn: () =>
-      getExportBillOverdue({
+    queryKey: ["export-bill-overdue", "from-2026-04-01", company, groupName, asOf, page, pageSize, refreshToken],
+    queryFn: async () => {
+      const refresh = bypassCacheRef.current;
+      const data = await getExportBillOverdue({
         company,
         groupName,
         asOf,
         page,
         pageSize,
-      }),
+        refresh,
+      });
+      bypassCacheRef.current = false;
+      return data;
+    },
     enabled: filtersReady,
     staleTime: 60 * 60_000,
     gcTime: 4 * 60 * 60_000,
@@ -275,6 +282,7 @@ function ExportBillOverduePage() {
   const from = totalCount === 0 ? 0 : (safePage - 1) * pageSize + 1;
   const to = Math.min(safePage * pageSize, totalCount);
   const showSkeleton = overdueQuery.isFetching && items.length === 0;
+  const isUpdating = overdueQuery.isFetching && items.length > 0;
   const isInitialLoad = overdueQuery.isFetching && !overdueQuery.isFetched;
 
   // Prefetch next page from API cache (usually instant after first load).
@@ -326,18 +334,35 @@ function ExportBillOverduePage() {
   }
 
   const exportButton = (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      className="h-9 shrink-0 gap-1.5"
-      disabled={exporting || !filtersReady || totalCount === 0 || overdueQuery.isFetching}
-      onClick={() => void exportExcel()}
-      aria-label="Export overdue bills to Excel"
-    >
-      {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-      Export Excel
-    </Button>
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-9 shrink-0 gap-1.5"
+        disabled={overdueQuery.isFetching || !filtersReady}
+        onClick={() => {
+          bypassCacheRef.current = true;
+          setRefreshToken((n) => n + 1);
+        }}
+        aria-label="Refresh overdue bills"
+      >
+        <RefreshCw className={`h-4 w-4 ${overdueQuery.isFetching ? "animate-spin" : ""}`} />
+        Refresh
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-9 shrink-0 gap-1.5"
+        disabled={exporting || !filtersReady || totalCount === 0 || overdueQuery.isFetching}
+        onClick={() => void exportExcel()}
+        aria-label="Export overdue bills to Excel"
+      >
+        {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+        Export Excel
+      </Button>
+    </div>
   );
 
   const pagination = (totalCount > 0 || (overdueQuery.isFetching && filtersReady)) && (
@@ -437,10 +462,14 @@ function ExportBillOverduePage() {
         )}
       </section>
 
-      {overdueQuery.isFetching && items.length === 0 && (
+      {(showSkeleton || isUpdating) && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          {isInitialLoad ? `Loading ${companyLabel}…` : "Updating…"}
+          {showSkeleton
+            ? isInitialLoad
+              ? `Loading ${companyLabel}…`
+              : "Updating…"
+            : "Updating… previous rows stay visible."}
         </div>
       )}
       {overdueQuery.isError && (

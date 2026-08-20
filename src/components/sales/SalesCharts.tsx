@@ -35,6 +35,7 @@ interface SalesChartsProps {
   bySubGroup: SalesBySubGroupItem[];
   trend?: SalesTrendItem[];
   trendLoading?: boolean;
+  groupsLoading?: boolean;
 }
 
 export function SalesCharts({
@@ -42,6 +43,7 @@ export function SalesCharts({
   bySubGroup,
   trend = [],
   trendLoading = false,
+  groupsLoading = false,
 }: SalesChartsProps) {
   const groupConfig = Object.fromEntries(
     byGroup.map((g, i) => [
@@ -156,7 +158,11 @@ export function SalesCharts({
           <p className="mt-0.5 text-[11px] text-muted-foreground">Excl. intercompany</p>
         </header>
         <div className="p-3 sm:p-4">
-          {byGroup.length === 0 ? (
+          {groupsLoading && byGroup.length === 0 ? (
+            <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground sm:aspect-square sm:max-h-[240px] sm:h-auto">
+              Loading…
+            </div>
+          ) : byGroup.length === 0 ? (
             <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground sm:aspect-square sm:max-h-[240px] sm:h-auto">
               No group data
             </div>
@@ -222,7 +228,11 @@ export function SalesCharts({
           <p className="mt-0.5 text-[11px] text-muted-foreground">Excl. intercompany</p>
         </header>
         <div className="overflow-x-auto p-2 sm:p-4">
-          {subGroupChartData.length === 0 ? (
+          {groupsLoading && subGroupChartData.length === 0 ? (
+            <div className="flex h-[180px] items-center justify-center text-sm text-muted-foreground sm:aspect-[16/10] sm:h-auto">
+              Loading…
+            </div>
+          ) : subGroupChartData.length === 0 ? (
             <div className="flex h-[180px] items-center justify-center text-sm text-muted-foreground sm:aspect-[16/10] sm:h-auto">
               No sub-group data
             </div>
