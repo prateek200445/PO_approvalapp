@@ -28,12 +28,16 @@
     </None>
   </ItemGroup>
 
-  <!-- DemoDataCheck is a standalone console tool under Scripts/; keep it out of the web app compile -->
+  <!-- Nested tools under Scripts/ (e.g. DemoDataCheck) have their own obj/AssemblyInfo; keep them out of this compile. -->
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Scripts\**\*</DefaultItemExcludes>
+  </PropertyGroup>
+
   <ItemGroup>
-    <Compile Remove="Scripts\DemoDataCheck\**" />
-    <Content Remove="Scripts\DemoDataCheck\**" />
-    <EmbeddedResource Remove="Scripts\DemoDataCheck\**" />
-    <None Remove="Scripts\DemoDataCheck\**" />
+    <Compile Remove="Scripts\**" />
+    <Content Remove="Scripts\**" />
+    <EmbeddedResource Remove="Scripts\**" />
+    <None Remove="Scripts\**" />
   </ItemGroup>
 
 </Project>
