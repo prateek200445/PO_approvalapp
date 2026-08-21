@@ -19,6 +19,7 @@ import { Route as AppPendingRouteImport } from './routes/_app/pending'
 import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
 import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
 import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
+import { Route as AppDebtorStatementRouteImport } from './routes/_app/debtor-statement'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
@@ -79,6 +80,11 @@ const AppLedgersRoute = AppLedgersRouteImport.update({
 const AppLedgerSummaryRoute = AppLedgerSummaryRouteImport.update({
   id: '/ledger-summary',
   path: '/ledger-summary',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDebtorStatementRoute = AppDebtorStatementRouteImport.update({
+  id: '/debtor-statement',
+  path: '/debtor-statement',
   getParentRoute: () => AppRoute,
 } as any)
 const AppIndentsRoute = AppIndentsRouteImport.update({
@@ -150,6 +156,7 @@ export interface FileRoutesByFullPath {
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/ledger-summary': typeof AppLedgerSummaryRoute
+  '/debtor-statement': typeof AppDebtorStatementRoute
   '/ledgers': typeof AppLedgersRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
@@ -172,6 +179,7 @@ export interface FileRoutesByTo {
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/ledger-summary': typeof AppLedgerSummaryRoute
+  '/debtor-statement': typeof AppDebtorStatementRoute
   '/ledgers': typeof AppLedgersRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
@@ -197,6 +205,7 @@ export interface FileRoutesById {
   '/_app/history': typeof AppHistoryRoute
   '/_app/indents': typeof AppIndentsRoute
   '/_app/ledger-summary': typeof AppLedgerSummaryRoute
+  '/_app/debtor-statement': typeof AppDebtorStatementRoute
   '/_app/ledgers': typeof AppLedgersRoute
   '/_app/payments': typeof AppPaymentsRoute
   '/_app/pending': typeof AppPendingRoute
@@ -222,6 +231,7 @@ export interface FileRouteTypes {
     | '/history'
     | '/indents'
     | '/ledger-summary'
+    | '/debtor-statement'
     | '/ledgers'
     | '/payments'
     | '/pending'
@@ -244,6 +254,7 @@ export interface FileRouteTypes {
     | '/history'
     | '/indents'
     | '/ledger-summary'
+    | '/debtor-statement'
     | '/ledgers'
     | '/payments'
     | '/pending'
@@ -268,6 +279,7 @@ export interface FileRouteTypes {
     | '/_app/history'
     | '/_app/indents'
     | '/_app/ledger-summary'
+    | '/_app/debtor-statement'
     | '/_app/ledgers'
     | '/_app/payments'
     | '/_app/pending'
@@ -359,6 +371,13 @@ declare module '@tanstack/react-router' {
       path: '/ledger-summary'
       fullPath: '/ledger-summary'
       preLoaderRoute: typeof AppLedgerSummaryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/debtor-statement': {
+      id: '/_app/debtor-statement'
+      path: '/debtor-statement'
+      fullPath: '/debtor-statement'
+      preLoaderRoute: typeof AppDebtorStatementRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/indents': {
@@ -470,6 +489,7 @@ interface AppRouteChildren {
   AppHistoryRoute: typeof AppHistoryRoute
   AppIndentsRoute: typeof AppIndentsRoute
   AppLedgerSummaryRoute: typeof AppLedgerSummaryRoute
+  AppDebtorStatementRoute: typeof AppDebtorStatementRoute
   AppLedgersRoute: typeof AppLedgersRoute
   AppPaymentsRoute: typeof AppPaymentsRoute
   AppPendingRoute: typeof AppPendingRoute
@@ -490,6 +510,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppHistoryRoute: AppHistoryRoute,
   AppIndentsRoute: AppIndentsRoute,
   AppLedgerSummaryRoute: AppLedgerSummaryRoute,
+  AppDebtorStatementRoute: AppDebtorStatementRoute,
   AppLedgersRoute: AppLedgersRoute,
   AppPaymentsRoute: AppPaymentsRoute,
   AppPendingRoute: AppPendingRoute,

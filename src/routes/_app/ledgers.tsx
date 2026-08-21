@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeftRight, BookOpen, ChevronRight } from "lucide-react";
+import { ArrowLeftRight, BookOpen, ChevronRight, FileSpreadsheet } from "lucide-react";
 
 export const Route = createFileRoute("/_app/ledgers")({
   head: () => ({ meta: [{ title: "Ledgers — PO Portal" }] }),
@@ -12,7 +12,7 @@ function LedgersHubPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Ledgers</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          View company ledger summaries or reconcile two Excel ledgers.
+          View company ledger summaries, reconcile Excel ledgers, or build the monthly debtor pack.
         </p>
       </div>
 
@@ -28,6 +28,12 @@ function LedgersHubPage() {
           icon={ArrowLeftRight}
           title="Ledger Reconciliation"
           description="Upload two company Excel ledgers and match Bill No + Bill Date (with voucher-date fallback)."
+        />
+        <HubCard
+          to="/debtor-statement"
+          icon={FileSpreadsheet}
+          title="Debtor Statement"
+          description="As-on bill-wise debtors vs ledger closing, with visible LIFO allocation for the bank drawing-power pack."
         />
       </div>
     </div>

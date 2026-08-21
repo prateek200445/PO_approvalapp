@@ -19,6 +19,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Remove="Scripts\**" />
+    <Content Remove="Scripts\**" />
+    <None Remove="Scripts\**" />
+    <EmbeddedResource Remove="Scripts\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

@@ -11,6 +11,7 @@ import {
   BookOpen,
   BarChart3,
   FileWarning,
+  FileSpreadsheet,
   Layers,
   PanelLeftClose,
   PanelLeftOpen,
@@ -34,6 +35,7 @@ type AppPath =
   | "/sales-dashboard"
   | "/ledgers"
   | "/export-bill-overdue"
+  | "/debtor-statement"
   | "/bom"
   | "/profile";
 
@@ -152,10 +154,10 @@ export function AppShell() {
         p.startsWith("/ledgers") || p.startsWith("/ledger-summary") || p.startsWith("/reconciliation"),
     },
     {
-      to: "/export-bill-overdue",
-      icon: FileWarning,
-      label: "Export Bill Overdue",
-      match: (p) => p.startsWith("/export-bill-overdue"),
+      to: "/debtor-statement",
+      icon: FileSpreadsheet,
+      label: "Debtor Statement",
+      match: (p) => p.startsWith("/debtor-statement"),
     },
     { to: "/bom", icon: Layers, label: "BOM Report", match: (p) => p.startsWith("/bom") },
   ];
