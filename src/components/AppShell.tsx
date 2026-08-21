@@ -51,6 +51,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const router = useRouterState();
   const path = router.location.pathname;
+  const fullScreenReport = path.includes("export-bill-overdue");
   const [dark, setDark] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -239,7 +240,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-background">
+    <div className={cn("min-h-screen overflow-x-hidden bg-background", fullScreenReport && "md:h-svh md:overflow-hidden")}>
       <header className="app-glass sticky top-0 z-30 border-b md:hidden">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-3">
           <div className="flex min-w-0 items-center gap-2">
@@ -289,7 +290,7 @@ export function AppShell() {
         </div>
       </header>
 
-      <div className="md:flex md:min-h-screen">
+      <div className={cn("md:flex md:min-h-screen", fullScreenReport && "md:h-svh md:overflow-hidden")}>
         <aside
           className={cn(
             "app-sidebar-3d fixed inset-y-0 left-0 z-40 hidden flex-col border-r transition-[width] duration-300 ease-in-out md:flex",
@@ -409,10 +410,17 @@ export function AppShell() {
           className={cn(
             "w-full min-w-0 max-w-full overflow-x-hidden px-4 py-5 transition-[margin-left] duration-300 ease-in-out md:px-6 md:py-8 lg:px-8",
             sidebarCollapsed ? "md:ml-[4.5rem]" : "md:ml-64",
+            fullScreenReport &&
+              "flex min-h-0 flex-col overflow-hidden py-3 md:h-svh md:px-4 md:py-3 lg:px-5",
           )}
           id="main-content"
         >
-          <div className="mx-auto w-full max-w-7xl">
+          <div
+            className={cn(
+              "mx-auto w-full max-w-7xl",
+              fullScreenReport && "flex min-h-0 max-w-none flex-1 flex-col",
+            )}
+          >
             <Outlet />
           </div>
         </main>

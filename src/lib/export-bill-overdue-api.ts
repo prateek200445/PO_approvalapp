@@ -27,6 +27,7 @@ export interface ExportBillOverdueItem {
 export interface ExportBillOverdueResponse {
   items: ExportBillOverdueItem[];
   company: string;
+  dateFrom: string;
   asOf: string;
   groupName: string;
   count: number;
@@ -34,6 +35,34 @@ export interface ExportBillOverdueResponse {
   page: number;
   pageSize: number;
   totalPages: number;
+}
+
+export type ExportOverdueView = "overdue" | "aging";
+
+export interface ExportAgingBucket {
+  key: string;
+  label: string;
+  pendingAmount: number;
+  billCount: number;
+}
+
+export interface ExportAgingCustomer {
+  companyName: string;
+  customerName: string;
+  amounts: number[];
+  total: number;
+  billCount: number;
+}
+
+export interface ExportAgingReport {
+  company: string;
+  dateFrom: string;
+  asOf: string;
+  groupName: string;
+  totalPending: number;
+  totalBills: number;
+  buckets: ExportAgingBucket[];
+  customers: ExportAgingCustomer[];
 }
 
 function getExportApiUrl(path: string): string {
@@ -124,20 +153,24 @@ export async function getExportBillOverdueGroups(): Promise<string[]> {
 
 export async function getExportBillOverdue(filters: {
   company: string;
+  dateFrom: string;
   asOf: string;
   groupName: string;
   page: number;
   pageSize: number;
   refresh?: boolean;
+  search?: string;
 }): Promise<ExportBillOverdueResponse> {
   const params = new URLSearchParams({
     company: filters.company,
+    dateFrom: filters.dateFrom,
     asOf: filters.asOf,
     groupName: filters.groupName,
     page: String(filters.page),
     pageSize: String(filters.pageSize),
   });
   if (filters.refresh) params.set("refresh", "true");
+  if (filters.search?.trim()) params.set("search", filters.search.trim());
   const response = await fetch(
     getExportApiUrl(`/api/ExportBillOverdue?${params}`),
   );
@@ -171,6 +204,7 @@ export async function getExportBillOverdue(filters: {
   return {
     items,
     company: str(payload.company ?? payload.Company) || filters.company,
+    dateFrom: str(payload.dateFrom ?? payload.DateFrom) || filters.dateFrom,
     asOf: str(payload.asOf ?? payload.AsOf) || filters.asOf,
     groupName: str(payload.groupName ?? payload.GroupName) || filters.groupName,
     count: num(payload.count ?? payload.Count) || items.length,
@@ -178,6 +212,54 @@ export async function getExportBillOverdue(filters: {
     page,
     pageSize,
     totalPages: totalCount === 0 ? 0 : totalPages,
+  };
+}
+
+export async function getExportBillAging(filters: {
+  company: string;
+  dateFrom: string;
+  asOf: string;
+  groupName: string;
+  refresh?: boolean;
+}): Promise<ExportAgingReport> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    asOf: filters.asOf,
+    groupName: filters.groupName,
+  });
+  if (filters.refresh) params.set("refresh", "true");
+  const response = await fetch(getExportApiUrl(`/api/ExportBillOverdue/aging?${params}`));
+  const payload = (await response.json()) as Record<string, unknown>;
+  if (!response.ok) {
+    throw new Error(str(payload.message) || "Failed to load export bill aging");
+  }
+
+  const bucketsRaw = (payload.buckets ?? payload.Buckets ?? []) as Array<Record<string, unknown>>;
+  const customersRaw = (payload.customers ?? payload.Customers ?? []) as Array<Record<string, unknown>>;
+  return {
+    company: str(payload.company ?? payload.Company) || filters.company,
+    dateFrom: str(payload.dateFrom ?? payload.DateFrom) || filters.dateFrom,
+    asOf: str(payload.asOf ?? payload.AsOf) || filters.asOf,
+    groupName: str(payload.groupName ?? payload.GroupName) || filters.groupName,
+    totalPending: num(payload.totalPending ?? payload.TotalPending),
+    totalBills: num(payload.totalBills ?? payload.TotalBills),
+    buckets: bucketsRaw.map((b, i) => ({
+      key: str(b.key ?? b.Key) || `b${i}`,
+      label: str(b.label ?? b.Label),
+      pendingAmount: num(b.pendingAmount ?? b.PendingAmount),
+      billCount: num(b.billCount ?? b.BillCount),
+    })),
+    customers: customersRaw.map((c) => {
+      const amountsRaw = (c.amounts ?? c.Amounts ?? []) as unknown[];
+      return {
+        companyName: str(c.companyName ?? c.CompanyName),
+        customerName: str(c.customerName ?? c.CustomerName),
+        amounts: amountsRaw.map((n) => num(n)),
+        total: num(c.total ?? c.Total),
+        billCount: num(c.billCount ?? c.BillCount),
+      };
+    }),
   };
 }
 
@@ -200,6 +282,16 @@ export function formatForeignAmount(currency: string, amount: number): string {
   return `${code} ${formatBillAmount(amount)}`;
 }
 
+export function financialYearStartIso(iso?: string): string {
+  const d = iso ? new Date(`${iso}T00:00:00`) : new Date();
+  const year = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+  return `${year}-04-01`;
+}
+
+export function formatPeriod(dateFrom: string, asOf: string): string {
+  return `${formatDisplayDate(dateFrom)} – ${formatDisplayDate(asOf)}`;
+}
+
 export function formatDisplayDate(iso: string): string {
   if (!iso || iso.startsWith("1900-01-01")) return "—";
   const d = new Date(`${iso}T00:00:00`);
@@ -219,19 +311,14 @@ export function isCompanyGroup(company: string): boolean {
   return company.trim().toUpperCase().startsWith("G-");
 }
 
-export async function downloadExportBillOverdueExcel(filters: {
-  company: string;
-  asOf: string;
-  groupName: string;
-}): Promise<string> {
-  const params = new URLSearchParams({
-    company: filters.company,
-    asOf: filters.asOf,
-    groupName: filters.groupName,
-  });
-  const response = await fetch(getExportApiUrl(`/api/ExportBillOverdue/excel?${params}`));
+async function downloadExportFile(
+  path: string,
+  fallbackName: string,
+  failMessage: string,
+): Promise<string> {
+  const response = await fetch(getExportApiUrl(path));
   if (!response.ok) {
-    let message = "Failed to export overdue bills";
+    let message = failMessage;
     try {
       const payload = (await response.json()) as { message?: string };
       if (payload.message) message = payload.message;
@@ -243,8 +330,7 @@ export async function downloadExportBillOverdueExcel(filters: {
 
   const blob = await response.blob();
   const fileName =
-    response.headers.get("content-disposition")?.match(/filename="?([^"]+)"?/i)?.[1] ||
-    `export-bill-overdue-${filters.asOf}.xlsx`;
+    response.headers.get("content-disposition")?.match(/filename="?([^"]+)"?/i)?.[1] || fallbackName;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -252,4 +338,61 @@ export async function downloadExportBillOverdueExcel(filters: {
   a.click();
   URL.revokeObjectURL(url);
   return fileName;
+}
+
+export async function downloadExportBillOverdueExcel(filters: {
+  company: string;
+  dateFrom: string;
+  asOf: string;
+  groupName: string;
+}): Promise<string> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    asOf: filters.asOf,
+    groupName: filters.groupName,
+  });
+  return downloadExportFile(
+    `/api/ExportBillOverdue/excel?${params}`,
+    `export-bill-overdue-${filters.asOf}.xlsx`,
+    "Failed to export overdue bills",
+  );
+}
+
+export async function downloadExportBillOverduePdf(filters: {
+  company: string;
+  dateFrom: string;
+  asOf: string;
+  groupName: string;
+}): Promise<string> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    asOf: filters.asOf,
+    groupName: filters.groupName,
+  });
+  return downloadExportFile(
+    `/api/ExportBillOverdue/pdf?${params}`,
+    `export-bill-overdue-${filters.asOf}.pdf`,
+    "Failed to export overdue bills PDF",
+  );
+}
+
+export async function downloadExportBillAgingPdf(filters: {
+  company: string;
+  dateFrom: string;
+  asOf: string;
+  groupName: string;
+}): Promise<string> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    asOf: filters.asOf,
+    groupName: filters.groupName,
+  });
+  return downloadExportFile(
+    `/api/ExportBillOverdue/aging/pdf?${params}`,
+    `export-bill-aging-${filters.asOf}.pdf`,
+    "Failed to export aging report PDF",
+  );
 }

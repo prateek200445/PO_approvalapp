@@ -5,6 +5,7 @@ import { AppShell } from "@/components/AppShell";
 import {
   DEFAULT_EXPORT_GROUP,
   DEFAULT_PAGE_SIZE,
+  financialYearStartIso,
   getExportBillOverdue,
   getExportBillOverdueCompanies,
   getExportBillOverdueGroups,
@@ -33,6 +34,7 @@ function AppLayout() {
 
   useEffect(() => {
     const asOf = todayIso();
+    const dateFrom = financialYearStartIso(asOf);
     const staleTime = 60 * 60_000;
     void queryClient.prefetchQuery({
       queryKey: ["export-bill-overdue-companies"],
@@ -45,11 +47,12 @@ function AppLayout() {
       staleTime,
     });
     void queryClient.prefetchQuery({
-      queryKey: ["export-bill-overdue", "from-2026-04-01", "All Companies", DEFAULT_EXPORT_GROUP, asOf, 1, DEFAULT_PAGE_SIZE],
+      queryKey: ["export-bill-overdue", "erp-v3", "All Companies", DEFAULT_EXPORT_GROUP, dateFrom, asOf, 1, DEFAULT_PAGE_SIZE],
       queryFn: () =>
         getExportBillOverdue({
           company: "All Companies",
           groupName: DEFAULT_EXPORT_GROUP,
+          dateFrom,
           asOf,
           page: 1,
           pageSize: DEFAULT_PAGE_SIZE,

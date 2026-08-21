@@ -4,13 +4,14 @@ using ClosedXML.Excel;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
+using POApprovalAPI.Documents;
+using QuestPDF.Fluent;
 
 namespace POApprovalAPI.Services;
 
 /// <summary>
-/// Bill receivable overdue — mirrors ERP FrmReceivable BindGrid
-/// (Outstanding → Receivable), with selectable Group Name (e.g. Debtors-Overseas).
-/// Fast path: slim ERP SQL + cached IC/FX lookups applied in memory.
+/// Bill receivable overdue — ERP Ledger Summary Consolidate (Bill Wise):
+/// outstanding = Opening + Debit − Credit, grouped by bill.
 /// </summary>
 public class ExportBillOverdueService
 {
@@ -18,9 +19,6 @@ public class ExportBillOverdueService
     public const int DefaultPageSize = 25;
     public const int MaxPageSize = 200;
     private const int CommandTimeoutSeconds = 120;
-    private const double MinPendingInr = 100;
-    /// <summary>Only bills with BillDate on or after this FY start (1 April 2026).</summary>
-    private static readonly DateTime MinBillDate = new(2026, 4, 1);
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(4);
     private static readonly TimeSpan MetaCacheTtl = TimeSpan.FromHours(6);
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> LoadLocks = new();
@@ -141,13 +139,23 @@ public class ExportBillOverdueService
         return isDebtor && isOverseasOrExport;
     }
 
+    /// <summary>
+    /// Indian FY start (1 April) for the given as-of / to date — same default as Ledger Summary.
+    /// </summary>
+    public static DateTime FinancialYearStart(DateTime asOf)
+    {
+        var y = asOf.Month >= 4 ? asOf.Year : asOf.Year - 1;
+        return new DateTime(y, 4, 1);
+    }
     public async Task<ExportBillOverdueResultDto> GetOverdueBillsAsync(
         string company,
         DateTime asOf,
         string? groupName,
         int page = 1,
         int pageSize = DefaultPageSize,
-        bool refresh = false)
+        bool refresh = false,
+        DateTime? dateFrom = null,
+        string? search = null)
     {
         var selectedGroup = string.IsNullOrWhiteSpace(groupName) ? DefaultGroupName : groupName.Trim();
         if (!IsExportReceivableGroup(selectedGroup))
@@ -158,17 +166,20 @@ public class ExportBillOverdueService
 
         var companyLabel = string.IsNullOrWhiteSpace(company) ? "All Companies" : company.Trim();
         var asOfDate = asOf.Date;
+        var fromDate = ResolveDateFrom(dateFrom, asOfDate);
         var universeKey = UniverseCacheKey(asOfDate, selectedGroup);
 
         if (refresh)
         {
             _cache.Remove(universeKey);
-            _cache.Remove($"{universeKey}|{companyLabel}|xlsx-v4");
-            _cache.Remove($"{universeKey}|All Companies|xlsx-v4");
+            _cache.Remove($"{universeKey}|{companyLabel}|xlsx-v11");
+            _cache.Remove($"{universeKey}|All Companies|xlsx-v11");
         }
 
         var universe = await GetOrLoadRowsAsync(universeKey, asOfDate, selectedGroup);
-        var rows = await FilterRowsByCompanyAsync(universe, companyLabel);
+        var rows = OverdueOnly(await FilterRowsByCompanyAsync(universe, companyLabel))
+            .Where(r => MatchesSearch(r, search))
+            .ToList();
         var total = rows.Count;
         var pageItems = rows.Skip(offset).Take(pageSize).ToList();
 
@@ -176,12 +187,153 @@ public class ExportBillOverdueService
         {
             Items = pageItems,
             Company = companyLabel,
+            DateFrom = fromDate.ToString("yyyy-MM-dd"),
             AsOf = asOfDate.ToString("yyyy-MM-dd"),
             GroupName = selectedGroup,
-            Source = "vw_billwisetransactionwithonaccount + accountbills (FrmReceivable, fast)",
+            Source = "ERP FrmReceivable BindGrid (dueamount + Forex)",
             Page = page,
             PageSize = pageSize,
             TotalCount = total,
+        };
+    }
+
+    public static readonly string[] AgingBucketLabels =
+    {
+        "1–30", "31–60", "61–90", "90–120", "121+",
+    };
+
+    public static string AgingBucketHeading(string label) => $"{label} days";
+
+    public async Task<ExportAgingReportDto> GetAgingReportAsync(
+        string company,
+        DateTime asOf,
+        string? groupName,
+        bool refresh = false,
+        DateTime? dateFrom = null)
+    {
+        var selectedGroup = string.IsNullOrWhiteSpace(groupName) ? DefaultGroupName : groupName.Trim();
+        if (!IsExportReceivableGroup(selectedGroup))
+            selectedGroup = DefaultGroupName;
+
+        var companyLabel = string.IsNullOrWhiteSpace(company) ? "All Companies" : company.Trim();
+        var asOfDate = asOf.Date;
+        var fromDate = ResolveDateFrom(dateFrom, asOfDate);
+        var universeKey = UniverseCacheKey(asOfDate, selectedGroup);
+
+        if (refresh)
+        {
+            _cache.Remove(universeKey);
+            _cache.Remove($"{universeKey}|{companyLabel}|xlsx-v11");
+            _cache.Remove($"{universeKey}|All Companies|xlsx-v11");
+        }
+
+        var universe = await GetOrLoadRowsAsync(universeKey, asOfDate, selectedGroup);
+        var rows = await FilterRowsByCompanyAsync(universe, companyLabel);
+        return BuildAgingReport(rows, companyLabel, selectedGroup, fromDate, asOfDate);
+    }
+
+    private static int AgingBucketIndex(int days)
+    {
+        if (days <= 30) return 0;
+        if (days <= 60) return 1;
+        if (days <= 90) return 2;
+        if (days <= 120) return 3;
+        return 4;
+    }
+
+    /// <summary>
+    /// Stock statement / ERP FrmAgingReport1: DATEDIFF(DD, bill date, as-of).
+    /// Day 0–30 sit in 1–30 (no separate Not due column).
+    /// </summary>
+    private static int AgingDays(ExportBillOverdueItemDto row, DateTime asOfDate)
+    {
+        if (!DateTime.TryParse(row.BillDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out var billDate)
+            || billDate.Year <= 1900)
+            return 0;
+        var days = (asOfDate.Date - billDate.Date).Days;
+        return days < 0 ? 0 : days;
+    }
+
+    private static List<ExportBillOverdueItemDto> OverdueOnly(List<ExportBillOverdueItemDto> rows) =>
+        rows.Where(r => r.OverdueDays > 0 && r.PendingAmount > 0).ToList();
+
+    private static DateTime ResolveDateFrom(DateTime? dateFrom, DateTime asOfDate)
+    {
+        var from = (dateFrom ?? FinancialYearStart(asOfDate)).Date;
+        return from > asOfDate ? asOfDate : from;
+    }
+
+    private static ExportAgingReportDto BuildAgingReport(
+        List<ExportBillOverdueItemDto> rows,
+        string companyLabel,
+        string selectedGroup,
+        DateTime fromDate,
+        DateTime asOfDate)
+    {
+        var buckets = AgingBucketLabels.Select((label, i) => new ExportAgingBucketDto
+        {
+            Key = $"b{i}",
+            Label = label,
+            PendingAmount = 0,
+            BillCount = 0,
+        }).ToList();
+
+        var map = new Dictionary<(string Company, string Customer), ExportAgingCustomerDto>();
+        // ERP FrmAgingReport1: CR bills are signed negative and netted into the party total.
+        foreach (var row in rows.Where(r => Math.Round(Math.Abs(r.PendingAmount), 0) != 0))
+        {
+            var idx = AgingBucketIndex(AgingDays(row, asOfDate));
+            var pending = Math.Round(row.PendingAmount, 2, MidpointRounding.AwayFromZero);
+            buckets[idx].PendingAmount += pending;
+            buckets[idx].BillCount += 1;
+
+            var customer = string.IsNullOrWhiteSpace(row.CustomerName) ? row.LedgerName : row.CustomerName;
+            customer = customer.Trim();
+            if (customer.Length == 0) customer = "Unknown";
+            var companyName = (row.CompanyName ?? "").Trim();
+            var key = (companyName, customer);
+            if (!map.TryGetValue(key, out var line))
+            {
+                line = new ExportAgingCustomerDto
+                {
+                    CompanyName = companyName,
+                    CustomerName = customer,
+                    Amounts = new double[AgingBucketLabels.Length],
+                };
+                map[key] = line;
+            }
+
+            line.Amounts[idx] += pending;
+            line.Total += pending;
+            line.BillCount += 1;
+        }
+
+        foreach (var bucket in buckets)
+            bucket.PendingAmount = Math.Round(bucket.PendingAmount, 2, MidpointRounding.AwayFromZero);
+
+        var customers = map.Values
+            .Select(c =>
+            {
+                for (var i = 0; i < c.Amounts.Length; i++)
+                    c.Amounts[i] = Math.Round(c.Amounts[i], 2, MidpointRounding.AwayFromZero);
+                c.Total = Math.Round(c.Total, 2, MidpointRounding.AwayFromZero);
+                return c;
+            })
+            .Where(c => Math.Round(c.Total, 0) != 0)
+            .OrderByDescending(c => c.Total)
+            .ThenBy(c => c.CustomerName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new ExportAgingReportDto
+        {
+            Company = companyLabel,
+            DateFrom = fromDate.ToString("yyyy-MM-dd"),
+            AsOf = asOfDate.ToString("yyyy-MM-dd"),
+            GroupName = selectedGroup,
+            TotalPending = Math.Round(buckets.Sum(b => b.PendingAmount), 2, MidpointRounding.AwayFromZero),
+            TotalBills = rows.Count(r => Math.Round(Math.Abs(r.PendingAmount), 0) != 0),
+            Buckets = buckets,
+            Customers = customers,
         };
     }
 
@@ -203,12 +355,13 @@ public class ExportBillOverdueService
     }
 
     private static string UniverseCacheKey(DateTime asOfDate, string selectedGroup) =>
-        $"export-bill-overdue-v19|{asOfDate:yyyy-MM-dd}|{selectedGroup}";
+        $"export-bill-overdue-v23|{asOfDate:yyyy-MM-dd}|{selectedGroup}";
 
     public async Task<byte[]> BuildExportAsync(
         string company,
         DateTime asOf,
-        string? groupName)
+        string? groupName,
+        DateTime? dateFrom = null)
     {
         var selectedGroup = string.IsNullOrWhiteSpace(groupName) ? DefaultGroupName : groupName.Trim();
         if (!IsExportReceivableGroup(selectedGroup))
@@ -216,29 +369,75 @@ public class ExportBillOverdueService
 
         var companyLabel = string.IsNullOrWhiteSpace(company) ? "All Companies" : company.Trim();
         var asOfDate = asOf.Date;
+        var fromDate = ResolveDateFrom(dateFrom, asOfDate);
         var universeKey = UniverseCacheKey(asOfDate, selectedGroup);
-        var excelKey = $"{universeKey}|{companyLabel}|xlsx-v4";
+        var excelKey = $"{universeKey}|{companyLabel}|xlsx-v11|{fromDate:yyyy-MM-dd}";
         if (_cache.TryGetValue(excelKey, out byte[]? cachedExcel) && cachedExcel is { Length: > 0 })
             return cachedExcel;
 
         var universe = await GetOrLoadRowsAsync(universeKey, asOfDate, selectedGroup);
         var rows = await FilterRowsByCompanyAsync(universe, companyLabel);
-        var bytes = BuildAttractiveWorkbook(rows, companyLabel, selectedGroup, asOfDate);
+        var bytes = BuildAttractiveWorkbook(rows, companyLabel, selectedGroup, fromDate, asOfDate);
         _cache.Set(excelKey, bytes, TimeSpan.FromMinutes(30));
         return bytes;
     }
+
+    public async Task<byte[]> BuildOverduePdfAsync(string company, DateTime asOf, string? groupName, DateTime? dateFrom = null)
+    {
+        var (rows, companyLabel, selectedGroup, asOfDate) = await LoadFilteredRowsAsync(company, asOf, groupName);
+        var display = DisplayCompanyLabel(companyLabel);
+        var fromDate = ResolveDateFrom(dateFrom, asOfDate);
+        return new ExportBillOverduePdfDocument(
+                OverdueOnly(rows), display, selectedGroup, fromDate, asOfDate, ShowCompanyColumn(companyLabel))
+            .GeneratePdf();
+    }
+
+    public async Task<byte[]> BuildAgingPdfAsync(string company, DateTime asOf, string? groupName, DateTime? dateFrom = null)
+    {
+        var (rows, companyLabel, selectedGroup, asOfDate) = await LoadFilteredRowsAsync(company, asOf, groupName);
+        var fromDate = ResolveDateFrom(dateFrom, asOfDate);
+        var report = BuildAgingReport(rows, companyLabel, selectedGroup, fromDate, asOfDate);
+        return new ExportBillAgingPdfDocument(report, DisplayCompanyLabel(companyLabel), ShowCompanyColumn(companyLabel))
+            .GeneratePdf();
+    }
+
+    private async Task<(List<ExportBillOverdueItemDto> Rows, string CompanyLabel, string GroupName, DateTime AsOf)> LoadFilteredRowsAsync(
+        string company,
+        DateTime asOf,
+        string? groupName)
+    {
+        var selectedGroup = string.IsNullOrWhiteSpace(groupName) ? DefaultGroupName : groupName.Trim();
+        if (!IsExportReceivableGroup(selectedGroup))
+            selectedGroup = DefaultGroupName;
+        var companyLabel = string.IsNullOrWhiteSpace(company) ? "All Companies" : company.Trim();
+        var asOfDate = asOf.Date;
+        var universe = await GetOrLoadRowsAsync(UniverseCacheKey(asOfDate, selectedGroup), asOfDate, selectedGroup);
+        var rows = await FilterRowsByCompanyAsync(universe, companyLabel);
+        return (rows, companyLabel, selectedGroup, asOfDate);
+    }
+
+    private static string DisplayCompanyLabel(string companyLabel) =>
+        companyLabel.StartsWith("G-", StringComparison.OrdinalIgnoreCase)
+            ? companyLabel[2..] + " (Group)"
+            : companyLabel;
+
+    private static bool ShowCompanyColumn(string companyLabel) =>
+        companyLabel.Equals("All Companies", StringComparison.OrdinalIgnoreCase)
+        || companyLabel.Contains("(All)", StringComparison.OrdinalIgnoreCase)
+        || companyLabel.StartsWith("G-", StringComparison.OrdinalIgnoreCase);
 
     private static byte[] BuildAttractiveWorkbook(
         List<ExportBillOverdueItemDto> rows,
         string companyLabel,
         string selectedGroup,
+        DateTime fromDate,
         DateTime asOfDate)
     {
         var displayGroup = companyLabel.StartsWith("G-", StringComparison.OrdinalIgnoreCase)
             ? companyLabel[2..] + " (Group)"
             : companyLabel;
-        var totalAmount = rows.Sum(r => r.BillAmount);
-        var totalPending = rows.Sum(r => r.PendingAmount);
+        var overdueRows = OverdueOnly(rows);
+        var totalPending = overdueRows.Sum(r => r.PendingAmount);
 
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("Overdue bills");
@@ -265,7 +464,7 @@ public class ExportBillOverdueService
 
         sheet.Range(2, 1, 2, 10).Merge();
         var subtitle = sheet.Cell(2, 1);
-        subtitle.Value = $"Overseas receivables  ·  Bills dated 01-Apr-2026 onwards  ·  Generated {DateTime.Now:dd-MMM-yyyy HH:mm}";
+        subtitle.Value = $"Overseas receivables  ·  Opening + Debit − Credit  ·  {fromDate:dd-MMM-yyyy} to {asOfDate:dd-MMM-yyyy}  ·  Generated {DateTime.Now:dd-MMM-yyyy HH:mm}";
         subtitle.Style.Font.FontColor = XLColor.White;
         subtitle.Style.Font.FontSize = 10;
         subtitle.Style.Fill.BackgroundColor = headerBlue;
@@ -279,10 +478,10 @@ public class ExportBillOverdueService
 
         WriteKpi(sheet, 5, 1, "Company group", displayGroup, navy, kpiFill, 2);
         WriteKpi(sheet, 5, 3, "Ledger group", selectedGroup, navy, kpiFill, 2);
-        WriteKpi(sheet, 5, 5, "As of date", asOfDate.ToString("dd-MMM-yyyy"), navy, kpiFill, 1);
-        WriteKpi(sheet, 5, 6, "Bills", rows.Count.ToString("N0"), navy, kpiFill, 1);
-        WriteKpi(sheet, 5, 7, "Total amount (INR)", totalAmount, navy, kpiFill, 2);
-        WriteKpi(sheet, 5, 9, "Pending (INR)", totalPending, navy, kpiFill, 2);
+        WriteKpi(sheet, 5, 5, "From date", fromDate.ToString("dd-MMM-yyyy"), navy, kpiFill, 1);
+        WriteKpi(sheet, 5, 6, "To date", asOfDate.ToString("dd-MMM-yyyy"), navy, kpiFill, 1);
+        WriteKpi(sheet, 5, 7, "Bills", overdueRows.Count.ToString("N0"), navy, kpiFill, 1);
+        WriteKpi(sheet, 5, 8, "Pending (INR)", totalPending, navy, kpiFill, 2);
 
         const int headerRow = 8;
         var headers = new[]
@@ -293,7 +492,7 @@ public class ExportBillOverdueService
         for (var i = 0; i < headers.Length; i++)
             sheet.Cell(headerRow, i + 1).Value = headers[i];
 
-        var data = rows.Select(r => new object?[]
+        var data = overdueRows.Select(r => new object?[]
         {
             r.CompanyName,
             string.IsNullOrWhiteSpace(r.CustomerName) ? r.LedgerName : r.CustomerName,
@@ -306,11 +505,11 @@ public class ExportBillOverdueService
             r.OverdueDays,
             r.PendingAmount,
         });
-        if (rows.Count > 0)
+        if (overdueRows.Count > 0)
             sheet.Cell(headerRow + 1, 1).InsertData(data);
 
-        var lastDataRow = headerRow + Math.Max(rows.Count, 1);
-        if (rows.Count > 0)
+        var lastDataRow = headerRow + Math.Max(overdueRows.Count, 1);
+        if (overdueRows.Count > 0)
         {
             var tableRange = sheet.Range(headerRow, 1, lastDataRow, headers.Length);
             var table = tableRange.CreateTable("OverdueBills");
@@ -332,7 +531,7 @@ public class ExportBillOverdueService
         headerRange.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
         sheet.Row(headerRow).Height = 22;
 
-        if (rows.Count > 0)
+        if (overdueRows.Count > 0)
         {
             sheet.Range(headerRow + 1, 5, lastDataRow, 5).Style.NumberFormat.Format = "#,##0.00";
             sheet.Range(headerRow + 1, 7, lastDataRow, 7).Style.NumberFormat.Format = "#,##0.00";
@@ -364,9 +563,111 @@ public class ExportBillOverdueService
         sheet.PageSetup.Header.Left.AddText("Export Bill Overdue");
         sheet.PageSetup.Footer.Right.AddText("Page &P of &N");
 
+        WriteAgingSheet(workbook, rows, companyLabel, selectedGroup, fromDate, asOfDate, navy, headerBlue, gold, kpiFill);
+
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
         return stream.ToArray();
+    }
+
+    private static void WriteAgingSheet(
+        XLWorkbook workbook,
+        List<ExportBillOverdueItemDto> rows,
+        string companyLabel,
+        string selectedGroup,
+        DateTime fromDate,
+        DateTime asOfDate,
+        XLColor navy,
+        XLColor headerBlue,
+        XLColor gold,
+        XLColor kpiFill)
+    {
+        var report = BuildAgingReport(rows, companyLabel, selectedGroup, fromDate, asOfDate);
+        var showCompany = companyLabel.Equals("All Companies", StringComparison.OrdinalIgnoreCase)
+            || companyLabel.StartsWith("G-", StringComparison.OrdinalIgnoreCase);
+        var sheet = workbook.Worksheets.Add("Aging");
+        sheet.Style.Font.FontName = "Calibri";
+        sheet.Style.Font.FontSize = 11;
+        sheet.ShowGridLines = false;
+
+        var lastCol = (showCompany ? 3 : 2) + AgingBucketLabels.Length;
+        sheet.Range(1, 1, 1, lastCol).Merge();
+        var title = sheet.Cell(1, 1);
+        title.Value = "EXPORT BILL AGING";
+        title.Style.Font.Bold = true;
+        title.Style.Font.FontSize = 20;
+        title.Style.Font.FontColor = XLColor.White;
+        title.Style.Fill.BackgroundColor = navy;
+        title.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+        title.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        title.Style.Alignment.Indent = 1;
+        sheet.Row(1).Height = 32;
+
+        sheet.Range(2, 1, 2, lastCol).Merge();
+        var subtitle = sheet.Cell(2, 1);
+        subtitle.Value = $"Outstanding aging  ·  Opening + Debit − Credit  ·  {fromDate:dd-MMM-yyyy} to {asOfDate:dd-MMM-yyyy}  ·  Generated {DateTime.Now:dd-MMM-yyyy HH:mm}";
+        subtitle.Style.Font.FontColor = XLColor.White;
+        subtitle.Style.Font.FontSize = 10;
+        subtitle.Style.Fill.BackgroundColor = headerBlue;
+        subtitle.Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        subtitle.Style.Alignment.Indent = 1;
+        sheet.Row(2).Height = 20;
+
+        sheet.Range(3, 1, 3, lastCol).Merge();
+        sheet.Cell(3, 1).Style.Fill.BackgroundColor = gold;
+        sheet.Row(3).Height = 4;
+
+        WriteKpi(sheet, 5, 1, "Company group", companyLabel.StartsWith("G-", StringComparison.OrdinalIgnoreCase) ? companyLabel[2..] + " (Group)" : companyLabel, navy, kpiFill, 2);
+        WriteKpi(sheet, 5, 3, "Ledger group", selectedGroup, navy, kpiFill, 2);
+        WriteKpi(sheet, 5, 5, "Customers", report.Customers.Count.ToString("N0"), navy, kpiFill, 1);
+        WriteKpi(sheet, 5, 6, "Pending (INR)", report.TotalPending, navy, kpiFill, 2);
+
+        const int headerRow = 8;
+        var headers = new List<string>();
+        if (showCompany) headers.Add("Company");
+        headers.Add("Customer");
+        headers.AddRange(AgingBucketLabels.Select(AgingBucketHeading));
+        headers.Add("Total (INR)");
+
+        for (var i = 0; i < headers.Count; i++)
+            sheet.Cell(headerRow, i + 1).Value = headers[i];
+
+        var data = report.Customers.Select(c =>
+        {
+            var cells = new List<object?>();
+            if (showCompany) cells.Add(c.CompanyName);
+            cells.Add(c.CustomerName);
+            cells.AddRange(c.Amounts.Cast<object?>());
+            cells.Add(c.Total);
+            return cells.ToArray();
+        });
+        if (report.Customers.Count > 0)
+            sheet.Cell(headerRow + 1, 1).InsertData(data);
+
+        var lastDataRow = headerRow + Math.Max(report.Customers.Count, 1);
+        var headerRange = sheet.Range(headerRow, 1, headerRow, headers.Count);
+        headerRange.Style.Font.Bold = true;
+        headerRange.Style.Font.FontColor = XLColor.White;
+        headerRange.Style.Fill.BackgroundColor = navy;
+        headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        sheet.Row(headerRow).Height = 22;
+
+        var firstAmtCol = showCompany ? 3 : 2;
+        if (report.Customers.Count > 0)
+        {
+            sheet.Range(headerRow + 1, firstAmtCol, lastDataRow, headers.Count).Style.NumberFormat.Format = "#,##0.00";
+            sheet.Range(headerRow + 1, firstAmtCol, lastDataRow, headers.Count).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+        }
+
+        sheet.Column(1).Width = showCompany ? 28 : 36;
+        if (showCompany) sheet.Column(2).Width = 34;
+        for (var c = firstAmtCol; c <= headers.Count; c++)
+            sheet.Column(c).Width = 14;
+
+        sheet.SheetView.FreezeRows(headerRow);
+        sheet.SheetView.FreezeColumns(showCompany ? 2 : 1);
+        sheet.PageSetup.PageOrientation = XLPageOrientation.Landscape;
+        sheet.PageSetup.FitToPages(1, 0);
     }
 
     private static void WriteKpi(
@@ -409,6 +710,49 @@ public class ExportBillOverdueService
         sheet.Row(row).Height = 16;
         sheet.Row(row + 1).Height = 22;
     }
+
+    private static bool MatchesSearch(ExportBillOverdueItemDto row, string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search)) return true;
+        var q = search.Trim();
+        if (ContainsIgnoreCase(row.CompanyName, q) ||
+            ContainsIgnoreCase(row.CustomerName, q) ||
+            ContainsIgnoreCase(row.LedgerName, q) ||
+            ContainsIgnoreCase(row.BillNo, q) ||
+            ContainsIgnoreCase(row.BillCurrency, q) ||
+            ContainsIgnoreCase(row.BillDate, q) ||
+            ContainsIgnoreCase(row.DueDate, q) ||
+            ContainsIgnoreCase(row.OverdueDays.ToString(CultureInfo.InvariantCulture), q))
+            return true;
+
+        if (DateTime.TryParse(row.BillDate, out var billDate) &&
+            (ContainsIgnoreCase(billDate.ToString("dd-MM-yyyy"), q) ||
+             ContainsIgnoreCase(billDate.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture), q)))
+            return true;
+        if (DateTime.TryParse(row.DueDate, out var dueDate) &&
+            (ContainsIgnoreCase(dueDate.ToString("dd-MM-yyyy"), q) ||
+             ContainsIgnoreCase(dueDate.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture), q)))
+            return true;
+
+        return AmountMatches(row.PendingAmount, q) ||
+               AmountMatches(row.BillAmount, q) ||
+               AmountMatches(row.ForeignAmount, q);
+    }
+
+    private static bool AmountMatches(double amount, string query)
+    {
+        var invariant = amount.ToString("0.##", CultureInfo.InvariantCulture);
+        var rounded = Math.Round(amount, 0, MidpointRounding.AwayFromZero).ToString("0", CultureInfo.InvariantCulture);
+        var indian = amount.ToString("N2", CultureInfo.GetCultureInfo("en-IN"));
+        return ContainsIgnoreCase(invariant, query) ||
+               ContainsIgnoreCase(rounded, query) ||
+               ContainsIgnoreCase(indian, query) ||
+               ContainsIgnoreCase(indian.Replace(",", ""), query);
+    }
+
+    private static bool ContainsIgnoreCase(string? value, string query) =>
+        !string.IsNullOrEmpty(value) &&
+        value.Contains(query, StringComparison.OrdinalIgnoreCase);
 
     private static DateTime? ParseIsoDate(string iso)
     {
@@ -484,7 +828,6 @@ public class ExportBillOverdueService
 
         return rows
             .Where(r => !IsIntercompanyRow(r, ic))
-            .Where(r => IsBillOnOrAfterMinDate(r.BillDate))
             .Select(r => ApplyForeignAmount(r, fx))
             .OrderByDescending(r => r.OverdueDays)
             .ThenBy(r => r.LedgerName, StringComparer.OrdinalIgnoreCase)
@@ -573,8 +916,9 @@ public class ExportBillOverdueService
     }
 
     /// <summary>
-    /// Slim query close to ERP FrmReceivable: no per-row IC / currency_rbi joins.
-    /// One All-Companies scan; G-{group} slices FactoryInfo names in memory.
+    /// ERP FrmReceivable BindGrid against SQL:
+    /// pending = SUM(amount) per bill (Opening + Debit − Credit).
+    /// accountbills is grouped so the join cannot duplicate rows.
     /// </summary>
     private static async Task<List<ExportBillOverdueItemDto>> QueryCompaniesFastAsync(
         SqlConnection connection,
@@ -583,14 +927,13 @@ public class ExportBillOverdueService
     {
         var filterByGroup = !string.IsNullOrWhiteSpace(groupName);
 
-        // Restrict early: only ledgers in the selected outstanding group.
         var groupRestrict = filterByGroup
             ? @"
         INNER JOIN (
             SELECT DISTINCT
                 LTRIM(RTRIM(ledgername)) AS ledgername,
                 LTRIM(RTRIM(companyname)) AS companyname
-            FROM vw_ledgergrouping WITH (NOLOCK)
+            FROM vw_ledgergrouping
             WHERE @GroupName IN (expensehead, expensegrouphead, b, c, d, e, f, g)
         ) grp
             ON grp.ledgername = LTRIM(RTRIM(v1.ledgername))
@@ -604,48 +947,63 @@ SELECT
     LedgerName AS CustomerName,
     billno AS BillNo,
     BillDate,
-    ROUND(ABS(SUM(amount)), 3) AS BillAmount,
+    ROUND(BillAmount, 2) AS BillAmount,
     DueDate,
     CASE
-        WHEN DueDate = '1900-01-01' THEN 0
+        WHEN DueDate IS NULL OR DueDate <= '1900-01-01' THEN 0
         WHEN DATEDIFF(DAY, DueDate, @AsOf) < 0 THEN 0
         ELSE DATEDIFF(DAY, DueDate, @AsOf)
     END AS OverdueDays,
-    ROUND(ABS(SUM(amount)), 3) AS PendingAmount,
+    ROUND(dueamount, 2) AS PendingAmount,
     DisplayCurrency AS BillCurrency,
     CAST(0 AS float) AS ForeignAmount
 FROM (
     SELECT
-        v1.companyname AS CompanyName,
-        v1.ledgername AS LedgerName,
-        CASE WHEN ISNULL(v1.billno, '') = '' THEN 'On Account' ELSE v1.billno END AS billno,
-        COALESCE(v2.billdate, v1.voucherdate) AS BillDate,
-        CASE WHEN ISNULL(v1.billno, '') = '' THEN CAST('1900-01-01' AS datetime) ELSE v2.duedate END AS DueDate,
-        ISNULL(NULLIF(LTRIM(RTRIM(v2.BillCurrency)), ''), ISNULL(NULLIF(LTRIM(RTRIM(v1.Currency)), ''), 'Rs.')) AS DisplayCurrency,
-        ISNULL(v1.amount, 0) AS amount
-    FROM vw_billwisetransactionwithonaccount v1 WITH (NOLOCK)
-    {groupRestrict}
-    LEFT JOIN accountbills v2 WITH (NOLOCK)
-        ON v1.companyid = v2.companyid
-       AND v1.ledgername = v2.ledgername
-       AND v1.billno = v2.billno
-       AND v1.CompanyName = v2.CompanyName
-       AND v1.ledgerid = v2.LedgerId
-    WHERE v1.isbillwise = 'yes'
-      AND v1.voucherdate >= @MinBillDate
-      AND v1.voucherdate <= @AsOf
-      AND (
-            v2.billdate >= @MinBillDate
-         OR (v2.billdate IS NULL AND v1.voucherdate >= @MinBillDate)
-      )
-) AS t1
-GROUP BY CompanyName, LedgerName, billno, BillDate, DueDate, DisplayCurrency
-HAVING ROUND(ABS(SUM(amount)), 3) >= @MinPending
-   AND CASE
-        WHEN DueDate = '1900-01-01' THEN 0
-        WHEN DATEDIFF(DAY, DueDate, @AsOf) < 0 THEN 0
-        ELSE DATEDIFF(DAY, DueDate, @AsOf)
-      END > 0";
+        CompanyName,
+        LedgerName,
+        billno,
+        MAX(BillDate) AS BillDate,
+        MAX(DueDate) AS DueDate,
+        MAX(DisplayCurrency) AS DisplayCurrency,
+        MAX(BillAmount) AS BillAmount,
+        SUM(amount) AS dueamount
+    FROM (
+        SELECT
+            v1.companyname AS CompanyName,
+            v1.ledgername AS LedgerName,
+            CASE WHEN ISNULL(v1.billno, '') = '' THEN 'On Account' ELSE v1.billno END AS billno,
+            CASE WHEN ISNULL(v1.billno, '') = '' THEN CAST('1900-01-01' AS datetime) ELSE bills.billdate END AS BillDate,
+            CASE WHEN ISNULL(v1.billno, '') = '' THEN CAST('1900-01-01' AS datetime) ELSE bills.duedate END AS DueDate,
+            ISNULL(NULLIF(LTRIM(RTRIM(bills.BillCurrency)), ''), ISNULL(NULLIF(LTRIM(RTRIM(v1.Currency)), ''), 'Rs.')) AS DisplayCurrency,
+            CASE WHEN ISNULL(v1.billno, '') = '' THEN 0 ELSE ISNULL(bills.billamount, 0) END AS BillAmount,
+            ISNULL(v1.amount, 0) AS amount
+        FROM vw_billwisetransactionwithonaccount v1
+        {groupRestrict}
+        LEFT JOIN (
+            SELECT
+                companyid,
+                ledgername,
+                billno,
+                CompanyName,
+                LedgerId,
+                MAX(billdate) AS billdate,
+                MAX(duedate) AS duedate,
+                MAX(BillCurrency) AS BillCurrency,
+                MAX(billamount) AS billamount
+            FROM accountbills
+            GROUP BY companyid, ledgername, billno, CompanyName, LedgerId
+        ) bills
+            ON v1.companyid = bills.companyid
+           AND v1.ledgername = bills.ledgername
+           AND v1.billno = bills.billno
+           AND v1.CompanyName = bills.CompanyName
+           AND v1.ledgerid = bills.LedgerId
+        WHERE v1.isbillwise = 'yes'
+          AND v1.voucherdate <= @AsOf
+    ) AS t1
+    GROUP BY CompanyName, LedgerName, billno
+    HAVING ROUND(ABS(SUM(amount)), 0) <> 0
+) AS BillWiseDetail";
 
         var rows = await connection.QueryAsync<ExportBillOverdueRow>(
             sql,
@@ -653,8 +1011,6 @@ HAVING ROUND(ABS(SUM(amount)), 3) >= @MinPending
             {
                 AsOf = asOf,
                 GroupName = groupName,
-                MinPending = MinPendingInr,
-                MinBillDate,
             },
             commandTimeout: CommandTimeoutSeconds);
 
@@ -668,7 +1024,7 @@ HAVING ROUND(ABS(SUM(amount)), 3) >= @MinPending
             BillAmount = r.BillAmount,
             DueDate = r.DueDate?.ToString("yyyy-MM-dd") ?? "",
             OverdueDays = r.OverdueDays,
-            PendingAmount = r.PendingAmount,
+            PendingAmount = Math.Round(r.PendingAmount, 2, MidpointRounding.AwayFromZero),
             BillCurrency = NormalizeCurrency(r.BillCurrency),
             ForeignAmount = 0,
         }).ToList();
@@ -770,15 +1126,6 @@ INNER JOIN LedgerMaster l WITH (NOLOCK) ON icl.LedgerId = l.srno",
         return row;
     }
 
-    private static bool IsBillOnOrAfterMinDate(string billDate)
-    {
-        if (string.IsNullOrWhiteSpace(billDate) || billDate.StartsWith("1900-01-01", StringComparison.Ordinal))
-            return false;
-        if (DateTime.TryParse(billDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
-            return parsed.Date >= MinBillDate;
-        return string.CompareOrdinal(billDate.Trim(), "2026-04-01") >= 0;
-    }
-
     private static bool IsInr(string currency) =>
         string.IsNullOrWhiteSpace(currency) ||
         currency.StartsWith("Rs", StringComparison.OrdinalIgnoreCase) ||
@@ -857,10 +1204,40 @@ public class ExportBillOverdueResultDto
 {
     public List<ExportBillOverdueItemDto> Items { get; set; } = new();
     public string Company { get; set; } = "";
+    public string DateFrom { get; set; } = "";
     public string AsOf { get; set; } = "";
     public string GroupName { get; set; } = "";
     public string Source { get; set; } = "";
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = ExportBillOverdueService.DefaultPageSize;
     public int TotalCount { get; set; }
+}
+
+public class ExportAgingBucketDto
+{
+    public string Key { get; set; } = "";
+    public string Label { get; set; } = "";
+    public double PendingAmount { get; set; }
+    public int BillCount { get; set; }
+}
+
+public class ExportAgingCustomerDto
+{
+    public string CompanyName { get; set; } = "";
+    public string CustomerName { get; set; } = "";
+    public double[] Amounts { get; set; } = Array.Empty<double>();
+    public double Total { get; set; }
+    public int BillCount { get; set; }
+}
+
+public class ExportAgingReportDto
+{
+    public string Company { get; set; } = "";
+    public string DateFrom { get; set; } = "";
+    public string AsOf { get; set; } = "";
+    public string GroupName { get; set; } = "";
+    public double TotalPending { get; set; }
+    public int TotalBills { get; set; }
+    public List<ExportAgingBucketDto> Buckets { get; set; } = new();
+    public List<ExportAgingCustomerDto> Customers { get; set; } = new();
 }

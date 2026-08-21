@@ -1,16 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Loader2, RefreshCw } from "lucide-react";
+import { Download, FileText, Loader2, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 import {
   DEFAULT_EXPORT_GROUP,
   DEFAULT_PAGE_SIZE,
   PAGE_SIZES,
+  downloadExportBillAgingPdf,
   downloadExportBillOverdueExcel,
+  downloadExportBillOverduePdf,
   formatBillAmount,
   formatDisplayDate,
   formatForeignAmount,
+  formatPeriod,
+  financialYearStartIso,
+  getExportBillAging,
   getExportBillOverdue,
   getExportBillOverdueCompanies,
   getExportBillOverdueGroups,
@@ -19,7 +24,10 @@ import {
   isInrCurrency,
   type ExportBillOverdueItem,
   type ExportCompanyOption,
+  type ExportOverdueView,
 } from "@/lib/export-bill-overdue-api";
+import { ExportAgingReportView } from "@/components/export/ExportAgingReport";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,7 +39,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -182,11 +189,16 @@ function ExportBillOverduePage() {
   const queryClient = useQueryClient();
   const [company, setCompany] = useState("All Companies");
   const [groupName, setGroupName] = useState(DEFAULT_EXPORT_GROUP);
+  const [dateFromInput, setDateFromInput] = useState(() => financialYearStartIso(todayIso()));
+  const [dateFrom, setDateFrom] = useState(() => financialYearStartIso(todayIso()));
   const [asOfInput, setAsOfInput] = useState(todayIso);
   const [asOf, setAsOf] = useState(todayIso);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(DEFAULT_PAGE_SIZE);
-  const [exporting, setExporting] = useState(false);
+  const [view, setView] = useState<ExportOverdueView>("overdue");
+  const [exporting, setExporting] = useState<"excel" | "pdf" | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const bypassCacheRef = useRef(false);
 
@@ -208,6 +220,10 @@ function ExportBillOverduePage() {
   );
   const groupOptions = useMemo(
     () => companyOptions.filter((o) => o.kind === "group"),
+    [companyOptions],
+  );
+  const factoryOptions = useMemo(
+    () => companyOptions.filter((o) => o.kind === "company"),
     [companyOptions],
   );
   const groups = useMemo(
@@ -238,28 +254,50 @@ function ExportBillOverduePage() {
     setPage(1);
   }, [groupList, groupName]);
 
-  // Debounce as-of date so calendar changes don't spam ERP.
+  // Debounce From / To so calendar changes don't spam ERP.
   useEffect(() => {
     const t = window.setTimeout(() => {
-      setAsOf((prev) => {
-        if (prev === asOfInput) return prev;
+      let nextFrom = dateFromInput;
+      let nextTo = asOfInput;
+      if (nextFrom && nextTo && nextFrom > nextTo) nextFrom = nextTo;
+      setDateFrom((prev) => {
+        if (prev === nextFrom) return prev;
         setPage(1);
-        return asOfInput;
+        return nextFrom;
+      });
+      setAsOf((prev) => {
+        if (prev === nextTo) return prev;
+        setPage(1);
+        return nextTo;
       });
     }, 350);
     return () => window.clearTimeout(t);
-  }, [asOfInput]);
+  }, [dateFromInput, asOfInput]);
 
-  const filtersReady = Boolean(company && groupName && asOf);
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      const next = searchInput.trim();
+      setSearch((prev) => {
+        if (prev === next) return prev;
+        setPage(1);
+        return next;
+      });
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [searchInput]);
+
+  const filtersReady = Boolean(company && groupName && dateFrom && asOf);
 
   const overdueQuery = useQuery({
-    queryKey: ["export-bill-overdue", "from-2026-04-01", company, groupName, asOf, page, pageSize, refreshToken],
+    queryKey: ["export-bill-overdue", "erp-v3", company, groupName, dateFrom, asOf, search, page, pageSize, refreshToken],
     queryFn: async () => {
       const refresh = bypassCacheRef.current;
       const data = await getExportBillOverdue({
         company,
         groupName,
+        dateFrom,
         asOf,
+        search,
         page,
         pageSize,
         refresh,
@@ -267,7 +305,29 @@ function ExportBillOverduePage() {
       bypassCacheRef.current = false;
       return data;
     },
-    enabled: filtersReady,
+    enabled: filtersReady && view === "overdue",
+    staleTime: 60 * 60_000,
+    gcTime: 4 * 60 * 60_000,
+    retry: 1,
+    placeholderData: keepPreviousData,
+    refetchOnWindowFocus: false,
+  });
+
+  const agingQuery = useQuery({
+    queryKey: ["export-bill-aging", "erp-v3", company, groupName, dateFrom, asOf, refreshToken],
+    queryFn: async () => {
+      const refresh = bypassCacheRef.current;
+      const data = await getExportBillAging({
+        company,
+        groupName,
+        dateFrom,
+        asOf,
+        refresh,
+      });
+      bypassCacheRef.current = false;
+      return data;
+    },
+    enabled: filtersReady && view === "aging",
     staleTime: 60 * 60_000,
     gcTime: 4 * 60 * 60_000,
     retry: 1,
@@ -287,15 +347,17 @@ function ExportBillOverduePage() {
 
   // Prefetch next page from API cache (usually instant after first load).
   useEffect(() => {
-    if (!filtersReady || !overdueQuery.isSuccess) return;
+    if (!filtersReady || view !== "overdue" || !overdueQuery.isSuccess) return;
     if (safePage >= totalPages) return;
     void queryClient.prefetchQuery({
-      queryKey: ["export-bill-overdue", "from-2026-04-01", company, groupName, asOf, safePage + 1, pageSize],
+      queryKey: ["export-bill-overdue", "erp-v3", company, groupName, dateFrom, asOf, search, safePage + 1, pageSize],
       queryFn: () =>
         getExportBillOverdue({
           company,
           groupName,
+          dateFrom,
           asOf,
+          search,
           page: safePage + 1,
           pageSize,
         }),
@@ -303,33 +365,63 @@ function ExportBillOverduePage() {
     });
   }, [
     filtersReady,
+    view,
     overdueQuery.isSuccess,
     safePage,
     totalPages,
     company,
     groupName,
+    dateFrom,
     asOf,
+    search,
     pageSize,
     queryClient,
   ]);
 
   const emptyMessage = filtersReady
-    ? "No overdue export bills for this filter"
+    ? search
+      ? `No overdue bills match “${search}”`
+      : "No overdue export bills for this filter"
     : "Loading filters…";
 
+  const canExport =
+    filtersReady &&
+    (view === "aging" ? (agingQuery.data?.totalBills ?? 0) > 0 : totalCount > 0);
+
   async function exportExcel() {
-    if (!filtersReady || totalCount === 0) {
+    if (!canExport) {
       toast.error("Nothing to export");
       return;
     }
-    setExporting(true);
+    setExporting("excel");
     try {
-      await downloadExportBillOverdueExcel({ company, asOf, groupName });
-      toast.success("Excel downloaded");
+      await downloadExportBillOverdueExcel({ company, dateFrom, asOf, groupName });
+      toast.success(view === "aging" ? "Excel downloaded (Overdue + Aging sheets)" : "Excel downloaded");
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Export failed");
     } finally {
-      setExporting(false);
+      setExporting(null);
+    }
+  }
+
+  async function exportPdf() {
+    if (!canExport) {
+      toast.error("Nothing to export");
+      return;
+    }
+    setExporting("pdf");
+    try {
+      if (view === "aging") {
+        await downloadExportBillAgingPdf({ company, dateFrom, asOf, groupName });
+        toast.success("Aging PDF downloaded");
+      } else {
+        await downloadExportBillOverduePdf({ company, dateFrom, asOf, groupName });
+        toast.success("Overdue PDF downloaded");
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "PDF export failed");
+    } finally {
+      setExporting(null);
     }
   }
 
@@ -340,7 +432,7 @@ function ExportBillOverduePage() {
         variant="outline"
         size="sm"
         className="h-9 shrink-0 gap-1.5"
-        disabled={overdueQuery.isFetching || !filtersReady}
+        disabled={overdueQuery.isFetching || agingQuery.isFetching || !filtersReady}
         onClick={() => {
           bypassCacheRef.current = true;
           setRefreshToken((n) => n + 1);
@@ -355,12 +447,24 @@ function ExportBillOverduePage() {
         variant="outline"
         size="sm"
         className="h-9 shrink-0 gap-1.5"
-        disabled={exporting || !filtersReady || totalCount === 0 || overdueQuery.isFetching}
+        disabled={Boolean(exporting) || !canExport || overdueQuery.isFetching || agingQuery.isFetching}
         onClick={() => void exportExcel()}
-        aria-label="Export overdue bills to Excel"
+        aria-label="Export to Excel"
       >
-        {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+        {exporting === "excel" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
         Export Excel
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-9 shrink-0 gap-1.5"
+        disabled={Boolean(exporting) || !canExport || overdueQuery.isFetching || agingQuery.isFetching}
+        onClick={() => void exportPdf()}
+        aria-label="Export to PDF"
+      >
+        {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+        Export PDF
       </Button>
     </div>
   );
@@ -384,27 +488,15 @@ function ExportBillOverduePage() {
   );
 
   return (
-    <div className="space-y-5 pb-20 sm:space-y-6 md:pb-2">
-      <div className="card-3d flex flex-col gap-3 rounded-2xl p-4 sm:flex-row sm:items-start sm:justify-between sm:p-5">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl">
-            Export Bill Overdue
-          </h1>
-          <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-            Overseas receivable bills with customer, bill no/date, amount, and due date. Only bills
-            dated 1 April 2026 or later. Filters apply automatically.
-          </p>
+    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden pb-0 md:gap-2.5">
+      <div className="relative z-20 flex shrink-0 flex-col gap-2 rounded-2xl border border-border bg-card p-3 shadow-soft sm:p-3.5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h1 className="text-lg font-semibold tracking-tight sm:text-xl">Export Bill Overdue</h1>
+          {exportButton}
         </div>
-        {exportButton}
-      </div>
-
-      <section
-        className="rounded-2xl border border-border bg-card p-3 shadow-soft sm:p-4"
-        aria-label="Export bill overdue filters"
-      >
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-[1.3fr_1fr_11rem]">
-          <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="export-company">Company group</Label>
+        <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-[1.2fr_1fr_9.5rem_9.5rem_auto]" aria-label="Export bill overdue filters">
+          <div className="min-w-0 space-y-1">
+            <Label htmlFor="export-company" className="text-xs">Company</Label>
             <select
               id="export-company"
               value={company}
@@ -413,20 +505,33 @@ function ExportBillOverduePage() {
                 setCompany(e.target.value || "All Companies");
                 setPage(1);
               }}
-              className="h-11 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
             >
               <option value="All Companies">
                 {companiesLoading ? "Loading…" : "All Companies"}
               </option>
-              {groupOptions.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
+              {groupOptions.length > 0 ? (
+                <optgroup label="Groups">
+                  {groupOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
+              {factoryOptions.length > 0 ? (
+                <optgroup label="Companies">
+                  {factoryOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
             </select>
           </div>
-          <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="export-group">Group Name</Label>
+          <div className="min-w-0 space-y-1">
+            <Label htmlFor="export-group" className="text-xs">Group Name</Label>
             <Select
               value={groupName}
               onValueChange={(v) => {
@@ -434,7 +539,7 @@ function ExportBillOverduePage() {
                 setPage(1);
               }}
             >
-              <SelectTrigger id="export-group" className="h-11 w-full bg-background text-sm">
+              <SelectTrigger id="export-group" className="h-9 w-full bg-background text-sm">
                 <SelectValue placeholder="Select group" />
               </SelectTrigger>
               <SelectContent className="max-h-[50vh]">
@@ -446,24 +551,76 @@ function ExportBillOverduePage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="export-asof">As of date</Label>
+          <div className="min-w-0 space-y-1">
+            <Label htmlFor="export-from" className="text-xs">From date</Label>
+            <Input
+              id="export-from"
+              type="date"
+              value={dateFromInput}
+              max={asOfInput}
+              onChange={(e) => setDateFromInput(e.target.value)}
+              className="h-9 bg-background text-sm"
+            />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <Label htmlFor="export-asof" className="text-xs">To date</Label>
             <Input
               id="export-asof"
               type="date"
               value={asOfInput}
               onChange={(e) => setAsOfInput(e.target.value)}
-              className="h-11 bg-background text-sm"
+              className="h-9 bg-background text-sm"
             />
           </div>
+          <fieldset className="min-w-0 space-y-1">
+            <legend className="text-xs font-medium leading-none">Report</legend>
+            <div
+              className="flex h-9 rounded-md border border-border p-0.5"
+              role="radiogroup"
+              aria-label="Overdue bills or aging report"
+            >
+              {(
+                [
+                  { id: "overdue", label: "Overdue bills" },
+                  { id: "aging", label: "Aging report" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={view === opt.id}
+                  onClick={() => setView(opt.id)}
+                  className={cn(
+                    "flex-1 whitespace-nowrap rounded-sm px-2.5 text-xs font-medium transition-colors sm:text-sm",
+                    view === opt.id
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        </section>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search company, customer, bill no, date, amount…"
+            className="h-9 bg-background pl-8 text-sm"
+            aria-label="Search overdue bills and aging report"
+          />
         </div>
         {(companiesLoading || groupsLoading) && (
-          <p className="mt-2 text-xs text-muted-foreground">Loading filters…</p>
+          <p className="text-xs text-muted-foreground">Loading filters…</p>
         )}
-      </section>
+      </div>
 
-      {(showSkeleton || isUpdating) && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
+      {view === "overdue" && (showSkeleton || isUpdating) && (
+        <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
           {showSkeleton
             ? isInitialLoad
@@ -472,21 +629,42 @@ function ExportBillOverduePage() {
             : "Updating… previous rows stay visible."}
         </div>
       )}
-      {overdueQuery.isError && (
-        <p className="text-xs text-destructive" role="alert">
+      {view === "overdue" && overdueQuery.isError && (
+        <p className="shrink-0 text-xs text-destructive" role="alert">
           Failed to load overdue bills. Please try again.
         </p>
       )}
 
-      {/* Mobile cards */}
-      <section className="md:hidden" aria-label="Overdue bills mobile">
-        <header className="mb-2 px-0.5">
+      {view === "aging" && agingQuery.isFetching && agingQuery.data && (
+        <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+          Updating aging report…
+        </div>
+      )}
+      {view === "aging" && agingQuery.isError && (
+        <p className="shrink-0 text-xs text-destructive" role="alert">
+          Failed to load aging report. Please try again.
+        </p>
+      )}
+
+      {view === "aging" ? (
+        <ExportAgingReportView
+          report={agingQuery.data}
+          loading={agingQuery.isFetching && !agingQuery.data}
+          showCompany={showCompanyColumn}
+          companyLabel={companyLabel}
+          search={search}
+        />
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden md:hidden" aria-label="Overdue bills mobile">
+        <header className="mb-2 shrink-0 px-0.5">
           <h2 className="text-sm font-semibold">Overdue bills</h2>
           <p className="text-[11px] text-muted-foreground">
             {filtersReady
               ? `${companyLabel} · Group: ${overdueQuery.data?.groupName || groupName}${
                   overdueQuery.data
-                    ? ` · ${totalCount} bill(s) · ${formatDisplayDate(overdueQuery.data.asOf)}`
+                    ? ` · ${totalCount} bill(s) · ${formatPeriod(overdueQuery.data.dateFrom || dateFrom, overdueQuery.data.asOf)}`
                     : ""
                 }`
               : "Preparing…"}
@@ -507,7 +685,7 @@ function ExportBillOverduePage() {
             {emptyMessage}
           </div>
         ) : (
-          <div className="grid gap-3">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto">
             {items.map((row, i) => (
               <MobileBillCard
                 key={`${row.companyName}-${row.customerName}-${row.billNo}-${i}`}
@@ -519,39 +697,39 @@ function ExportBillOverduePage() {
         )}
 
         {pagination ? (
-          <div className="mt-3 overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
+          <div className="mt-2 shrink-0 overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
             {pagination}
           </div>
         ) : null}
       </section>
 
-      {/* Desktop table */}
-      <section className="hidden overflow-hidden rounded-2xl border border-border bg-card shadow-soft md:block">
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+      <section className="hidden min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-soft md:flex">
+        <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
           <div>
             <h2 className="text-sm font-semibold">Overdue bills</h2>
             <p className="text-[11px] text-muted-foreground">
               {filtersReady
                 ? `${companyLabel} · Group: ${overdueQuery.data?.groupName || groupName} · ${
                     overdueQuery.data
-                      ? `${totalCount} bill(s) · as of ${formatDisplayDate(overdueQuery.data.asOf)}`
+                      ? `${totalCount} bill(s) · ${formatPeriod(overdueQuery.data.dateFrom || dateFrom, overdueQuery.data.asOf)}`
                       : "loading…"
                   }`
                 : "Preparing…"}
             </p>
           </div>
-          {exportButton}
         </header>
-        <div className="overflow-x-auto">
-          <Table>
+        <div className="min-h-0 flex-1 overflow-auto">
+          <table className="w-full border-separate border-spacing-0 caption-bottom text-sm">
             <TableHeader>
-              <TableRow>
-                {showCompanyColumn ? <TableHead>Company</TableHead> : null}
-                <TableHead>Customer name</TableHead>
-                <TableHead>Bill no</TableHead>
-                <TableHead>Bill date</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead>Due date</TableHead>
+              <TableRow className="hover:bg-transparent">
+                {showCompanyColumn ? (
+                  <TableHead className="sticky top-0 z-20 border-b border-border bg-card">Company</TableHead>
+                ) : null}
+                <TableHead className="sticky top-0 z-20 border-b border-border bg-card">Customer name</TableHead>
+                <TableHead className="sticky top-0 z-20 border-b border-border bg-card">Bill no</TableHead>
+                <TableHead className="sticky top-0 z-20 border-b border-border bg-card">Bill date</TableHead>
+                <TableHead className="sticky top-0 z-20 border-b border-border bg-card text-right">Amount</TableHead>
+                <TableHead className="sticky top-0 z-20 border-b border-border bg-card">Due date</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -589,7 +767,7 @@ function ExportBillOverduePage() {
                     <TableCell className="whitespace-nowrap text-xs sm:text-sm">
                       {formatDisplayDate(row.billDate)}
                     </TableCell>
-                    <TableCell className="text-right text-xs sm:text-sm whitespace-nowrap">
+                    <TableCell className="whitespace-nowrap text-right text-xs sm:text-sm">
                       <AmountBlock row={row} />
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-xs sm:text-sm">
@@ -599,10 +777,12 @@ function ExportBillOverduePage() {
                 ))
               )}
             </TableBody>
-          </Table>
+          </table>
         </div>
         {pagination}
       </section>
+        </div>
+      )}
     </div>
   );
 }
