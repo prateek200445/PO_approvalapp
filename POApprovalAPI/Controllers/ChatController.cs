@@ -49,12 +49,14 @@ public class ChatController : ControllerBase
     [HttpPost("export")]
     public async Task<IActionResult> Export([FromBody] ChatExportRequest request, CancellationToken ct)
     {
-        if (request == null || string.IsNullOrWhiteSpace(request.Sql))
-            return BadRequest(new { message = "Sql is required." });
+        if (request == null)
+            return BadRequest(new { message = "Request body is required." });
+        if (string.IsNullOrWhiteSpace(request.Sql) && request.ExportContext == null)
+            return BadRequest(new { message = "Sql or exportContext is required." });
 
         try
         {
-            var result = await _chat.ExportCsvAsync(request.Sql, ct);
+            var result = await _chat.ExportAsync(request, ct);
             Response.Headers["X-Row-Count"] = result.RowCount.ToString();
             Response.Headers["X-Truncated"] = result.Truncated ? "true" : "false";
             Response.Headers["X-Total-Count"] = result.TotalCount?.ToString() ?? "";

@@ -101,21 +101,28 @@ public partial class ChatOrchestratorService
             - Top export customers / export sales ranking: ALWAYS vw_Salesvoucher (NOT despatch). Filter InvType LIKE '%Export%', Indian FY on InvDate (FY 2024-25 = 2024-04-01 to <2025-04-01), GROUP BY BuyerName, ORDER BY SUM(BillAMount) DESC, TOP N. For '<company> group' use CompanyName IN (SELECT Name FROM FactoryInfo WHERE GroupName LIKE '%hint%' OR Name LIKE '%hint%'). When user says exclude inter-company / inter unit / group companies: also NOT EXISTS buyer matching FactoryInfo.Name for that same group (do not count sister companies as export customers). BillAMount spelling. Always TOP N (default 5).
             - Country-wise sales / sales by country: ALWAYS vw_Countrywise_sales_dashboard (NOT vw_Salesvoucher). Columns: Country, Value (Amount-DebitNote), InvYear (short label 25-26), GroupName. Filter InvYear = '25-26' for FY 2025-26. Filter company via GroupName IN (SELECT DISTINCT GroupName FROM FactoryInfo WHERE Name = legal company). NEVER use vw_Salesvoucher.Destination for country — Destination is port/city/state (Gujarat, Ahmedabad), not country. GROUP BY Country, SUM(CAST(Value AS float)), ORDER BY total DESC, TOP 50.
             - Total sales / sales by product group for FY: ALWAYS vw_Sales_EBIDTA (same as Sales Dashboard, excl. InterGroup='Intergroup'). Total: SUM(Amount), SUM(netwt). By group: GROUP BY Groupname; by sub-group: GROUP BY Groupname, SubGroupName. Filter CompanyName and invdate for Indian FY (2025-04-01 to 2026-03-31 for FY 25-26). Total purchase: vw_Purchase_EBIDTA with same rules.
+            - FIBC / product-line sales (per kg, monthly, last N months): governed path on vw_Sales_EBIDTA — filter Groupname/SubGroupName LIKE FIBC/Jumbo/Bulk (or tape/fabric/webbing/small bag); SUM(Amount), SUM(netwt), PerKg=Amount/netwt; monthly GROUP BY YEAR/MONTH(invdate); default period last 6 months when not FY; company optional (all companies if omitted).
             - Ledger count: COUNT(*) FROM LedgerMaster WHERE CompanyName = company; when user says under/in a group (e.g. Sundry Debtors) also filter LedgerMaster.Under LIKE '%group%'. Ledger/account groups list: SELECT DISTINCT Under FROM LedgerMaster (never LedgerGroupMaster).
             - Debtor/creditor ageing / overdue buckets: monthly/group pivot and bill-wise overdue use ERP SPs (sp_Representative_Outstanding_Pivot, sp_Overdue_Ledger). Day-bucket ageing (0-30/31-60/61-90/90+) uses governed SELECT on vw_BillWiseTransaction. Debtors use G3='Sundry Debtors'; creditors use G3='Trade Creditors' (never 'Sundry Creditors'). Sub-groups: Debtors-Overseas, Debtors-Domestic, Creditors-RM, etc.
             - Ledger voucher statement / transaction history for a named party: handled by ERP sp_ac_LedgerSummary_BankRecoDate (portal parity) — NOT vw_LedgerSummary or LedgerMaster alone. Requires company + ledger/party name + date range (defaults to current FY).
             - Despatch/packing: roll history vw_MISrolldespatch; FIBC bails FIBCDespatch; yarn MIS_YarnDespatch; small bag SmallBagBailForDespatch; rolls waiting vw_RollforDespatch. ALWAYS filter CompanyName/Companyname or InvNo/PartyName/date + TOP 50 (million-row tables). Prefer view over MISRollforDespatch table.
             - Production: factory daily vw_FactoryProduction (companyname, Particulars, TapeProduction/Fabric/SmallBag); tape plant vw_daily_tape_prod_New (bracket [Loom Dept]/[FIBC Dept]); loom rolls vw_LoomProductionENtry (MUST filter CompanyName/Sysdate/LoomNo + TOP 50 — ~716k; skip stale vw_Loom_Prod_Mtr); FIBC bags VW_FIBCBagwiseProduction (not _New); MIS qty VW_PRODUCTION_EBD_DTL; WIP vw_WIPReport; small bags SmallBagProductionEntry (Cutting/Stitching — live data mainly Plastene/HCP units, NOT Oswal; Oswal uses Tape/Fabric/WEBBING in vw_FactoryProduction). Filter EBD/WIP/loom + TOP 50. Not despatch / not ApproveWorkOrder.
+            - Department wastage % vs production: governed path on vw_FactoryProduction (Particulars Tape/Fabric/WEBBING/Small Bag; WastagePct = Wastage*100/ProductionQty) using latest business Sysdate for company — NOT bare GETDATE(). Tape-plant wastage dept: vw_daily_tape_prod_New [Wastage Dept] vs [Total Production].
+            - Multi-material inventory (fabric/webbing/filler cord): governed vw_itemwiseStock with OR ItemName LIKE across slash/comma-separated materials — requires company name.
+            - Stitcher/sewer headcount / attendance: Loginentry.dbo.Attendancemachine (AttendanceDate, Empcode, intime) JOIN Loginentry.dbo.empinfo (EmpCode, Designation, Deptt, CompanyName). Filter Designation/Deptt LIKE stitch/sewer. Count DISTINCT Empcode where intime IS NOT NULL. NOT LoginRights for attendance.
             - Prefer TOP 50 for detail lists. COUNT aggregates need no TOP.
             - Pending filters: status = 'Pending' or Status = 'Pending' (match column casing in schema).
             - Approved counts: status LIKE 'Approved%' when statuses vary.
             - Use correct joins from the schema notes.
             - OUR company nicknames MUST use full legal CompanyName/CompName/companyname — never the nickname string:
-              kp woven / k.p. woven / kpv → 'K.P. WOVEN PRIVATE LIMITED';
-              oswal → 'Oswal Extrusion Limited';
+              kp woven / k.p. woven / kpv / kpw → 'K.P. WOVEN PRIVATE LIMITED';
+              oswal / oel / oel2 → 'Oswal Extrusion Limited' (or Unit-II/III/IV/V when oel2/oel3 etc.);
               polyfilms / ppl → 'Plastene Polyfilms Limited';
-              hcp / bulkpack → 'HCP Plastene Bulkpack Ltd';
-              plastene india → 'Plastene India Limited' (or Unit -II when user says unit 2).
+              hcp / bulkpack / hpbl → 'HCP Plastene Bulkpack Ltd' (hpbl2/3/4 for units);
+              plastene india / pil / pil1 → 'Plastene India Limited';
+              pil2 / plastene unit 2 → 'Plastene India Limited (Unit -II)';
+              pil3 → Unit -III; pil4 → Unit-IV; pil5 → Unit-V; pil6 → Unit-VI; pil8 → Unit-VIII.
+              Do NOT treat PIL2 in PIL2/RAW/25-26/231 as a company — that is a document prefix.
               Names ending -Purchase are vendors (PartyName/FirmName), NOT our CompanyName.
             - PurchasePayment header: PurchaseCode, TotalAmount, CompanyName, Currency, LoginName, DepttName, deliverydate — NO PurchaseDate, NO PODate. PO date is ApprovePO.PODate / ApprovePOHOD.PODate. For pending PO lists join PurchasePayment to ApprovePO and ApprovePOHOD (status = 'Pending').
             - Pending POs AT/FOR our company X → PurchasePayment.CompanyName = full legal name. Pending POs TO a vendor/supplier → Vw_PurchaseOrder.FirmName LIKE '%name%'. Always start FROM pending ApprovePO/ApprovePOHOD then join — never SELECT FROM Vw_PurchaseOrder without joining the pending set first (view is huge and times out).
@@ -151,6 +158,10 @@ public partial class ChatOrchestratorService
         int? ledgerStatementTotalCount = null;
         int? financeTotalCount = null;
         int? inventoryTotalCount = null;
+        AgeingReportPlan? exportAgeingPlan = null;
+        ErpFinanceReportPlan? exportFinancePlan = null;
+        ErpInventoryReportPlan? exportInventoryPlan = null;
+        LedgerStatementPlan? exportLedgerPlan = null;
 
         // Day-bucket ageing (SELECT on vw_BillWiseTransaction) — before EXEC ageing
         if (TryBuildPartyAgeingBucketsSql(request.Message, out var partyBucketSql, out var partyBucketWarn))
@@ -168,6 +179,7 @@ public partial class ChatOrchestratorService
         // ERP inventory/stock ageing — before debtor ageing
         else if (TryBuildStockAgeingPlan(request.Message, out var stockAgeingPlan))
         {
+            exportFinancePlan = stockAgeingPlan;
             _logger.LogInformation("Using ERP stock ageing SP {Sp}", stockAgeingPlan.StockAgeingSp);
             var stockResult = await _financeReportService.ExecuteAsync(stockAgeingPlan, ct);
             rows = stockResult.Rows;
@@ -178,6 +190,7 @@ public partial class ChatOrchestratorService
         }
         else if (TryBuildGroupOverdueDaysPlan(request.Message, out var groupOverduePlan))
         {
+            exportFinancePlan = groupOverduePlan;
             _logger.LogInformation("Using ERP group overdue days SP");
             var groupResult = await _financeReportService.ExecuteAsync(groupOverduePlan, ct);
             rows = groupResult.Rows;
@@ -188,6 +201,7 @@ public partial class ChatOrchestratorService
         }
         else if (TryBuildOutstandingAllPlan(request.Message, out var outstandingAllPlan))
         {
+            exportFinancePlan = outstandingAllPlan;
             _logger.LogInformation("Using ERP sp_OutstandingAll");
             var outstandingResult = await _financeReportService.ExecuteAsync(outstandingAllPlan, ct);
             rows = outstandingResult.Rows;
@@ -198,6 +212,7 @@ public partial class ChatOrchestratorService
         }
         else if (TryBuildMsmeOverduePlan(request.Message, out var msmePlan))
         {
+            exportFinancePlan = msmePlan;
             _logger.LogInformation("Using ERP MSME overdue SP");
             var msmeResult = await _financeReportService.ExecuteAsync(msmePlan, ct);
             rows = msmeResult.Rows;
@@ -208,6 +223,7 @@ public partial class ChatOrchestratorService
         }
         else if (TryBuildSalesDiscountPlan(request.Message, out var discountPlan))
         {
+            exportFinancePlan = discountPlan;
             _logger.LogInformation("Using ERP sales discount SP");
             var discountResult = await _financeReportService.ExecuteAsync(discountPlan, ct);
             rows = discountResult.Rows;
@@ -218,6 +234,7 @@ public partial class ChatOrchestratorService
         }
         else if (TryBuildExportDebtorsLast3MonthsPlan(request.Message, out var exportDebtorsPlan))
         {
+            exportFinancePlan = exportDebtorsPlan;
             _logger.LogInformation("Using ERP export debtors last 3 months SP");
             var exportResult = await _financeReportService.ExecuteAsync(exportDebtorsPlan, ct);
             rows = exportResult.Rows;
@@ -228,6 +245,7 @@ public partial class ChatOrchestratorService
         }
         else if (TryBuildInventoryReportPlan(request.Message, out var inventoryPlan))
         {
+            exportInventoryPlan = inventoryPlan;
             _logger.LogInformation("Using ERP inventory/MIS SP mode={Mode}", inventoryPlan.Mode);
             var inventoryResult = await _inventoryReportService.ExecuteAsync(inventoryPlan, ct);
             rows = inventoryResult.Rows;
@@ -239,6 +257,7 @@ public partial class ChatOrchestratorService
         // ERP ageing (portal parity SPs) — before LLM / LedgerMaster-only outstanding
         else if (TryBuildAgeingReportPlan(request.Message, out var ageingPlan))
         {
+            exportAgeingPlan = ageingPlan;
             _logger.LogInformation("Using ERP ageing service (mode={Mode})", ageingPlan.Mode);
             var ageingResult = await _ageingService.ExecuteAsync(ageingPlan, ct);
             rows = ageingResult.Rows;
@@ -250,6 +269,7 @@ public partial class ChatOrchestratorService
         // ERP ledger statement (portal parity SP) — before LLM
         else if (TryBuildLedgerStatementPlan(request.Message, out var ledgerPlan))
         {
+            exportLedgerPlan = ledgerPlan;
             _logger.LogInformation("Using ERP ledger statement service for {Ledger}", ledgerPlan.LedgerName);
             var ledgerResult = await _ledgerStatementChat.ExecuteAsync(ledgerPlan, ct);
             rows = ledgerResult.Rows;
@@ -259,8 +279,23 @@ public partial class ChatOrchestratorService
             usedErpLedgerStatement = true;
         }
 
+        var usedCompositeOperational = false;
         var skipSqlExecution = usedErpAgeing || usedErpLedgerStatement || usedErpFinance || usedErpInventory;
         var useLlm = string.IsNullOrWhiteSpace(sql) && !skipSqlExecution;
+
+        if (useLlm)
+        {
+            var composite = await TryExecuteCompositeOperationalQueryAsync(request.Message, ct);
+            if (composite.Ok)
+            {
+                rows = composite.Rows;
+                sql = composite.Sql;
+                warning = composite.Warning;
+                usedCompositeOperational = true;
+                useLlm = false;
+                skipSqlExecution = true;
+            }
+        }
 
         // Governed: pending PO approval (portal queue) — highest priority; skip LLM/PR confusion
         if (useLlm && TryBuildPendingPoApprovalSql(request.Message, "", out var earlyPendingPoSql, out var earlyPendingPoWarn))
@@ -336,6 +371,12 @@ public partial class ChatOrchestratorService
             _logger.LogInformation("Using governed country-wise sales SQL");
             sql = countryWiseSql;
             warning = countryWiseWarning;
+        }
+        else if (useLlm && TryBuildProductLineSalesSql(request.Message, out var productLineSalesSql, out var productLineSalesWarn))
+        {
+            _logger.LogInformation("Using governed product-line sales SQL (FIBC/monthly/per kg)");
+            sql = productLineSalesSql;
+            warning = productLineSalesWarn;
         }
         else if (useLlm && TryBuildSalesTotalsSql(request.Message, out var salesTotalsSql, out var salesTotalsWarning))
         {
@@ -481,6 +522,18 @@ public partial class ChatOrchestratorService
             _logger.LogInformation("Using governed FIBC bag production SQL");
             sql = fibcProdSql;
             warning = fibcProdWarn;
+        }
+        else if (useLlm && TryBuildDepartmentWastageSql(request.Message, out var deptWastageSql, out var deptWastageWarn))
+        {
+            _logger.LogInformation("Using governed department wastage SQL");
+            sql = deptWastageSql;
+            warning = deptWastageWarn;
+        }
+        else if (useLlm && TryBuildStitcherAttendanceSql(request.Message, out var stitcherAttSql, out var stitcherAttWarn))
+        {
+            _logger.LogInformation("Using governed stitcher attendance SQL");
+            sql = stitcherAttSql;
+            warning = stitcherAttWarn;
         }
         else if (useLlm && TryBuildTapePlantEarlySql(request.Message, out var tapePlantSql, out var tapePlantWarn))
         {
@@ -1483,6 +1536,11 @@ public partial class ChatOrchestratorService
             If multiple payment rows exist, list each PaymentNo with amount and give a total when useful.
             For receipt/bill questions: if multiple distinct MRNo/SrNo values appear, say how many distinct receipts and list them — do not claim a single receipt when several exist.
             When cardinality notes say the chat is capped, never imply the sample size is the full population.
+            For multi-row results: summarize intelligently from the data shape — do NOT list every row.
+            - If rows group by country/buyer/party/customer/vendor/ledger/item/department: give grand total of the main amount/qty column and name the top 5 by value (e.g. "Top countries: USA ₹X, UK ₹Y…").
+            - If many numeric columns exist: state row count and sum the primary amount/qty totals.
+            - If a simple list with no clear measure: name up to 5 distinct key values and how many total.
+            Keep the answer to 2-4 sentences; put detailed rows in the table, not prose.
             """;
         var answerUser = $"""
             Question: {request.Message}
@@ -1526,7 +1584,12 @@ public partial class ChatOrchestratorService
             RowCount = rows.Count,
             TotalCount = totalCount,
             Truncated = truncated,
-            Warning = warning
+            Warning = warning,
+            ExportContext = BuildExportContext(
+                exportAgeingPlan,
+                exportFinancePlan,
+                exportInventoryPlan,
+                exportLedgerPlan),
         };
         }
         finally
@@ -3333,25 +3396,8 @@ public partial class ChatOrchestratorService
             sql, @"\bGETDATE\s*\(", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
-    private static string? ResolveOutwardCompanyAlias(string message)
-    {
-        var m = message.ToLowerInvariant();
-        if (m.Contains("oswal")) return "Oswal Extrusion Limited";
-        if ((m.Contains("k.p") || m.Contains("kp ") || m.Contains("kp woven") || m == "kp woven" || m.Contains("kpwoven"))
-            && m.Contains("woven"))
-            return "K.P. WOVEN PRIVATE LIMITED";
-        // "kp woven issue slip..." — kp without trailing space
-        if (System.Text.RegularExpressions.Regex.IsMatch(m, @"\bkp\b") && m.Contains("woven"))
-            return "K.P. WOVEN PRIVATE LIMITED";
-        if (m.Contains("polyfilms") || m.Contains("ppl"))
-            return "Plastene Polyfilms Limited";
-        if (m.Contains("bulkpack") || m.Contains("hcp plastene"))
-            return "HCP Plastene Bulkpack Ltd";
-        if (m.Contains("plastene india") && m.Contains("unit"))
-            return "Plastene India Limited (Unit -II)";
-        if (m.Contains("plastene india")) return "Plastene India Limited";
-        return null;
-    }
+    private static string? ResolveOutwardCompanyAlias(string message) =>
+        CompanyAliasMap.Resolve(message);
 
     /// <summary>
     /// Resolve our-company name for debit-note rewrites from message and/or mistaken MRNo literal.

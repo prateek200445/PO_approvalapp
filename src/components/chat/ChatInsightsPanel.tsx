@@ -4,6 +4,11 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { exportChatCsv } from "@/lib/chat-api";
 import {
+  canExportResponse,
+  exportButtonLabel,
+  shouldUseServerExport,
+} from "@/lib/chat-export";
+import {
   downloadCsv,
   formatRowCountBadge,
   primaryTables,
@@ -36,10 +41,7 @@ function stampName(ext: string) {
 }
 
 function needsFullExport(response: ChatApiResponse) {
-  return (
-    Boolean(response.truncated) ||
-    (response.totalCount != null && response.totalCount > response.rowCount)
-  );
+  return shouldUseServerExport(response);
 }
 
 export function ChatInsightsPanel({ response, onClose, className }: ChatInsightsPanelProps) {
@@ -60,10 +62,14 @@ export function ChatInsightsPanel({ response, onClose, className }: ChatInsights
       toast.error("No rows to export");
       return;
     }
-    if (needsFullExport(response) && response.sql) {
+    if (needsFullExport(response)) {
       setExporting(true);
       try {
-        const { truncated, rowCount } = await exportChatCsv(response.sql, stampName("csv"));
+        const { truncated, rowCount } = await exportChatCsv(
+          response.sql || undefined,
+          stampName("csv"),
+          response.exportContext,
+        );
         toast.success(
           truncated
             ? `Exported ${rowCount} rows (export capped)`
@@ -89,10 +95,14 @@ export function ChatInsightsPanel({ response, onClose, className }: ChatInsights
       toast.error("No rows to export");
       return;
     }
-    if (needsFullExport(response) && response.sql) {
+    if (needsFullExport(response)) {
       setExporting(true);
       try {
-        const { truncated, rowCount } = await exportChatCsv(response.sql, stampName("csv"));
+        const { truncated, rowCount } = await exportChatCsv(
+          response.sql || undefined,
+          stampName("csv"),
+          response.exportContext,
+        );
         toast.success(
           truncated
             ? `Exported ${rowCount} rows (export capped) — open in Excel`
@@ -265,17 +275,12 @@ export function ChatInsightsPanel({ response, onClose, className }: ChatInsights
                 size="sm"
                 className="h-9 w-full justify-start gap-2 rounded-xl border-border/60 bg-card/60 dark:bg-card/40"
                 onClick={() => void exportFullOrLocal()}
-                disabled={
-                  exporting ||
-                  (!response.sql && response.rows.length === 0)
-                }
+                disabled={exporting || !canExportResponse(response)}
               >
                 <Download className="h-3.5 w-3.5" />
                 {exporting
                   ? "Exporting…"
-                  : needsFullExport(response)
-                    ? "Export all CSV"
-                    : "Export CSV"}
+                  : exportButtonLabel(response)}
               </Button>
               <Button
                 type="button"
@@ -283,10 +288,7 @@ export function ChatInsightsPanel({ response, onClose, className }: ChatInsights
                 size="sm"
                 className="h-9 w-full justify-start gap-2 rounded-xl border-border/60 bg-card/60 dark:bg-card/40"
                 onClick={() => void exportExcelFriendly()}
-                disabled={
-                  exporting ||
-                  (!response.sql && response.rows.length === 0)
-                }
+                disabled={exporting || !canExportResponse(response)}
               >
                 <FileSpreadsheet className="h-3.5 w-3.5" />
                 Open in Excel

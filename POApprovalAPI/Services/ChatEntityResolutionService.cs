@@ -62,9 +62,9 @@ public class ChatEntityResolutionService
         var alias = ResolveOutwardCompanyAlias(message);
         if (!string.IsNullOrWhiteSpace(alias))
         {
-            var id = await LookupCompanyIdByNameAsync(alias, ct);
-            if (id > 0)
-                return new ResolvedCompany { Name = alias, CompanyId = id, Source = "alias" };
+            var row = await LookupCompanyByExactNameAsync(alias, ct);
+            if (row is not null)
+                return new ResolvedCompany { Name = row.Value.Name, CompanyId = row.Value.Id, Source = "alias" };
         }
 
         foreach (var hint in ExtractCompanyHints(message))
@@ -112,24 +112,8 @@ public class ChatEntityResolutionService
         return null;
     }
 
-    internal static string? ResolveOutwardCompanyAlias(string message)
-    {
-        var m = message.ToLowerInvariant();
-        if (m.Contains("oswal")) return "Oswal Extrusion Limited";
-        if ((m.Contains("k.p") || m.Contains("kp ") || m.Contains("kp woven") || m.Contains("kpwoven"))
-            && m.Contains("woven"))
-            return "K.P. WOVEN PRIVATE LIMITED";
-        if (Regex.IsMatch(m, @"\bkp\b") && m.Contains("woven"))
-            return "K.P. WOVEN PRIVATE LIMITED";
-        if (m.Contains("polyfilms") || m.Contains("ppl"))
-            return "Plastene Polyfilms Limited";
-        if (m.Contains("bulkpack") || m.Contains("hcp plastene"))
-            return "HCP Plastene Bulkpack Ltd";
-        if (m.Contains("plastene india") && m.Contains("unit"))
-            return "Plastene India Limited (Unit -II)";
-        if (m.Contains("plastene india")) return "Plastene India Limited";
-        return null;
-    }
+    internal static string? ResolveOutwardCompanyAlias(string message) =>
+        CompanyAliasMap.Resolve(message);
 
     internal static bool NamesLooselyMatch(string a, string b)
     {
@@ -151,10 +135,21 @@ public class ChatEntityResolutionService
 
     private async Task<int> LookupCompanyIdByNameAsync(string name, CancellationToken ct)
     {
+        var row = await LookupCompanyByExactNameAsync(name, ct);
+        return row?.Id ?? 0;
+    }
+
+    private async Task<(int Id, string Name)?> LookupCompanyByExactNameAsync(string name, CancellationToken ct)
+    {
         await using var conn = _database.CreateConnection();
-        return await conn.QueryFirstOrDefaultAsync<int>(
-            "SELECT SrNo FROM FactoryInfo WITH (NOLOCK) WHERE Name = @Name",
+        var row = await conn.QueryFirstOrDefaultAsync<(int SrNo, string Name)>(
+            """
+            SELECT TOP 1 SrNo, RTRIM(Name) AS Name
+            FROM FactoryInfo WITH (NOLOCK)
+            WHERE RTRIM(Name) = RTRIM(@Name)
+            """,
             new { Name = name.Trim() });
+        return row.Name is { Length: > 0 } ? (row.SrNo, row.Name.Trim()) : null;
     }
 
     private async Task<(int Id, string Name)?> LookupCompanyByHintAsync(string hint, CancellationToken ct)
@@ -240,6 +235,12 @@ public class ChatEntityResolutionService
                      RegexOptions.IgnoreCase))
             hints.Add(nm.Groups[1].Value.Trim());
 
+        foreach (Match pc in Regex.Matches(
+                     message,
+                     @"\b(?:at|for|in)\s+(pil\d|oel\d?|kpv|kpw|ppl|hpbl\d?|hcp)\b",
+                     RegexOptions.IgnoreCase))
+            hints.Add(pc.Groups[1].Value.Trim());
+
         var scrubbed = ScrubIntentNoise(message);
         foreach (Match seg in Regex.Matches(
                      scrubbed,
@@ -249,7 +250,7 @@ public class ChatEntityResolutionService
 
         return hints
             .Select(NormalizeHint)
-            .Where(h => h.Length >= 4)
+            .Where(h => h.Length >= 3)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(8);
     }

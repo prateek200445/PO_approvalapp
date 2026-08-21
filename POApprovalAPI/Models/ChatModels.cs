@@ -9,6 +9,8 @@ public class ChatRequest
 public class ChatExportRequest
 {
     public string Sql { get; set; } = "";
+    /// <summary>When set, re-runs the ERP stored procedure instead of validating Sql as SELECT.</summary>
+    public ChatExportContext? ExportContext { get; set; }
 }
 
 public class ChatResponse
@@ -24,6 +26,8 @@ public class ChatResponse
     /// <summary>True when chat rows are a sample of a larger result set.</summary>
     public bool Truncated { get; set; }
     public string? Warning { get; set; }
+    /// <summary>Present for ERP EXEC answers — used by Export to re-run the same SP with a higher row cap.</summary>
+    public ChatExportContext? ExportContext { get; set; }
 }
 
 public class ChatExportResult

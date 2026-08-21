@@ -1,6 +1,6 @@
 {
-  "version": "3.2.0",
-  "createdFor": "NL-to-SQL chatbot — Phase 7: MRN, vendor, production/despatch, user/indent/sales EBD early paths",
+  "version": "3.3.0",
+  "createdFor": "NL-to-SQL chatbot — Phase 7+: wastage KPI, multi-material inventory, stitcher attendance",
   "database": {
     "server": "103.240.33.122,5115",
     "name": "MaterialProcessing",
@@ -50,6 +50,9 @@
     "GOVERNANCE (MRN early): MRN lookup by MRNo → Vw_StoreInwards (CompanyName=receiving plant, PartyName=vendor). Payment against MRN → BillPaymentEntry.MRNno (not vw_MRNToBillPayment null PaymentNo). Receipts by bill → Vw_StoreInwards.BillNo. Pending receipt → CompanyName + PendingQty > 0.",
     "GOVERNANCE (Vendor early): Profile GST/bank/email → Vendor or vw_VendorListwithBankdtls (NewGSTNo not GSTNo). Rates → VendorRate with FirmName/ItemCode filter + TOP 50. MSME list → Vendor.ISMSME. Internal vendors → InternalVendor.",
     "GOVERNANCE (Production/despatch early): Factory daily → vw_FactoryProduction; tape plant → vw_daily_tape_prod_New; WIP → vw_WIPReport; prod EBD → VW_PRODUCTION_EBD_DTL; roll despatch → vw_MISrolldespatch; FIBC → FIBCDespatch; yarn → MIS_YarnDespatch; small bag bails → SmallBagBailForDespatch.",
+    "GOVERNANCE (Department wastage): Wastage qty and % vs production for Tape/Fabric/WEBBING/Small Bag → governed SELECT on vw_FactoryProduction (latest business Sysdate for company; WastagePct = Wastage*100/ProductionQty). Tape-plant wastage dept → vw_daily_tape_prod_New [Wastage Dept] vs [Total Production]. NOT store Wastage Godown unless user asks stock.",
+    "GOVERNANCE (Company aliases): ERP plant codes map to FactoryInfo names — PIL2/'unit 2' → Plastene India Limited (Unit -II); PIL3 → Unit -III; PIL4 → Unit-IV; PIL/PIL1 → Plastene India Limited; OEL/oswal → Oswal Extrusion Limited; KPV/kp woven → K.P. WOVEN PRIVATE LIMITED; PPL/polyfilms → Plastene Polyfilms Limited; HPBL/HCP → HCP Plastene Bulkpack Ltd. Ignore codes in document numbers (PIL2/RAW/... is PO prefix, not company).",
+    "GOVERNANCE (Stitcher/sewer attendance): Present headcount → Loginentry.dbo.Attendancemachine JOIN empinfo on Empcode=EmpCode; COUNT DISTINCT where intime IS NOT NULL and Designation/Deptt LIKE stitch/sewer. Optional empinfo.CompanyName filter. NOT LoginRights.",
     "GOVERNANCE (User/indent/sales EBD early): User email → loginentry.dbo.LoginRights (Name column, never Password). Indent line items → Vw_StoreDeptt + ItemInfo. MIS sales qty → VW_SALES_EBD_DTL.",
     "MRN / store inward: prefer Vw_StoreInwards or vw_MRNList for user questions. Header key SrNo joins StoreInwardsPayment.SrNo = StoreInwards.SrNo. MRN number is MRNo / MRno. BillPaymentEntry.MRNno joins StoreInwardsPayment.MRNo. Prefer TOP 50 — StoreInwards and WareHouseInwards are large. Skip *_old,*_GPL3,*_delete clones. Columns with spaces in vw_MRNToBillPayment (e.g. [Challan Date], [Basic Amount], [MRN User]) must be bracket-quoted.",
     "GOVERNANCE (MRN): When user says 'for company X' / 'company X' / 'under X Limited' on material receipts, filter CompanyName = X. PartyName/SupplierName is the VENDOR/supplier only — use those when user says vendor, supplier, or party. Do not put the receiving company into PartyName.",
@@ -68,7 +71,7 @@
     "GOVERNANCE (Job work): Formal job-work orders are sparse (~7 headers / ~12 lines) — prefer Vw_EditJOBWorkOrder or Vw_JOBWORKORDER (PurchaseCode like PIL/JRO/... or PIL2/JWO/...; FirmName, ItemCode, JobWorkCharges, GatePassNo on edit view). Do NOT expect join to PurchasePayment/ApproveWorkOrder (0 matches live). Live MIS quantities: VW_JobWork_EBD_DTL (material at/sent job work by ItemCode, companyname) and VW_RECJOBWORK_EBD_DTL (received from job work with MRNo e.g. JBIN-SE). Prefer detail (_DTL) views over summary EBD. Returnable job-work movements also appear on Vw_ReturnGatePass WHERE Purpose LIKE '%Job Work%'. Skip empty Vw_StoreOutwardjobworkorder and tiny ApproveJOBWORKORDER. Always TOP 50; filter companyname/CompanyName and/or ItemCode on EBD views.",
     "GOVERNANCE (Sales): Sales invoices/vouchers — prefer vw_Salesvoucher (header: InvNo, InvDate, BuyerName, BillAMount, CompanyName, InvType, TypeofInvoice, currency) or SalesVoucher. Line items: SalesVoucherItem (join CompanyName+InvNo; ITEMCODE, ItemName, ActualQty, Rate, Amount, HSNCODE). Compact list: vw_SalesInvList (Invno, DespatchDate, BuyerName, OrgInvno). Tax lines: SalesVoucherTax (TaxledgerName, Amount; CreditNoteNumber links sales credit notes). MIS item sales: VW_SALES_EBD_DTL (itemcode, qTY, InvNo, companyname). BuyerName is the customer. InvType values include Sales, Export Sales, Commercial Export Sales, Sales InterUnit, Job Invoice, etc. Top export customers: GROUP BY BuyerName, SUM(BillAMount), InvType LIKE '%Export%', Indian FY on InvDate (FY 2024-25 = 2024-04-01 to <2025-04-01); for company groups use FactoryInfo.GroupName/Name. Spaced columns on vw_Salesvoucher must be bracket-quoted e.g. [Company Address], [Company GST]. Sales credit notes remain CreditNote/vw_creditnote. Physical despatch/packing uses Despatch domain objects (not invoice headers alone). Always TOP 50.",
     "GOVERNANCE (Country-wise sales): For 'country wise sales' / 'sales by country' / 'export sales by country' for a company and Indian FY — ALWAYS prefer vw_Countrywise_sales_dashboard (Country, Value, InvYear, GroupName). Value = Amount - DebitNote; intercompany already excluded in view. Filter InvYear = short FY label e.g. '25-26' for FY 2025-26 (NOT InvDate range on vw_Salesvoucher). Filter company via GroupName IN (SELECT DISTINCT GroupName FROM FactoryInfo WHERE Name = full legal company name) — same as Sales Dashboard; NOT CompanyName on vw_Salesvoucher. Related vw_Countrywise_sales (Amount pre-aggregated per country), vw_Countrywise_sales_basic_value. NEVER use vw_Salesvoucher.Destination for country — Destination is port/city/district (Gujarat, Ahmedabad, KACHCHH), not country. GROUP BY Country, SUM(CAST(Value AS float)), ORDER BY SalesAmount DESC, TOP 50.",
-    "GOVERNANCE (Sales/Purchase EBIDTA): Total sales and sales-by-group/subgroup for FY — prefer vw_Sales_EBIDTA (CompanyName, invdate, Groupname, SubGroupName, Amount, netwt, InterGroup). Same basis as Sales Dashboard SP_Sales_EBIDTA. ALWAYS filter InterGroup <> 'Intergroup'. Total sales: SUM(Amount), SUM(netwt) for CompanyName + invdate FY range. By group: GROUP BY Groupname; by sub-group: GROUP BY Groupname, SubGroupName. Total purchase: vw_Purchase_EBIDTA with same IC filter and invdate FY range. NEVER use vw_Salesvoucher.BillAMount for dashboard-style totals.",
+    "GOVERNANCE (Sales/Purchase EBIDTA): Total sales and sales-by-group/subgroup for FY — prefer vw_Sales_EBIDTA (CompanyName, invdate, Groupname, SubGroupName, Amount, netwt, InterGroup). Same basis as Sales Dashboard SP_Sales_EBIDTA. ALWAYS filter InterGroup <> 'Intergroup'. Total sales: SUM(Amount), SUM(netwt) for CompanyName + invdate FY range. By group: GROUP BY Groupname; by sub-group: GROUP BY Groupname, SubGroupName. FIBC/product-line monthly sales and per-kg rate: same view — filter Groupname/SubGroupName LIKE FIBC/Jumbo/Bulk (or tape/fabric/webbing/small bag); PerKg = SUM(Amount)/SUM(netwt); GROUP BY YEAR/MONTH(invdate) for monthly; rolling last N months when user says last 6 months (default 6 if unstated). Company optional — aggregate all companies if omitted. Total purchase: vw_Purchase_EBIDTA with same IC filter and invdate FY range. NEVER use vw_Salesvoucher.BillAMount for dashboard-style totals.",
     "GOVERNANCE (Despatch): Physical despatch/packing — ALWAYS filter CompanyName/Companyname and/or InvNo/Invno and/or PartyName/Partyname and/or date (sysdate/SysDate) and ALWAYS TOP 50 (tables are 200k–1.1M+). Roll despatch: prefer vw_MISrolldespatch (RollNO, Quality, NetWt, Companyname, Partyname, Invno, sysdate, PONO, PACKINGLISTNO on underlying MISRollforDespatch — prefer the view; do not also query MISRollforDespatch). FIBC bail despatch: FIBCDespatch (BailNo, Qty, Wt, InvNo, PACKINGLISTNO, PartyName, vVehicleNo). Yarn: MIS_YarnDespatch. Small bag bails: SmallBagBailForDespatch. Rolls waiting to despatch (no invoice yet): vw_RollforDespatch. Needle-loom rolls: MISNeedleRollforDespatch. Partyname/PartyName is customer/consignee. Link to sales invoice when InvNo matches vw_Salesvoucher.InvNo (formats vary — may need OrgInvno from vw_SalesInvList). Skip unused packing-list views that timeout.",
     "GOVERNANCE (Production): Factory daily summary — prefer vw_FactoryProduction (companyname, Sysdate, Particulars e.g. Tape/Fabric/Small Bag/WEBBING, TapeProduction, Loom, Fabric, SmallBag, Wastage). Tape plant daily — vw_daily_tape_prod_New (CompanyName, date, Opening, Production, Closing; bracket spaced cols [Total Production], [Loom Dept], [FIBC Dept], [Wastage Dept]). Loom roll production — prefer vw_LoomProductionENtry (CompanyName, Sysdate, LoomNo, RollNo, Quality, NetWt, Metre, Partyname) — ~716k MUST filter CompanyName and/or Sysdate/LoomNo/RollNo + TOP 50. FIBC bag production — prefer VW_FIBCBagwiseProduction (NOT stale VW_FIBCBagwiseProduction_New which ends 2016); BagPCS, BagWt, TYPEOFBAG, TeamNO, PartyName, PONO. Item/plant MIS qty — VW_PRODUCTION_EBD_DTL (itemcode, Qty, PlantName, companyname, sysdate) — filter company/item/date + TOP 50. WIP by item/dept — vw_WIPReport (ItemCode, Qty, Consumption, Deptt, CompanyName, Date). Small-bag line — SmallBagProductionEntry (Cutting, Stitching, BagPcs, PartyName) — live data is mainly Plastene India / HCP Plastene units (~8k rows); Oswal Extrusion Limited has NO SmallBagProductionEntry rows (Oswal production is Tape/Fabric/WEBBING via vw_FactoryProduction and FIBC via VW_FIBCBagwiseProduction). Skip stale vw_Loom_Prod_Mtr / vw_daily_loom_Meter_Rep (last ~2023), empty/timeout vw_totalproductionconsumption / Vw_Prod_WIPLoom, dailyProductionReport/DailyTotalProduction (no company), huge raw MISLOOMProductionEntryNew / misneedleloomproductionentry / Prod_Cutting_InOut / TapePlantConsumption / stockJournalProd. Production ≠ despatch and ≠ ApproveWorkOrder. Always TOP 50."
   ],
@@ -2965,9 +2968,11 @@
       ],
       "exampleQuestions": [
         "Total sales for Plastene India Limited FY 25-26",
-        "Sales by product group for Oswal Extrusion Limited financial year 2025-26"
+        "Sales by product group for Oswal Extrusion Limited financial year 2025-26",
+        "What is the per kg of FIBC sold last 6 months?",
+        "Show me monthly FIBC sales"
       ],
-      "embeddingText": "View vw_Sales_EBIDTA. Domain: Sales dashboard totals. Total sales and sales by group/sub-group — CompanyName, invdate, Groupname, SubGroupName, Amount, netwt, InterGroup. Filter InterGroup <> Intergroup. FY filter on invdate. SUM(Amount) for total sales; GROUP BY Groupname for group breakdown. Same as Sales Dashboard. NOT vw_Salesvoucher for totals."
+      "embeddingText": "View vw_Sales_EBIDTA. Domain: Sales dashboard totals. Total sales and sales by group/sub-group — CompanyName, invdate, Groupname, SubGroupName, Amount, netwt, InterGroup. Filter InterGroup <> Intergroup. FY filter on invdate. SUM(Amount) for total sales; GROUP BY Groupname for group breakdown. FIBC monthly sales, per kg rate, last 6 months rolling — filter Groupname/SubGroupName for FIBC/Jumbo/Bulk; PerKg = Amount/netwt. Same as Sales Dashboard. NOT vw_Salesvoucher for totals."
     },
     {
       "id": "vw_Purchase_EBIDTA",
@@ -3587,6 +3592,56 @@
         "What is the email of the person who created this PO?"
       ],
       "embeddingText": "Table loginentry.dbo.LoginRights (also loginentry..loginrights). Domain: Users / login rights. Purpose: ERP user master — Name (username), FullName, Email, ContactNo, EmpCode, Category (Account/Purchase/Store/Marketing/Payroll/Finance/Production/Approval/HO), role flags IsAdmin IsFinance IsAccounts IsPayroll IsmaterialProc IsMarketing IsstoreHOD ispurchasehod isPaymentApprove ISAccounthOD. NEVER select Password. Cross-database query from MaterialProcessing. Joins: Name = PurchasePayment.LoginName for PO requester email; Name = BillPaymentEntry.Loginname; Name = ApprovePO.ApprovalName; Name = POAllocation.username. Synonyms: user email, login rights, who is username, employee contact, approver email, requester email, email id of user, jinal ka email, email kya hai, finance people emails. Example: SELECT TOP 50 Name, FullName, Email FROM loginentry.dbo.LoginRights WHERE Name = 'jinal'. Admin filter: IsAdmin = 'yes'. Prefer listed identity columns only — do not SELECT *."
+    },
+    {
+      "id": "loginentry_empinfo",
+      "objectName": "loginentry.dbo.empinfo",
+      "schema": "loginentry.dbo",
+      "objectType": "TABLE",
+      "domain": "HR / Payroll",
+      "purpose": "Employee master (~18k): Name, EmpCode, Designation, Deptt, CompanyName, Branch, DateOJ. Join Attendancemachine.Empcode = empinfo.EmpCode for stitcher/sewer headcount. Designation values include STITCHER, Sticher, T.Stitcher.",
+      "primaryKeyHint": "EmpCode",
+      "columns": [
+        { "name": "EmpCode", "dataType": "varchar", "nullable": true, "meaning": "Employee code; joins Attendancemachine.Empcode" },
+        { "name": "Name", "dataType": "varchar", "nullable": true, "meaning": "Employee full name" },
+        { "name": "Designation", "dataType": "varchar", "nullable": true, "meaning": "Job title e.g. STITCHER, Sticher, HELPER" },
+        { "name": "Deptt", "dataType": "varchar", "nullable": true, "meaning": "Department" },
+        { "name": "CompanyName", "dataType": "varchar", "nullable": true, "meaning": "Employer company / unit" },
+        { "name": "Branch", "dataType": "varchar", "nullable": true, "meaning": "Branch / location" }
+      ],
+      "joins": [
+        { "to": "loginentry.dbo.Attendancemachine", "on": "empinfo.EmpCode = Attendancemachine.Empcode", "note": "Present punch count" }
+      ],
+      "synonyms": ["employee master", "empinfo", "stitcher list", "sewer staff"],
+      "exampleQuestions": [
+        "How many stitchers were present yesterday at Plastene India Limited?",
+        "How many sewers were present yesterday?"
+      ],
+      "embeddingText": "Table loginentry.dbo.empinfo. Domain: HR. Employee master EmpCode, Name, Designation, Deptt, CompanyName, Branch. Join Attendancemachine for attendance. Stitcher/sewer filter: Designation LIKE '%stitch%' OR '%Stich%' OR '%sewer%'. NOT LoginRights for headcount."
+    },
+    {
+      "id": "loginentry_Attendancemachine",
+      "objectName": "loginentry.dbo.Attendancemachine",
+      "schema": "loginentry.dbo",
+      "objectType": "TABLE",
+      "domain": "HR / Attendance",
+      "purpose": "Biometric/machine attendance punches (~2M rows). AttendanceDate, Empcode, intime, Branch. Present = intime IS NOT NULL on AttendanceDate. Join empinfo for Designation/CompanyName.",
+      "primaryKeyHint": "AttendanceDate + Empcode (+ intime)",
+      "columns": [
+        { "name": "AttendanceDate", "dataType": "datetime", "nullable": true, "meaning": "Attendance calendar date" },
+        { "name": "Empcode", "dataType": "varchar", "nullable": true, "meaning": "Employee code" },
+        { "name": "intime", "dataType": "datetime", "nullable": true, "meaning": "Punch-in time; NULL = absent" },
+        { "name": "Branch", "dataType": "varchar", "nullable": true, "meaning": "Branch" }
+      ],
+      "joins": [
+        { "to": "loginentry.dbo.empinfo", "on": "Attendancemachine.Empcode = empinfo.EmpCode", "note": "Designation and company filter" }
+      ],
+      "synonyms": ["attendance punch", "biometric attendance", "present count", "sewers present", "stitchers present"],
+      "exampleQuestions": [
+        "How many sewers were present yesterday?",
+        "Stitcher attendance count today for Oswal Extrusion Limited"
+      ],
+      "embeddingText": "Table loginentry.dbo.Attendancemachine. Domain: HR attendance. AttendanceDate, Empcode, intime, Branch. Present headcount: COUNT DISTINCT Empcode WHERE intime IS NOT NULL AND CAST(AttendanceDate AS date) = target date. Join empinfo for stitcher/sewer Designation filter. NOT loginentry.dbo.attendance (often empty). Cross-database from MaterialProcessing."
     }
   ],
   "validatedJoinFacts": [
@@ -3651,8 +3706,8 @@
       "verifiedOn": "live counts 2026-08-11"
     },
     {
-      "fact": "loginentry.dbo.LoginRights has 736 users (~706 with email). Username column is Name. User jinal email is jinal@champalalgroup.com. Cross-db join PurchasePayment.LoginName = loginentry..loginrights.Name works from MaterialProcessing. Never select Password. InactiveUser table is empty (0 rows).",
-      "verifiedOn": "live loginentry 2026-08-11"
+      "fact": "loginentry.dbo.Attendancemachine has biometric punches (AttendanceDate, Empcode, intime). Join empinfo.EmpCode for Designation/CompanyName. Stitcher filter Designation LIKE '%stitch%' OR '%Stich%'. loginentry.dbo.attendance and DailyAttendance are often empty — prefer Attendancemachine for headcount.",
+      "verifiedOn": "live loginentry 2026-08-21"
     },
     {
       "fact": "PurchaseReq/Vw_PurchaseReq Code is PR number (~102k / ~628k rows), not IndentNo (0 join to ApproveIndent). Vw_Quotation.PurchaseCode joins PurchasePayment (667k). Vw_Quotation.StoreCode and Vw_IndentQuotation.Storecode join ApproveIndent.IndentNo. ApproveQuotation is empty (0 rows) — use Vw_Quotation.",

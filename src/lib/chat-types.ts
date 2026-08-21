@@ -4,6 +4,11 @@ export interface ChatTableUsed {
   score: number;
 }
 
+export interface ChatExportContext {
+  kind: string;
+  plan?: Record<string, unknown>;
+}
+
 export interface ChatApiResponse {
   answer: string;
   sql: string;
@@ -15,6 +20,8 @@ export interface ChatApiResponse {
   /** True when chat rows are a capped sample. */
   truncated?: boolean;
   warning?: string | null;
+  /** ERP EXEC handle for full CSV export (re-runs the same stored procedure). */
+  exportContext?: ChatExportContext | null;
 }
 
 export type ChatMessageRole = "user" | "assistant" | "error";

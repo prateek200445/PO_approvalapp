@@ -38,6 +38,8 @@ public partial class ChatOrchestratorService
         if (TryBuildJobWorkReceiptSql(message, out sql, out warning)) return true;
         if (TryBuildPoPendingReceiptSql(message, out sql, out warning)) return true;
         if (TryBuildFibcBagProductionSql(message, out sql, out warning)) return true;
+        if (TryBuildDepartmentWastageSql(message, out sql, out warning)) return true;
+        if (TryBuildStitcherAttendanceSql(message, out sql, out warning)) return true;
         if (TryBuildTapePlantEarlySql(message, out sql, out warning)) return true;
         if (TryBuildFactoryProductionEarlySql(message, out sql, out warning)) return true;
         if (TryBuildWipReportEarlySql(message, out sql, out warning)) return true;
@@ -66,6 +68,7 @@ public partial class ChatOrchestratorService
         if (TryBuildAdvanceBillOutstandingSql(message, out sql, out warning)) return true;
         if (TryBuildDueOverDueSql(message, out sql, out warning)) return true;
         if (TryBuildDueDateCashFlowSql(message, out sql, out warning)) return true;
+        if (TryBuildProductLineSalesSql(message, out sql, out warning)) return true;
         if (TryBuildSalesTotalsSql(message, out sql, out warning)) return true;
         if (TryBuildSalesByGroupSql(message, out sql, out warning)) return true;
         if (TryBuildPurchaseTotalsSql(message, out sql, out warning)) return true;
@@ -1153,6 +1156,8 @@ public partial class ChatOrchestratorService
     {
         if (LooksLikeCountryWiseSalesQuestion(message))
             return false;
+        if (LooksLikeProductLineSalesQuestion(message))
+            return false;
         if (LooksLikeSalesByGroupQuestion(message))
             return false;
 
@@ -1171,6 +1176,8 @@ public partial class ChatOrchestratorService
     private static bool LooksLikeSalesByGroupQuestion(string message)
     {
         if (LooksLikeCountryWiseSalesQuestion(message))
+            return false;
+        if (LooksLikeProductLineSalesQuestion(message))
             return false;
 
         var m = message.ToLowerInvariant();
@@ -1443,7 +1450,10 @@ public partial class ChatOrchestratorService
 
         var itemCode = TryExtractStockItemCode(message);
         var itemNameFrag = TryExtractStockItemNameFragment(message);
-        if (string.IsNullOrWhiteSpace(itemCode) && string.IsNullOrWhiteSpace(itemNameFrag))
+        var materialFrags = TryExtractStockMaterialFragments(message);
+        if (string.IsNullOrWhiteSpace(itemCode)
+            && string.IsNullOrWhiteSpace(itemNameFrag)
+            && materialFrags.Count == 0)
             return false;
 
         var filters = new List<string> { $"CompanyName = '{EscapeSqlLiteral(company)}'" };
@@ -1452,6 +1462,14 @@ public partial class ChatOrchestratorService
         {
             var code = EscapeSqlLiteral(itemCode);
             filters.Add($"(ItemCode = '{code}' OR ItemCode LIKE '{code}%')");
+        }
+        else if (materialFrags.Count > 1)
+        {
+            filters.Add(BuildMultiMaterialStockFilter(materialFrags));
+        }
+        else if (materialFrags.Count == 1)
+        {
+            filters.Add(BuildStockItemNameLikeFilter(materialFrags[0]));
         }
         else if (!string.IsNullOrWhiteSpace(itemNameFrag))
         {
@@ -1474,9 +1492,11 @@ public partial class ChatOrchestratorService
             WHERE {where}
             ORDER BY StkInHand DESC
             """;
-        warning = string.IsNullOrWhiteSpace(itemCode)
-            ? $"Governed stock-in-hand on vw_itemwiseStock for {company} with ItemName LIKE filters (not exact match)."
-            : $"Governed stock-in-hand on vw_itemwiseStock for {company} item {itemCode}.";
+        warning = !string.IsNullOrWhiteSpace(itemCode)
+            ? $"Governed stock-in-hand on vw_itemwiseStock for {company} item {itemCode}."
+            : materialFrags.Count > 1
+                ? $"Governed multi-material inventory on vw_itemwiseStock for {company} ({materialFrags.Count} materials, OR ItemName LIKE)."
+                : $"Governed stock-in-hand on vw_itemwiseStock for {company} with ItemName LIKE filters (not exact match).";
         return true;
     }
 
@@ -1496,12 +1516,14 @@ public partial class ChatOrchestratorService
                              || m.Contains("stock of")
                              || m.Contains("stock for")
                              || (m.Contains("stock") && (m.Contains("how much") || m.Contains("what is")))
-                             || (m.Contains("inventory") && (m.Contains("how much") || m.Contains("what is")));
+                             || (m.Contains("inventory") && (m.Contains("how much") || m.Contains("what is")))
+                             || Regex.IsMatch(m, @"\b[\w/]+(?:/[\w]+)+\s+stock\b");
 
         if (!hasStockIntent) return false;
 
         return TryExtractStockItemCode(message) is not null
-               || TryExtractStockItemNameFragment(message) is not null;
+               || TryExtractStockItemNameFragment(message) is not null
+               || TryExtractStockMaterialFragments(message).Count > 0;
     }
 
     private static string? TryExtractStockItemCode(string message)
@@ -1518,7 +1540,9 @@ public partial class ChatOrchestratorService
             @"\bstock\s+in\s+hand\s+for\s+(?:item\s+)?(.+?)\s+(?:at|for|in|by)\s+",
             @"\bhow\s+much\s+stock\s+(?:of\s+)?(.+?)\s+(?:at|for|in)\s+",
             @"\bstock\s+for\s+(.+?)\s+(?:at|in)\s+",
-            @"\bstock\s+of\s+(.+?)\s*\??\s*$"
+            @"\bstock\s+of\s+(.+?)\s*\??\s*$",
+            @"\binventory\s+of\s+(.+?)\s+(?:at|for|in)\s+",
+            @"\binventory\s+of\s+(.+?)\s*\??\s*$"
         ];
 
         foreach (var pattern in patterns)

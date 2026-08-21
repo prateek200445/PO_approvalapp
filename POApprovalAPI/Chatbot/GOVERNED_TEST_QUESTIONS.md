@@ -2,7 +2,7 @@
 
 Manual test pack for **`POST /api/chat`** — user-style questions that should hit **governed** paths (no LLM SQL generation).
 
-**Catalog version:** 3.2.0  
+**Catalog version:** 3.3.0  
 **API default:** `http://localhost:5115/api/chat`  
 **Body:** `{ "message": "<question>", "topK": 4 }`
 
@@ -185,6 +185,17 @@ Pass **all** of these checks:
 
 - Export debtors last 3 months for Plastene Polyfilms Limited
 - Last three months export sales by overseas debtor for polyfilms
+
+### FIBC / product-line sales (monthly, per kg, rolling period)
+**Expected:** `vw_Sales_EBIDTA` (governed SELECT — not LLM)
+
+- What is the per kg of FIBC sold last 6 months?
+- Show me monthly FIBC sales
+- FIBC sales per kg for Plastene Polyfilms last 6 months
+- Average rate per kg for jumbo bags sold last 3 months
+- Monthly tape sales at Oswal Extrusion last 6 months
+
+> **Note:** Filters `InterGroup <> 'Intergroup'`. PerKg = SUM(Amount)/SUM(netwt). Default period last 6 months when unstated. Company optional.
 
 ### Stock analysis (data caveat in warning)
 **Expected:** `SP_STOCKANALYSIS_RPT_ALL`
@@ -500,6 +511,30 @@ Pass **all** of these checks:
 - Item wise sales qty for Oswal Extrusion Limited
 - Sales EBD detail Oswal by item
 - Show sales quantity by item code at Plastene Polyfilms Limited
+
+---
+
+## Phase 8 — Wastage KPI, multi-material inventory, stitcher attendance
+
+### Department wastage % vs production
+**Expected:** `vw_FactoryProduction` (WastagePct column) or `vw_daily_tape_prod_New` (tape-plant wastage dept)
+
+- What was Tape department wastage today at Oswal Extrusion Limited and what percent against production?
+- Fabric department wastage today for Oswal how much percent against production?
+- Show wastage percentage by department for Oswal Extrusion Limited today
+
+### Multi-material inventory
+**Expected:** `vw_itemwiseStock` with OR ItemName LIKE (Governed multi-material)
+
+- What is the inventory of fabric/webbing/filler cord at Oswal Extrusion Limited?
+- What is the inventory of fabric/webbing/filler cord at PIL2?
+- Inventory of fabric and webbing at Plastene India unit 2
+
+### Stitcher / sewer attendance
+**Expected:** `Loginentry.dbo.Attendancemachine` + `empinfo`
+
+- How many sewers were present yesterday?
+- How many stitchers were present yesterday at Plastene India Limited?
 
 ---
 

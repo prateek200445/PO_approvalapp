@@ -1,6 +1,12 @@
+import { CompactSummaryPanel } from "@/components/chat/CompactSummaryPanel";
 import { FormattedAnswer, InlineMarkdown } from "@/components/chat/FormattedAnswer";
 import { SqlHighlight } from "@/components/chat/SqlHighlight";
 import { exportChatCsv } from "@/lib/chat-api";
+import {
+  canExportResponse,
+  exportButtonLabel,
+  shouldUseServerExport,
+} from "@/lib/chat-export";
 import {
   downloadCsv,
   formatRowCountBadge,
@@ -20,6 +26,7 @@ import {
   reorderProgress,
   userFacingWarning,
   splitAnswerRich,
+  buildCompactRowSummary,
 } from "@/lib/result-card-format";
 import { cn } from "@/lib/utils";
 import {
@@ -65,6 +72,15 @@ export function ChatResultCard({
   const [exporting, setExporting] = useState(false);
 
   const { title, body } = splitAnswerRich(answer);
+  const bodyTrimmed = body.trim();
+  const fallbackSummary = buildCompactRowSummary(response.rows);
+  const compactSummary =
+    response.rows.length > 1 && fallbackSummary
+      ? fallbackSummary
+      : bodyTrimmed && bodyTrimmed.length <= 280
+        ? bodyTrimmed
+        : fallbackSummary ?? "";
+  const showLongBody = bodyTrimmed.length > 280;
   const theme = getDomainTheme(response, answer);
   const mode = detectResultCardMode(response.rows);
   const columns =
@@ -77,9 +93,8 @@ export function ChatResultCard({
   const listPrimary = getListPrimaryColumn(columns);
   const listSecondary = getListSecondaryColumns(columns, listPrimary);
 
-  const needsServerExport =
-    Boolean(response.truncated) ||
-    (response.totalCount != null && response.totalCount > response.rowCount);
+  const needsServerExport = shouldUseServerExport(response);
+  const exportLabel = exportButtonLabel(response);
 
   const visibleRows = showAll
     ? response.rows
@@ -98,14 +113,18 @@ export function ChatResultCard({
   }
 
   async function exportCsv() {
-    if (!response.sql && response.rows.length === 0) {
+    if (!canExportResponse(response)) {
       toast.error("No rows to export");
       return;
     }
-    if (needsServerExport && response.sql) {
+    if (needsServerExport) {
       setExporting(true);
       try {
-        const { truncated, rowCount } = await exportChatCsv(response.sql);
+        const { truncated, rowCount } = await exportChatCsv(
+          response.sql || undefined,
+          undefined,
+          response.exportContext,
+        );
         toast.success(
           truncated
             ? `Exported ${rowCount} rows (export capped)`
@@ -201,17 +220,22 @@ export function ChatResultCard({
           </div>
         </header>
 
-        {/* Answer */}
-        <section className="relative px-3 pt-3 md:px-5 md:pt-5">
+        {/* Answer + summary */}
+        <section className="relative space-y-4 px-3 pt-3 md:space-y-5 md:px-5 md:pt-5">
           <h3 className="text-[15px] font-semibold leading-snug tracking-tight text-white md:text-[1.35rem]">
             <InlineMarkdown text={title} />
           </h3>
-          {body && (
-            <div className="mt-2 text-sm leading-relaxed text-slate-200/95 md:mt-3 md:text-[15px]">
-              <FormattedAnswer text={body} variant="highlight" />
-            </div>
-          )}
+
+          {compactSummary && <CompactSummaryPanel text={compactSummary} />}
         </section>
+
+        {showLongBody && (
+          <section className="relative px-3 pt-2 md:px-5 md:pt-3">
+            <div className="text-sm leading-relaxed text-slate-200/95 md:text-[15px]">
+              <FormattedAnswer text={bodyTrimmed} variant="highlight" />
+            </div>
+          </section>
+        )}
 
         {/* User-facing note (no table/SQL names) */}
         {displayWarning && (
@@ -227,7 +251,7 @@ export function ChatResultCard({
         )}
 
         {/* Data body */}
-        <section className="relative px-3 py-3 md:px-5 md:py-5">
+        <section className="relative px-3 pb-3 pt-1 md:px-5 md:pb-5 md:pt-2">
           {mode === "empty" && <EmptyState />}
           {mode === "summary" && hero && (
             <div className={cn(hideHeroOnMobile && "hidden md:block")}>
@@ -276,16 +300,10 @@ export function ChatResultCard({
         )}
 
         <footer className="relative flex flex-wrap items-center gap-1.5 border-t border-white/[0.06] px-3 py-2.5 md:gap-2 md:px-5 md:py-3.5">
-          {(response.rows.length > 0 || (needsServerExport && response.sql)) && (
+          {canExportResponse(response) && (
             <ActionButton
               icon={<Download className="h-3.5 w-3.5" />}
-              label={
-                exporting
-                  ? "Exporting…"
-                  : needsServerExport
-                    ? "Export all"
-                    : "Export CSV"
-              }
+              label={exporting ? "Exporting…" : exportLabel}
               onClick={() => void exportCsv()}
               disabled={exporting}
               primary

@@ -6,7 +6,7 @@ import {
   mockChatDelayMs,
 } from "@/lib/chat-mocks";
 import type { ChatHistoryItem } from "@/lib/chat-helpers";
-import type { ChatApiResponse, ChatMessage, ChatTableUsed } from "@/lib/chat-types";
+import type { ChatApiResponse, ChatExportContext, ChatMessage, ChatTableUsed } from "@/lib/chat-types";
 import { downloadCsv } from "@/lib/chat-helpers";
 
 const SESSION_KEY = "po-chat-session";
@@ -19,6 +19,15 @@ function normalizeTable(t: Record<string, unknown>): ChatTableUsed {
     domain: String(t.domain ?? t.Domain ?? ""),
     score: Number(t.score ?? t.Score ?? 0),
   };
+}
+
+function normalizeExportContext(data: Record<string, unknown>): ChatExportContext | null {
+  const raw = (data.exportContext ?? data.ExportContext) as Record<string, unknown> | null | undefined;
+  if (!raw || typeof raw !== "object") return null;
+  const kind = String(raw.kind ?? raw.Kind ?? "").trim();
+  if (!kind) return null;
+  const plan = (raw.plan ?? raw.Plan) as Record<string, unknown> | undefined;
+  return { kind, plan };
 }
 
 export function normalizeChatResponse(data: Record<string, unknown>): ChatApiResponse {
@@ -39,6 +48,7 @@ export function normalizeChatResponse(data: Record<string, unknown>): ChatApiRes
     totalCount: Number.isFinite(totalCount as number) ? (totalCount as number) : null,
     truncated: Boolean(data.truncated ?? data.Truncated ?? false),
     warning: (data.warning ?? data.Warning ?? null) as string | null,
+    exportContext: normalizeExportContext(data),
   };
 }
 
@@ -64,26 +74,37 @@ export async function sendChatMessage(message: string): Promise<ChatApiResponse>
   return normalizeChatResponse(data);
 }
 
-/** Download full result set for the chat SQL (strips TOP; server caps at 5k). */
-export async function exportChatCsv(sql: string, filename?: string): Promise<{ truncated: boolean; rowCount: number }> {
+/** Download full result set (SELECT without TOP, or ERP EXEC re-run; server caps at 5k). */
+export async function exportChatCsv(
+  sql: string | undefined,
+  filename?: string,
+  exportContext?: ChatExportContext | null,
+): Promise<{ truncated: boolean; rowCount: number }> {
   if (isChatMockEnabled()) {
     await new Promise((r) => setTimeout(r, 400));
-    const rows = getMockExportRows(sql);
+    const rows = getMockExportRows(sql ?? "");
     if (rows.length === 0) {
       throw new Error("No rows to export (mock)");
     }
     downloadCsv(rows, filename);
-    const scenarioTruncated = sql.includes("reorder-list") || sql.includes("pending-po-table");
+    const scenarioTruncated = (sql ?? "").includes("reorder-list") || (sql ?? "").includes("pending-po-table");
     return {
       rowCount: scenarioTruncated ? 108 : rows.length,
       truncated: scenarioTruncated,
     };
   }
 
+  if (!exportContext && !sql?.trim()) {
+    throw new Error("Nothing to export");
+  }
+
   const response = await fetch(getApiUrl("/api/chat/export"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sql }),
+    body: JSON.stringify({
+      sql: sql ?? "",
+      exportContext: exportContext ?? undefined,
+    }),
   });
 
   if (!response.ok) {

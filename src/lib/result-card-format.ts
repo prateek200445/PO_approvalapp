@@ -1,4 +1,5 @@
 import type { ChatApiResponse, ChatTableUsed } from "@/lib/chat-types";
+import { buildSmartRowSummary } from "@/lib/row-summary";
 
 export type ResultCardMode = "empty" | "summary" | "list" | "table";
 
@@ -31,7 +32,10 @@ const COLUMN_LABELS: Record<string, string> = {
   PartyName: "Party",
   BillAMount: "Bill amount",
   PaymentAmount: "Payment amount",
-  TotalSalesAmount: "Total sales",
+  PerKg: "Per kg",
+  QuantityKg: "Quantity (kg)",
+  SalesAmount: "Sales amount",
+  MonthsInPeriod: "Months",
   SalesCountryCategory: "Category",
   Destination: "Country",
   Country: "Country",
@@ -63,6 +67,13 @@ const COLUMN_LABELS: Record<string, string> = {
   Maxlevel: "Max level",
   Minlevel: "Min level",
   Deptt: "Department",
+  ReportDate: "Report date",
+  Department: "Department",
+  ProductionQty: "Production",
+  WastageQty: "Wastage",
+  WastagePct: "Wastage %",
+  StitchersPresent: "Present",
+  AttendanceDate: "Date",
   PendingPOCount: "Pending POs",
   LedgerCount: "Ledgers",
 };
@@ -209,6 +220,16 @@ export function extractHeroMetric(
   if (rows.length !== 1) return null;
   const row = rows[0];
   const cols = Object.keys(row);
+
+  const perKgCol = cols.find((c) => /^perkg$/i.test(c) || /^per_kg$/i.test(c));
+  if (perKgCol) {
+    const formatted = formatCellValue(perKgCol, row[perKgCol]);
+    return {
+      label: "Per kg",
+      value: formatted.kind === "currency" ? `${formatted.text}/kg` : `${formatted.text} /kg`,
+      kind: "text",
+    };
+  }
 
   const countCol = cols.find((c) => COUNT_COLS.test(c));
   if (countCol) {
@@ -426,6 +447,119 @@ export function splitAnswerRich(answer: string): { title: string; body: string }
 
   if (trimmed.length <= 160) return { title: trimmed, body: "" };
   return { title: `${trimmed.slice(0, 157)}…`, body: trimmed };
+}
+
+/** One-line KPI summary from known row shapes when answer body is empty. */
+export function buildCompactRowSummary(
+  rows: Record<string, unknown>[],
+): string | null {
+  if (rows.length === 0) return null;
+  const row = rows[0];
+  const keys = Object.keys(row).map((k) => k.toLowerCase());
+
+  if (
+    keys.includes("wastageqty")
+    || (keys.includes("wastage") && keys.includes("productionqty"))
+  ) {
+    const dept = String(row.Department ?? row.Particulars ?? "Dept");
+    const wastage = formatCellValue("WastageQty", row.WastageQty ?? row.Wastage).text;
+    const prod = formatCellValue("ProductionQty", row.ProductionQty ?? row.TapeProduction).text;
+    const pct = row.WastagePct != null
+      ? formatCellValue("WastagePct", row.WastagePct).text
+      : null;
+    const date = row.ReportDate ?? row.Sysdate ?? row.date;
+    const dateText = date ? formatCellValue("ReportDate", date).text : null;
+    return [
+      dept,
+      dateText,
+      `${wastage} wastage / ${prod} prod`,
+      pct != null ? `${pct} of production` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  if (keys.includes("stitcherspresent")) {
+    const count = formatCellValue("StitchersPresent", row.StitchersPresent).text;
+    const date = row.AttendanceDate
+      ? formatCellValue("AttendanceDate", row.AttendanceDate).text
+      : null;
+    return date ? `${count} present · ${date}` : `${count} stitchers/sewers present`;
+  }
+
+  if (keys.includes("stkinhand")) {
+    if (rows.length === 1) {
+      const item = String(row.ItemName ?? row.ItemCode ?? "Item");
+      const stk = formatCellValue("StkInHand", row.StkInHand).text;
+      return `${item}: ${stk} in stock`;
+    }
+
+    const totalStock = rows.reduce(
+      (sum, r) => sum + (Number(r.StkInHand) || 0),
+      0,
+    );
+    const distinctItems = new Set(
+      rows.map((r) => String(r.ItemCode ?? r.ItemName ?? "").trim()).filter(Boolean),
+    ).size;
+    const distinctGodowns = new Set(
+      rows.map((r) => String(r.Warehousename ?? r.WareHouseName ?? "").trim()).filter(Boolean),
+    ).size;
+
+    const buckets: Record<string, number> = {};
+    for (const r of rows) {
+      const name = String(r.ItemName ?? r.ItemCode ?? "").toLowerCase();
+      const stk = Number(r.StkInHand) || 0;
+      if (stk === 0) continue;
+      const bucket = name.includes("fabric")
+        ? "Fabric"
+        : name.includes("webbing")
+          ? "Webbing"
+          : name.includes("filler")
+            ? "Filler"
+            : name.includes("yarn")
+              ? "Yarn"
+              : name.includes("tape")
+                ? "Tape"
+                : "Other";
+      buckets[bucket] = (buckets[bucket] ?? 0) + stk;
+    }
+
+    const categoryPart = Object.entries(buckets)
+      .filter(([k, v]) => v > 0 && k !== "Other")
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${k} ${formatCellValue("StkInHand", v).text}`)
+      .join(" · ");
+
+    const totalText = formatCellValue("StkInHand", totalStock).text;
+    const scope =
+      distinctGodowns > 0
+        ? `${rows.length} lines · ${totalText} total · ${distinctGodowns} godowns · ${distinctItems} items`
+        : `${rows.length} lines · ${totalText} total · ${distinctItems} items`;
+    return categoryPart ? `${scope} · ${categoryPart}` : scope;
+  }
+
+  if (
+    rows.length > 1
+    && (keys.includes("wastageqty") || keys.includes("wastage"))
+    && keys.includes("productionqty")
+  ) {
+    const totalProd = rows.reduce(
+      (sum, r) => sum + (Number(r.ProductionQty ?? r.TapeProduction) || 0),
+      0,
+    );
+    const totalWastage = rows.reduce(
+      (sum, r) => sum + (Number(r.WastageQty ?? r.Wastage) || 0),
+      0,
+    );
+    const pct = totalProd > 0 ? ((totalWastage * 100) / totalProd).toFixed(2) : null;
+    const wastageText = formatCellValue("WastageQty", totalWastage).text;
+    const prodText = formatCellValue("ProductionQty", totalProd).text;
+    return pct != null
+      ? `${rows.length} depts · ${wastageText} wastage / ${prodText} prod · ${pct}% overall`
+      : `${rows.length} depts · ${wastageText} wastage / ${prodText} prod`;
+  }
+
+  return buildSmartRowSummary(rows);
 }
 
 export function primarySourceLabel(tables: ChatTableUsed[]): string {
