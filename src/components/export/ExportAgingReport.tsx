@@ -94,8 +94,8 @@ export function ExportAgingReportView({
 
   if (loading && !report) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col gap-2">
-        <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="@container flex min-h-0 flex-1 flex-col gap-2">
+        <div className="grid shrink-0 grid-cols-2 gap-2 @[32rem]:grid-cols-3 @[56rem]:grid-cols-5">
           {Array.from({ length: 5 }).map((_, i) => (
             <div
               key={`sk-kpi-${i}`}
@@ -117,16 +117,16 @@ export function ExportAgingReportView({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
+      <div className="@container flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden">
       <section className="shrink-0 overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
         <div className="flex items-center justify-between gap-3 border-b border-border bg-primary/5 px-3 py-1.5">
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="min-w-0 truncate text-[0.85em] text-muted-foreground">
             <span className="font-semibold text-foreground">Aging</span>
             {report
               ? ` · ${companyLabel} · ${report.groupName} · ${formatPeriod(report.dateFrom, report.asOf)} · ${visibleCustomers.length} customer(s)${isFiltered ? ` of ${customers.length}` : ""}`
               : ` · ${companyLabel}`}
           </p>
-          <div className="hidden h-1.5 min-w-[8rem] max-w-xs flex-1 overflow-hidden rounded-full bg-muted sm:flex">
+          <div className="hidden h-1.5 min-w-[8rem] max-w-xs flex-1 overflow-hidden rounded-full bg-muted @[40rem]:flex">
             {visibleBuckets.map((bucket, i) => {
               const pct = totalPending > 0 ? (bucket.pendingAmount / totalPending) * 100 : 0;
               if (pct <= 0) return null;
@@ -141,19 +141,19 @@ export function ExportAgingReportView({
             })}
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-px bg-border sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-px bg-border @[32rem]:grid-cols-3 @[56rem]:grid-cols-5">
           {visibleBuckets.map((bucket, i) => {
             const tone = BUCKET_TONES[i] ?? BUCKET_TONES[0];
             const share = totalPending > 0 ? (bucket.pendingAmount / totalPending) * 100 : 0;
             return (
               <div key={bucket.key} className="bg-card px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-medium text-muted-foreground">{bucketHeading(bucket.label)}</span>
+                  <span className="text-[0.8em] font-medium text-muted-foreground">{bucketHeading(bucket.label)}</span>
                   <span className={cn("rounded border px-1 py-px text-[10px] font-medium", tone.tone)}>
                     {bucket.billCount}
                   </span>
                 </div>
-                <div className="mt-0.5 text-sm font-semibold tabular-nums">₹ {formatBillAmount(bucket.pendingAmount)}</div>
+                <div className="mt-0.5 font-semibold tabular-nums">₹ {formatBillAmount(bucket.pendingAmount)}</div>
                 <div className="text-[10px] tabular-nums text-muted-foreground">{share.toFixed(1)}%</div>
               </div>
             );
@@ -170,7 +170,7 @@ export function ExportAgingReportView({
           </p>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto md:hidden">
+        <div className="min-h-0 flex-1 overflow-y-auto @[56rem]:hidden">
           {visibleCustomers.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-muted-foreground">
               No rows match “{query}”
@@ -208,8 +208,8 @@ export function ExportAgingReportView({
           )}
         </div>
 
-        <div className="hidden min-h-0 flex-1 overflow-auto md:block">
-          <table className="w-full min-w-[56rem] border-separate border-spacing-0 caption-bottom text-sm">
+        <div className="hidden min-h-0 min-w-0 flex-1 overflow-auto @[56rem]:block">
+          <table className="w-full table-auto border-separate border-spacing-0 caption-bottom">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 {showCompany ? (
@@ -239,25 +239,25 @@ export function ExportAgingReportView({
                 visibleCustomers.map((row, i) => (
                 <TableRow key={`${row.companyName}-${row.customerName}-${i}`} className={i % 2 === 1 ? "bg-muted/30" : undefined}>
                   {showCompany ? (
-                    <TableCell className="max-w-[180px] truncate text-xs sm:text-sm">
+                    <TableCell className="max-w-[22cqi] truncate">
                       {row.companyName || "—"}
                     </TableCell>
                   ) : null}
-                  <TableCell className="max-w-[220px] truncate font-medium sm:max-w-none">
+                  <TableCell className="max-w-[30cqi] truncate font-medium">
                     {row.customerName}
                   </TableCell>
-                  <TableCell className="text-right text-xs tabular-nums text-muted-foreground sm:text-sm">
+                  <TableCell className="text-right tabular-nums text-muted-foreground">
                     {row.billCount}
                   </TableCell>
                   {buckets.map((bucket, bi) => (
                     <TableCell
                       key={bucket.key}
-                      className="whitespace-nowrap text-right text-xs tabular-nums sm:text-sm"
+                      className="whitespace-nowrap text-right tabular-nums"
                     >
                       {moneyOrDash(row.amounts[bi] ?? 0)}
                     </TableCell>
                   ))}
-                  <TableCell className="whitespace-nowrap text-right text-xs font-semibold tabular-nums sm:text-sm">
+                  <TableCell className="whitespace-nowrap text-right font-semibold tabular-nums">
                     {formatBillAmount(row.total)}
                   </TableCell>
                 </TableRow>
@@ -265,18 +265,18 @@ export function ExportAgingReportView({
               {report && visibleCustomers.length > 0 ? (
                 <TableRow className="bg-muted font-semibold hover:bg-muted">
                   <TableCell colSpan={showCompany ? 2 : 1}>Total</TableCell>
-                  <TableCell className="text-right text-xs tabular-nums sm:text-sm">
+                  <TableCell className="text-right tabular-nums">
                     {totalBills}
                   </TableCell>
                   {visibleBuckets.map((bucket) => (
                     <TableCell
                       key={bucket.key}
-                      className="whitespace-nowrap text-right text-xs tabular-nums sm:text-sm"
+                      className="whitespace-nowrap text-right tabular-nums"
                     >
                       {formatBillAmount(bucket.pendingAmount)}
                     </TableCell>
                   ))}
-                  <TableCell className="whitespace-nowrap text-right text-xs tabular-nums sm:text-sm">
+                  <TableCell className="whitespace-nowrap text-right tabular-nums">
                     {formatBillAmount(totalPending)}
                   </TableCell>
                 </TableRow>

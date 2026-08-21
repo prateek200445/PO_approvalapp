@@ -135,7 +135,7 @@ function PaginationBar({
   onNext: () => void;
 }) {
   return (
-    <footer className="flex flex-col gap-3 border-t border-border px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+    <footer className="flex flex-col gap-2 border-t border-border px-2 py-2 sm:flex-row sm:items-center sm:justify-between sm:px-3">
       <p className="text-xs text-muted-foreground">
         {totalCount > 0 ? `Showing ${from} to ${to} of ${totalCount} entries` : "Loading page…"}
       </p>
@@ -488,13 +488,18 @@ function ExportBillOverduePage() {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden pb-0 md:gap-2.5">
-      <div className="relative z-20 flex shrink-0 flex-col gap-2 rounded-2xl border border-border bg-card p-3 shadow-soft sm:p-3.5">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <h1 className="text-lg font-semibold tracking-tight sm:text-xl">Export Bill Overdue</h1>
+    <div className="export-report-fit @container flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden pb-0">
+      <div className="relative z-20 flex shrink-0 flex-col gap-2 rounded-2xl border border-border bg-card p-2.5 shadow-soft sm:p-3">
+        <div className="flex flex-col gap-2 @[40rem]:flex-row @[40rem]:items-center @[40rem]:justify-between">
+          <h1 className="text-[clamp(1.05rem,2.6cqi,1.4rem)] font-semibold tracking-tight">
+            Export Bill Overdue
+          </h1>
           {exportButton}
         </div>
-        <section className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-[1.2fr_1fr_9.5rem_9.5rem_auto]" aria-label="Export bill overdue filters">
+        <section
+          className="grid grid-cols-1 gap-2 @[28rem]:grid-cols-2 @[56rem]:grid-cols-3 @[80rem]:grid-cols-[minmax(0,1.3fr)_minmax(0,1.1fr)_minmax(9rem,11rem)_minmax(9rem,11rem)_minmax(12rem,auto)]"
+          aria-label="Export bill overdue filters"
+        >
           <div className="min-w-0 space-y-1">
             <Label htmlFor="export-company" className="text-xs">Company</Label>
             <select
@@ -592,7 +597,7 @@ function ExportBillOverduePage() {
                   aria-checked={view === opt.id}
                   onClick={() => setView(opt.id)}
                   className={cn(
-                    "flex-1 whitespace-nowrap rounded-sm px-2.5 text-xs font-medium transition-colors sm:text-sm",
+                    "flex-1 whitespace-nowrap rounded-sm px-2 text-[0.95em] font-medium transition-colors",
                     view === opt.id
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:bg-secondary hover:text-foreground",
@@ -656,8 +661,8 @@ function ExportBillOverduePage() {
           search={search}
         />
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden md:hidden" aria-label="Overdue bills mobile">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden @[56rem]:hidden" aria-label="Overdue bills compact">
         <header className="mb-2 shrink-0 px-0.5">
           <h2 className="text-sm font-semibold">Overdue bills</h2>
           <p className="text-[11px] text-muted-foreground">
@@ -703,7 +708,7 @@ function ExportBillOverduePage() {
         ) : null}
       </section>
 
-      <section className="hidden min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-soft md:flex">
+      <section className="hidden min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-soft @[56rem]:flex">
         <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
           <div>
             <h2 className="text-sm font-semibold">Overdue bills</h2>
@@ -718,8 +723,8 @@ function ExportBillOverduePage() {
             </p>
           </div>
         </header>
-        <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full border-separate border-spacing-0 caption-bottom text-sm">
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+          <table className="w-full table-auto border-separate border-spacing-0 caption-bottom">
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 {showCompanyColumn ? (
@@ -754,23 +759,23 @@ function ExportBillOverduePage() {
                 items.map((row, i) => (
                   <TableRow key={`${row.companyName}-${row.customerName}-${row.billNo}-${i}`}>
                     {showCompanyColumn ? (
-                      <TableCell className="max-w-[180px] truncate text-xs sm:text-sm">
+                      <TableCell className="max-w-[28cqi] truncate">
                         {row.companyName || "—"}
                       </TableCell>
                     ) : null}
-                    <TableCell className="max-w-[220px] truncate font-medium sm:max-w-none">
+                    <TableCell className="max-w-[36cqi] truncate font-medium">
                       {row.customerName || row.ledgerName || "—"}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-xs sm:text-sm">
+                    <TableCell className="whitespace-nowrap">
                       {row.billNo || "—"}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-xs sm:text-sm">
+                    <TableCell className="whitespace-nowrap">
                       {formatDisplayDate(row.billDate)}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-right text-xs sm:text-sm">
+                    <TableCell className="whitespace-nowrap text-right">
                       <AmountBlock row={row} />
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-xs sm:text-sm">
+                    <TableCell className="whitespace-nowrap">
                       {formatDisplayDate(row.dueDate)}
                     </TableCell>
                   </TableRow>

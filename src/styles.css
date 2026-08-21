@@ -158,6 +158,14 @@
       14px 0 42px rgba(0, 0, 0, 0.35);
   }
 
+  .export-report-fit {
+    font-size: clamp(0.8125rem, 0.72rem + 0.45cqi, 1rem);
+  }
+
+  .export-report-fit table {
+    width: 100%;
+  }
+
   .nav-3d-active {
     background: linear-gradient(180deg, color-mix(in oklab, var(--color-primary) 92%, white 8%), var(--color-primary));
     color: var(--color-primary-foreground);

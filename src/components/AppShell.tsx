@@ -240,7 +240,12 @@ export function AppShell() {
   }
 
   return (
-    <div className={cn("min-h-screen overflow-x-hidden bg-background", fullScreenReport && "md:h-svh md:overflow-hidden")}>
+    <div
+      className={cn(
+        "min-h-screen overflow-x-hidden bg-background",
+        fullScreenReport && "flex h-dvh max-h-dvh flex-col overflow-hidden",
+      )}
+    >
       <header className="app-glass sticky top-0 z-30 border-b md:hidden">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-3">
           <div className="flex min-w-0 items-center gap-2">
@@ -290,7 +295,12 @@ export function AppShell() {
         </div>
       </header>
 
-      <div className={cn("md:flex md:min-h-screen", fullScreenReport && "md:h-svh md:overflow-hidden")}>
+      <div
+        className={cn(
+          "md:flex md:min-h-screen",
+          fullScreenReport && "flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row",
+        )}
+      >
         <aside
           className={cn(
             "app-sidebar-3d fixed inset-y-0 left-0 z-40 hidden flex-col border-r transition-[width] duration-300 ease-in-out md:flex",
@@ -411,7 +421,7 @@ export function AppShell() {
             "w-full min-w-0 max-w-full overflow-x-hidden px-4 py-5 transition-[margin-left] duration-300 ease-in-out md:px-6 md:py-8 lg:px-8",
             sidebarCollapsed ? "md:ml-[4.5rem]" : "md:ml-64",
             fullScreenReport &&
-              "flex min-h-0 flex-col overflow-hidden py-3 md:h-svh md:px-4 md:py-3 lg:px-5",
+              "flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-2 sm:px-3 sm:py-2.5 md:h-auto md:px-3 md:py-3 lg:px-4",
           )}
           id="main-content"
         >
