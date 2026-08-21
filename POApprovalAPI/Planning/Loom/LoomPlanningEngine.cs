@@ -13,17 +13,20 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
     private readonly ILoomPlanningRepository _repository;
     private readonly PlanningRuntimeContextLoader _runtimeLoader;
     private readonly IPlanningSetupRepository _setup;
+    private readonly OrderPlanningRouteService _routeService;
     private readonly LoomPlanningOptions _options;
 
     public LoomPlanningEngine(
         ILoomPlanningRepository repository,
         PlanningRuntimeContextLoader runtimeLoader,
         IPlanningSetupRepository setup,
+        OrderPlanningRouteService routeService,
         IOptions<LoomPlanningOptions> options)
     {
         _repository = repository;
         _runtimeLoader = runtimeLoader;
         _setup = setup;
+        _routeService = routeService;
         _options = options.Value;
     }
 
@@ -87,7 +90,10 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             return result;
         }
 
-        var company = ResolveCompany(request.CompanyName);
+        var route = await _routeService.ResolveAsync(orderNo, ct);
+        var company = string.IsNullOrWhiteSpace(request.CompanyName)
+            ? route.FabricSupplyCompanyName
+            : ResolveCompany(request.CompanyName);
         var partyName = request.PartyName;
         if (string.IsNullOrWhiteSpace(partyName))
         {
@@ -152,7 +158,11 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         ct.ThrowIfCancellationRequested();
         var warnings = new List<string>();
         var orderNo = request.OrderNo.Trim();
-        var company = ResolveCompany(request.CompanyName);
+        var route = await _routeService.ResolveAsync(orderNo, ct);
+        var fibcCompany = route.FibcCompanyName;
+        var company = string.IsNullOrWhiteSpace(request.CompanyName)
+            ? route.FabricSupplyCompanyName
+            : ResolveCompany(request.CompanyName);
 
         if (string.IsNullOrWhiteSpace(orderNo))
             return Fail(orderNo, "Order number is required.");
@@ -170,7 +180,18 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         if (fabricRequirementDate is null || fabricRequirementDate.Value.Date < MinValidDate)
             return Fail(orderNo, "Fabric requirement date is required (FIBC fabric-ready date).");
 
-        var fabricCompletion = fabricRequirementDate.Value.Date.AddDays(-_options.FabricBufferDays);
+        var isInterUnitWeave = !string.Equals(company, fibcCompany, StringComparison.OrdinalIgnoreCase);
+        var transferDays = isInterUnitWeave ? Math.Max(0, route.TransferBufferDays) : 0;
+        if (isInterUnitWeave)
+        {
+            warnings.Add(
+                $"Inter-unit: weaving at {company}, FIBC at {fibcCompany} (+{transferDays} day transfer buffer).");
+            if (!string.IsNullOrWhiteSpace(route.AutoDetectedReason))
+                warnings.Add(route.AutoDetectedReason);
+        }
+
+        var fabricCompletion = fabricRequirementDate.Value.Date
+            .AddDays(-_options.FabricBufferDays - transferDays);
         var horizonStart = fabricCompletion.AddDays(-_options.MaxPlanningHorizonDays);
         var allocationLoadFrom = horizonStart.AddDays(-Math.Max(0, _options.AllocationLookbackDays));
         var planningEarliestStart = horizonStart;

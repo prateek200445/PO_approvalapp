@@ -95,6 +95,7 @@ builder.Services.AddScoped<LoomPlanningService>();
 builder.Services.AddScoped<IntegratedPlanningService>();
 builder.Services.AddScoped<IPlanningSetupRepository, PlanningSetupRepository>();
 builder.Services.AddScoped<PlanningSetupService>();
+builder.Services.AddScoped<OrderPlanningRouteService>();
 builder.Services.AddScoped<PlanningRuntimeContextLoader>();
 builder.Services.AddScoped<ExecutionPlanningService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();

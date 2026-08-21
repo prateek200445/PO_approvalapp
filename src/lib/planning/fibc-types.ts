@@ -53,6 +53,8 @@ export type FibcAllotmentResult = {
   allotmentMode?: string;
   dustLevel?: string;
   rejectionPercentApplied?: number;
+  usedSyntheticGrid?: boolean;
+  savedAllocationsApplied?: number;
   warnings: string[];
   proposedSlots: FibcSlotGridItem[];
 };
@@ -416,6 +418,8 @@ export function normalizeAllotmentResult(data: Record<string, unknown>): FibcAll
     allotmentMode: optStr(data, "allotmentMode", "AllotmentMode") ?? "OrderWise",
     dustLevel: optStr(data, "dustLevel", "DustLevel") ?? "Normal",
     rejectionPercentApplied: optNum(data, "rejectionPercentApplied", "RejectionPercentApplied") ?? undefined,
+    usedSyntheticGrid: Boolean(data.usedSyntheticGrid ?? data.UsedSyntheticGrid),
+    savedAllocationsApplied: numField(data, "savedAllocationsApplied", "SavedAllocationsApplied"),
     warnings: Array.isArray(warnings) ? warnings.map(String) : [],
     proposedSlots: proposed.map(normalizeSlotGridItem),
   };

@@ -57,9 +57,16 @@ export type IntegratedOrderTimeline = {
   fabricRequirementDate: string | null;
   loomStartDate: string | null;
   loomEndDate: string | null;
+  transferStartDate: string | null;
+  transferEndDate: string | null;
   fibcStartDate: string | null;
   fibcEndDate: string | null;
   fabricBufferDays: number;
+  transferBufferDays: number;
+  fibcCompanyName: string | null;
+  fabricSupplyCompanyName: string | null;
+  isInterUnit: boolean;
+  routeSource: string | null;
   milestones: IntegratedTimelineMilestone[];
   loomAllocations: IntegratedLoomAllocation[];
   fabricRequirements: IntegratedFabricRequirement[];
@@ -115,6 +122,16 @@ function optDate(data: Record<string, unknown>, ...keys: string[]): string | nul
   return null;
 }
 
+function boolField(data: Record<string, unknown>, ...keys: string[]): boolean {
+  for (const key of keys) {
+    const value = data[key];
+    if (value === true || value === false) return value;
+    if (value === 1 || value === "1" || value === "true") return true;
+    if (value === 0 || value === "0" || value === "false") return false;
+  }
+  return false;
+}
+
 export function formatTimelineDate(value: string | null | undefined): string {
   if (!value) return "—";
   const parsed = new Date(value);
@@ -138,9 +155,16 @@ export function normalizeIntegratedOrderTimeline(data: Record<string, unknown>):
     fabricRequirementDate: optDate(data, "fabricRequirementDate", "FabricRequirementDate"),
     loomStartDate: optDate(data, "loomStartDate", "LoomStartDate"),
     loomEndDate: optDate(data, "loomEndDate", "LoomEndDate"),
+    transferStartDate: optDate(data, "transferStartDate", "TransferStartDate"),
+    transferEndDate: optDate(data, "transferEndDate", "TransferEndDate"),
     fibcStartDate: optDate(data, "fibcStartDate", "FibcStartDate"),
     fibcEndDate: optDate(data, "fibcEndDate", "FibcEndDate"),
     fabricBufferDays: numField(data, "fabricBufferDays", "FabricBufferDays"),
+    transferBufferDays: numField(data, "transferBufferDays", "TransferBufferDays"),
+    fibcCompanyName: optStr(data, "fibcCompanyName", "FibcCompanyName"),
+    fabricSupplyCompanyName: optStr(data, "fabricSupplyCompanyName", "FabricSupplyCompanyName"),
+    isInterUnit: boolField(data, "isInterUnit", "IsInterUnit"),
+    routeSource: optStr(data, "routeSource", "RouteSource"),
     warnings: Array.isArray(data.warnings ?? data.Warnings) ? (data.warnings ?? data.Warnings).map(String) : [],
     milestones: milestones.map((m) => ({
       stage: strField(m, "stage", "Stage"),

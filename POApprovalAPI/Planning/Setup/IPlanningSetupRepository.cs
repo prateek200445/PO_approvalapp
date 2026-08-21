@@ -51,4 +51,18 @@ public interface IPlanningSetupRepository
     Task SaveLoomPreferenceChartAsync(SavePlanningLoomPreferenceChartRequest request, CancellationToken ct = default);
 
     Task<int> ClearOpenBacklogForOrderAsync(string companyName, string orderNo, CancellationToken ct = default);
+
+    Task<PlanningInterUnitDefaultsDto> GetInterUnitDefaultsAsync(string fibcCompanyName, CancellationToken ct = default);
+
+    Task<PlanningInterUnitDefaultsDto> UpsertInterUnitDefaultsAsync(
+        UpsertPlanningInterUnitDefaultsRequest request,
+        CancellationToken ct = default);
+
+    Task<PlanningOrderRouteDto?> GetSavedOrderRouteAsync(string orderNo, CancellationToken ct = default);
+
+    Task<PlanningOrderRouteDto> UpsertOrderRouteAsync(UpsertPlanningOrderRouteRequest request, CancellationToken ct = default);
+
+    Task<bool> DeleteOrderRouteAsync(string orderNo, CancellationToken ct = default);
+
+    Task<IReadOnlyList<string>> DetectBomInterUnitSignalsAsync(string orderNo, CancellationToken ct = default);
 }

@@ -293,6 +293,92 @@ ORDER BY sysdate, linenos, shift", new { OrderNo = orderNo.Trim() }, commandTime
         }).ToList();
     }
 
+    public async Task<IReadOnlyList<FibcSavedAllocationRowDto>> GetSavedAllocationsInWindowAsync(
+        string companyName,
+        DateTime dateFrom,
+        DateTime dateTo,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var company = ResolveCompany(companyName);
+        var from = dateFrom.Date;
+        var to = dateTo.Date;
+        if (from > to)
+            (from, to) = (to, from);
+
+        using var connection = _database.CreateConnection();
+        var rows = await connection.QueryAsync<SavedAllocationRow>(@"
+SELECT
+    Companyname,
+    linenos,
+    partyname,
+    orderno,
+    qty,
+    sysdate,
+    shift,
+    ALLOCATEDPER,
+    PBagType,
+    MarketingNo,
+    QCapacity,
+    Effi
+FROM dbo.prod_fibcallocationMaster WITH (NOLOCK)
+WHERE Companyname = @CompanyName
+  AND sysdate >= @DateFrom
+  AND sysdate <= @DateTo
+ORDER BY sysdate, linenos, shift", new
+        {
+            CompanyName = company,
+            DateFrom = from,
+            DateTo = to,
+        }, commandTimeout: CommandTimeoutSeconds);
+
+        return rows.Select(row => new FibcSavedAllocationRowDto
+        {
+            CompanyName = row.Companyname ?? company,
+            LineNo = row.linenos ?? "",
+            PartyName = row.partyname,
+            OrderNo = row.orderno ?? "",
+            BagType = row.PBagType ?? "",
+            PlanDate = row.sysdate,
+            Shift = row.shift ?? "",
+            Qty = row.qty,
+            AllocatedPercent = row.ALLOCATEDPER,
+            Capacity = row.QCapacity,
+            Efficiency = row.Effi,
+            MarketingNo = row.MarketingNo,
+        }).ToList();
+    }
+
+    public async Task<double> GetSavedQtyOnSlotExcludingOrderAsync(
+        string companyName,
+        string lineNo,
+        DateTime planDate,
+        string shift,
+        string excludeOrderNo,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(lineNo) || string.IsNullOrWhiteSpace(shift))
+            return 0;
+
+        using var connection = _database.CreateConnection();
+        return await connection.ExecuteScalarAsync<double>(@"
+SELECT ISNULL(SUM(qty), 0)
+FROM dbo.prod_fibcallocationMaster WITH (NOLOCK)
+WHERE Companyname = @CompanyName
+  AND linenos = @LineNo
+  AND sysdate = @PlanDate
+  AND shift = @Shift
+  AND orderno <> @ExcludeOrderNo", new
+        {
+            CompanyName = ResolveCompany(companyName),
+            LineNo = lineNo.Trim(),
+            PlanDate = planDate.Date,
+            Shift = shift.Trim(),
+            ExcludeOrderNo = excludeOrderNo.Trim(),
+        }, commandTimeout: CommandTimeoutSeconds);
+    }
+
     public async Task<IReadOnlyList<string>> GetDistinctShiftsAsync(
         DateTime dateFrom,
         DateTime dateTo,
@@ -427,6 +513,22 @@ WHERE orderno = @OrderNo", new { OrderNo = orderNo }, transaction, commandTimeou
             {
                 ct.ThrowIfCancellationRequested();
 
+                var occupiedByOthers = await connection.ExecuteScalarAsync<double>(@"
+SELECT ISNULL(SUM(qty), 0)
+FROM dbo.prod_fibcallocationMaster WITH (NOLOCK)
+WHERE Companyname = @CompanyName
+  AND linenos = @LineNo
+  AND sysdate = @PlanDate
+  AND shift = @Shift
+  AND orderno <> @OrderNo", new
+                {
+                    CompanyName = companyName,
+                    LineNo = slot.LineNo,
+                    PlanDate = slot.PlanDate.Date,
+                    Shift = slot.Shift,
+                    OrderNo = orderNo.Trim(),
+                }, transaction, commandTimeout: CommandTimeoutSeconds);
+
                 var remaining = await connection.ExecuteScalarAsync<double?>(@"
 SELECT remaining
 FROM vw_fibclineplanning_NEW WITH (NOLOCK)
@@ -441,23 +543,39 @@ WHERE CompanyNam = @CompanyName
                     Shift = slot.Shift,
                 }, transaction, commandTimeout: CommandTimeoutSeconds);
 
-                if (remaining is null)
+                var capacity = slot.Capacity > 0.001 ? slot.Capacity : slot.Allotted;
+                if (capacity <= 0.001 && remaining is > 0)
+                    capacity = remaining.Value + slot.Allotted;
+
+                double available;
+                if (allowSyntheticSlots || remaining is null)
                 {
-                    if (!allowSyntheticSlots)
+                    if (remaining is null && capacity <= 0.001)
                     {
-                        throw new InvalidOperationException(
-                            $"Capacity slot on {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} no longer exists.");
+                        capacity = slot.Remaining + slot.Allotted;
+                        if (capacity <= 0.001)
+                            capacity = slot.Allotted;
                     }
 
-                    remaining = slot.Remaining + slot.Allotted;
-                    if (remaining <= 0)
-                        remaining = slot.Capacity;
+                    available = Math.Max(0, capacity - occupiedByOthers);
+                }
+                else
+                {
+                    available = Math.Max(0, Math.Min(remaining.Value, capacity - occupiedByOthers));
                 }
 
-                if (slot.Allotted > remaining.Value + 0.01)
+                if (slot.Allotted > available + 0.01)
                 {
                     throw new InvalidOperationException(
-                        $"Slot {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} only has {remaining.Value:N0} remaining but {slot.Allotted:N0} was requested.");
+                        occupiedByOthers > 0.001
+                            ? $"Slot {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} only has {available:N0} available ({occupiedByOthers:N0} pcs allocated to other orders)."
+                            : $"Slot {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} only has {available:N0} remaining but {slot.Allotted:N0} was requested.");
+                }
+
+                if (remaining is null && !allowSyntheticSlots)
+                {
+                    throw new InvalidOperationException(
+                        $"Capacity slot on {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} no longer exists.");
                 }
 
                 var allocatedPercent = slot.AllocatedPercent

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using POApprovalAPI.Planning.Loom;
 using POApprovalAPI.Planning.Loom.Models;
+using POApprovalAPI.Planning.Setup;
 
 namespace POApprovalAPI.Controllers;
 
@@ -134,6 +135,23 @@ public class LoomPlanningController : ControllerBase
                 return NotFound(new { message = "No marketing, BOM, or loom data found for this order." });
 
             return Ok(context);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("orders/route")]
+    public async Task<IActionResult> GetOrderRoute([FromQuery] string orderNo, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
+            var routeService = HttpContext.RequestServices.GetRequiredService<OrderPlanningRouteService>();
+            return Ok(await routeService.ResolveAsync(orderNo, ct));
         }
         catch (Exception ex)
         {

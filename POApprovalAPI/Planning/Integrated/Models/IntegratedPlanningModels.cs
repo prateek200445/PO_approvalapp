@@ -24,9 +24,16 @@ public sealed class IntegratedOrderTimelineDto
     public DateTime? FabricRequirementDate { get; set; }
     public DateTime? LoomStartDate { get; set; }
     public DateTime? LoomEndDate { get; set; }
+    public DateTime? TransferStartDate { get; set; }
+    public DateTime? TransferEndDate { get; set; }
     public DateTime? FibcStartDate { get; set; }
     public DateTime? FibcEndDate { get; set; }
     public int FabricBufferDays { get; set; }
+    public int TransferBufferDays { get; set; }
+    public string? FibcCompanyName { get; set; }
+    public string? FabricSupplyCompanyName { get; set; }
+    public bool IsInterUnit { get; set; }
+    public string? RouteSource { get; set; }
     public IReadOnlyList<IntegratedTimelineMilestoneDto> Milestones { get; set; } = Array.Empty<IntegratedTimelineMilestoneDto>();
     public IReadOnlyList<LoomOrderAllocationLineDto> LoomAllocations { get; set; } = Array.Empty<LoomOrderAllocationLineDto>();
     public IReadOnlyList<FibcFabricRequirementDto> FabricRequirements { get; set; } = Array.Empty<FibcFabricRequirementDto>();

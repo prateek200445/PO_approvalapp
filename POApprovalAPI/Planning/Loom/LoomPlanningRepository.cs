@@ -151,6 +151,27 @@ ORDER BY a.AllocationDate DESC, a.LoomNo", new { OrderNo = orderNo.Trim() }, com
         }).ToList();
     }
 
+    public async Task<string?> ResolveWeavingCompanyFromAllocationsAsync(
+        string orderNo,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(orderNo))
+            return null;
+
+        using var connection = _database.CreateConnection();
+        return await connection.QueryFirstOrDefaultAsync<string>(@"
+SELECT TOP 1 m.CompanyName
+FROM Prod_LoomAlocationMaster a WITH (NOLOCK)
+INNER JOIN NewMISLoomMaster m WITH (NOLOCK) ON m.LoomNo = a.LoomNo
+WHERE a.PONO = @OrderNo
+  AND (a.isActive IS NULL OR UPPER(LTRIM(RTRIM(a.isActive))) <> 'N')
+  AND ISNULL(m.CompanyName, '') <> ''
+ORDER BY a.AllocationDate DESC, a.LoomNo",
+            new { OrderNo = orderNo.Trim() },
+            commandTimeout: CommandTimeoutSeconds);
+    }
+
     public async Task<IReadOnlyList<LoomFabricRequirementDto>> GetFabricRequirementsAsync(
         string orderNo,
         CancellationToken ct = default)
@@ -462,6 +483,12 @@ WHERE PONO = @OrderNo", new { OrderNo = orderNo.Trim() }, transaction, commandTi
             }
 
             var companyId = await connection.ExecuteScalarAsync<int?>(@"
+SELECT TOP 1 a.CompanyId
+FROM Prod_LoomAlocationMaster a WITH (NOLOCK)
+INNER JOIN NewMISLoomMaster m WITH (NOLOCK) ON m.LoomNo = a.LoomNo
+WHERE m.CompanyName = @CompanyName AND a.CompanyId IS NOT NULL
+ORDER BY a.SrNo DESC", new { CompanyName = companyName.Trim() }, transaction, commandTimeout: CommandTimeoutSeconds)
+                ?? await connection.ExecuteScalarAsync<int?>(@"
 SELECT TOP 1 CompanyId
 FROM Prod_LoomAlocationMaster WITH (NOLOCK)
 WHERE CompanyId IS NOT NULL

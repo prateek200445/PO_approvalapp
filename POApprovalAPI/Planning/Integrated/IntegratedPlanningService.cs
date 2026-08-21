@@ -6,6 +6,7 @@ using POApprovalAPI.Planning.Integrated.Models;
 using POApprovalAPI.Planning.Loom;
 using POApprovalAPI.Planning.Loom.Models;
 using POApprovalAPI.Planning.Setup;
+using POApprovalAPI.Planning.Setup.Models;
 
 namespace POApprovalAPI.Planning.Integrated;
 
@@ -17,6 +18,7 @@ public sealed class IntegratedPlanningService
     private readonly LoomPlanningService _loom;
     private readonly ExecutionPlanningService _execution;
     private readonly PlanningRuntimeContextLoader _runtimeLoader;
+    private readonly OrderPlanningRouteService _routeService;
     private readonly LoomPlanningOptions _loomOptions;
 
     public IntegratedPlanningService(
@@ -24,12 +26,14 @@ public sealed class IntegratedPlanningService
         LoomPlanningService loom,
         ExecutionPlanningService execution,
         PlanningRuntimeContextLoader runtimeLoader,
+        OrderPlanningRouteService routeService,
         IOptions<LoomPlanningOptions> loomOptions)
     {
         _fibc = fibc;
         _loom = loom;
         _execution = execution;
         _runtimeLoader = runtimeLoader;
+        _routeService = routeService;
         _loomOptions = loomOptions.Value;
     }
 
@@ -40,12 +44,14 @@ public sealed class IntegratedPlanningService
             return null;
 
         var trimmed = orderNo.Trim();
+        var routeTask = _routeService.ResolveAsync(trimmed, ct);
         var fibcPlanTask = _fibc.GetOrderPlanAsync(trimmed, ct);
         var fibcCtxTask = _fibc.GetOrderAllotmentContextAsync(trimmed, ct);
         var loomPlanTask = _loom.GetOrderPlanAsync(trimmed, ct);
         var loomCtxTask = _loom.GetOrderAllotmentContextAsync(trimmed, ct);
-        await Task.WhenAll(fibcPlanTask, fibcCtxTask, loomPlanTask, loomCtxTask);
+        await Task.WhenAll(routeTask, fibcPlanTask, fibcCtxTask, loomPlanTask, loomCtxTask);
 
+        var route = await routeTask;
         var fibcPlan = await fibcPlanTask;
         var fibcCtx = await fibcCtxTask;
         var loomPlan = await loomPlanTask;
@@ -59,6 +65,15 @@ public sealed class IntegratedPlanningService
         if (!hasLoom && !hasFibc && !hasFabric && !hasContext)
             return null;
 
+        var loomAllocations = loomPlan?.Allocations ?? Array.Empty<LoomOrderAllocationLineDto>();
+        var effectiveRoute = route;
+        if (hasLoom)
+        {
+            var wovenAt = await _loom.ResolveWeavingCompanyForOrderAsync(trimmed, ct);
+            if (!string.IsNullOrWhiteSpace(wovenAt))
+                effectiveRoute = WithWeavingCompany(route, wovenAt);
+        }
+
         var warnings = new List<string>();
         var fabricRequirements = MergeFabricRequirements(fibcPlan, loomPlan);
 
@@ -67,7 +82,6 @@ public sealed class IntegratedPlanningService
             loomCtx?.FabricRequirementDate,
             fabricRequirements.Select(f => f.TargetDate).FirstOrDefault(IsValidDate));
 
-        var loomAllocations = loomPlan?.Allocations ?? Array.Empty<LoomOrderAllocationLineDto>();
         var loomStart = loomAllocations.Count > 0
             ? loomAllocations.Min(a => a.AllocationDate.Date)
             : (DateTime?)null;
@@ -75,17 +89,46 @@ public sealed class IntegratedPlanningService
             ? loomAllocations.Max(a => (a.ToDate ?? a.AllocationDate).Date)
             : (DateTime?)null;
 
+        var transferDays = effectiveRoute.IsInterUnit ? Math.Max(0, effectiveRoute.TransferBufferDays) : 0;
+        DateTime? transferStart = loomEnd;
+        DateTime? transferEnd = loomEnd is not null && transferDays > 0
+            ? loomEnd.Value.AddDays(transferDays)
+            : loomEnd;
+
         var fibcLines = MergeFibcLines(fibcPlan);
         var fibcStart = fibcLines.Count > 0 ? MinFibcDate(fibcLines, true) : null;
         var fibcEnd = fibcLines.Count > 0 ? MinFibcDate(fibcLines, false) : null;
 
+        if (effectiveRoute.IsInterUnit)
+        {
+            warnings.Add(
+                $"Inter-unit: fabric woven at {effectiveRoute.FabricSupplyCompanyName}, FIBC at {effectiveRoute.FibcCompanyName} " +
+                $"(transfer buffer {transferDays} day(s), source: {effectiveRoute.RouteSource}).");
+            if (!string.IsNullOrWhiteSpace(effectiveRoute.AutoDetectedReason))
+                warnings.Add(effectiveRoute.AutoDetectedReason);
+        }
+
         if (loomEnd is not null && fabricRequirementDate is not null)
         {
-            var fabricReadyBy = fabricRequirementDate.Value.Date.AddDays(-_loomOptions.FabricBufferDays);
-            if (loomEnd.Value.Date > fabricReadyBy)
+            var loomMustCompleteBy = fabricRequirementDate.Value.Date
+                .AddDays(-_loomOptions.FabricBufferDays - transferDays);
+            if (loomEnd.Value.Date > loomMustCompleteBy)
             {
                 warnings.Add(
-                    $"Loom weaving ends {loomEnd:yyyy-MM-dd} but fabric should complete by {fabricReadyBy:yyyy-MM-dd} ({_loomOptions.FabricBufferDays}-day buffer before FIBC).");
+                    effectiveRoute.IsInterUnit
+                        ? $"Loom weaving ends {loomEnd:yyyy-MM-dd} but must complete by {loomMustCompleteBy:yyyy-MM-dd} " +
+                          $"({_loomOptions.FabricBufferDays}-day FIBC buffer + {transferDays}-day inter-unit transfer)."
+                        : $"Loom weaving ends {loomEnd:yyyy-MM-dd} but fabric should complete by {loomMustCompleteBy:yyyy-MM-dd} ({_loomOptions.FabricBufferDays}-day buffer before FIBC).");
+            }
+        }
+
+        if (transferEnd is not null && fabricRequirementDate is not null && effectiveRoute.IsInterUnit)
+        {
+            var fabricReadyBy = fabricRequirementDate.Value.Date.AddDays(-_loomOptions.FabricBufferDays);
+            if (transferEnd.Value.Date > fabricReadyBy)
+            {
+                warnings.Add(
+                    $"Inter-unit transfer ends {transferEnd:yyyy-MM-dd} after fabric-ready target {fabricReadyBy:yyyy-MM-dd}.");
             }
         }
 
@@ -95,13 +138,18 @@ public sealed class IntegratedPlanningService
         }
 
         if (!hasLoom)
-            warnings.Add("No loom allocations found for this order.");
+        {
+            warnings.Add(effectiveRoute.IsInterUnit
+                ? $"No loom allocations at supply factory ({effectiveRoute.FabricSupplyCompanyName})."
+                : "No loom allocations found for this order.");
+        }
+
         if (!hasFibc)
             warnings.Add("No FIBC line plan found for this order.");
 
         try
         {
-            var exec = await _execution.GetOrderExecutionAsync(trimmed, _loomOptions.DefaultCompanyName, ct);
+            var exec = await _execution.GetOrderExecutionAsync(trimmed, route.FibcCompanyName, ct);
             if (exec.BailingGap > 0)
                 warnings.Add($"Bailing gap: {exec.BailingGap:N0} pcs produced but not bailed.");
             foreach (var s in exec.ReplanSuggestions)
@@ -116,9 +164,8 @@ public sealed class IntegratedPlanningService
         {
             try
             {
-                var company = _loomOptions.DefaultCompanyName;
-                var runtime = await _runtimeLoader.LoadAsync(company, ct);
-                if (runtime.LoomPool.Any(l => l.PoolId.HasValue) && !hasLoom)
+                var runtime = await _runtimeLoader.LoadAsync(effectiveRoute.FibcCompanyName, ct);
+                if (runtime.LoomPool.Any(l => l.PoolId.HasValue) && !hasLoom && !effectiveRoute.IsInterUnit)
                     warnings.Add("Loom pool is configured but this order has no loom plan — fabric may be missing.");
             }
             catch
@@ -127,7 +174,18 @@ public sealed class IntegratedPlanningService
             }
         }
 
-        var milestones = BuildMilestones(loomStart, loomEnd, fabricRequirementDate, fibcStart, fibcEnd, dispatchDate, loomAllocations, fibcLines);
+        var milestones = BuildMilestones(
+            loomStart,
+            loomEnd,
+            transferStart,
+            transferEnd,
+            fabricRequirementDate,
+            fibcStart,
+            fibcEnd,
+            dispatchDate,
+            effectiveRoute,
+            loomAllocations,
+            fibcLines);
 
         return new IntegratedOrderTimelineDto
         {
@@ -140,9 +198,16 @@ public sealed class IntegratedPlanningService
             FabricRequirementDate = fabricRequirementDate,
             LoomStartDate = loomStart,
             LoomEndDate = loomEnd,
+            TransferStartDate = effectiveRoute.IsInterUnit ? transferStart : null,
+            TransferEndDate = effectiveRoute.IsInterUnit ? transferEnd : null,
             FibcStartDate = fibcStart,
             FibcEndDate = fibcEnd,
             FabricBufferDays = _loomOptions.FabricBufferDays,
+            TransferBufferDays = transferDays,
+            FibcCompanyName = effectiveRoute.FibcCompanyName,
+            FabricSupplyCompanyName = effectiveRoute.FabricSupplyCompanyName,
+            IsInterUnit = effectiveRoute.IsInterUnit,
+            RouteSource = effectiveRoute.RouteSource,
             Milestones = milestones,
             LoomAllocations = loomAllocations,
             FabricRequirements = fabricRequirements,
@@ -213,14 +278,18 @@ public sealed class IntegratedPlanningService
     private static List<IntegratedTimelineMilestoneDto> BuildMilestones(
         DateTime? loomStart,
         DateTime? loomEnd,
+        DateTime? transferStart,
+        DateTime? transferEnd,
         DateTime? fabricRequirementDate,
         DateTime? fibcStart,
         DateTime? fibcEnd,
         DateTime? dispatchDate,
+        PlanningOrderRouteDto route,
         IReadOnlyList<LoomOrderAllocationLineDto> loomAllocations,
         IReadOnlyList<FibcOrderPlanLineDto> fibcLines)
     {
         var milestones = new List<IntegratedTimelineMilestoneDto>();
+        var sort = 1;
 
         if (loomStart is not null || loomEnd is not null)
         {
@@ -228,11 +297,26 @@ public sealed class IntegratedPlanningService
             milestones.Add(new IntegratedTimelineMilestoneDto
             {
                 Stage = "Loom",
-                Label = "Loom weaving",
+                Label = route.IsInterUnit ? "Loom weaving (supply factory)" : "Loom weaving",
                 StartDate = loomStart,
                 EndDate = loomEnd,
-                Detail = loomCount > 0 ? $"{loomCount} loom(s), {loomAllocations.Count} segment(s)" : null,
-                SortOrder = 1,
+                Detail = loomCount > 0
+                    ? $"{loomCount} loom(s) at {route.FabricSupplyCompanyName}"
+                    : route.FabricSupplyCompanyName,
+                SortOrder = sort++,
+            });
+        }
+
+        if (route.IsInterUnit && (transferStart is not null || transferEnd is not null))
+        {
+            milestones.Add(new IntegratedTimelineMilestoneDto
+            {
+                Stage = "Transfer",
+                Label = "Inter-unit fabric transfer",
+                StartDate = transferStart,
+                EndDate = transferEnd,
+                Detail = $"{route.FabricSupplyCompanyName} → {route.FibcCompanyName} ({route.TransferBufferDays} day buffer)",
+                SortOrder = sort++,
             });
         }
 
@@ -244,8 +328,10 @@ public sealed class IntegratedPlanningService
                 Label = "Fabric ready for FIBC",
                 StartDate = fabricRequirementDate,
                 EndDate = fabricRequirementDate,
-                Detail = "Target from BOM / dispatch plan",
-                SortOrder = 2,
+                Detail = route.IsInterUnit
+                    ? $"Target at {route.FibcCompanyName} (BOM / dispatch plan)"
+                    : "Target from BOM / dispatch plan",
+                SortOrder = sort++,
             });
         }
 
@@ -258,8 +344,10 @@ public sealed class IntegratedPlanningService
                 Label = "FIBC line production",
                 StartDate = fibcStart,
                 EndDate = fibcEnd,
-                Detail = lineCount > 0 ? $"{lineCount} line(s), {fibcLines.Count} slot(s)" : null,
-                SortOrder = 3,
+                Detail = lineCount > 0
+                    ? $"{lineCount} line(s) at {route.FibcCompanyName}"
+                    : route.FibcCompanyName,
+                SortOrder = sort++,
             });
         }
 
@@ -272,11 +360,26 @@ public sealed class IntegratedPlanningService
                 StartDate = dispatchDate,
                 EndDate = dispatchDate,
                 Detail = "Marketing invoice despatch date",
-                SortOrder = 4,
+                SortOrder = sort++,
             });
         }
 
         return milestones;
+    }
+
+    private static PlanningOrderRouteDto WithWeavingCompany(PlanningOrderRouteDto route, string weavingCompany)
+    {
+        var interUnit = !string.Equals(weavingCompany, route.FibcCompanyName, StringComparison.OrdinalIgnoreCase);
+        return new PlanningOrderRouteDto
+        {
+            OrderNo = route.OrderNo,
+            FibcCompanyName = route.FibcCompanyName,
+            FabricSupplyCompanyName = weavingCompany,
+            TransferBufferDays = route.TransferBufferDays,
+            IsInterUnit = interUnit,
+            RouteSource = interUnit == route.IsInterUnit ? route.RouteSource : "ActualWeave",
+            AutoDetectedReason = route.AutoDetectedReason,
+        };
     }
 
     private static DateTime? FirstValidDate(params DateTime?[] dates)

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Save, Search, Sparkles, TriangleAlert, X } from "lucide-react";
 import { toast } from "sonner";
@@ -25,10 +25,13 @@ import {
   fetchLoomMaster,
   fetchLoomOrderAllotmentContext,
   fetchLoomOrderPlan,
+  fetchLoomOrderRoute,
   fetchLoomPlanningConfig,
   fetchLoomProductionMeters,
+  parsePlanningGsm,
   previewLoomAllotment,
 } from "@/lib/planning/loom-api";
+import { searchPlanningFactories } from "@/lib/planning/setup-api";
 import {
   defaultPlanningDateFrom,
   formatPlanDate,
@@ -57,6 +60,8 @@ function LoomPlanningPage() {
   const debouncedOrderSearch = useDebounce(orderSearch, 250);
   const debouncedLoomFilter = useDebounce(loomFilter, 200);
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
+  const [weavingFactoryQuery, setWeavingFactoryQuery] = useState("");
+  const debouncedWeavingFactoryQuery = useDebounce(weavingFactoryQuery, 300);
 
   const { data: config } = useQuery({
     queryKey: ["loom-planning-config"],
@@ -64,7 +69,22 @@ function LoomPlanningPage() {
     staleTime: 1000 * 60 * 30,
   });
 
-  const company = config?.defaultCompanyName;
+  const fibcCompany = config?.defaultCompanyName ?? "";
+  const [weavingCompany, setWeavingCompany] = useState("");
+
+  useEffect(() => {
+    if (config?.defaultCompanyName && !weavingCompany) {
+      setWeavingCompany(config.defaultCompanyName);
+    }
+  }, [config?.defaultCompanyName, weavingCompany]);
+
+  const { data: weavingFactoryOptions = [] } = useQuery({
+    queryKey: ["loom-weaving-factory-search", debouncedWeavingFactoryQuery],
+    queryFn: () => searchPlanningFactories(debouncedWeavingFactoryQuery),
+    enabled: debouncedWeavingFactoryQuery.length >= 0,
+  });
+
+  const company = weavingCompany || fibcCompany;
 
   const {
     data: looms = [],
@@ -141,7 +161,7 @@ function LoomPlanningPage() {
         }
       />
 
-      <div className="mb-6 grid gap-4 lg:grid-cols-3">
+      <div className="mb-6 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
         <PlanningPanel title="Date range" subtitle="Loads Prod_LoomAlocationMaster from ERP">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1.5">
@@ -164,8 +184,10 @@ function LoomPlanningPage() {
         <PlanningPanel title="Configuration" subtitle={company ?? "Loading…"}>
           {config ? (
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              <dt className="text-muted-foreground">Company</dt>
-              <dd className="font-medium">{config.defaultCompanyName}</dd>
+              <dt className="text-muted-foreground">FIBC factory</dt>
+              <dd className="font-medium">{fibcCompany}</dd>
+              <dt className="text-muted-foreground">Weaving factory</dt>
+              <dd className="font-medium">{company}</dd>
               <dt className="text-muted-foreground">Fabric buffer</dt>
               <dd className="font-medium">{config.fabricBufferDays} days</dd>
               <dt className="text-muted-foreground">Max segment</dt>
@@ -178,6 +200,47 @@ function LoomPlanningPage() {
           ) : (
             <p className="text-sm text-muted-foreground">Loading config…</p>
           )}
+        </PlanningPanel>
+
+        <PlanningPanel title="Weaving factory" subtitle="Loom pool for this grid & allotment">
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Search factory</span>
+            <Input
+              value={weavingFactoryQuery}
+              onChange={(e) => setWeavingFactoryQuery(e.target.value)}
+              placeholder="Unit-II, KPW, sister unit…"
+            />
+          </label>
+          <div className="mt-2 max-h-36 overflow-auto rounded-md border border-border">
+            {weavingFactoryOptions.length === 0 ? (
+              <p className="p-2 text-xs text-muted-foreground">Type to search factories with looms.</p>
+            ) : (
+              weavingFactoryOptions
+                .filter((opt) => opt.hasLoomMaster)
+                .map((opt) => (
+                  <button
+                    key={opt.companyName}
+                    type="button"
+                    className={cn(
+                      "flex w-full items-center justify-between gap-2 border-b border-border/60 px-2 py-2 text-left text-sm last:border-0 hover:bg-muted/50",
+                      opt.companyName === company && "bg-primary/5",
+                    )}
+                    onClick={() => {
+                      setWeavingCompany(opt.companyName);
+                      setWeavingFactoryQuery("");
+                    }}
+                  >
+                    <span className="font-medium">{opt.companyName}</span>
+                    {opt.companyName === company ? <Badge variant="secondary">Active</Badge> : null}
+                  </button>
+                ))
+            )}
+          </div>
+          {weavingCompany && weavingCompany !== fibcCompany ? (
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+              Inter-unit: weaving at <strong>{weavingCompany}</strong>, FIBC stays at {fibcCompany}.
+            </p>
+          ) : null}
         </PlanningPanel>
 
         <PlanningPanel title="Order lookup" subtitle="Loom allocations + BOM fabric (read-only)">
@@ -196,7 +259,13 @@ function LoomPlanningPage() {
         </PlanningPanel>
       </div>
 
-      <PlanOrderPanel company={company} config={config} onGridRefresh={refetchGrid} />
+      <PlanOrderPanel
+        weavingCompany={company}
+        fibcCompany={fibcCompany}
+        setWeavingCompany={setWeavingCompany}
+        config={config}
+        onGridRefresh={refetchGrid}
+      />
 
       <LoomMasterPanel looms={looms} loading={loadingLooms} />
 
@@ -522,11 +591,15 @@ function OrderDetailPanel({
 }
 
 function PlanOrderPanel({
-  company,
+  weavingCompany,
+  fibcCompany,
+  setWeavingCompany,
   config,
   onGridRefresh,
 }: {
-  company?: string;
+  weavingCompany: string;
+  fibcCompany: string;
+  setWeavingCompany: (company: string) => void;
   config?: LoomPlanningConfig;
   onGridRefresh: () => void;
 }) {
@@ -554,6 +627,28 @@ function PlanOrderPanel({
     retry: false,
   });
 
+  const { data: orderRoute } = useQuery({
+    queryKey: ["loom-order-route", contextOrderNo],
+    queryFn: () => fetchLoomOrderRoute(contextOrderNo!),
+    enabled: Boolean(contextOrderNo),
+    retry: false,
+  });
+
+  const autoRouteOrderRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!orderRoute?.fabricSupplyCompanyName || !contextOrderNo) return;
+    // Auto-pick weaving factory once per order when BOM/route explicitly says inter-unit (Sulzer) or saved route.
+    if (orderRoute.routeSource !== "Saved" && orderRoute.routeSource !== "AutoDetected") return;
+    if (autoRouteOrderRef.current === contextOrderNo) return;
+    autoRouteOrderRef.current = contextOrderNo;
+    setWeavingCompany(orderRoute.fabricSupplyCompanyName);
+  }, [orderRoute, contextOrderNo, setWeavingCompany]);
+
+  useEffect(() => {
+    setPreviewResult(null);
+  }, [weavingCompany]);
+
   useEffect(() => {
     if (!planContextError || !planContextErr) return;
     toast.error(planContextErr.message || "Failed to load order context.");
@@ -569,7 +664,7 @@ function PlanOrderPanel({
   useEffect(() => {
     if (!planContext) return;
     const line = planContext.fabricLines[0];
-    if (line?.gsm) setReqGsm(line.gsm.replace(/[^\d.]/g, "") || line.gsm);
+    if (line?.gsm) setReqGsm(parsePlanningGsm(line.gsm));
     if (line?.fabricSize != null) setSize(String(line.fabricSize));
     if (line?.totalMtr != null && line.totalMtr > 0) setRequiredMeters(String(line.totalMtr));
     if (line?.heading) setHeading(line.heading);
@@ -627,7 +722,7 @@ function PlanOrderPanel({
     }
     return {
       orderNo,
-      companyName: company,
+      companyName: weavingCompany || fibcCompany,
       partyName: planContext?.partyName ?? undefined,
       heading: heading.trim() || undefined,
       reqGsm: gsm,
@@ -664,6 +759,25 @@ function PlanOrderPanel({
         subtitle="Backward/forward loom allotment — cases i–vii"
         className="mb-6"
       >
+        {orderRoute?.isInterUnit && weavingCompany !== fibcCompany ? (
+          <div className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-900 dark:text-amber-200">
+            <div className="flex items-start gap-2">
+              <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <strong>Inter-unit order</strong> — weaving at{" "}
+                <span className="font-medium">{weavingCompany}</span>, FIBC at{" "}
+                <span className="font-medium">{fibcCompany}</span>
+                {orderRoute.transferBufferDays > 0
+                  ? ` (+${orderRoute.transferBufferDays} day transfer buffer)`
+                  : null}
+                . Route: {orderRoute.routeSource}.
+                {orderRoute.autoDetectedReason ? (
+                  <p className="mt-1 text-xs opacity-90">{orderRoute.autoDetectedReason}</p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-3">
             <label className="block space-y-1.5">
@@ -674,6 +788,14 @@ function PlanOrderPanel({
                 placeholder="Buyer order number"
                 onBlur={() => triggerContextLoad(planOrderNo)}
               />
+            </label>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Weaving factory</span>
+              <Input value={weavingCompany} readOnly className="bg-muted/30" />
+            </label>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">FIBC factory (fixed)</span>
+              <Input value={fibcCompany} readOnly className="bg-muted/30" />
             </label>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1.5">
@@ -749,7 +871,11 @@ function PlanOrderPanel({
           </div>
           <div className="rounded-lg border border-border/70 bg-surface/40 p-4">
             {previewResult ? (
-              <LoomPreviewSummary result={previewResult} />
+              <LoomPreviewSummary
+                result={previewResult}
+                weavingCompany={weavingCompany || fibcCompany}
+                fibcCompany={fibcCompany}
+              />
             ) : (
               <p className="text-sm text-muted-foreground">
                 Enter fabric GSM, width, meters and fabric requirement date. Engine uses {config?.fabricBufferDays ?? 5}-day
@@ -857,7 +983,32 @@ function PlanOrderPanel({
   );
 }
 
-function LoomPreviewSummary({ result }: { result: LoomAllotmentResult }) {
+function filterSameUnitLoomWarnings(
+  warnings: string[],
+  weavingCompany: string,
+  fibcCompany: string,
+): string[] {
+  if (!weavingCompany || !fibcCompany || weavingCompany === fibcCompany) {
+    return warnings.filter(
+      (w) =>
+        !/^Inter-unit:/i.test(w) &&
+        !/sister-unit weave/i.test(w) &&
+        !/Sulzer fabric/i.test(w),
+    );
+  }
+  return warnings;
+}
+
+function LoomPreviewSummary({
+  result,
+  weavingCompany,
+  fibcCompany,
+}: {
+  result: LoomAllotmentResult;
+  weavingCompany: string;
+  fibcCompany: string;
+}) {
+  const visibleWarnings = filterSameUnitLoomWarnings(result.warnings, weavingCompany, fibcCompany);
   return (
     <div className="space-y-2 text-sm">
       <p className={result.success ? "text-foreground" : "text-destructive"}>{result.message}</p>
@@ -873,9 +1024,9 @@ function LoomPreviewSummary({ result }: { result: LoomAllotmentResult }) {
         <dt className="text-muted-foreground">Fully allotted</dt>
         <dd>{result.fullyAllotted ? "Yes" : "No"}</dd>
       </dl>
-      {result.warnings.length > 0 ? (
+      {visibleWarnings.length > 0 ? (
         <ul className="mt-2 space-y-1 text-xs text-amber-700 dark:text-amber-300">
-          {result.warnings.map((w, i) => (
+          {visibleWarnings.map((w, i) => (
             <li key={i}>• {w}</li>
           ))}
         </ul>

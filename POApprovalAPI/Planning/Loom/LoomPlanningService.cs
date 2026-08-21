@@ -90,6 +90,9 @@ public sealed class LoomPlanningService
     public Task<LoomOrderAllotmentContextDto?> GetOrderAllotmentContextAsync(string orderNo, CancellationToken ct = default) =>
         _repository.GetOrderAllotmentContextAsync(orderNo, ct);
 
+    public Task<string?> ResolveWeavingCompanyForOrderAsync(string orderNo, CancellationToken ct = default) =>
+        _repository.ResolveWeavingCompanyFromAllocationsAsync(orderNo, ct);
+
     public Task<LoomAllotmentResult> PreviewAllotmentAsync(LoomAllotmentRequest request, CancellationToken ct = default) =>
         _engine.AllotAsync(request, ct);
 

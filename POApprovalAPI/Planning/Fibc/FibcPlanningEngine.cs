@@ -69,28 +69,27 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
         var targetDate = dispatchDate.Value.AddDays(-bufferDays);
         var lookbackFrom = targetDate.AddDays(-MaxLookbackDays);
 
-        var gridTask = _repository.GetSlotGridAsync(lookbackFrom, targetDate, company, ct);
-        var shiftsTask = _repository.GetDistinctShiftsAsync(lookbackFrom, targetDate, company, ct);
-        await Task.WhenAll(gridTask, shiftsTask);
+        var gridBuild = await FibcPlanningGridComposer.BuildAsync(
+            _repository,
+            runtime,
+            erpLines,
+            Microsoft.Extensions.Options.Options.Create(_options),
+            company,
+            lookbackFrom,
+            targetDate,
+            erpFamily,
+            ct);
 
-        var grid = await gridTask;
-        var activeShifts = FilterShifts(await shiftsTask, grid.Items);
-        if (activeShifts.Count == 0)
-            activeShifts = OrderShifts(_options.ShiftPreference, _options.ActiveShifts.ToList());
-
-        if (activeShifts.Count == 0)
+        if (gridBuild.ActiveShifts.Count == 0)
             return Fail(orderNo, "No shift capacity found in CapacityPlanning for the selected date range.");
 
-        var usedSyntheticGrid = false;
-        if (!FibcSyntheticGridBuilder.HasSlotsInWindow(grid, lookbackFrom, targetDate))
-        {
-            grid = FibcSyntheticGridBuilder.BuildForWindow(
-                lookbackFrom, targetDate, company, activeShifts, runtime, erpLines, erpFamily);
-            usedSyntheticGrid = grid.Items.Count > 0;
-        }
-
-        if (usedSyntheticGrid && grid.Items.Count == 0)
+        if (gridBuild.Grid.Items.Count == 0)
             return Fail(orderNo, "No production lines configured for this bag type in portal setup.");
+
+        var grid = gridBuild.Grid;
+        var activeShifts = gridBuild.ActiveShifts;
+        var usedSyntheticGrid = gridBuild.UsedSyntheticGrid;
+        var savedAllocationsApplied = gridBuild.SavedAllocationsApplied;
 
         var holdReservations = _options.QuotationHoldEnabled
             ? await _holdRepository.GetActiveHoldReservationsAsync(company, lookbackFrom, targetDate, ct: ct)
@@ -114,15 +113,22 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
             heldBySlot,
             erpLines);
 
-        if (usedSyntheticGrid && result.Success)
+        var warnings = result.Warnings.ToList();
+        if (usedSyntheticGrid)
         {
-            var warnings = result.Warnings.ToList();
             warnings.Insert(0,
                 "ERP capacity grid has no rows for this dispatch window; preview uses portal line capacities (A/B shifts).");
-            result.Warnings = warnings;
         }
 
+        if (savedAllocationsApplied > 0)
+        {
+            warnings.Add(
+                $"Loaded {savedAllocationsApplied} saved allocation row(s) from prod_fibcallocationMaster onto the planning grid.");
+        }
+
+        result.Warnings = warnings;
         result.UsedSyntheticGrid = usedSyntheticGrid;
+        result.SavedAllocationsApplied = savedAllocationsApplied;
         return result;
     }
 
@@ -186,11 +192,20 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
         {
             var key = ReservationKey(slot.PlanDate, slot.LineNo, slot.Shift);
             var otherHeld = heldBySlot.GetValueOrDefault(key);
+            var occupiedByOthers = await _repository.GetSavedQtyOnSlotExcludingOrderAsync(
+                company,
+                slot.LineNo,
+                slot.PlanDate,
+                slot.Shift,
+                preview.OrderNo,
+                ct);
+
+            var capacity = slot.Capacity > SlotEpsilon ? slot.Capacity : PreviewSlotAvailable(slot);
             double available;
 
-            if (preview.UsedSyntheticGrid)
+            if (preview.UsedSyntheticGrid || preview.SavedAllocationsApplied > 0 || occupiedByOthers > SlotEpsilon)
             {
-                available = PreviewSlotAvailable(slot) - otherHeld;
+                available = Math.Max(0, capacity - occupiedByOthers - otherHeld);
             }
             else
             {
@@ -208,14 +223,15 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
                     return result;
                 }
 
-                available = remaining.Value - otherHeld;
+                available = Math.Max(0, Math.Min(remaining.Value, capacity - occupiedByOthers) - otherHeld);
             }
 
             if (slot.Allotted > available + SlotEpsilon)
             {
                 result.Success = false;
-                result.Message =
-                    $"Cannot save: slot {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} only has {available:N0} available ({otherHeld:N0} held by quotation holds). Refresh and retry.";
+                result.Message = occupiedByOthers > SlotEpsilon
+                    ? $"Cannot save: slot {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} only has {available:N0} available ({occupiedByOthers:N0} pcs allocated to other orders)."
+                    : $"Cannot save: slot {slot.PlanDate:yyyy-MM-dd} line {slot.LineNo} shift {slot.Shift} only has {available:N0} available ({otherHeld:N0} held by quotation holds). Refresh and retry.";
                 return result;
             }
         }
@@ -287,6 +303,7 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
         DustLevel = preview.DustLevel,
         RejectionPercentApplied = preview.RejectionPercentApplied,
         UsedSyntheticGrid = preview.UsedSyntheticGrid,
+        SavedAllocationsApplied = preview.SavedAllocationsApplied,
         Warnings = preview.Warnings,
         ProposedSlots = preview.ProposedSlots,
         Saved = false,
@@ -334,24 +351,6 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
             map[key] = map.GetValueOrDefault(key) + r.Qty;
         }
         return map;
-    }
-
-    private IReadOnlyList<string> FilterShifts(IReadOnlyList<string> fromCapacity, IReadOnlyList<FibcSlotGridItemDto> gridItems)
-    {
-        var shifts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var shift in fromCapacity)
-            shifts.Add(shift);
-
-        foreach (var item in gridItems)
-        {
-            if (!string.IsNullOrWhiteSpace(item.Shift))
-                shifts.Add(item.Shift.Trim());
-        }
-
-        if (!_options.AllowShiftCWhenCapacityExists)
-            shifts.RemoveWhere(s => s.Equals("C", StringComparison.OrdinalIgnoreCase));
-
-        return OrderShifts(_options.ShiftPreference, shifts.OrderBy(s => s, StringComparer.OrdinalIgnoreCase).ToList());
     }
 
     private static IReadOnlyList<string> OrderShifts(IReadOnlyList<string> preference, IReadOnlyList<string> active)

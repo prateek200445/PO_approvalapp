@@ -107,10 +107,18 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
             kv => kv.Value,
             StringComparer.OrdinalIgnoreCase);
 
-        var grid = await _repository.GetSlotGridAsync(lookbackFrom, gridDateTo, company, ct);
-        var activeShifts = grid.Items
-            .Where(s => s.PlanDate.Date <= targetDate.Date)
-            .Select(s => s.Shift)
+        var gridBuild = await FibcPlanningGridComposer.BuildAsync(
+            _repository,
+            runtime,
+            erpLines,
+            Microsoft.Extensions.Options.Options.Create(_options),
+            company,
+            lookbackFrom,
+            gridDateTo,
+            erpFamily,
+            ct);
+        var grid = gridBuild.Grid;
+        var activeShifts = gridBuild.ActiveShifts
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -128,6 +136,19 @@ public sealed class FibcCriticalShiftEngine : IFibcCriticalShiftEngine
         var displacements = new List<FibcOrderShiftDisplacementDto>();
         var movedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var warnings = new List<string>(initialPreview.Warnings);
+
+        if (gridBuild.UsedSyntheticGrid
+            && !warnings.Exists(w => w.Contains("ERP capacity grid", StringComparison.OrdinalIgnoreCase)))
+        {
+            warnings.Add(
+                "ERP capacity grid has no rows for this dispatch window; preview uses portal line capacities (A/B shifts).");
+        }
+
+        if (gridBuild.SavedAllocationsApplied > 0)
+        {
+            warnings.Add(
+                $"Loaded {gridBuild.SavedAllocationsApplied} saved allocation row(s) from prod_fibcallocationMaster onto the planning grid.");
+        }
 
         if (backlogRemaining.Values.Sum() > SlotEpsilon)
             warnings.Add($"Open backlog reserves {backlogRemaining.Values.Sum():N0} pcs on line+shift before critical allotment.");

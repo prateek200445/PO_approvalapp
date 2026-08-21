@@ -34,6 +34,20 @@ public interface IFibcPlanningRepository
         string? companyName,
         CancellationToken ct = default);
 
+    Task<IReadOnlyList<FibcSavedAllocationRowDto>> GetSavedAllocationsInWindowAsync(
+        string companyName,
+        DateTime dateFrom,
+        DateTime dateTo,
+        CancellationToken ct = default);
+
+    Task<double> GetSavedQtyOnSlotExcludingOrderAsync(
+        string companyName,
+        string lineNo,
+        DateTime planDate,
+        string shift,
+        string excludeOrderNo,
+        CancellationToken ct = default);
+
     Task<int> GetExistingAllocationCountAsync(string orderNo, CancellationToken ct = default);
 
     Task<double?> GetSlotRemainingAsync(

@@ -23,6 +23,7 @@
 
 **Recommended demo order:** Setup → Loom → FIBC → Timeline → Execution  
 **Same order end-to-end:** Use **Script 5** with **`PO 9305/4LT-0775`**  
+**BOM templates (Setup → Timeline):** Use **Script 6** — run seed first, then `DEMO-U2-STD-LINER-001`, `DEMO-U2-ICO-SULZER-001`, `DEMO-U2-VENT-NOLINER-001`. For **critical shift** after Case A, also use **`DEMO-U2-CRITICAL-001`** (Script **6D**).  
 
 ---
 
@@ -30,9 +31,9 @@
 
 | Fact | What to do in the UI |
 |------|----------------------|
-| FIBC slot grid (`vw_fibclineplanning_NEW`) has data **Feb 2025 – Dec 2025 only** | Set FIBC **From/To** to `2025-09-01` – `2025-12-31` (not Aug 2026) |
+| FIBC slot grid | Set FIBC **From/To** to **`2026-09-01` – `2026-12-31`** (same year as loom — Aug 2026 demo) |
 | Marketing dispatch dates are mostly invalid (`1900-01-01`, qty 0) | **Manually enter** dispatch date + quantity on FIBC panels |
-| Loom allocations exist for 2026 orders | Loom date range can stay default (last 30 days → today) or widen to cover Aug 2026 |
+| Loom + FIBC demo window | Use **2026** dates throughout; loom fabric date **`2026-10-30`**, FIBC dispatch **Nov–Dec 2026** |
 | Only one saved FIBC plan in ERP | `PO 9305/4LT-0775` — use for “view existing plan” |
 | Backlog table is empty | Add one row in Setup → Backlog before FIBC demo |
 
@@ -203,6 +204,21 @@
 
 **Demo scenario — Must do before FIBC demo:**
 - Line `1`, Shift `A`, Order `PO 9305/4LT-0775`, Qty `150`, Reason `Demo backlog` → **Add backlog**.
+
+---
+
+## 1.9 Tab: Inter-unit (ICO / sister-factory weaving)
+
+| # | Field | Type | Required | Demo value | Notes |
+|---|-------|------|----------|------------|-------|
+| 1 | **Default fabric supply factory** | Text + search list | Yes (for ICO demo) | `HCP Plastene Bulkpack Ltd` | Used **only when Sulzer/ICO auto-detect** fires on an order — not for every order |
+| 2 | **Search factories…** | Text | No | Type `HCP` or `Plastene` | Pick row with looms |
+| 3 | **Transfer buffer (days)** | Number | Yes | `3` | Fabric travel supply → FIBC factory |
+| 4 | **Auto-detect Sulzer / ICO from BOM** | Checkbox | Yes | ☑ checked | Routes Sulzer BOM orders to supply factory |
+| 5 | **Notes** | Text | No | `Three-BOM demo — ICO weaves at HCP` | |
+| 6 | **Save inter-unit defaults** | Button | — | Click | Used by Loom weaving-factory auto-select + Timeline **Transfer** |
+
+**After saving:** Switch factory (top panel) to **HCP Plastene Bulkpack Ltd** → open **Loom pool** tab → **Import from ERP** if empty → ☑ Include on planning looms → **Save pool** (needed before Case B loom preview).
 
 ---
 
@@ -421,7 +437,7 @@ Same inputs as **L1** on `8500585065/157602` or `PPL-66/2026/BIG BAGS/ITEM1` wit
 
 **Purpose:** Schedule bag production on FIBC lines (writes `prod_fibcallocationMaster` on confirm).
 
-**Critical:** Set date range to **2025-09-01 – 2025-12-31** (ERP grid has no Aug 2026 slots).
+**Critical:** Set date range to **`2026-09-01` – `2026-12-31`** (aligned with loom demo in 2026).
 
 ---
 
@@ -431,8 +447,8 @@ Same inputs as **L1** on `8500585065/157602` or `PPL-66/2026/BIG BAGS/ITEM1` wit
 
 | # | Field | Type | Required | Demo value | Notes |
 |---|-------|------|----------|------------|-------|
-| 1 | **From** | Date picker | Yes | `2025-09-01` | Must overlap ERP grid data |
-| 2 | **To** | Date picker | Yes | `2025-12-31` | |
+| 1 | **From** | Date picker | Yes | `2026-09-01` | Overlap FIBC slot grid for demo |
+| 2 | **To** | Date picker | Yes | `2026-12-31` | |
 | 3 | **Refresh grid** | Button | — | Click | |
 
 ### Panel B: Configuration (read-only)
@@ -736,12 +752,306 @@ Single order: **`PO 9305/4LT-0775`**. FIBC **already in ERP** (4 slots); you **s
 
 | Step | Page | What to do |
 |------|------|------------|
-| 1 | **FIBC** | Dates `2025-09-01` – `2025-12-31` → Refresh. Lookup **`PO 9305/4LT-0775`** → show 4 saved slots (view only). |
+| 1 | **FIBC** | Dates `2026-09-01` – `2026-12-31` → Refresh. Lookup **`PO 9305/4LT-0775`** → show 4 saved slots (view only). |
 | 2 | **Loom** | Dates `2026-08-01` – `2026-11-30` → Refresh. Order **`PO 9305/4LT-0775`**, GSM **`122`**, width **`103`**, meters **`200`**, fabric **`2026-10-30`**. Preview → Fully allotted, no changeover → **Confirm & save**. |
 | 3 | **Timeline** | **`PO 9305/4LT-0775`** → loom + FIBC milestones together. |
 | 4 | **Execution** | **`PO 9305/4LT-0775`** → 1170 planned/produced pcs, FIBC plan slots. |
 
-**Execution shows FIBC production only** (pcs planned/produced/bailed). **Timeline** shows loom + FIBC together. Loom dates are 2026; FIBC grid is 2025 — normal for Unit-II demo data.
+**Execution shows FIBC production only** (pcs planned/produced/bailed). **Timeline** shows loom + FIBC together on the same order.
+
+---
+
+## Script 6 — **Three BOM cases** (Setup → Loom → FIBC → Timeline) — **~45 min**
+
+Isolated **demo orders in ERP** (cloned from the three Excel templates in `public/`). Safe to save loom + FIBC plans without touching real customer POs.
+
+**Prerequisites**
+
+1. **Seed BOM once** (or re-run before each demo day):
+
+```powershell
+python scripts/seed_planning_demo_orders.py --clean-plans
+```
+
+Uses `DB_PASSWORD` from `POApprovalAPI/Properties/launchSettings.json` (same as `dotnet run`), unless `DB_PASSWORD` env overrides it.
+
+`--clean-plans` removes any prior loom/FIBC saves on the three demo orders. Verify only: `python scripts/seed_planning_demo_orders.py --verify-only`
+
+2. API running (`dotnet run` in `POApprovalAPI`, port **5115**). Frontend `.env` → `VITE_API_URL=http://localhost:5115`. Log in → **Profile** → planning tools.
+
+**Per case:** Setup (once) → **Loom save** → **FIBC save** → **Timeline** (same order number throughout).
+
+### Demo orders (type exactly in every field)
+
+| Excel reference | Case | **Demo order no.** | Customer (in BOM) | Bags | Bag family |
+|-----------------|------|--------------------|-------------------|------|------------|
+| `HGL-14-07092023.xls` | **A — Circular + liner** | **`DEMO-U2-STD-LINER-001`** | DEMO — Hidden Gold LLC | 7,200 | Circular |
+| `6110-JS-15028 ICO 2604-091.xls` | **B — ICO / Sulzer** | **`DEMO-U2-ICO-SULZER-001`** | DEMO — Jumbo Sack Corp | 1,225 | UPanel / Sulzer |
+| `KPW-01-2022-03.xls` | **C — Ventilated, no liner** | **`DEMO-U2-VENT-NOLINER-001`** | DEMO — Indralok Domestic | 2,000 | UPanel / Ventilated |
+| `HGL-14-07092023.xls` | **D — Critical bump (after A)** | **`DEMO-U2-CRITICAL-001`** | DEMO — Critical Rush LLC | 3,600 | Circular |
+
+Cloned from ERP templates `HGL-14-07092023`, `6110/JS-15028`, `KPW/01/2022/03` — see `scripts/seed_planning_demo_orders.py`.
+
+**Loom body-fabric line (one preview per case):**
+
+| Case | Body GSM | Width (cm) | BOM meters (info) | **Enter meters** | **Fabric date** |
+|------|----------|------------|-------------------|------------------|-----------------|
+| A | `202` | `190` | 9,792 | **`300`** | **`2026-10-30`** |
+| B | `272` | `93` | 2,891 | **`300`** | **`2026-10-30`** |
+| C | `155` | `98` | 11,616 | **`300`** | **`2026-10-30`** |
+
+**Why 300 m?** Full BOM meters trigger partial previews or **changeover blocked** (max 4 loom starts/day). **300 m** on fabric **`2026-10-30`** gives **Fully allotted: Yes** on the live Unit-II grid (validated Aug 2026).
+
+**Single-year demo (2026):** Loom grid **`2026-08-01` – `2026-11-30`** · FIBC grid **`2026-09-01` – `2026-12-31`** · FIBC dispatch **Nov–Dec 2026** (after fabric ready **`2026-10-30`**).
+
+---
+
+### Part 0 — Shared setup (once, ~8 min)
+
+Open **`/planning/setup`**.
+
+| Step | Tab / panel | Exact inputs | Click |
+|------|-------------|--------------|-------|
+| 0.1 | Factory selector (top) | Search: `Plastene` | Click **Plastene India Limited (Unit -II)** |
+| 0.2 | **Factory settings** | Planning enabled ☑ · Buffer **`7`** · Rejection **`2.5`** · Notes: `Three-BOM demo Aug 2026` | **Save factory settings** (or verify only) |
+| 0.3 | **Inter-unit** | Supply factory: search `HCP` → **`HCP Plastene Bulkpack Ltd`** · Transfer buffer **`3`** · Auto-detect Sulzer ☑ · Notes: `ICO weaves at HCP; FIBC stays Unit-II` | **Save inter-unit defaults** |
+| 0.4 | **Loom pool** (Unit-II selected) | Planning pool: **`Domestic only`** · verify ☑ **Include** on domestic looms | **Save pool** |
+| 0.5 | Factory selector | Search: `HCP` | Click **HCP Plastene Bulkpack Ltd** |
+| 0.6 | **Loom pool** (HCP selected) | If empty: **Import from ERP** · ☑ **Include** on planning looms · Purpose **`DomesticFibc`** | **Save pool** |
+| 0.7 | **Backlog** (optional) | Line **`1`** · Shift **`A`** · Order **`DEMO-U2-STD-LINER-001`** · Qty **`100`** · Reason: `Script 6 demo` | **Add backlog** |
+
+---
+
+### Case A — Standard circular + liner (same factory)
+
+**Story:** Export circular bag with liner — loom and FIBC both at Unit-II. No **Transfer** on Timeline.
+
+#### A1 — Loom (`/planning/loom`)
+
+| Panel / field | Value |
+|---------------|-------|
+| **From** | `2026-08-01` |
+| **To** | `2026-11-30` |
+| | **Refresh grid** |
+| **Weaving factory** | Search `Unit -II` → **`Plastene India Limited (Unit -II)`** (Active) |
+| **Order lookup** | `DEMO-U2-STD-LINER-001` → **Search** (read BOM: Body 202 GSM, 190 cm) |
+| **Plan order — Order / PO no.** | `DEMO-U2-STD-LINER-001` (tab out → auto-load) |
+| **GSM** | `202` |
+| **Width (size cm)** | `190` |
+| **Required meters** | **`300`** |
+| **Fabric requirement date (FIBC ready)** | **`2026-10-30`** |
+| **Replace existing plan** | ☐ (☑ only if re-running demo) |
+| | **Preview allotment** → expect **Fully allotted: Yes**, 300/300 m |
+| | **Confirm & save** → confirm dialog → **Confirm & save** |
+
+#### A2 — FIBC (`/planning/fibc`)
+
+| Panel / field | Value |
+|---------------|-------|
+| **From** | `2026-09-01` |
+| **To** | `2026-12-31` |
+| | **Refresh grid** |
+| **Plan order — Order / PO number** | `DEMO-U2-STD-LINER-001` |
+| | **Load** (fills qty/bag from BOM) |
+| **Quantity (pcs)** | **`7200`** (confirm if Load left blank) |
+| **Bag type (ERP)** | **`Circular`** |
+| **Dispatch date** | **`2026-12-01`** |
+| **Allotment mode** | **Order-wise (one line first)** |
+| **Dust capacity** | **Normal** |
+| **Replace existing plan** | ☐ |
+| | **Preview allotment** → **Confirm & save** |
+
+#### A3 — Timeline (`/planning/timeline`)
+
+| Field | Value |
+|-------|-------|
+| **Order number** | `DEMO-U2-STD-LINER-001` |
+| | **Load timeline** |
+
+**Say while showing results:**
+- Milestones: **Loom weaving** → **Fabric ready (~2026-10-30)** → **FIBC (Nov 2026 slots)** → **Dispatch (2026-12-01)** — all **2026**.
+- BOM shows **Liner** row — FIBC-only component, not loom meters.
+- Loom + FIBC both at Unit-II; no **Transfer**.
+
+---
+
+### Case A + D — Critical order shift (same timeline, ~10 min)
+
+**Prerequisite:** Finish **Case A** Loom + FIBC **Confirm & save** first. The grid must show **`DEMO-U2-STD-LINER-001`** occupying **Circular Line 4** slots around **Nov 20–24, 2026** (from dispatch **`2026-12-01`**).
+
+**What the Critical panel does (read before demo):**
+
+1. **Preview critical shift** runs a normal FIBC allotment first. If the order already fits in **free** slots, you will see **Shifts required: No** and **no “Orders to shift” table** — that is correct; nothing was bumped.
+2. To **force** a displacement demo, check **Pin to target date only**. The engine then tries to place the critical order **only** on **target completion date** (dispatch − buffer days, usually 7). If those slots are **full** with another order (same bag family), it proposes moving that blocker **forward** to a later free slot.
+3. After virtual moves, it proposes **Proposed slots for critical order** — where the urgent order would land.
+4. **Confirm shift & save** (if enabled) writes both: moved blocker rows + new critical rows to `prod_fibcallocationMaster`.
+
+| Preview section | Meaning |
+|-----------------|--------|
+| **Summary** (top box) | Message, qty, **Shifts required**, **Fully allotted**, dispatch, **Target complete** |
+| **Orders to shift** | Each row = one **blocking** slot: order **From** date/line/shift **To** a later slot |
+| **Proposed slots for critical order** | Where **`DEMO-U2-CRITICAL-001`** would be planned after moves |
+| **Warnings** (amber) | e.g. could not relocate a blocker, partial allotment, backlog reserve |
+
+#### D1 — Critical panel (`/planning/fibc`, same grid dates as Case A)
+
+| Panel / field | Value |
+|---------------|-------|
+| **From / To** | `2026-09-01` – `2026-12-31` · **Refresh grid** (liner order visible on Line 4) |
+| **Critical order / PO number** | `DEMO-U2-CRITICAL-001` |
+| | **Load** (fills qty / bag from BOM) |
+| **Quantity (pcs)** | **`3600`** (needs ~2 full shifts on one day) |
+| **Bag type (ERP)** | **`Circular`** (must match Line 4 family) |
+| **Dispatch date** | **`2026-12-01`** (same as Case A → target complete **`2026-11-24`**) |
+| **Reason** | `Script 6D — customer escalation demo` |
+| **Pin to target date only** | ☑ **Checked** — forces slots on **2026-11-24** (where Case A liner should sit on Line 4) |
+| **Replace existing plan** | ☐ |
+| | **Preview critical shift** |
+
+**Expected preview:**
+
+| Field | Expected |
+|-------|----------|
+| **Shifts required** | **Yes (1–2)** |
+| **Orders to shift** | **`DEMO-U2-STD-LINER-001`** moved **from** `2026-11-24` Line 4 · **To** a later date (engine picks next free Circular slot) |
+| **Proposed slots for critical order** | **`3600` pcs** on **`2026-11-24`** Line 4 (Shift A + B or spread per capacity) |
+| **Fully allotted** | **Yes** |
+
+Optional: **Confirm shift & save** → grid refreshes; liner shifts later; critical order appears on Nov 20. Re-open **Timeline** for either order to compare milestones.
+
+**If “Orders to shift” is empty:** Case A FIBC was not saved, wrong bag family, **pin target day has no saved liner slots** (check grid — liner ends ~**Nov 24** for dispatch Dec 1), or **Pin to target date** is unchecked. Re-save Case A FIBC and retry with values above.
+
+**Normal Plan order vs Critical:** Both preview paths now merge saved rows from `prod_fibcallocationMaster` onto the grid (so Case A occupancy is respected). Use **Critical** only when you intentionally want to **shift** blockers; normal planning will show **partial** or use other free days instead of moving orders.
+
+**No loom step for D** — critical demo is FIBC-only; Case A loom plan stays as-is.
+
+---
+
+### Case B — ICO / Sulzer (inter-unit weave)
+
+**Story:** Sulzer fabric woven at **HCP**, bags sewn at **Unit-II**. Timeline shows **Transfer** between loom and fabric ready.
+
+#### B1 — Loom (`/planning/loom`)
+
+| Panel / field | Value |
+|---------------|-------|
+| **From** | `2026-08-01` |
+| **To** | `2026-11-30` |
+| | **Refresh grid** |
+| **Weaving factory** | After entering order, expect auto-select **`HCP Plastene Bulkpack Ltd`** and amber banner *Inter-unit: weaving at HCP…* If not: search `HCP` → click **HCP Plastene Bulkpack Ltd** |
+| **Order lookup** | `DEMO-U2-ICO-SULZER-001` → **Search** (BOM: Body 272 GSM, 93 cm; bag type Sulzer) |
+| **Plan order — Order / PO no.** | `DEMO-U2-ICO-SULZER-001` |
+| **GSM** | `272` |
+| **Width (size cm)** | `93` |
+| **Required meters** | **`300`** |
+| **Fabric requirement date** | **`2026-10-30`** |
+| **Replace existing plan** | ☐ |
+| | **Preview allotment** (on **HCP** loom grid) → **Confirm & save** |
+
+#### B2 — FIBC (`/planning/fibc`)
+
+| Panel / field | Value |
+|---------------|-------|
+| **From** | `2026-09-01` |
+| **To** | `2026-12-31` |
+| | **Refresh grid** |
+| **Plan order — Order / PO number** | `DEMO-U2-ICO-SULZER-001` |
+| | **Load** |
+| **Quantity (pcs)** | **`1225`** |
+| **Bag type (ERP)** | **`UPanel`** ← manual (BOM *U+2 PANEL* does not auto-map) |
+| **Dispatch date** | **`2026-11-20`** |
+| **Allotment mode** | **Order-wise (one line first)** |
+| **Dust capacity** | **Normal** |
+| | **Preview allotment** → **Confirm & save** |
+
+#### B3 — Timeline (`/planning/timeline`)
+
+| Field | Value |
+|-------|-------|
+| **Order number** | `DEMO-U2-ICO-SULZER-001` |
+| | **Load timeline** |
+
+**Say while showing results:**
+- Milestones: **Loom (HCP)** → **Transfer (3 d)** → **Fabric ready (~2026-10-30)** → **FIBC** → **Dispatch (2026-11-20)**.
+- Weaving factory = **HCP Plastene Bulkpack Ltd**; FIBC factory = **Plastene India Limited (Unit -II)**.
+- ICO ref **2604-091** on seeded BOM header.
+
+---
+
+### Case C — Ventilated U-panel, no liner (same factory)
+
+**Story:** Ventilated body + Leno skirt — **no liner**. Seeded BOM fabric colour has **no Sulzer** text → stays same-unit (no manual factory override needed).
+
+#### C1 — Loom (`/planning/loom`)
+
+| Panel / field | Value |
+|---------------|-------|
+| **From** | `2026-08-01` |
+| **To** | `2026-11-30` |
+| | **Refresh grid** |
+| **Weaving factory** | **`Plastene India Limited (Unit -II)`** (Active) |
+| **Order lookup** | `DEMO-U2-VENT-NOLINER-001` → **Search** (Body 155 GSM, 98 cm; Leno skirt, no liner) |
+| **Plan order — Order / PO no.** | `DEMO-U2-VENT-NOLINER-001` |
+| **GSM** | `155` |
+| **Width (size cm)** | `98` |
+| **Required meters** | **`300`** |
+| **Fabric requirement date** | **`2026-10-30`** |
+| **Replace existing plan** | ☐ |
+| | **Preview allotment** → **Confirm & save** |
+
+#### C2 — FIBC (`/planning/fibc`)
+
+| Panel / field | Value |
+|---------------|-------|
+| **From** | `2026-09-01` |
+| **To** | `2026-12-31` |
+| | **Refresh grid** |
+| **Plan order — Order / PO number** | `DEMO-U2-VENT-NOLINER-001` |
+| | **Load** |
+| **Quantity (pcs)** | **`2000`** |
+| **Bag type (ERP)** | **`UPanel`** |
+| **Dispatch date** | **`2026-11-10`** |
+| **Allotment mode** | **Order-wise (one line first)** |
+| **Dust capacity** | **Normal** |
+| | **Preview allotment** → **Confirm & save** |
+
+#### C3 — Timeline (`/planning/timeline`)
+
+| Field | Value |
+|-------|-------|
+| **Order number** | `DEMO-U2-VENT-NOLINER-001` |
+| | **Load timeline** |
+
+**Say while showing results:**
+- Same-unit chain in **2026** — **no Transfer**; dispatch **2026-11-10**.
+- Ventilated fabric on BOM; **Leno** skirt — no **Liner** row with meters.
+
+---
+
+### Script 6 — quick comparison (closing slide)
+
+| | Case A `DEMO-U2-STD-LINER-001` | Case B `DEMO-U2-ICO-SULZER-001` | Case C `DEMO-U2-VENT-NOLINER-001` |
+|--|-------------------------------|--------------------------------|----------------------------------|
+| Bag | Circular + liner | Sulzer UPanel + liner | Ventilated UPanel, no liner |
+| Weaving factory | Unit-II | **HCP** (inter-unit) | Unit-II |
+| Transfer on Timeline | No | **Yes (3 d)** | No |
+| FIBC bag type entered | `Circular` | `UPanel` | `UPanel` |
+| FIBC dispatch | 2026-12-01 | 2026-11-20 | 2026-11-10 |
+
+### Troubleshooting (Script 6)
+
+| Symptom | Fix |
+|---------|-----|
+| BOM / order not found | Run `python scripts/seed_planning_demo_orders.py --clean-plans` |
+| Unable to connect | Start API: `cd POApprovalAPI && dotnet run` |
+| GSM shows `10020` instead of `120` | Type **`100`** or **`120`** manually (ERP stores `100+20`) |
+| Preview partial on 300 m | Widen loom **To** date; confirm fabric date **`2026-10-30`** |
+| Changeover blocked on save | Reduce meters to **`300`**; do not use full BOM meters |
+| Case B preview empty / no looms | Setup → select **HCP** → **Loom pool** → Import + Save |
+| FIBC grid empty | Set **From/To** to **`2026-09-01` – `2026-12-31`** and Refresh |
+| Bag type rejected on FIBC | Use **`Circular`** or **`UPanel`** exactly — match line families in Setup |
+
+---
 
 ## Script 2 — “Quotation pipeline” (15 min)
 
@@ -754,12 +1064,14 @@ Single order: **`PO 9305/4LT-0775`**. FIBC **already in ERP** (4 slots); you **s
 
 ## Script 3 — “Critical customer” (15 min)
 
+Prefer **Script 6D** (Case A + `DEMO-U2-CRITICAL-001`, 2026 grid) for a realistic bump of a saved demo order.
+
 | Step | Page | Inputs |
 |------|------|--------|
-| 1 | FIBC grid | Show occupied slots near 2025-11-01 |
-| 2 | Critical panel | FIBC-CRIT-001, 3000, UPanel, dispatch 2025-11-01, ☑ Pin to target date |
-| 3 | Preview critical shift | Walk displacements table |
-| 4 | Confirm shift & save | |
+| 1 | FIBC | Complete Case A save first (`DEMO-U2-STD-LINER-001`) |
+| 2 | Critical panel | `DEMO-U2-CRITICAL-001`, 3600, Circular, dispatch **2026-12-01**, ☑ Pin to target date |
+| 3 | Preview critical shift | **Orders to shift** shows liner moved forward |
+| 4 | Confirm shift & save | Optional |
 
 ## Script 4 — “Loom displacement + full preview” (15 min)
 
@@ -774,8 +1086,8 @@ Single order: **`PO 9305/4LT-0775`**. FIBC **already in ERP** (4 slots); you **s
 
 | Page | Editable inputs |
 |------|-----------------|
-| **Setup** | Factory search; Planning enabled; Buffer days; Rejection %; Notes; Line capacities/families/team/active; Loom pool mode/filter/include/purpose/winder/type; Preference chart rows; Team manual factors; Downtime add/edit; Backlog add |
-| **Loom** | Date from/to; Order lookup; Plan order (order, GSM, width, meters, fabric date, replace); Loom filter; Confirm dialog |
+| **Setup** | Factory search; Planning enabled; Buffer days; Rejection %; Notes; Line capacities/families/team/active; Loom pool mode/filter/include/purpose/winder/type; Preference chart rows; Team manual factors; Downtime add/edit; Backlog add; **Inter-unit supply factory, transfer days, Sulzer auto-detect** |
+| **Loom** | Date from/to; **Weaving factory**; Order lookup; Plan order (order, GSM, width, meters, fabric date, replace); Loom filter; Confirm dialog |
 | **FIBC** | Date from/to; Order lookup; Plan order (order, qty, bag, dispatch, mode, dust, replace); Critical (order, qty, bag, dispatch, reason, pin, replace); Hold (order, qty, bag, dispatch, notes); Slot occupancy filter; All confirm dialogs |
 | **Timeline** | Order number only |
 | **Execution** | Order number only |

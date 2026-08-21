@@ -2,8 +2,30 @@ export type PlanningSetupConstants = {
   bagFamilies: string[];
   poolPurposes: string[];
   winderCategories: string[];
-  fabricForms?: string[];
-  changeoverTiers?: string[];
+  fabricForms: string[];
+  changeoverTiers: string[];
+};
+
+export type PlanningInterUnitDefaults = {
+  defaultsId?: number | null;
+  fibcCompanyName: string;
+  defaultFabricSupplyCompany: string | null;
+  defaultTransferBufferDays: number;
+  autoDetectSulzerFabric: boolean;
+  notes: string | null;
+  updatedAt: string | null;
+};
+
+export type PlanningOrderRoute = {
+  routeId?: number | null;
+  orderNo: string;
+  fibcCompanyName: string;
+  fabricSupplyCompanyName: string;
+  transferBufferDays: number;
+  isInterUnit: boolean;
+  routeSource: string;
+  autoDetectedReason: string | null;
+  updatedAt: string | null;
 };
 
 export type PlanningFactoryOption = {
@@ -362,4 +384,30 @@ export function inferLoomPoolIncludeMode(looms: PlanningLoomPool[]): LoomPoolInc
   if (hasDomestic && hasExport) return "Both";
   if (hasExport && !hasDomestic) return "ExportOnly";
   return "DomesticOnly";
+}
+
+export function normalizeInterUnitDefaults(data: Record<string, unknown>): PlanningInterUnitDefaults {
+  return {
+    defaultsId: optNum(data, "defaultsId", "DefaultsId"),
+    fibcCompanyName: String(data.fibcCompanyName ?? data.FibcCompanyName ?? ""),
+    defaultFabricSupplyCompany: optStr(data, "defaultFabricSupplyCompany", "DefaultFabricSupplyCompany"),
+    defaultTransferBufferDays: numField(data, "defaultTransferBufferDays", "DefaultTransferBufferDays") || 3,
+    autoDetectSulzerFabric: data.autoDetectSulzerFabric !== false && data.AutoDetectSulzerFabric !== false,
+    notes: optStr(data, "notes", "Notes"),
+    updatedAt: optStr(data, "updatedAt", "UpdatedAt"),
+  };
+}
+
+export function normalizeOrderRoute(data: Record<string, unknown>): PlanningOrderRoute {
+  return {
+    routeId: optNum(data, "routeId", "RouteId"),
+    orderNo: String(data.orderNo ?? data.OrderNo ?? ""),
+    fibcCompanyName: String(data.fibcCompanyName ?? data.FibcCompanyName ?? ""),
+    fabricSupplyCompanyName: String(data.fabricSupplyCompanyName ?? data.FabricSupplyCompanyName ?? ""),
+    transferBufferDays: numField(data, "transferBufferDays", "TransferBufferDays") || 3,
+    isInterUnit: boolField(data, "isInterUnit", "IsInterUnit"),
+    routeSource: String(data.routeSource ?? data.RouteSource ?? "Default"),
+    autoDetectedReason: optStr(data, "autoDetectedReason", "AutoDetectedReason"),
+    updatedAt: optStr(data, "updatedAt", "UpdatedAt"),
+  };
 }

@@ -1,4 +1,6 @@
 import { getApiUrl } from "@/lib/api-config";
+import { normalizeOrderRoute } from "@/lib/planning/setup-types";
+import type { PlanningOrderRoute } from "@/lib/planning/setup-types";
 import { planningOrderUrl } from "@/lib/planning/planning-order-url";
 import {
   normalizeLoomAllotmentConfirmResult,
@@ -148,6 +150,24 @@ export async function fetchLoomOrderAllotmentContext(orderNo: string): Promise<L
   const res = await fetch(planningOrderUrl("/api/planning/loom/orders/allotment-context", orderNo));
   const data = await parseJson<Record<string, unknown>>(res);
   return normalizeLoomAllotmentContext(data);
+}
+
+export async function fetchLoomOrderRoute(orderNo: string): Promise<PlanningOrderRoute> {
+  const res = await fetch(planningOrderUrl("/api/planning/loom/orders/route", orderNo));
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeOrderRoute(data);
+}
+
+/** Parse BOM GSM like "100+20" → "120" instead of "10020". */
+export function parsePlanningGsm(raw: string): string {
+  const trimmed = raw.trim();
+  const composite = /^(\d+(?:\.\d+)?)\s*\+\s*(\d+(?:\.\d+)?)$/.exec(trimmed);
+  if (composite) {
+    const sum = Number(composite[1]) + Number(composite[2]);
+    if (!Number.isNaN(sum)) return String(sum);
+  }
+  const digits = trimmed.replace(/[^\d.]/g, "");
+  return digits || trimmed;
 }
 
 export async function previewLoomAllotment(body: LoomAllotmentRequest): Promise<LoomAllotmentResult> {

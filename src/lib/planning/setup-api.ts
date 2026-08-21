@@ -10,9 +10,13 @@ import {
   normalizeTeamFactor,
   normalizeDowntime,
   normalizeLoomPreferenceChart,
+  normalizeInterUnitDefaults,
+  normalizeOrderRoute,
   type PlanningBacklog,
   type PlanningDowntime,
   type PlanningLoomPreferenceChart,
+  type PlanningInterUnitDefaults,
+  type PlanningOrderRoute,
   type PlanningFactoryConfig,
   type PlanningFactoryOption,
   type PlanningLineConfig,
@@ -221,4 +225,52 @@ export async function saveLoomPreferenceChart(company: string, rows: PlanningLoo
     }),
   });
   await parseJson(res);
+}
+
+export async function fetchInterUnitDefaults(company: string): Promise<PlanningInterUnitDefaults> {
+  const params = new URLSearchParams({ company });
+  const res = await fetch(getApiUrl(`/api/planning/setup/inter-unit/defaults?${params.toString()}`));
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeInterUnitDefaults(data);
+}
+
+export async function saveInterUnitDefaults(
+  payload: PlanningInterUnitDefaults,
+): Promise<PlanningInterUnitDefaults> {
+  const res = await fetch(getApiUrl("/api/planning/setup/inter-unit/defaults"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fibcCompanyName: payload.fibcCompanyName,
+      defaultFabricSupplyCompany: payload.defaultFabricSupplyCompany,
+      defaultTransferBufferDays: payload.defaultTransferBufferDays,
+      autoDetectSulzerFabric: payload.autoDetectSulzerFabric,
+      notes: payload.notes,
+    }),
+  });
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeInterUnitDefaults(data);
+}
+
+export async function resolveOrderPlanningRoute(orderNo: string): Promise<PlanningOrderRoute> {
+  const params = new URLSearchParams({ orderNo });
+  const res = await fetch(getApiUrl(`/api/planning/setup/order-routes/resolve?${params.toString()}`));
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeOrderRoute(data);
+}
+
+export async function saveOrderPlanningRoute(route: {
+  orderNo: string;
+  fibcCompanyName: string;
+  fabricSupplyCompanyName: string;
+  transferBufferDays?: number;
+  isInterUnit?: boolean;
+}): Promise<PlanningOrderRoute> {
+  const res = await fetch(getApiUrl("/api/planning/setup/order-routes"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(route),
+  });
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeOrderRoute(data);
 }

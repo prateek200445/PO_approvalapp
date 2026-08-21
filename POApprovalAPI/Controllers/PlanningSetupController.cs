@@ -286,4 +286,103 @@ public class PlanningSetupController : ControllerBase
             return StatusCode(500, new { message = ex.Message });
         }
     }
+
+    [HttpGet("inter-unit/defaults")]
+    public async Task<IActionResult> GetInterUnitDefaults([FromQuery] string company, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(company))
+                return BadRequest(new { message = "company query parameter is required." });
+
+            return Ok(await _service.GetInterUnitDefaultsAsync(company, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpPut("inter-unit/defaults")]
+    public async Task<IActionResult> SaveInterUnitDefaults([FromBody] UpsertPlanningInterUnitDefaultsRequest request, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await _service.SaveInterUnitDefaultsAsync(request, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("order-routes/resolve")]
+    public async Task<IActionResult> ResolveOrderRoute([FromQuery] string orderNo, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
+            var routeService = HttpContext.RequestServices.GetRequiredService<OrderPlanningRouteService>();
+            return Ok(await routeService.ResolveAsync(orderNo, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("order-routes")]
+    public async Task<IActionResult> GetSavedOrderRoute([FromQuery] string orderNo, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
+            var route = await _service.GetSavedOrderRouteAsync(orderNo, ct);
+            if (route is null)
+                return NotFound(new { message = "No saved route for this order." });
+
+            return Ok(route);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpPut("order-routes")]
+    public async Task<IActionResult> SaveOrderRoute([FromBody] UpsertPlanningOrderRouteRequest request, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await _service.SaveOrderRouteAsync(request, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpDelete("order-routes")]
+    public async Task<IActionResult> DeleteOrderRoute([FromQuery] string orderNo, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
+            var deleted = await _service.DeleteOrderRouteAsync(orderNo, ct);
+            if (!deleted)
+                return NotFound(new { message = "No saved route for this order." });
+
+            return Ok(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
 }

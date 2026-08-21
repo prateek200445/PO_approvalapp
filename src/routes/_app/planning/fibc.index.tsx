@@ -912,6 +912,17 @@ function CriticalOrderPanel({
           </div>
         </div>
 
+        {previewResult && previewResult.displacements.length === 0 ? (
+          <div className="mt-4 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">No orders to shift in this preview</p>
+            <p className="mt-1 text-xs leading-relaxed">
+              {previewResult.fullyAllotted
+                ? "The critical order fits in existing free capacity — no blocking slots needed to move. To demo displacement, save another order on the target date first (Script 6D: Case A FIBC, then critical with Pin to target date)."
+                : "The engine could not find full blocking slots to relocate. Save a plan on the target completion date, use the same bag family (e.g. Circular on Line 4), or enable Pin to target date."}
+            </p>
+          </div>
+        ) : null}
+
         {previewResult && previewResult.displacements.length > 0 ? (
           <div className="mt-4 overflow-x-auto">
             <h4 className="mb-2 text-sm font-medium">Orders to shift</h4>

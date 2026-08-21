@@ -32,6 +32,9 @@ public interface ILoomPlanningRepository
         string orderNo,
         CancellationToken ct = default);
 
+    /// <summary>Company name from loom master for saved allocations (actual weave site).</summary>
+    Task<string?> ResolveWeavingCompanyFromAllocationsAsync(string orderNo, CancellationToken ct = default);
+
     Task<IReadOnlyList<LoomFabricRequirementDto>> GetFabricRequirementsAsync(
         string orderNo,
         CancellationToken ct = default);

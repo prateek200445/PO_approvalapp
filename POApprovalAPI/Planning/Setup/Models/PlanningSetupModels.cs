@@ -183,6 +183,51 @@ public sealed class SavePlanningLoomPreferenceChartRequest
     public IReadOnlyList<PlanningLoomPreferenceChartDto> Rows { get; set; } = Array.Empty<PlanningLoomPreferenceChartDto>();
 }
 
+public sealed class PlanningInterUnitDefaultsDto
+{
+    public int? DefaultsId { get; set; }
+    /// <summary>FIBC / bag-stitching factory (hub).</summary>
+    public string FibcCompanyName { get; set; } = "";
+    /// <summary>Default sister unit that weaves fabric when inter-unit (ICO).</summary>
+    public string? DefaultFabricSupplyCompany { get; set; }
+    public int DefaultTransferBufferDays { get; set; } = 3;
+    public bool AutoDetectSulzerFabric { get; set; } = true;
+    public string? Notes { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public sealed class UpsertPlanningInterUnitDefaultsRequest
+{
+    public string FibcCompanyName { get; set; } = "";
+    public string? DefaultFabricSupplyCompany { get; set; }
+    public int DefaultTransferBufferDays { get; set; } = 3;
+    public bool AutoDetectSulzerFabric { get; set; } = true;
+    public string? Notes { get; set; }
+}
+
+public sealed class PlanningOrderRouteDto
+{
+    public int? RouteId { get; set; }
+    public string OrderNo { get; set; } = "";
+    public string FibcCompanyName { get; set; } = "";
+    public string FabricSupplyCompanyName { get; set; } = "";
+    public int TransferBufferDays { get; set; } = 3;
+    public bool IsInterUnit { get; set; }
+    /// <summary>Saved, AutoDetected, or Default.</summary>
+    public string RouteSource { get; set; } = "Default";
+    public string? AutoDetectedReason { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+}
+
+public sealed class UpsertPlanningOrderRouteRequest
+{
+    public string OrderNo { get; set; } = "";
+    public string FibcCompanyName { get; set; } = "";
+    public string FabricSupplyCompanyName { get; set; } = "";
+    public int? TransferBufferDays { get; set; }
+    public bool? IsInterUnit { get; set; }
+}
+
 public static class PlanningSetupConstants
 {
     public static readonly string[] BagFamilies = ["UPanel", "Buffle", "Circular"];

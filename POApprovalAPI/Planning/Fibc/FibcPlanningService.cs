@@ -70,7 +70,10 @@ public sealed class FibcPlanningService
     {
         var to = dateTo?.Date ?? DateTime.Today;
         var from = dateFrom?.Date ?? to.AddDays(-30);
-        return _repository.GetSlotGridAsync(from, to, companyName, ct);
+        var company = string.IsNullOrWhiteSpace(companyName)
+            ? _options.DefaultCompanyName
+            : companyName.Trim();
+        return FibcPlanningGridComposer.BuildDisplayGridAsync(_repository, company, from, to, ct);
     }
 
     public async Task<FibcOrderPlanDetailDto?> GetOrderPlanAsync(string orderNo, CancellationToken ct = default)

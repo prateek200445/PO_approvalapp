@@ -92,4 +92,21 @@ public sealed class PlanningSetupService
 
     public Task<int> ClearOpenBacklogForOrderAsync(string companyName, string orderNo, CancellationToken ct = default) =>
         _repository.ClearOpenBacklogForOrderAsync(companyName, orderNo, ct);
+
+    public Task<PlanningInterUnitDefaultsDto> GetInterUnitDefaultsAsync(string fibcCompanyName, CancellationToken ct = default) =>
+        _repository.GetInterUnitDefaultsAsync(fibcCompanyName, ct);
+
+    public Task<PlanningInterUnitDefaultsDto> SaveInterUnitDefaultsAsync(
+        UpsertPlanningInterUnitDefaultsRequest request,
+        CancellationToken ct = default) =>
+        _repository.UpsertInterUnitDefaultsAsync(request, ct);
+
+    public Task<PlanningOrderRouteDto?> GetSavedOrderRouteAsync(string orderNo, CancellationToken ct = default) =>
+        _repository.GetSavedOrderRouteAsync(orderNo, ct);
+
+    public Task<PlanningOrderRouteDto> SaveOrderRouteAsync(UpsertPlanningOrderRouteRequest request, CancellationToken ct = default) =>
+        _repository.UpsertOrderRouteAsync(request, ct);
+
+    public Task<bool> DeleteOrderRouteAsync(string orderNo, CancellationToken ct = default) =>
+        _repository.DeleteOrderRouteAsync(orderNo, ct);
 }

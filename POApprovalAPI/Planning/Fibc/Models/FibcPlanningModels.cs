@@ -146,6 +146,7 @@ public class FibcAllotmentResult
     public string DustLevel { get; set; } = "Normal";
     public double RejectionPercentApplied { get; set; }
     public bool UsedSyntheticGrid { get; set; }
+    public int SavedAllocationsApplied { get; set; }
     public IReadOnlyList<string> Warnings { get; set; } = Array.Empty<string>();
     public IReadOnlyList<FibcSlotGridItemDto> ProposedSlots { get; set; } = Array.Empty<FibcSlotGridItemDto>();
 }

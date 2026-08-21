@@ -201,6 +201,43 @@ END;", commandTimeout: CommandTimeoutSeconds);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PlanningLoomPref_Lookup' AND object_id = OBJECT_ID('dbo.PlanningLoomPreferenceChart'))
     CREATE INDEX IX_PlanningLoomPref_Lookup ON dbo.PlanningLoomPreferenceChart(CompanyName, FabricForm, PreferenceRank);", commandTimeout: CommandTimeoutSeconds);
 
+            await connection.ExecuteAsync(@"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'PlanningInterUnitDefaults' AND schema_id = SCHEMA_ID('dbo'))
+BEGIN
+    CREATE TABLE dbo.PlanningInterUnitDefaults (
+        DefaultsId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        FibcCompanyName NVARCHAR(200) NOT NULL,
+        DefaultFabricSupplyCompany NVARCHAR(200) NULL,
+        DefaultTransferBufferDays INT NOT NULL CONSTRAINT DF_PlanningInterUnit_Transfer DEFAULT (3),
+        AutoDetectSulzerFabric BIT NOT NULL CONSTRAINT DF_PlanningInterUnit_AutoSulzer DEFAULT (1),
+        Notes NVARCHAR(500) NULL,
+        UpdatedAt DATETIME NOT NULL CONSTRAINT DF_PlanningInterUnit_Updated DEFAULT (GETDATE())
+    );
+END;", commandTimeout: CommandTimeoutSeconds);
+
+            await connection.ExecuteAsync(@"
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_PlanningInterUnit_Fibc' AND object_id = OBJECT_ID('dbo.PlanningInterUnitDefaults'))
+    CREATE UNIQUE INDEX UX_PlanningInterUnit_Fibc ON dbo.PlanningInterUnitDefaults(FibcCompanyName);", commandTimeout: CommandTimeoutSeconds);
+
+            await connection.ExecuteAsync(@"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'PlanningOrderRoute' AND schema_id = SCHEMA_ID('dbo'))
+BEGIN
+    CREATE TABLE dbo.PlanningOrderRoute (
+        RouteId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        OrderNo NVARCHAR(200) NOT NULL,
+        FibcCompanyName NVARCHAR(200) NOT NULL,
+        FabricSupplyCompanyName NVARCHAR(200) NOT NULL,
+        TransferBufferDays INT NOT NULL CONSTRAINT DF_PlanningOrderRoute_Transfer DEFAULT (3),
+        IsInterUnit BIT NOT NULL CONSTRAINT DF_PlanningOrderRoute_Inter DEFAULT (0),
+        AutoDetectedReason NVARCHAR(500) NULL,
+        UpdatedAt DATETIME NOT NULL CONSTRAINT DF_PlanningOrderRoute_Updated DEFAULT (GETDATE())
+    );
+END;", commandTimeout: CommandTimeoutSeconds);
+
+            await connection.ExecuteAsync(@"
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_PlanningOrderRoute_Order' AND object_id = OBJECT_ID('dbo.PlanningOrderRoute'))
+    CREATE UNIQUE INDEX UX_PlanningOrderRoute_Order ON dbo.PlanningOrderRoute(OrderNo);", commandTimeout: CommandTimeoutSeconds);
+
             _schemaEnsured = true;
         }
         finally
@@ -810,6 +847,181 @@ WHERE CompanyName = @CompanyName AND OrderNo = @OrderNo AND Status = 'Open'",
             commandTimeout: CommandTimeoutSeconds);
     }
 
+    public async Task<PlanningInterUnitDefaultsDto> GetInterUnitDefaultsAsync(string fibcCompanyName, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        await EnsureSchemaAsync(ct);
+        var fibc = string.IsNullOrWhiteSpace(fibcCompanyName)
+            ? _loomOptions.DefaultCompanyName
+            : fibcCompanyName.Trim();
+
+        using var connection = _database.CreateConnection();
+        var row = await connection.QueryFirstOrDefaultAsync<InterUnitDefaultsRow>(@"
+SELECT DefaultsId, FibcCompanyName, DefaultFabricSupplyCompany, DefaultTransferBufferDays,
+       AutoDetectSulzerFabric, Notes, UpdatedAt
+FROM PlanningInterUnitDefaults WITH (NOLOCK)
+WHERE FibcCompanyName = @FibcCompanyName", new { FibcCompanyName = fibc }, commandTimeout: CommandTimeoutSeconds);
+
+        if (row is null)
+        {
+            return new PlanningInterUnitDefaultsDto
+            {
+                FibcCompanyName = fibc,
+                DefaultTransferBufferDays = 3,
+                AutoDetectSulzerFabric = true,
+            };
+        }
+
+        return MapInterUnitDefaults(row);
+    }
+
+    public async Task<PlanningInterUnitDefaultsDto> UpsertInterUnitDefaultsAsync(
+        UpsertPlanningInterUnitDefaultsRequest request,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        await EnsureSchemaAsync(ct);
+        var fibc = request.FibcCompanyName.Trim();
+        if (string.IsNullOrEmpty(fibc))
+            throw new InvalidOperationException("FibcCompanyName is required.");
+
+        using var connection = _database.CreateConnection();
+        await connection.ExecuteAsync(@"
+MERGE dbo.PlanningInterUnitDefaults AS t
+USING (SELECT @FibcCompanyName AS FibcCompanyName) AS s
+ON t.FibcCompanyName = s.FibcCompanyName
+WHEN MATCHED THEN UPDATE SET
+    DefaultFabricSupplyCompany = @DefaultFabricSupplyCompany,
+    DefaultTransferBufferDays = @DefaultTransferBufferDays,
+    AutoDetectSulzerFabric = @AutoDetectSulzerFabric,
+    Notes = @Notes,
+    UpdatedAt = GETDATE()
+WHEN NOT MATCHED THEN INSERT
+    (FibcCompanyName, DefaultFabricSupplyCompany, DefaultTransferBufferDays, AutoDetectSulzerFabric, Notes)
+VALUES
+    (@FibcCompanyName, @DefaultFabricSupplyCompany, @DefaultTransferBufferDays, @AutoDetectSulzerFabric, @Notes);",
+            new
+            {
+                FibcCompanyName = fibc,
+                DefaultFabricSupplyCompany = string.IsNullOrWhiteSpace(request.DefaultFabricSupplyCompany)
+                    ? null
+                    : request.DefaultFabricSupplyCompany.Trim(),
+                DefaultTransferBufferDays = Math.Max(0, request.DefaultTransferBufferDays),
+                AutoDetectSulzerFabric = request.AutoDetectSulzerFabric,
+                Notes = request.Notes,
+            },
+            commandTimeout: CommandTimeoutSeconds);
+
+        return await GetInterUnitDefaultsAsync(fibc, ct);
+    }
+
+    public async Task<PlanningOrderRouteDto?> GetSavedOrderRouteAsync(string orderNo, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        await EnsureSchemaAsync(ct);
+        var order = orderNo.Trim();
+        if (string.IsNullOrEmpty(order))
+            return null;
+
+        using var connection = _database.CreateConnection();
+        var row = await connection.QueryFirstOrDefaultAsync<OrderRouteRow>(@"
+SELECT RouteId, OrderNo, FibcCompanyName, FabricSupplyCompanyName, TransferBufferDays,
+       IsInterUnit, AutoDetectedReason, UpdatedAt
+FROM PlanningOrderRoute WITH (NOLOCK)
+WHERE OrderNo = @OrderNo", new { OrderNo = order }, commandTimeout: CommandTimeoutSeconds);
+
+        return row is null ? null : MapOrderRoute(row, "Saved");
+    }
+
+    public async Task<PlanningOrderRouteDto> UpsertOrderRouteAsync(
+        UpsertPlanningOrderRouteRequest request,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        await EnsureSchemaAsync(ct);
+        var order = request.OrderNo.Trim();
+        var fibc = request.FibcCompanyName.Trim();
+        var supply = request.FabricSupplyCompanyName.Trim();
+        if (string.IsNullOrEmpty(order) || string.IsNullOrEmpty(fibc) || string.IsNullOrEmpty(supply))
+            throw new InvalidOperationException("OrderNo, FibcCompanyName, and FabricSupplyCompanyName are required.");
+
+        var transferDays = request.TransferBufferDays ?? 3;
+        var isInterUnit = request.IsInterUnit ?? !string.Equals(fibc, supply, StringComparison.OrdinalIgnoreCase);
+
+        using var connection = _database.CreateConnection();
+        await connection.ExecuteAsync(@"
+MERGE dbo.PlanningOrderRoute AS t
+USING (SELECT @OrderNo AS OrderNo) AS s
+ON t.OrderNo = s.OrderNo
+WHEN MATCHED THEN UPDATE SET
+    FibcCompanyName = @FibcCompanyName,
+    FabricSupplyCompanyName = @FabricSupplyCompanyName,
+    TransferBufferDays = @TransferBufferDays,
+    IsInterUnit = @IsInterUnit,
+    AutoDetectedReason = NULL,
+    UpdatedAt = GETDATE()
+WHEN NOT MATCHED THEN INSERT
+    (OrderNo, FibcCompanyName, FabricSupplyCompanyName, TransferBufferDays, IsInterUnit)
+VALUES
+    (@OrderNo, @FibcCompanyName, @FabricSupplyCompanyName, @TransferBufferDays, @IsInterUnit);",
+            new
+            {
+                OrderNo = order,
+                FibcCompanyName = fibc,
+                FabricSupplyCompanyName = supply,
+                TransferBufferDays = Math.Max(0, transferDays),
+                IsInterUnit = isInterUnit,
+            },
+            commandTimeout: CommandTimeoutSeconds);
+
+        return (await GetSavedOrderRouteAsync(order, ct))!;
+    }
+
+    public async Task<bool> DeleteOrderRouteAsync(string orderNo, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        await EnsureSchemaAsync(ct);
+        var order = orderNo.Trim();
+        if (string.IsNullOrEmpty(order))
+            return false;
+
+        using var connection = _database.CreateConnection();
+        var rows = await connection.ExecuteAsync(@"
+DELETE FROM PlanningOrderRoute WHERE OrderNo = @OrderNo", new { OrderNo = order }, commandTimeout: CommandTimeoutSeconds);
+        return rows > 0;
+    }
+
+    public async Task<IReadOnlyList<string>> DetectBomInterUnitSignalsAsync(string orderNo, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var order = orderNo.Trim();
+        if (string.IsNullOrEmpty(order))
+            return Array.Empty<string>();
+
+        using var connection = _database.CreateConnection();
+        var signals = new List<string>();
+
+        // Inter-unit auto-detect uses BOM header only — line rows in Vw_Bom_PPC often carry unrelated bag labels.
+        var header = await connection.QueryFirstOrDefaultAsync<BomHeaderSignalRow>(@"
+SELECT TOP 1 FabColor AS FabColor, BagType AS BagType
+FROM production.dbo.BOM1 WITH (NOLOCK)
+WHERE FilePONo = @OrderNo
+  AND ISNULL(SrNo, '') <> 'temp'
+ORDER BY SysDate DESC", new { OrderNo = order }, commandTimeout: CommandTimeoutSeconds);
+
+        if (header is not null)
+        {
+            var fabColor = header.FabColor ?? "";
+            if (fabColor.Contains("SULZER", StringComparison.OrdinalIgnoreCase))
+                signals.Add("BOM fabric colour specifies Sulzer fabric.");
+            var bag = header.BagType ?? "";
+            if (bag.Contains("Sulzer", StringComparison.OrdinalIgnoreCase))
+                signals.Add("BOM header bag type includes Sulzer.");
+        }
+
+        return signals.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     public async Task<IReadOnlyList<PlanningLoomPreferenceChartDto>> GetLoomPreferenceChartAsync(
         string companyName,
         CancellationToken ct = default)
@@ -1302,4 +1514,64 @@ ORDER BY LoomNo", new { CompanyName = company }, commandTimeout: CommandTimeoutS
         ChangeoverTier = row.ChangeoverTier ?? "Blue",
         Notes = row.Notes,
     };
+
+    private static PlanningInterUnitDefaultsDto MapInterUnitDefaults(InterUnitDefaultsRow row) => new()
+    {
+        DefaultsId = row.DefaultsId,
+        FibcCompanyName = row.FibcCompanyName ?? "",
+        DefaultFabricSupplyCompany = row.DefaultFabricSupplyCompany,
+        DefaultTransferBufferDays = row.DefaultTransferBufferDays,
+        AutoDetectSulzerFabric = row.AutoDetectSulzerFabric != 0,
+        Notes = row.Notes,
+        UpdatedAt = row.UpdatedAt,
+    };
+
+    private static PlanningOrderRouteDto MapOrderRoute(OrderRouteRow row, string routeSource) => new()
+    {
+        RouteId = row.RouteId,
+        OrderNo = row.OrderNo ?? "",
+        FibcCompanyName = row.FibcCompanyName ?? "",
+        FabricSupplyCompanyName = row.FabricSupplyCompanyName ?? "",
+        TransferBufferDays = row.TransferBufferDays,
+        IsInterUnit = row.IsInterUnit != 0,
+        RouteSource = routeSource,
+        AutoDetectedReason = row.AutoDetectedReason,
+        UpdatedAt = row.UpdatedAt,
+    };
+
+    private sealed class InterUnitDefaultsRow
+    {
+        public int DefaultsId { get; set; }
+        public string? FibcCompanyName { get; set; }
+        public string? DefaultFabricSupplyCompany { get; set; }
+        public int DefaultTransferBufferDays { get; set; }
+        public int AutoDetectSulzerFabric { get; set; }
+        public string? Notes { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+    }
+
+    private sealed class OrderRouteRow
+    {
+        public int RouteId { get; set; }
+        public string? OrderNo { get; set; }
+        public string? FibcCompanyName { get; set; }
+        public string? FabricSupplyCompanyName { get; set; }
+        public int TransferBufferDays { get; set; }
+        public int IsInterUnit { get; set; }
+        public string? AutoDetectedReason { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+    }
+
+    private sealed class BomSignalRow
+    {
+        public string? Heading { get; set; }
+        public string? GSM { get; set; }
+        public string? BagType { get; set; }
+    }
+
+    private sealed class BomHeaderSignalRow
+    {
+        public string? FabColor { get; set; }
+        public string? BagType { get; set; }
+    }
 }

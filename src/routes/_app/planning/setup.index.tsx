@@ -14,6 +14,7 @@ import {
   clearPlanningBacklog,
   createPlanningBacklog,
   deletePlanningDowntime,
+  fetchInterUnitDefaults,
   fetchPlanningBacklog,
   fetchPlanningDowntime,
   fetchPlanningFactoryConfig,
@@ -30,6 +31,7 @@ import {
   savePlanningLines,
   savePlanningLoomPool,
   savePlanningTeamFactors,
+  saveInterUnitDefaults,
   searchPlanningFactories,
 } from "@/lib/planning/setup-api";
 import {
@@ -41,6 +43,7 @@ import {
   type PlanningDowntime,
   type PlanningFactoryConfig,
   type PlanningFactoryOption,
+  type PlanningInterUnitDefaults,
   type PlanningLineConfig,
   type PlanningLoomPool,
   type PlanningLoomPreferenceChart,
@@ -76,6 +79,9 @@ function PlanningSetupPage() {
   });
   const [downtimeDraft, setDowntimeDraft] = useState<PlanningDowntime[]>([]);
   const [prefDraft, setPrefDraft] = useState<PlanningLoomPreferenceChart[]>([]);
+  const [interUnitDraft, setInterUnitDraft] = useState<PlanningInterUnitDefaults | null>(null);
+  const [supplyFactoryQuery, setSupplyFactoryQuery] = useState("");
+  const debouncedSupplyFactoryQuery = useDebounce(supplyFactoryQuery, 300);
 
   const { data: constants } = useQuery({
     queryKey: ["planning-setup-constants"],
@@ -129,9 +135,24 @@ function PlanningSetupPage() {
     enabled: !!company,
   });
 
+  const { data: interUnitDefaults, isLoading: interUnitLoading } = useQuery({
+    queryKey: ["planning-inter-unit", company],
+    queryFn: () => fetchInterUnitDefaults(company),
+    enabled: !!company,
+  });
+
+  const { data: supplyFactoryOptions = [] } = useQuery({
+    queryKey: ["planning-supply-factory-search", debouncedSupplyFactoryQuery],
+    queryFn: () => searchPlanningFactories(debouncedSupplyFactoryQuery),
+  });
+
   useEffect(() => {
     if (factoryConfig) setFactoryDraft(factoryConfig);
   }, [factoryConfig]);
+
+  useEffect(() => {
+    if (interUnitDefaults) setInterUnitDraft(interUnitDefaults);
+  }, [interUnitDefaults]);
 
   useEffect(() => {
     setLineDraft(lines);
@@ -160,6 +181,16 @@ function PlanningSetupPage() {
       setFactoryDraft(saved);
       queryClient.invalidateQueries({ queryKey: ["planning-factory-config", company] });
       toast.success("Factory planning settings saved.");
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const saveInterUnitMut = useMutation({
+    mutationFn: () => saveInterUnitDefaults({ ...interUnitDraft!, fibcCompanyName: company }),
+    onSuccess: (saved) => {
+      setInterUnitDraft(saved);
+      queryClient.invalidateQueries({ queryKey: ["planning-inter-unit", company] });
+      toast.success("Inter-unit defaults saved.");
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -390,6 +421,7 @@ function PlanningSetupPage() {
           <TabsTrigger value="loom-pref">Loom preference</TabsTrigger>
           <TabsTrigger value="teams">Team factors</TabsTrigger>
           <TabsTrigger value="downtime">Downtime</TabsTrigger>
+          <TabsTrigger value="inter-unit">Inter-unit</TabsTrigger>
           <TabsTrigger value="backlog">Backlog</TabsTrigger>
         </TabsList>
 
@@ -1046,6 +1078,112 @@ function PlanningSetupPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </PlanningPanel>
+        </TabsContent>
+
+        <TabsContent value="inter-unit">
+          <PlanningPanel
+            title="Inter-unit / ICO defaults"
+            subtitle={`FIBC hub: ${company} — configure fabric supply factory for sister-unit weaving`}
+          >
+            {interUnitLoading || !interUnitDraft ? (
+              <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading inter-unit settings…
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-1.5 text-sm md:col-span-2">
+                  <span className="font-medium">Default fabric supply factory (loom weaving)</span>
+                  <Input
+                    value={interUnitDraft.defaultFabricSupplyCompany ?? ""}
+                    onChange={(e) =>
+                      setInterUnitDraft({
+                        ...interUnitDraft,
+                        defaultFabricSupplyCompany: e.target.value || null,
+                      })
+                    }
+                    placeholder="Sister unit with looms (e.g. KPW / Unit-I)"
+                  />
+                  <Input
+                    className="mt-2"
+                    value={supplyFactoryQuery}
+                    onChange={(e) => setSupplyFactoryQuery(e.target.value)}
+                    placeholder="Search factories…"
+                  />
+                  {supplyFactoryOptions.filter((o) => o.hasLoomMaster).length > 0 ? (
+                    <div className="mt-1 max-h-32 overflow-auto rounded border border-border">
+                      {supplyFactoryOptions
+                        .filter((o) => o.hasLoomMaster)
+                        .map((opt) => (
+                          <button
+                            key={opt.companyName}
+                            type="button"
+                            className="block w-full border-b border-border/60 px-2 py-1.5 text-left text-xs hover:bg-muted/50 last:border-0"
+                            onClick={() => {
+                              setInterUnitDraft({
+                                ...interUnitDraft,
+                                defaultFabricSupplyCompany: opt.companyName,
+                              });
+                              setSupplyFactoryQuery("");
+                            }}
+                          >
+                            {opt.companyName}
+                          </button>
+                        ))}
+                    </div>
+                  ) : null}
+                </label>
+                <label className="space-y-1.5 text-sm">
+                  <span className="font-medium">Transfer buffer (days)</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={interUnitDraft.defaultTransferBufferDays}
+                    onChange={(e) =>
+                      setInterUnitDraft({
+                        ...interUnitDraft,
+                        defaultTransferBufferDays: Number(e.target.value) || 0,
+                      })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">Fabric travel time from supply factory to FIBC factory.</p>
+                </label>
+                <label className="space-y-1.5 text-sm">
+                  <span className="font-medium">Auto-detect Sulzer / ICO from BOM</span>
+                  <div className="flex items-center gap-2 pt-1">
+                    <Checkbox
+                      checked={interUnitDraft.autoDetectSulzerFabric}
+                      onCheckedChange={(v) =>
+                        setInterUnitDraft({ ...interUnitDraft, autoDetectSulzerFabric: v === true })
+                      }
+                    />
+                    <span className="text-muted-foreground">Use supply factory when BOM mentions Sulzer fabric</span>
+                  </div>
+                </label>
+                <label className="space-y-1.5 text-sm md:col-span-2">
+                  <span className="font-medium">Notes</span>
+                  <Input
+                    value={interUnitDraft.notes ?? ""}
+                    onChange={(e) => setInterUnitDraft({ ...interUnitDraft, notes: e.target.value || null })}
+                    placeholder="Demo / ICO policy notes"
+                  />
+                </label>
+                <div className="md:col-span-2">
+                  <Button
+                    onClick={() => saveInterUnitMut.mutate()}
+                    disabled={saveInterUnitMut.isPending}
+                  >
+                    {saveInterUnitMut.isPending ? (
+                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="mr-1 h-4 w-4" />
+                    )}
+                    Save inter-unit defaults
+                  </Button>
+                </div>
               </div>
             )}
           </PlanningPanel>
