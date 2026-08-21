@@ -3,14 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
 import {
-  DEFAULT_EXPORT_GROUP,
-  DEFAULT_PAGE_SIZE,
-  financialYearStartIso,
-  getExportBillOverdue,
   getExportBillOverdueCompanies,
   getExportBillOverdueGroups,
 } from "@/lib/export-bill-overdue-api";
-import { DEFAULT_SALES_FILTERS, getSalesCompanies, getSalesKpis, getSalesTables, getSalesYearlyTrend } from "@/lib/sales-dashboard-api";
+import { getSalesCompanies } from "@/lib/sales-dashboard-api";
 
 export const Route = createFileRoute("/_app")({
   beforeLoad: () => {
@@ -21,20 +17,10 @@ export const Route = createFileRoute("/_app")({
   component: AppLayout,
 });
 
-function todayIso(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 function AppLayout() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    const asOf = todayIso();
-    const dateFrom = financialYearStartIso(asOf);
     const staleTime = 60 * 60_000;
     void queryClient.prefetchQuery({
       queryKey: ["export-bill-overdue-companies"],
@@ -47,71 +33,8 @@ function AppLayout() {
       staleTime,
     });
     void queryClient.prefetchQuery({
-      queryKey: ["export-bill-overdue", "erp-v3", "All Companies", DEFAULT_EXPORT_GROUP, dateFrom, asOf, 1, DEFAULT_PAGE_SIZE],
-      queryFn: () =>
-        getExportBillOverdue({
-          company: "All Companies",
-          groupName: DEFAULT_EXPORT_GROUP,
-          dateFrom,
-          asOf,
-          page: 1,
-          pageSize: DEFAULT_PAGE_SIZE,
-        }),
-      staleTime,
-    });
-    void queryClient.prefetchQuery({
       queryKey: ["sales-dashboard-companies"],
       queryFn: getSalesCompanies,
-      staleTime,
-    });
-    void queryClient.prefetchQuery({
-      queryKey: [
-        "sales-kpis",
-        DEFAULT_SALES_FILTERS.category,
-        DEFAULT_SALES_FILTERS.company,
-        DEFAULT_SALES_FILTERS.dateFrom,
-        DEFAULT_SALES_FILTERS.dateTo,
-        0,
-      ],
-      queryFn: () =>
-        getSalesKpis({
-          company: DEFAULT_SALES_FILTERS.company,
-          dateFrom: DEFAULT_SALES_FILTERS.dateFrom,
-          dateTo: DEFAULT_SALES_FILTERS.dateTo,
-          category: DEFAULT_SALES_FILTERS.category,
-        }),
-      staleTime,
-    });
-    void queryClient.prefetchQuery({
-      queryKey: [
-        "sales-trend",
-        DEFAULT_SALES_FILTERS.category,
-        DEFAULT_SALES_FILTERS.company,
-        DEFAULT_SALES_FILTERS.dateTo,
-        0,
-      ],
-      queryFn: () =>
-        getSalesYearlyTrend({
-          company: DEFAULT_SALES_FILTERS.company,
-          dateTo: DEFAULT_SALES_FILTERS.dateTo,
-          category: DEFAULT_SALES_FILTERS.category,
-        }),
-      staleTime,
-    });
-    void queryClient.prefetchQuery({
-      queryKey: [
-        "sales-tables",
-        DEFAULT_SALES_FILTERS.company,
-        DEFAULT_SALES_FILTERS.dateFrom,
-        DEFAULT_SALES_FILTERS.dateTo,
-        0,
-      ],
-      queryFn: () =>
-        getSalesTables({
-          company: DEFAULT_SALES_FILTERS.company,
-          dateFrom: DEFAULT_SALES_FILTERS.dateFrom,
-          dateTo: DEFAULT_SALES_FILTERS.dateTo,
-        }),
       staleTime,
     });
   }, [queryClient]);

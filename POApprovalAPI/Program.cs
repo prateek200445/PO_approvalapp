@@ -100,6 +100,7 @@ app.UseSwaggerUI();
 
 app.MapControllers();
 app.MapGet("/", () => Results.Ok("PO Approval API is running!"));
+app.MapGet("/api/health", () => Results.Ok(new { ok = true, service = "PO Approval API" }));
 app.Run();
 
 static void LoadDotEnvFiles()

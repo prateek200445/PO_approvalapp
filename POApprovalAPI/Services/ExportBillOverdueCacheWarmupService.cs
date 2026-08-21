@@ -1,11 +1,12 @@
 namespace POApprovalAPI.Services;
 
 /// <summary>
-/// Keeps Export Bill Overdue All-Companies data hot so the first UI open is a cache hit.
+/// Warms lightweight dropdowns first, then one overdue universe, without fighting Sales warmup.
 /// </summary>
 public sealed class ExportBillOverdueCacheWarmupService : BackgroundService
 {
-    private static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan StartDelay = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan RefreshEvery = TimeSpan.FromHours(3);
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<ExportBillOverdueCacheWarmupService> _logger;
 
@@ -19,14 +20,29 @@ public sealed class ExportBillOverdueCacheWarmupService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            await Task.Delay(StartDelay, stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 using var scope = _scopeFactory.CreateScope();
                 var service = scope.ServiceProvider.GetRequiredService<ExportBillOverdueService>();
-                await service.WarmDefaultCachesAsync(stoppingToken);
+                await ErpCacheWarmupGate.RunAsync(
+                    () => service.WarmDefaultCachesAsync(stoppingToken),
+                    stoppingToken);
                 _logger.LogInformation("Export bill overdue caches warmed.");
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
             catch (Exception ex)
             {

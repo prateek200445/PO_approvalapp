@@ -350,8 +350,6 @@ public class ExportBillOverdueService
         await GetCompaniesAsync();
         cancellationToken.ThrowIfCancellationRequested();
         await GetOverdueBillsAsync("All Companies", DateTime.Today, DefaultGroupName, 1, DefaultPageSize);
-        cancellationToken.ThrowIfCancellationRequested();
-        await GetOverdueBillsAsync("All Companies", DateTime.Today.AddDays(-1), DefaultGroupName, 1, DefaultPageSize);
     }
 
     private static string UniverseCacheKey(DateTime asOfDate, string selectedGroup) =>

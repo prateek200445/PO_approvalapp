@@ -154,22 +154,14 @@ public class SalesDashboardService
         await GetCompanyOptionsAsync();
         cancellationToken.ThrowIfCancellationRequested();
 
-        var salesWarm = GetOverviewAsync("Sales", "All Companies", from, today);
-        var purchaseWarm = GetOverviewAsync("Purchase", "All Companies", from, today);
-        var suppliersWarm = GetTopSuppliersAsync("All Companies", from, today, 5);
         try
         {
-            await salesWarm;
+            await GetOverviewAsync("Sales", "All Companies", from, today);
         }
         catch (Exception)
         {
             // First user request will load Sales if warmup fails.
         }
-
-        cancellationToken.ThrowIfCancellationRequested();
-        try { await suppliersWarm; } catch (Exception) { }
-        cancellationToken.ThrowIfCancellationRequested();
-        try { await purchaseWarm; } catch (Exception) { }
     }
 
     public async Task<SalesOverviewDto> GetOverviewAsync(

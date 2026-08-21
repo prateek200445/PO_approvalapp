@@ -1,9 +1,10 @@
 namespace POApprovalAPI.Services;
 
-/// <summary>Preloads default Sales Dashboard ERP aggregates and refreshes them on a timer.</summary>
+/// <summary>Preloads Sales companies, then one overview, serialized with overdue warmup.</summary>
 public sealed class SalesDashboardCacheWarmupService : BackgroundService
 {
-    private static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan StartDelay = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan RefreshEvery = TimeSpan.FromHours(3);
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<SalesDashboardCacheWarmupService> _logger;
 
@@ -17,14 +18,29 @@ public sealed class SalesDashboardCacheWarmupService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            await Task.Delay(StartDelay, stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 using var scope = _scopeFactory.CreateScope();
                 var sales = scope.ServiceProvider.GetRequiredService<SalesDashboardService>();
-                await sales.WarmDefaultCachesAsync(stoppingToken);
+                await ErpCacheWarmupGate.RunAsync(
+                    () => sales.WarmDefaultCachesAsync(stoppingToken),
+                    stoppingToken);
                 _logger.LogInformation("Sales dashboard caches warmed.");
+            }
+            catch (OperationCanceledException)
+            {
+                break;
             }
             catch (Exception ex)
             {
