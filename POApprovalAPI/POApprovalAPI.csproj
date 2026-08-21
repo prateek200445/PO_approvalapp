@@ -7,12 +7,16 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);Scripts/**</DefaultItemExcludes>
   </PropertyGroup>
 
-  <!-- DemoDataCheck is a separate console project; exclude its sources and obj/bin from web compile -->
+  <!-- Nested console tools under Scripts/ (DemoDataCheck, DbFsProbe, …) have their own obj/AssemblyInfo. -->
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Scripts\**\*</DefaultItemExcludes>
+  </PropertyGroup>
+
   <ItemGroup>
-    <Compile Remove="Scripts\DemoDataCheck\**" />
-    <Content Remove="Scripts\DemoDataCheck\**" />
-    <EmbeddedResource Remove="Scripts\DemoDataCheck\**" />
-    <None Remove="Scripts\DemoDataCheck\**" />
+    <Compile Remove="Scripts\**" />
+    <Content Remove="Scripts\**" />
+    <EmbeddedResource Remove="Scripts\**" />
+    <None Remove="Scripts\**" />
   </ItemGroup>
 
   <ItemGroup>
