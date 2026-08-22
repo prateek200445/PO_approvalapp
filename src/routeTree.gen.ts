@@ -19,6 +19,7 @@ import { Route as AppPendingRouteImport } from './routes/_app/pending'
 import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
 import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
 import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
+import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
@@ -79,6 +80,11 @@ const AppLedgersRoute = AppLedgersRouteImport.update({
 const AppLedgerSummaryRoute = AppLedgerSummaryRouteImport.update({
   id: '/ledger-summary',
   path: '/ledger-summary',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppIntercompanyRoute = AppIntercompanyRouteImport.update({
+  id: '/intercompany',
+  path: '/intercompany',
   getParentRoute: () => AppRoute,
 } as any)
 const AppIndentsRoute = AppIndentsRouteImport.update({
@@ -149,6 +155,7 @@ export interface FileRoutesByFullPath {
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
+  '/intercompany': typeof AppIntercompanyRoute
   '/ledger-summary': typeof AppLedgerSummaryRoute
   '/ledgers': typeof AppLedgersRoute
   '/payments': typeof AppPaymentsRoute
@@ -171,6 +178,7 @@ export interface FileRoutesByTo {
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
+  '/intercompany': typeof AppIntercompanyRoute
   '/ledger-summary': typeof AppLedgerSummaryRoute
   '/ledgers': typeof AppLedgersRoute
   '/payments': typeof AppPaymentsRoute
@@ -196,6 +204,7 @@ export interface FileRoutesById {
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/_app/history': typeof AppHistoryRoute
   '/_app/indents': typeof AppIndentsRoute
+  '/_app/intercompany': typeof AppIntercompanyRoute
   '/_app/ledger-summary': typeof AppLedgerSummaryRoute
   '/_app/ledgers': typeof AppLedgersRoute
   '/_app/payments': typeof AppPaymentsRoute
@@ -221,6 +230,7 @@ export interface FileRouteTypes {
     | '/export-bill-overdue'
     | '/history'
     | '/indents'
+    | '/intercompany'
     | '/ledger-summary'
     | '/ledgers'
     | '/payments'
@@ -243,6 +253,7 @@ export interface FileRouteTypes {
     | '/export-bill-overdue'
     | '/history'
     | '/indents'
+    | '/intercompany'
     | '/ledger-summary'
     | '/ledgers'
     | '/payments'
@@ -267,6 +278,7 @@ export interface FileRouteTypes {
     | '/_app/export-bill-overdue'
     | '/_app/history'
     | '/_app/indents'
+    | '/_app/intercompany'
     | '/_app/ledger-summary'
     | '/_app/ledgers'
     | '/_app/payments'
@@ -359,6 +371,13 @@ declare module '@tanstack/react-router' {
       path: '/ledger-summary'
       fullPath: '/ledger-summary'
       preLoaderRoute: typeof AppLedgerSummaryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/intercompany': {
+      id: '/_app/intercompany'
+      path: '/intercompany'
+      fullPath: '/intercompany'
+      preLoaderRoute: typeof AppIntercompanyRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/indents': {
@@ -469,6 +488,7 @@ interface AppRouteChildren {
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
   AppHistoryRoute: typeof AppHistoryRoute
   AppIndentsRoute: typeof AppIndentsRoute
+  AppIntercompanyRoute: typeof AppIntercompanyRoute
   AppLedgerSummaryRoute: typeof AppLedgerSummaryRoute
   AppLedgersRoute: typeof AppLedgersRoute
   AppPaymentsRoute: typeof AppPaymentsRoute
@@ -489,6 +509,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
   AppHistoryRoute: AppHistoryRoute,
   AppIndentsRoute: AppIndentsRoute,
+  AppIntercompanyRoute: AppIntercompanyRoute,
   AppLedgerSummaryRoute: AppLedgerSummaryRoute,
   AppLedgersRoute: AppLedgersRoute,
   AppPaymentsRoute: AppPaymentsRoute,

@@ -150,7 +150,10 @@ export function AppShell() {
       icon: BookOpen,
       label: "Ledgers",
       match: (p) =>
-        p.startsWith("/ledgers") || p.startsWith("/ledger-summary") || p.startsWith("/reconciliation"),
+        p.startsWith("/ledgers") ||
+        p.startsWith("/ledger-summary") ||
+        p.startsWith("/reconciliation") ||
+        p.startsWith("/intercompany"),
     },
     {
       to: "/export-bill-overdue",
