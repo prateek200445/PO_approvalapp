@@ -17,6 +17,8 @@ public sealed class DailyProductionSummary
     public int UnpricedRowCount { get; set; }
     public double TotalPcs { get; set; }
     public double TotalKgs { get; set; }
+    public double TotalSalesValueInr { get; set; }
+    public DailyProductionFxInfo Fx { get; set; } = new();
     public List<DailyProductionCurrencyTotal> CurrencyTotals { get; set; } = new();
     public List<DailyProductionLineRow> ByLine { get; set; } = new();
     public List<DailyProductionBandRow> ByWeightBand { get; set; } = new();
@@ -65,9 +67,23 @@ public sealed class DailyProductionIcoRow
     public double WeightPerPc { get; set; }
     public double? SalesPrice { get; set; }
     public string Currency { get; set; } = "";
+    public double? OriginalPrice { get; set; }
+    public string OriginalCurrency { get; set; } = "";
     public double? SalesValue { get; set; }
     public double? ValuePerKg { get; set; }
     public bool Priced { get; set; }
+}
+
+public sealed class DailyProductionFxInfo
+{
+    public string AsOf { get; set; } = "";
+    public string RateFrom { get; set; } = "";
+    public string RateTo { get; set; } = "";
+    public bool UsedFallback { get; set; }
+    public double Dollar { get; set; }
+    public double Euro { get; set; }
+    public double Pound { get; set; }
+    public double Chf { get; set; }
 }
 
 public sealed class DailyProductionUnpricedRow

@@ -102,7 +102,13 @@ public class DailyProductionPriceService
         if (parsed.Count == 0)
             throw new InvalidOperationException("No production rows found under the header row.");
 
-        var prices = await LoadPricesAsync(icos.ToList(), ct);
+        var asOf = DateTime.Today;
+        var fxTask = LoadFxRatesAsync(asOf, ct);
+        var pricesTask = LoadPricesAsync(icos.ToList(), ct);
+        await Task.WhenAll(fxTask, pricesTask);
+        var fx = await fxTask;
+        var prices = await pricesTask;
+
         var priceCol = EnsureColumn(sheet, headerRow, map.LastHeaderCol, "Sales Price", map.SalesPrice);
         var currencyCol = EnsureColumn(sheet, headerRow, Math.Max(map.LastHeaderCol, priceCol), "Currency", map.Currency);
         var valueCol = EnsureColumn(sheet, headerRow, Math.Max(Math.Max(map.LastHeaderCol, priceCol), currencyCol), "Sales Value", map.SalesValue);
@@ -112,9 +118,21 @@ public class DailyProductionPriceService
             var match = ResolvePrice(item, prices);
             if (match is not null && match.Rate > 0)
             {
-                item.SalesPrice = match.Rate;
-                item.Currency = match.Currency;
-                item.SalesValue = match.Rate * item.Pcs;
+                var originalCurrency = string.IsNullOrWhiteSpace(match.Currency) ? "INR" : match.Currency.Trim();
+                double inrPrice;
+                try
+                {
+                    inrPrice = ToInr(match.Rate, originalCurrency, fx);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    throw new InvalidOperationException($"ICO {item.Ico}: {ex.Message}");
+                }
+                item.OriginalPrice = match.Rate;
+                item.OriginalCurrency = originalCurrency;
+                item.SalesPrice = Math.Round(inrPrice, 4);
+                item.Currency = "INR";
+                item.SalesValue = Math.Round(inrPrice * item.Pcs, 2);
                 item.Priced = true;
             }
 
@@ -123,7 +141,7 @@ public class DailyProductionPriceService
             {
                 excelRow.Cell(priceCol).Value = item.SalesPrice!.Value;
                 excelRow.Cell(priceCol).Style.NumberFormat.Format = "0.00";
-                excelRow.Cell(currencyCol).Value = item.Currency;
+                excelRow.Cell(currencyCol).Value = "INR";
                 excelRow.Cell(valueCol).Value = item.SalesValue!.Value;
                 excelRow.Cell(valueCol).Style.NumberFormat.Format = "#,##0.00";
             }
@@ -150,8 +168,98 @@ public class DailyProductionPriceService
             DownloadToken = token,
             FileName = fileName,
             SheetName = sheet.Name,
-            Summary = BuildSummary(parsed),
+            Summary = BuildSummary(parsed, fx),
         };
+    }
+
+    private async Task<FxSnapshot> LoadFxRatesAsync(DateTime asOf, CancellationToken ct)
+    {
+        using var connection = _database.CreateConnection();
+        const string select = @"
+SELECT TOP 1
+    CAST(ISNULL(Dollar, 0) AS float) AS Dollar,
+    CAST(ISNULL(Euro, 0) AS float) AS Euro,
+    CAST(ISNULL(Pound, 0) AS float) AS Pound,
+    CAST(ISNULL(CHF, 0) AS float) AS CHF,
+    sysdate AS RateFrom,
+    todate AS RateTo
+FROM currency_rbi WITH (NOLOCK)";
+
+        var window = await connection.QueryFirstOrDefaultAsync<FxSnapshot>(
+            select + @"
+WHERE CAST(@AsOf AS date) BETWEEN CAST(sysdate AS date) AND CAST(ISNULL(todate, DATEADD(YEAR, 5, GETDATE())) AS date)
+ORDER BY sysdate DESC",
+            new { AsOf = asOf.Date },
+            commandTimeout: CommandTimeoutSeconds);
+
+        if (window is not null && HasUsableFx(window))
+        {
+            window.AsOf = asOf.Date;
+            window.UsedFallback = false;
+            return window;
+        }
+
+        ct.ThrowIfCancellationRequested();
+        var fallback = await connection.QueryFirstOrDefaultAsync<FxSnapshot>(
+            select + @"
+WHERE CAST(sysdate AS date) <= CAST(@AsOf AS date)
+ORDER BY sysdate DESC",
+            new { AsOf = asOf.Date },
+            commandTimeout: CommandTimeoutSeconds);
+
+        if (fallback is null || !HasUsableFx(fallback))
+            throw new InvalidOperationException(
+                $"No RBI forex found in currency_rbi for {asOf:yyyy-MM-dd} (or earlier). Cannot convert to INR.");
+
+        fallback.AsOf = asOf.Date;
+        fallback.UsedFallback = true;
+        return fallback;
+    }
+
+    private static bool HasUsableFx(FxSnapshot fx) =>
+        fx.Dollar > 1 || fx.Euro > 1 || fx.Pound > 1 || fx.CHF > 1;
+
+    private static double ToInr(double amount, string currency, FxSnapshot fx)
+    {
+        var key = NormalizeFxCurrency(currency);
+        var rate = key switch
+        {
+            "INR" => 1d,
+            "USD" => fx.Dollar,
+            "EUR" => fx.Euro,
+            "GBP" => fx.Pound,
+            "CHF" => fx.CHF,
+            _ => throw new InvalidOperationException(
+                $"Cannot convert currency '{currency}' to INR. Supported: INR, USD, EUR, GBP, CHF."),
+        };
+        if (key != "INR" && rate <= 1)
+            throw new InvalidOperationException(
+                $"RBI {key} rate is missing or invalid ({rate}) for {fx.AsOf:yyyy-MM-dd}.");
+        return amount * rate;
+    }
+
+    private static string NormalizeFxCurrency(string? currency)
+    {
+        var c = (currency ?? "").Trim();
+        if (string.IsNullOrEmpty(c)) return "INR";
+        if (c.StartsWith("Rs", StringComparison.OrdinalIgnoreCase)
+            || c.Equals("INR", StringComparison.OrdinalIgnoreCase)
+            || c == "₹")
+            return "INR";
+        if (c is "$" or "USD" or "US$" or "DOLLAR" or "DOLLARS")
+            return "USD";
+        if (c is "€"
+            || c.Equals("EUR", StringComparison.OrdinalIgnoreCase)
+            || c.Equals("EURO", StringComparison.OrdinalIgnoreCase)
+            || c.Equals("EUROS", StringComparison.OrdinalIgnoreCase))
+            return "EUR";
+        if (c.Equals("GBP", StringComparison.OrdinalIgnoreCase)
+            || c.Equals("POUND", StringComparison.OrdinalIgnoreCase)
+            || c == "£")
+            return "GBP";
+        if (c.Equals("CHF", StringComparison.OrdinalIgnoreCase))
+            return "CHF";
+        return c.ToUpperInvariant();
     }
 
     private async Task<Dictionary<string, List<MarketingPriceRow>>> LoadPricesAsync(
@@ -238,7 +346,7 @@ WHERE LTRIM(RTRIM(MarketingInvNo)) IN @Icos",
         return best;
     }
 
-    private static DailyProductionSummary BuildSummary(List<ParsedRow> parsed)
+    private static DailyProductionSummary BuildSummary(List<ParsedRow> parsed, FxSnapshot fx)
     {
         var pricedRows = parsed.Count(p => p.Priced);
         var uniqueIco = parsed
@@ -261,6 +369,18 @@ WHERE LTRIM(RTRIM(MarketingInvNo)) IN @Icos",
             UnpricedRowCount = parsed.Count - pricedRows,
             TotalPcs = parsed.Sum(p => p.Pcs),
             TotalKgs = parsed.Sum(p => p.Kgs),
+            TotalSalesValueInr = parsed.Where(p => p.Priced).Sum(p => p.SalesValue ?? 0),
+            Fx = new DailyProductionFxInfo
+            {
+                AsOf = fx.AsOf.ToString("yyyy-MM-dd"),
+                RateFrom = fx.RateFrom?.ToString("yyyy-MM-dd") ?? "",
+                RateTo = fx.RateTo?.ToString("yyyy-MM-dd") ?? "",
+                UsedFallback = fx.UsedFallback,
+                Dollar = fx.Dollar,
+                Euro = fx.Euro,
+                Pound = fx.Pound,
+                Chf = fx.CHF,
+            },
             CurrencyTotals = RollupCurrency(parsed.Where(p => p.Priced)),
             ByLine = parsed
                 .GroupBy(p => string.IsNullOrWhiteSpace(p.LineNo) ? "(blank)" : p.LineNo)
@@ -315,6 +435,8 @@ WHERE LTRIM(RTRIM(MarketingInvNo)) IN @Icos",
                     WeightPerPc = first.WeightPerPc,
                     SalesPrice = priced?.SalesPrice,
                     Currency = priced?.Currency ?? "",
+                    OriginalPrice = priced?.OriginalPrice,
+                    OriginalCurrency = priced?.OriginalCurrency ?? "",
                     SalesValue = value,
                     ValuePerKg = valuePerKg,
                     Priced = priced is not null,
@@ -343,40 +465,36 @@ WHERE LTRIM(RTRIM(MarketingInvNo)) IN @Icos",
     {
         var hints = new List<string>
         {
-            "Sales price is ERP Rate per bag in the invoice currency — not profit. Compare only within the same currency unless you convert FX.",
+            "Sales price and value are ERP Rate converted to INR using RBI forex for the upload date — still selling price, not profit.",
         };
 
         foreach (var line in summary.ByLine)
         {
-            var icosOnLine = summary.ByIco
+            var ranked = summary.ByIco
                 .Where(i => i.Priced
                             && i.ValuePerKg is > 0
                             && i.LineNos.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
                                 .Contains(line.LineNo, StringComparer.OrdinalIgnoreCase)
                             && i.Pcs >= 50)
-                .GroupBy(i => string.IsNullOrWhiteSpace(i.Currency) ? "—" : i.Currency, StringComparer.OrdinalIgnoreCase);
-
-            foreach (var curGroup in icosOnLine)
-            {
-                var ranked = curGroup.OrderBy(i => i.ValuePerKg).ToList();
-                if (ranked.Count < 2)
-                    continue;
-                var low = ranked.First();
-                var high = ranked.Last();
-                if (high.ValuePerKg is not double hv || low.ValuePerKg is not double lv || hv < lv * 1.4)
-                    continue;
-                hints.Add(
-                    $"Line {line.LineNo} ({curGroup.Key}): {high.Ico} is {hv:0.00}/kg vs {low.Ico} at {lv:0.00}/kg. If that line can run the higher-value bag, consider shifting mix toward {high.Ico}.");
-            }
+                .OrderBy(i => i.ValuePerKg)
+                .ToList();
+            if (ranked.Count < 2)
+                continue;
+            var low = ranked.First();
+            var high = ranked.Last();
+            if (high.ValuePerKg is not double hv || low.ValuePerKg is not double lv || hv < lv * 1.4)
+                continue;
+            hints.Add(
+                $"Line {line.LineNo}: {high.Ico} is ₹{hv:0.00}/kg vs {low.Ico} at ₹{lv:0.00}/kg. If that line can run the higher-value bag, consider shifting mix toward {high.Ico}.");
         }
 
         var weakBands = summary.ByWeightBand
             .Where(b => b.Pcs > 0)
             .Select(b =>
             {
-                var topCur = b.Currencies.OrderByDescending(c => c.SalesValue).FirstOrDefault();
-                var valuePerKg = topCur is { Kgs: > 0 } ? topCur.SalesValue / topCur.Kgs : 0;
-                return (b.Band, b.Pcs, topCur?.Currency ?? "", valuePerKg, Share: b.Pcs / Math.Max(summary.TotalPcs, 1));
+                var inr = b.Currencies.FirstOrDefault();
+                var valuePerKg = inr is { Kgs: > 0 } ? inr.SalesValue / inr.Kgs : 0;
+                return (b.Band, b.Pcs, valuePerKg, Share: b.Pcs / Math.Max(summary.TotalPcs, 1));
             })
             .Where(x => x.Share >= 0.15 && x.valuePerKg > 0)
             .OrderBy(x => x.valuePerKg)
@@ -388,9 +506,8 @@ WHERE LTRIM(RTRIM(MarketingInvNo)) IN @Icos",
             var strong = summary.ByWeightBand
                 .Select(b =>
                 {
-                    var topCur = b.Currencies.FirstOrDefault(c =>
-                        string.Equals(c.Currency, weak.Item3, StringComparison.OrdinalIgnoreCase));
-                    var vpk = topCur is { Kgs: > 0 } ? topCur.SalesValue / topCur.Kgs : 0;
+                    var inr = b.Currencies.FirstOrDefault();
+                    var vpk = inr is { Kgs: > 0 } ? inr.SalesValue / inr.Kgs : 0;
                     return (b.Band, vpk, b.Pcs);
                 })
                 .Where(x => x.vpk > weak.valuePerKg * 1.3 && x.Pcs > 0)
@@ -399,7 +516,7 @@ WHERE LTRIM(RTRIM(MarketingInvNo)) IN @Icos",
             if (strong.Band is not null)
             {
                 hints.Add(
-                    $"Weight band {weak.Band} is {weak.Share:P0} of pcs with lower {weak.Item3} value/kg than {strong.Band}. Use the range sheet plus Sales Price to see if some of that volume can move to a heavier / higher-value bag.");
+                    $"Weight band {weak.Band} is {weak.Share:P0} of pcs with lower INR value/kg than {strong.Band}. Consider whether some of that volume can move to a higher-value bag.");
             }
         }
 
@@ -666,8 +783,22 @@ WHERE LTRIM(RTRIM(MarketingInvNo)) IN @Icos",
         public double WeightPerPc { get; set; }
         public double? SalesPrice { get; set; }
         public string Currency { get; set; } = "";
+        public double? OriginalPrice { get; set; }
+        public string OriginalCurrency { get; set; } = "";
         public double? SalesValue { get; set; }
         public bool Priced { get; set; }
+    }
+
+    private sealed class FxSnapshot
+    {
+        public DateTime AsOf { get; set; }
+        public DateTime? RateFrom { get; set; }
+        public DateTime? RateTo { get; set; }
+        public bool UsedFallback { get; set; }
+        public double Dollar { get; set; }
+        public double Euro { get; set; }
+        public double Pound { get; set; }
+        public double CHF { get; set; }
     }
 
     private sealed class MarketingPriceRow
