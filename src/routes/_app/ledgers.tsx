@@ -27,7 +27,7 @@ function LedgersHubPage() {
           to="/intercompany"
           icon={Building2}
           title="Intercompany"
-          description="Group-company outstanding in matrix and detailed inter-company balance format."
+          description="Group-company outstanding, balance matrix, and a settlement prediction for plus/minus nets."
         />
         <HubCard
           to="/reconciliation"

@@ -353,4 +353,26 @@
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+
+  @keyframes ic-ring-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes ic-coin-pulse {
+    0%,
+    100% {
+      opacity: 0.45;
+      transform: scale(0.85);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.15);
+    }
+  }
+
+  .ic-live-ring {
+    animation: ic-ring-spin 8s linear infinite;
+  }
 }

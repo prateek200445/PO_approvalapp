@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -19,6 +19,7 @@ import {
   getIntercompanyDashboard,
   type IntercompanyMatrix,
 } from "@/lib/intercompany-api";
+import { IntercompanySubnav } from "@/components/intercompany/IntercompanySubnav";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,8 +27,14 @@ import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/_app/intercompany")({
   head: () => ({ meta: [{ title: "Intercompany — PO Portal" }] }),
-  component: IntercompanyPage,
+  component: IntercompanyLayout,
 });
+
+function IntercompanyLayout() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  if (pathname.startsWith("/intercompany/settlement")) return <Outlet />;
+  return <IntercompanyPage />;
+}
 
 const SELECT_CLASS =
   "h-9 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-50";
@@ -268,6 +275,7 @@ function BalanceMatrixSection({
   );
 }
 
+
 function IntercompanyPage() {
   const [asOfInput, setAsOfInput] = useState(todayIso);
   const [asOf, setAsOf] = useState(todayIso);
@@ -333,16 +341,19 @@ function IntercompanyPage() {
           <ArrowLeft className="h-4 w-4" />
           Ledgers
         </Link>
-        <div className="mt-1 flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Building2 className="h-5 w-5" />
+        <div className="mt-1 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <Building2 className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Intercompany Balances</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Outstanding balances between group companies, as on the selected date.
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Intercompany Balances</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Outstanding balances between group companies, as on the selected date.
-            </p>
-          </div>
+          <IntercompanySubnav />
         </div>
       </div>
 
@@ -431,6 +442,19 @@ function IntercompanyPage() {
       ) : null}
 
       {matrices.length > 0 ? <BalanceMatrixSection asOf={report?.asOf ?? asOf} matrices={matrices} /> : null}
+
+      <Link
+        to="/intercompany/settlement"
+        className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3 shadow-soft transition hover:border-primary/40 hover:bg-primary/[0.04]"
+      >
+        <div>
+          <p className="text-sm font-semibold">Need a settlement plan?</p>
+          <p className="text-xs text-muted-foreground">
+            Open How to settle — who pays, who receives, and the payment steps.
+          </p>
+        </div>
+        <span className="text-sm font-medium text-primary">Open →</span>
+      </Link>
 
       {matrix ? (
         <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
