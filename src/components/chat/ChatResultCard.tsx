@@ -27,6 +27,7 @@ import {
   userFacingWarning,
   splitAnswerRich,
   buildCompactRowSummary,
+  orderDisplayColumns,
 } from "@/lib/result-card-format";
 import { cn } from "@/lib/utils";
 import {
@@ -84,7 +85,9 @@ export function ChatResultCard({
   const theme = getDomainTheme(response, answer);
   const mode = detectResultCardMode(response.rows);
   const columns =
-    response.rows.length > 0 ? Object.keys(response.rows[0]) : [];
+    response.rows.length > 0
+      ? orderDisplayColumns(Object.keys(response.rows[0]), response.rows)
+      : [];
   const hero = extractHeroMetric(response.rows);
   const governed = isGovernedResponse(response.warning);
   const displayWarning = userFacingWarning(response.warning);

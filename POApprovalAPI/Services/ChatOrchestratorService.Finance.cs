@@ -29,12 +29,45 @@ public partial class ChatOrchestratorService
         plan.ToDate = TryParseAsOnDate(message) ?? DateTime.Today;
         plan.MaxRows = MaxReturnRows;
         plan.StockAgeingSp = ResolveStockAgeingSp(message);
-
-        var subMatch = Regex.Match(message, @"\bsub\s*[- ]?group\s+(.+?)(?:\s+at|\s+for|\?|$)", RegexOptions.IgnoreCase);
-        if (subMatch.Success)
-            plan.SubGroupName = subMatch.Groups[1].Value.Trim().TrimEnd('.', '?', '!');
+        plan.SubGroupName = ResolveStockAgeingSubGroupName(message);
+        plan.GroupName = ResolveStockAgeingGroupName(message);
 
         return true;
+    }
+
+    private static string? ResolveStockAgeingGroupName(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (Regex.IsMatch(m, @"\bfg\b") || m.Contains("finished good"))
+            return "FG";
+        if (Regex.IsMatch(m, @"\bsf\b") || m.Contains("semi finished") || m.Contains("semi-finished"))
+            return "SF";
+        if (Regex.IsMatch(m, @"\brm\b") || m.Contains("raw material"))
+            return "RM";
+        return null;
+    }
+
+    private static string? ResolveStockAgeingSubGroupName(string message)
+    {
+        var subMatch = Regex.Match(
+            message,
+            @"\bsub\s*[- ]?group\s+(.+?)(?:\s+at|\s+for|\?|$)",
+            RegexOptions.IgnoreCase);
+        if (subMatch.Success)
+        {
+            var name = subMatch.Groups[1].Value.Trim().TrimEnd('.', '?', '!');
+            return name.Length >= 2 ? name : null;
+        }
+
+        var m = message.ToLowerInvariant();
+        if (m.Contains("roll")) return "Roll";
+        if (m.Contains("fibc") || m.Contains("jumbo bag")) return "FIBC";
+        if (m.Contains("small bag")) return "Small Bag";
+        if (m.Contains("tape")) return "Tape";
+        if (m.Contains("fabric")) return "Fabric";
+        if (m.Contains("webbing")) return "Webbing";
+
+        return null;
     }
 
     private static string ResolveStockAgeingSp(string message)

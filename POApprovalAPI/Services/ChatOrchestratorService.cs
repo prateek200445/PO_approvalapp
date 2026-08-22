@@ -163,8 +163,39 @@ public partial class ChatOrchestratorService
         ErpInventoryReportPlan? exportInventoryPlan = null;
         LedgerStatementPlan? exportLedgerPlan = null;
 
+        // Inactive customers (no order/invoice since N days) — before day-bucket ageing (also contains "90 days")
+        if (TryBuildInactiveCustomersSql(request.Message, out var inactiveCustSql, out var inactiveCustWarn))
+        {
+            _logger.LogInformation("Using governed inactive-customers SQL (early path)");
+            sql = inactiveCustSql;
+            warning = inactiveCustWarn;
+        }
+        else if (TryBuildCustomerSalesCurrencySql(request.Message, out var custSalesCurSql, out var custSalesCurWarn))
+        {
+            _logger.LogInformation("Using governed customer sales FC/INR SQL (early path)");
+            sql = custSalesCurSql;
+            warning = custSalesCurWarn;
+        }
+        else if (TryBuildTopExpenseLedgersSql(request.Message, out var topExpenseSql, out var topExpenseWarn))
+        {
+            _logger.LogInformation("Using governed top expense ledgers SQL (early path)");
+            sql = topExpenseSql;
+            warning = topExpenseWarn;
+        }
+        else if (TryBuildAllExpensesMonthlySql(request.Message, out var allExpenseSql, out var allExpenseWarn))
+        {
+            _logger.LogInformation("Using governed all expense heads month-wise SQL (early path)");
+            sql = allExpenseSql;
+            warning = allExpenseWarn;
+        }
+        else if (TryBuildExpenseMonthlySql(request.Message, out var namedExpenseSql, out var namedExpenseWarn))
+        {
+            _logger.LogInformation("Using governed named expense month-wise SQL (early path)");
+            sql = namedExpenseSql;
+            warning = namedExpenseWarn;
+        }
         // Day-bucket ageing (SELECT on vw_BillWiseTransaction) — before EXEC ageing
-        if (TryBuildPartyAgeingBucketsSql(request.Message, out var partyBucketSql, out var partyBucketWarn))
+        else if (TryBuildPartyAgeingBucketsSql(request.Message, out var partyBucketSql, out var partyBucketWarn))
         {
             _logger.LogInformation("Using governed party day-bucket ageing SQL");
             sql = partyBucketSql;
@@ -242,6 +273,18 @@ public partial class ChatOrchestratorService
             warning = exportResult.Warning;
             financeTotalCount = exportResult.TotalCount;
             usedErpFinance = true;
+        }
+        else if (TryBuildRmWarehouseStockSql(request.Message, out var rmWarehouseSql, out var rmWarehouseWarn))
+        {
+            _logger.LogInformation("Using governed RM warehouse stock SQL");
+            sql = rmWarehouseSql;
+            warning = rmWarehouseWarn;
+        }
+        else if (TryBuildLedgerOutstandingSql(request.Message, out var earlyLedgerBalSql, out var earlyLedgerBalWarn))
+        {
+            _logger.LogInformation("Using governed ledger balance/outstanding SQL (early path)");
+            sql = earlyLedgerBalSql;
+            warning = earlyLedgerBalWarn;
         }
         else if (TryBuildInventoryReportPlan(request.Message, out var inventoryPlan))
         {
@@ -366,6 +409,12 @@ public partial class ChatOrchestratorService
             warning = intVendorWarn;
         }
         // Governed: country-wise sales (Sales Dashboard source) — before export-customer ranking
+        else if (useLlm && TryBuildExtendedGovernanceSql(request.Message, out var extGovSql, out var extGovWarn))
+        {
+            _logger.LogInformation("Using governed extended MIS/sales/import SQL");
+            sql = extGovSql;
+            warning = extGovWarn;
+        }
         else if (useLlm && TryBuildCountryWiseSalesSql(request.Message, out var countryWiseSql, out var countryWiseWarning))
         {
             _logger.LogInformation("Using governed country-wise sales SQL");
@@ -1384,6 +1433,15 @@ public partial class ChatOrchestratorService
             warning = fallbackCountryWarn;
         }
         else if (rows.Count == 0
+                 && LooksLikeStockAgeingQuestion(request.Message)
+                 && TryBuildStockGroupAgeingFallbackSql(request.Message, out var stockAgeFallbackSql, out var stockAgeFallbackWarn))
+        {
+            _logger.LogWarning("Empty stock ageing SP result; using FG/SF inventory age fallback");
+            sql = stockAgeFallbackSql;
+            rows = await ExecuteReadOnlyAsync(sql, ct);
+            warning = stockAgeFallbackWarn;
+        }
+        else if (rows.Count == 0
                  && LooksLikeTopExportCustomersQuestion(request.Message)
                  && TryBuildTopExportCustomersSql(request.Message, out var emptyExportSql, out var emptyExportWarn)
                  && !string.Equals(emptyExportSql, sql, StringComparison.OrdinalIgnoreCase))
@@ -1499,6 +1557,27 @@ public partial class ChatOrchestratorService
         }
         }
 
+        if (rows.Count == 0 && LooksLikeCustomerSalesCurrencyQuestion(request.Message))
+        {
+            if (TryBuildCustomerSalesCurrencyFallbackSql(request.Message, out var custSalesFallbackSql, out var custSalesFallbackWarn)
+                && !string.Equals(custSalesFallbackSql, sql, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("Empty customer FC/INR sales; retrying with relaxed buyer + export-inclusive FC match");
+                sql = custSalesFallbackSql;
+                rows = await ExecuteReadOnlyAsync(sql, ct);
+                warning = custSalesFallbackWarn;
+            }
+
+            if (rows.Count == 0
+                && TryBuildCustomerSalesCrossCompanySql(request.Message, out var custCrossCoSql, out var custCrossCoWarn))
+            {
+                _logger.LogWarning("Empty customer sales at requested company; showing cross-company sales for same buyer");
+                sql = custCrossCoSql;
+                rows = await ExecuteReadOnlyAsync(sql, ct);
+                warning = custCrossCoWarn;
+            }
+        }
+
         var hitCap = rows.Count > MaxReturnRows;
         if (hitCap)
             rows = rows.Take(MaxReturnRows).ToList();
@@ -1511,6 +1590,25 @@ public partial class ChatOrchestratorService
         var (totalCount, truncated) = erpTotalCount.HasValue
             ? (erpTotalCount, erpTotalCount.Value > rows.Count)
             : await ResolveListCardinalityAsync(sql, rows, hitCap, ct);
+
+        if (!totalCount.HasValue
+            && TryBuildImportPaymentTrackingCountSql(request.Message, out var importPayCountSql))
+        {
+            try
+            {
+                var importCountRows = await ExecuteReadOnlyAsync(importPayCountSql, ct, maxRows: 1);
+                var importTotal = TryReadFirstInt(importCountRows);
+                if (importTotal.HasValue)
+                {
+                    totalCount = importTotal;
+                    truncated = importTotal.Value > rows.Count;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Import payment companion COUNT query failed");
+            }
+        }
 
         var preview = JsonSerializer.Serialize(rows);
         if (preview.Length > 12000)
@@ -1658,6 +1756,10 @@ public partial class ChatOrchestratorService
     {
         var m = message.ToLowerInvariant();
         if (m.Contains("ledgeropeningbalance")) return true;
+        if (m.Contains("ledger balance") || m.Contains("ledger outstanding")) return true;
+        if ((m.Contains("balance as on") || m.Contains("balance as of") || m.Contains("as on today"))
+            && m.Contains("balance"))
+            return true;
         var mentionsBalance = m.Contains("opening") || m.Contains("pending") || m.Contains("outstanding");
         var mentionsLedgerContext = m.Contains("ledger") || m.Contains("bill") || m.Contains("balance");
         return mentionsBalance && mentionsLedgerContext;
@@ -1727,8 +1829,8 @@ public partial class ChatOrchestratorService
             """;
 
         warning = string.IsNullOrWhiteSpace(ourCompany)
-            ? $"Governed ledger outstanding: LedgerMaster.LedgerName LIKE '%{party}%' (PendingBalance/Openingbalance)."
-            : $"Governed ledger outstanding: LedgerName LIKE '%{party}%' AND CompanyName = '{ourCompany}'.";
+            ? $"Governed ledger balance as on today: LedgerMaster.LedgerName LIKE '%{party}%' (PendingBalance/Openingbalance; enriched from statement/ageing when stale)."
+            : $"Governed ledger balance as on today for {party} at {ourCompany}: LedgerMaster PendingBalance/Openingbalance (enriched when stale).";
         return true;
     }
 
@@ -1855,7 +1957,29 @@ public partial class ChatOrchestratorService
             if (p is not null) return FinalizeLedgerPartyName(p, message);
         }
 
-        // "outstanding for Procon Pacific LLC" / "pending balance of X"
+        // "ledger balance as on today for Reliance Industries at KPW"
+        m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\bledger\s+balance\s+(?:as\s+on(?:\s+today|\s+\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\s+\d{4}-\d{2}-\d{2})?\s+)?(?:for|of)\s+(?:the\s+)?(.+)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var p = CleanParty(m.Groups[1].Value);
+            if (p is not null) return FinalizeLedgerPartyName(p, message);
+        }
+
+        // "outstanding for Procon Pacific LLC" / "pending balance of X" / "balance as on today for X"
+        m = System.Text.RegularExpressions.Regex.Match(
+            message,
+            @"\b(?:ledger\s+)?(?:outstanding|pending(?:\s+balance)?|opening(?:\s+balance)?|balance)\s+(?:as\s+on(?:\s+today|\s+\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\s+\d{4}-\d{2}-\d{2})?\s+)?(?:for|of|against)\s+(?:the\s+)?(?:customer|buyer|party|vendor|supplier)?\s*(.+)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var p = CleanParty(m.Groups[1].Value);
+            if (p is not null) return FinalizeLedgerPartyName(p, message);
+        }
+
+        // legacy pattern kept for simpler phrasing without as-on clause
         m = System.Text.RegularExpressions.Regex.Match(
             message,
             @"\b(?:ledger\s+)?(?:outstanding|pending(?:\s+balance)?|opening(?:\s+balance)?|balance)\s+(?:for|of|against)\s+(?:the\s+)?(?:customer|buyer|party|vendor|supplier)?\s*(.+)$",
@@ -1953,6 +2077,15 @@ public partial class ChatOrchestratorService
                 $@"\s+(?:at|for)\s+{System.Text.RegularExpressions.Regex.Escape(knownCompany)}\s*$",
                 "",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            foreach (var code in ResolveErpCompanyCodes(knownCompany))
+            {
+                s = System.Text.RegularExpressions.Regex.Replace(
+                    s,
+                    $@"\s+(?:at|for)\s+{System.Text.RegularExpressions.Regex.Escape(code)}\s*$",
+                    "",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
         }
 
         // Fallback when company alias did not match but message ends with " at … Limited"

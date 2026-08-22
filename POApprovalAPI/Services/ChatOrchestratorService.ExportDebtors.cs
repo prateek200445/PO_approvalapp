@@ -69,6 +69,7 @@ public partial class ChatOrchestratorService
     {
         var m = message.ToLowerInvariant();
         return m.Contains("stock analysis") || m.Contains("stockanalysis")
+               || m.Contains("mis stock")
                || (m.Contains("opening") && m.Contains("closing") && m.Contains("stock"))
                || (m.Contains("factory owned") && m.Contains("stock"));
     }
@@ -81,10 +82,24 @@ public partial class ChatOrchestratorService
         var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
-        var (fyStart, fyEndEx, _) = ParseIndianFinancialYear(message);
+        DateTime dateFrom;
+        DateTime dateTo;
+        if (Regex.IsMatch(message, @"\blast\s+\d{1,2}\s+months?|\blast\s+(?:three|six)\s+months?", RegexOptions.IgnoreCase))
+        {
+            var (start, end, _) = ParseSalesRollingPeriod(message);
+            dateFrom = start;
+            dateTo = end;
+        }
+        else
+        {
+            var (fyStart, fyEndEx, _) = ParseIndianFinancialYear(message);
+            dateFrom = fyStart;
+            dateTo = fyEndEx.AddDays(-1);
+        }
+
         plan.CompanyName = company;
-        plan.DateFrom = fyStart;
-        plan.DateTo = fyEndEx.AddDays(-1);
+        plan.DateFrom = dateFrom;
+        plan.DateTo = dateTo;
         plan.ReportType = ResolveStockAnalysisReportType(message);
         plan.IntOp = 0;
         plan.Mode = message.Contains("detail", StringComparison.OrdinalIgnoreCase)

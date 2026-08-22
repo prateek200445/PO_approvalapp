@@ -15,10 +15,14 @@ function humanizeColumn(col: string): string {
 }
 
 function formatSummaryValue(col: string, value: number): string {
+  const lower = col.toLowerCase();
+  const isQty = /qty|quantity|stk|stock|pcs|count/i.test(lower);
   if (
-    /amount|bill|debit|credit|balance|pending|outstanding|opening|closing|value|net/i.test(
-      col,
+    !isQty
+    && (/amount|bill|debit|credit|balance|outstanding|opening|closing|value|net/i.test(
+      lower,
     )
+      || (/\bpending/i.test(lower) && !/pendingqty|pending qty|pendingpo/i.test(lower)))
   ) {
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
@@ -80,9 +84,22 @@ function scoreMeasureColumn(
   if (SKIP_COLUMNS.test(col)) return -100;
   const lower = col.toLowerCase();
   if (/pct|percent|ratio|rate|%/i.test(lower)) return -20;
+  if (/^(expense|sales)?year$|^month$|^expensemonth$|^salesmonth$|^day$|^week$|^quarter$/i.test(lower))
+    return -40;
+  if (/\byear\b|\bmonth\b|\bday\b|\bweek\b|\bquarter\b|\bfy\b/i.test(lower) && !/amount|qty|count|total/i.test(lower))
+    return -30;
 
   let score = 0;
   if (MEASURE_HINTS.test(lower)) score += 12;
+  if (/^debitbalance$|^creditbalance$|^effectivebalance$/i.test(lower)) score += 25;
+  if (
+    /^pendingbalance$/i.test(lower)
+    && rows.every((r) => Math.abs(rowNumber(r, col) ?? 0) < 0.01)
+    && rows.some((r) =>
+      Object.keys(r).some((k) => /^(debitbalance|creditbalance|effectivebalance)$/i.test(k)),
+    )
+  )
+    score -= 30;
   if (/count|cnt/i.test(lower) && !/country/i.test(lower)) score += 6;
 
   const nums = rows.map((r) => rowNumber(r, col)).filter((n): n is number => n != null);

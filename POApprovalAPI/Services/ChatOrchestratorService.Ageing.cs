@@ -7,6 +7,9 @@ public partial class ChatOrchestratorService
 {
     private static bool LooksLikeAgeingQuestion(string message)
     {
+        if (LooksLikeInactiveCustomersQuestion(message))
+            return false;
+
         var m = message.ToLowerInvariant();
 
         var hasAgeingIntent =
@@ -36,6 +39,9 @@ public partial class ChatOrchestratorService
 
     private static bool LooksLikeDayBucketAgeing(string message)
     {
+        if (LooksLikeInactiveCustomersQuestion(message))
+            return false;
+
         var m = message.ToLowerInvariant();
         return Regex.IsMatch(m, @"\b0\s*[-–]\s*30\b|\b31\s*[-–]\s*60\b|\b61\s*[-–]\s*90\b|\b90\s*\+|\b90\s+days\b")
             || m.Contains("day bucket") || m.Contains("days bucket")

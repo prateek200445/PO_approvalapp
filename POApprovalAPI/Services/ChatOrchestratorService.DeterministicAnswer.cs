@@ -65,6 +65,9 @@ public partial class ChatOrchestratorService
             && warning.StartsWith("ERP ledger statement", StringComparison.OrdinalIgnoreCase))
             return BuildLedgerStatementBody(warning, rows);
 
+        if (rows.Count >= 1 && LooksLikeLedgerAnomalyRow(rows[0]))
+            return BuildLedgerAnomalyBody(rows, warning);
+
         if (rows.Count >= 1 && LooksLikeLedgerMasterBalanceRow(rows[0]))
             return BuildLedgerBalanceBody(rows[0]);
 
@@ -400,6 +403,55 @@ public partial class ChatOrchestratorService
             || DateTime.TryParse(raw, CultureInfo.GetCultureInfo("en-IN"), DateTimeStyles.None, out dt))
             return FormatIndianDate(dt);
         return null;
+    }
+
+    private static bool LooksLikeLedgerAnomalyRow(Dictionary<string, object?> row)
+    {
+        var keys = row.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return keys.Contains("LedgerName")
+               && keys.Contains("Under")
+               && (keys.Contains("DebitBalance") || keys.Contains("CreditBalance"));
+    }
+
+    private static string BuildLedgerAnomalyBody(List<Dictionary<string, object?>> rows, string? warning)
+    {
+        var isCreditorDebit = rows[0].Keys.Any(k => k.Equals("DebitBalance", StringComparison.OrdinalIgnoreCase));
+        var balanceCol = isCreditorDebit ? "DebitBalance" : "CreditBalance";
+        var total = rows.Sum(r => GetRowDecimal(r, balanceCol) ?? 0m);
+        var label = isCreditorDebit ? "debit balance" : "credit balance";
+        var groupCol = "Under";
+        var topGroups = rows
+            .GroupBy(r => GetRowString(r, groupCol) ?? "Other", StringComparer.OrdinalIgnoreCase)
+            .Select(g => new { Group = g.Key, Total = g.Sum(r => Math.Abs(GetRowDecimal(r, balanceCol) ?? 0m)) })
+            .OrderByDescending(x => x.Total)
+            .Take(3)
+            .ToList();
+
+        var groupPart = topGroups.Count > 0
+            ? string.Join(" · ", topGroups.Select(g => $"**{g.Group}** {FormatInr(g.Total)}"))
+            : "";
+
+        var company = warning != null && Regex.IsMatch(warning, @"\bfor\s+(.+?)\s+on\s+LedgerMaster", RegexOptions.IgnoreCase)
+            ? Regex.Match(warning, @"\bfor\s+(.+?)\s+on\s+LedgerMaster", RegexOptions.IgnoreCase).Groups[1].Value.Trim()
+            : null;
+
+        var intro = isCreditorDebit
+            ? "Creditor accounts normally have a **credit** (payable) balance. These **{0}** creditor ledgers sit on the **debit** side — usually advance paid, overpayment, or opening adjustment."
+            : "Debtor accounts normally have a **debit** (receivable) balance. These **{0}** debtor ledgers sit on the **credit** side — usually over-receipt or opening adjustment.";
+
+        var lines = new List<string>
+        {
+            string.Format(intro, rows.Count),
+            $"Total abnormal **{label}**: **{FormatInr(Math.Abs(total))}** (from FY opening balance where ERP pending balance is not maintained)."
+        };
+
+        if (!string.IsNullOrWhiteSpace(company))
+            lines[0] += $" Company: **{company}**.";
+
+        if (!string.IsNullOrWhiteSpace(groupPart))
+            lines.Add($"Largest groups: {groupPart}.");
+
+        return string.Join("\n\n", lines);
     }
 
     private static bool LooksLikeLedgerMasterBalanceRow(Dictionary<string, object?> row)

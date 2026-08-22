@@ -57,6 +57,11 @@ const COLUMN_LABELS: Record<string, string> = {
   RollNO: "Roll no.",
   NetWt: "Net weight",
   Quality: "Quality",
+  PendingQty: "Pending qty",
+  PurchasedQty: "Purchased qty",
+  RecdQty: "Received qty",
+  AcceptedQty: "Accepted qty",
+  OrderQty: "Order qty",
   Qty: "Quantity",
   ActualQty: "Qty",
   Rate: "Rate",
@@ -75,7 +80,16 @@ const COLUMN_LABELS: Record<string, string> = {
   StitchersPresent: "Present",
   AttendanceDate: "Date",
   PendingPOCount: "Pending POs",
-  LedgerCount: "Ledgers",
+  ExpenseGroupHead: "Expense group",
+  ExpenseAmount: "Expense amount",
+  TotalExpense: "Total expense",
+  VoucherCount: "Vouchers",
+  LedgerName: "Ledger",
+  Under: "Group",
+  DebitBalance: "Debit balance",
+  CreditBalance: "Credit balance",
+  FyOpeningBalance: "FY opening",
+  EffectiveBalance: "Balance",
 };
 
 /** Count/quantity columns — never format as currency even if name contains "pending" or "total". */
@@ -156,19 +170,19 @@ export function formatCellValue(column: string, value: unknown): FormattedCell {
     };
   }
 
-  if (isNum && CURRENCY_COLS.test(column)) {
-    return {
-      text: `₹${formatIndianNumber(num)}`,
-      kind: "currency",
-      raw: value,
-    };
-  }
-
   if (isNum && NUMERIC_COLS.test(column)) {
     const decimals = Number.isInteger(num) ? 0 : 2;
     return {
       text: formatIndianNumber(num, decimals),
       kind: "number",
+      raw: value,
+    };
+  }
+
+  if (isNum && CURRENCY_COLS.test(column)) {
+    return {
+      text: `₹${formatIndianNumber(num)}`,
+      kind: "currency",
       raw: value,
     };
   }
@@ -269,6 +283,7 @@ export function extractHeroMetric(
 
 export function getListPrimaryColumn(columns: string[]): string {
   const preferred = [
+    "LedgerName",
     "Country",
     "SalesCountryCategory",
     "Destination",
@@ -290,7 +305,63 @@ export function getListPrimaryColumn(columns: string[]): string {
 }
 
 export function getListSecondaryColumns(columns: string[], primary: string): string[] {
-  return columns.filter((c) => c !== primary).slice(0, 3);
+  const preferred = [
+    "DebitBalance",
+    "CreditBalance",
+    "EffectiveBalance",
+    "Under",
+    "FyOpeningBalance",
+  ];
+  const picked: string[] = [];
+  for (const col of preferred) {
+    if (columns.includes(col) && col !== primary) picked.push(col);
+  }
+  for (const col of columns) {
+    if (col === primary || picked.includes(col)) continue;
+    if (/^pendingbalance$/i.test(col)) continue;
+    picked.push(col);
+    if (picked.length >= 3) break;
+  }
+  return picked.slice(0, 3);
+}
+
+/** Preferred column order for table/list views; drops stale PendingBalance when Debit/Credit balance is present. */
+export function orderDisplayColumns(
+  columns: string[],
+  rows: Record<string, unknown>[],
+): string[] {
+  const hasAnomalyBalance = columns.some((c) =>
+    /^(DebitBalance|CreditBalance|EffectiveBalance)$/i.test(c),
+  );
+  const pendingAlwaysZero =
+    hasAnomalyBalance
+    && columns.some((c) => /^pendingbalance$/i.test(c))
+    && rows.every((r) => Math.abs(Number(r.PendingBalance ?? r.pendingBalance ?? 0)) < 0.01);
+
+  const preferred = [
+    "LedgerName",
+    "Under",
+    "DebitBalance",
+    "CreditBalance",
+    "EffectiveBalance",
+    "FyOpeningBalance",
+    "Openingbalance",
+    "PendingBalance",
+  ];
+
+  const ordered: string[] = [];
+  for (const col of preferred) {
+    const match = columns.find((c) => c.toLowerCase() === col.toLowerCase());
+    if (!match) continue;
+    if (pendingAlwaysZero && /^pendingbalance$/i.test(match)) continue;
+    if (!ordered.includes(match)) ordered.push(match);
+  }
+  for (const col of columns) {
+    if (ordered.includes(col)) continue;
+    if (pendingAlwaysZero && /^pendingbalance$/i.test(col)) continue;
+    ordered.push(col);
+  }
+  return ordered;
 }
 
 export function hasReorderProgress(columns: string[]): boolean {
@@ -345,7 +416,8 @@ export function getDomainTheme(response: ChatApiResponse, answer?: string): Doma
       icon: "approvals",
     };
   }
-  if (domains.has("warehousestock") || domains.has("warehouse") || objects.includes("warehouse")) {
+  if (domains.has("warehousestock") || domains.has("warehouse") || objects.includes("warehouse")
+      || objects.includes("inventoryitemwarehouse") || objects.includes("itemwisestock")) {
     return {
       label: "Stock & inventory",
       accent: "from-emerald-400 to-teal-500",
@@ -404,6 +476,10 @@ export function userFacingWarning(warning?: string | null): string | null {
 
   if (/stock analysis|STOCK_ANALYSIS|opening.*stale|warehouse\.stkinhand/i.test(warning)) {
     return "Opening/closing stock analysis may not match current warehouse stock due to known ERP data limitations.";
+  }
+
+  if (/creditors with debit balance|debtors with credit balance|debitbalance|creditbalance/i.test(warning)) {
+    return "These are abnormal ledger balances (creditors on debit side / debtors on credit side). Amounts use FY opening balance because ERP pending balance on LedgerMaster is often not updated.";
   }
 
   // Governed / ERP routing notes are for developers — hide from business users.
@@ -485,6 +561,32 @@ export function buildCompactRowSummary(
       ? formatCellValue("AttendanceDate", row.AttendanceDate).text
       : null;
     return date ? `${count} present · ${date}` : `${count} stitchers/sewers present`;
+  }
+
+  if (
+    rows.length > 1
+    && (keys.includes("debitbalance") || keys.includes("creditbalance"))
+    && keys.includes("ledgername")
+  ) {
+    const balanceCol = keys.includes("debitbalance") ? "DebitBalance" : "CreditBalance";
+    const actualCol =
+      Object.keys(rows[0]).find((k) => k.toLowerCase() === balanceCol.toLowerCase()) ?? balanceCol;
+    const total = rows.reduce((sum, r) => sum + (Number(r[actualCol]) || 0), 0);
+    const label = balanceCol === "DebitBalance" ? "debit balance" : "credit balance";
+    const underCol = Object.keys(rows[0]).find((k) => k.toLowerCase() === "under");
+    if (underCol) {
+      const grouped = new Map<string, number>();
+      for (const r of rows) {
+        const g = String(r[underCol] ?? "Other");
+        grouped.set(g, (grouped.get(g) ?? 0) + Math.abs(Number(r[actualCol]) || 0));
+      }
+      const top = [...grouped.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+      const topPart = top
+        .map(([g, v]) => `${g} ${formatCellValue(actualCol, v).text}`)
+        .join(" · ");
+      return `${rows.length} ledgers · ${formatCellValue(actualCol, Math.abs(total)).text} total ${label} · ${topPart}`;
+    }
+    return `${rows.length} ledgers · ${formatCellValue(actualCol, Math.abs(total)).text} total ${label}`;
   }
 
   if (keys.includes("stkinhand")) {

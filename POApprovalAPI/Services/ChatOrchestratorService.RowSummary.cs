@@ -144,6 +144,14 @@ public partial class ChatOrchestratorService
         if (PercentColumnRegex.IsMatch(col)) return -20;
 
         var score = MeasureHintRegex.IsMatch(col) ? 12 : 0;
+        if (col.Equals("DebitBalance", StringComparison.OrdinalIgnoreCase)
+            || col.Equals("CreditBalance", StringComparison.OrdinalIgnoreCase)
+            || col.Equals("EffectiveBalance", StringComparison.OrdinalIgnoreCase))
+            score += 25;
+        if (col.Equals("PendingBalance", StringComparison.OrdinalIgnoreCase)
+            && rows.All(r => Math.Abs(GetRowDecimal(r, col) ?? 0m) < 0.01m)
+            && rows.Any(r => r.ContainsKey("DebitBalance") || r.ContainsKey("CreditBalance")))
+            score -= 30;
         if (Regex.IsMatch(col, @"count|cnt", RegexOptions.IgnoreCase) && !col.Contains("country", StringComparison.OrdinalIgnoreCase))
             score += 6;
 

@@ -22,16 +22,144 @@ public partial class ChatOrchestratorService
                && !m.Contains("ageing") && !m.Contains("analysis report");
     }
 
+    private static bool HasExplicitPlantRmStockIntent(string messageLower) =>
+        messageLower.Contains("plant") || messageLower.Contains("loom") || messageLower.Contains("tape")
+        || messageLower.Contains("lamination") || messageLower.Contains("tfo") || messageLower.Contains("needle")
+        || messageLower.Contains("brrope") || messageLower.Contains("braid") || messageLower.Contains("fcbr");
+
+    private static bool LooksLikeGenericRmWarehouseStockQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (m.Contains("ageing") || m.Contains("aging") || m.Contains("stock analysis") || m.Contains("stockanalysis"))
+            return false;
+        if (!m.Contains("stock")) return false;
+
+        var hasRm = m.Contains("rm stock") || m.Contains("raw material stock")
+            || (Regex.IsMatch(m, @"\brm\b") && m.Contains("stock"));
+        if (!hasRm || HasExplicitPlantRmStockIntent(m)) return false;
+
+        return m.Contains("current") || m.Contains("show") || m.Contains("what is")
+               || m.Contains("how much") || m.Contains("list");
+    }
+
+    private static bool TryBuildRmWarehouseStockSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeGenericRmWarehouseStockQuestion(message)) return false;
+
+        var company = ResolveCompanyForChat(message);
+        if (string.IsNullOrWhiteSpace(company)) return false;
+
+        var companyLit = EscapeSqlLiteral(company);
+        sql = $"""
+            SELECT TOP {MaxReturnRows}
+                warehouse,
+                Deptt,
+                GroupName,
+                SubGroupName,
+                itemcode AS ItemCode,
+                ItemName,
+                ROUND(ISNULL(StkInHand, 0), 2) AS StkInHand,
+                unit
+            FROM vw_inventoryitemwarehouse_all WITH (NOLOCK)
+            WHERE CompanyName = '{companyLit}'
+              AND ISNULL(StkInHand, 0) <> 0
+              AND (
+                  ISNULL(Deptt, '') LIKE '%RM%'
+                  OR ISNULL(GroupName, '') LIKE '%RM%'
+                  OR ISNULL(GroupName, '') LIKE '%Raw%'
+                  OR ISNULL(SubGroupName, '') LIKE '%RM%'
+              )
+            ORDER BY StkInHand DESC
+            """;
+        warning =
+            $"Governed current RM warehouse stock on vw_inventoryitemwarehouse_all for {company} (Deptt/GroupName RM; use loom/tape plant phrasing for sp_Prod_GetRowMaterialStock_*).";
+        return true;
+    }
+
+    /// <summary>
+    /// When sp_Agingreport_SubgroupName returns 0 rows, show FG/SF/RM stock with age from last production or inward.
+    /// </summary>
+    private static bool TryBuildStockGroupAgeingFallbackSql(string message, out string sql, out string warning)
+    {
+        sql = "";
+        warning = "";
+        if (!LooksLikeStockAgeingQuestion(message))
+            return false;
+
+        var company = ResolveCompanyForChat(message);
+        if (string.IsNullOrWhiteSpace(company))
+            return false;
+
+        var group = ResolveStockAgeingGroupName(message);
+        var subgroup = ResolveStockAgeingSubGroupName(message);
+        if (string.IsNullOrWhiteSpace(group) && string.IsNullOrWhiteSpace(subgroup))
+            return false;
+
+        var filters = new List<string>
+        {
+            $"v.CompanyName = '{EscapeSqlLiteral(company)}'",
+            "ISNULL(v.StkInHand, 0) > 0",
+        };
+        if (!string.IsNullOrWhiteSpace(group))
+        {
+            var g = EscapeSqlLiteral(group);
+            filters.Add($"(v.GroupName = '{g}' OR v.Deptt LIKE '%{g}%')");
+        }
+
+        if (!string.IsNullOrWhiteSpace(subgroup))
+            filters.Add($"v.SubGroupName LIKE '%{EscapeSqlLiteral(subgroup)}%'");
+
+        var label = !string.IsNullOrWhiteSpace(group) ? group : subgroup!;
+        sql = $"""
+            SELECT TOP {MaxReturnRows}
+                v.GroupName,
+                v.SubGroupName,
+                v.itemcode AS ItemCode,
+                v.ItemName,
+                v.warehouse,
+                ROUND(ISNULL(v.StkInHand, 0), 2) AS StkInHand,
+                prod.LastProductionDate,
+                inward.LastInwardDate,
+                DATEDIFF(
+                    day,
+                    COALESCE(prod.LastProductionDate, inward.LastInwardDate),
+                    CAST(GETDATE() AS date)) AS StockAgeDays
+            FROM vw_inventoryitemwarehouse_all v WITH (NOLOCK)
+            OUTER APPLY (
+                SELECT MAX(CAST(p.sysdate AS date)) AS LastProductionDate
+                FROM VW_PRODUCTION_EBD_DTL p WITH (NOLOCK)
+                WHERE p.companyname = v.CompanyName
+                  AND p.ItemCode = v.itemcode
+            ) prod
+            OUTER APPLY (
+                SELECT MAX(CAST(si.BillDate AS date)) AS LastInwardDate
+                FROM Vw_StoreInwards si WITH (NOLOCK)
+                WHERE si.CompanyName = v.CompanyName
+                  AND si.ItemCode = v.itemcode
+            ) inward
+            WHERE {string.Join(" AND ", filters)}
+            ORDER BY StockAgeDays DESC, v.StkInHand DESC
+            """;
+        warning =
+            $"Governed {label} stock ageing fallback for {company} (vw_inventoryitemwarehouse_all + last production/inward date; ERP ageing SP returned 0 rows).";
+        return true;
+    }
+
     private static bool LooksLikePlantRmStockQuestion(string message)
     {
         var m = message.ToLowerInvariant();
         if (m.Contains("stock analysis") || m.Contains("stockanalysis")) return false;
+        if ((m.Contains("current") || m.Contains("show me") || m.Contains("show"))
+            && (m.Contains("rm stock") || m.Contains("raw material stock")))
+            return HasExplicitPlantRmStockIntent(m);
+
         return (m.Contains("raw material stock") || m.Contains("rm stock at plant")
-                || m.Contains("loom stock") || m.Contains("tape plant stock")
+                || m.Contains("rm stock") || m.Contains("loom stock") || m.Contains("tape plant stock")
                 || m.Contains("lamination stock") || m.Contains("tfo stock")
                 || m.Contains("needle loom stock") || m.Contains("plant wise rm"))
-               && (m.Contains("plant") || m.Contains("loom") || m.Contains("tape")
-                   || m.Contains("lamination") || m.Contains("tfo") || m.Contains("needle"));
+               && HasExplicitPlantRmStockIntent(m);
     }
 
     private static bool LooksLikeMisReportQuestion(string message)
@@ -163,6 +291,11 @@ public partial class ChatOrchestratorService
         if (m.Contains("needle")) return "sp_Prod_GetRowMaterialStock_NeedleLoom";
         if (m.Contains("brrope") || m.Contains("braid")) return "sp_Prod_GetRowMaterialStock_BRROPE";
         if (m.Contains("fcbr")) return "sp_Prod_GetRowMaterialStock_FCBR";
+        if (m.Contains("loom")) return "sp_Prod_GetRowMaterialStock_Loom";
+
+        var company = ResolveCompanyForChat(message)?.ToLowerInvariant() ?? "";
+        if (company.Contains("woven")) return "sp_Prod_GetRowMaterialStock_Tape";
+
         return "sp_Prod_GetRowMaterialStock_Loom";
     }
 

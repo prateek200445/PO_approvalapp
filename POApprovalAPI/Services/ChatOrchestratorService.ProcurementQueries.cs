@@ -467,8 +467,12 @@ public partial class ChatOrchestratorService
     {
         var m = message.ToLowerInvariant();
         if (m.Contains("import")) return false;
-        return (m.Contains("po") || m.Contains("purchase order"))
-               && (m.Contains("pending") && (m.Contains("mrn") || m.Contains("receipt") || m.Contains("receive")))
+        var pendingReceipt = (m.Contains("po") || m.Contains("purchase order"))
+                             && (m.Contains("not received") || m.Contains("material not received")
+                                 || (m.Contains("issued") && m.Contains("not received")));
+        return pendingReceipt
+               || ((m.Contains("po") || m.Contains("purchase order"))
+                   && (m.Contains("pending") && (m.Contains("mrn") || m.Contains("receipt") || m.Contains("receive"))))
                || m.Contains("pending qty on po")
                || m.Contains("po lines pending");
     }

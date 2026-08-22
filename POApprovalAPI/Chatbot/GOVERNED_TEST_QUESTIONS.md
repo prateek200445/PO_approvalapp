@@ -119,6 +119,7 @@ Pass **all** of these checks:
 |--------|-------------|-------------------|
 | Warehouse stock summary | `sp_WarehouseStockSummry` | Warehouse stock summary for Oswal Extrusion Limited FY 25-26 |
 | Plant RM stock (loom) | `sp_Prod_GetRowMaterialStock_Loom` | Loom plant raw material stock for Oswal Extrusion Limited FY 25-26 |
+| Current RM stock (warehouse) | Yes | `vw_inventoryitemwarehouse_all` Deptt/GroupName RM — e.g. Show me current RM stock for KPW |
 | MIS consolidated | `sp_ac_getMISReportData` | MIS consolidated report for Plastene India Limited FY 25-26 |
 | Top 100 purchased | `sp_top100_items` | Top 100 items purchased stores spares value wise |
 | Auto roll stock | `sp_Auto_RollStock` | Auto roll stock report |
@@ -168,6 +169,13 @@ Pass **all** of these checks:
 
 - Ledger statement for Commercial Bag Company at Plastene Polyfilms Limited
 - Show ledger summary bank reco date for buyer Commercial Bag Company
+
+### Ledger balance as on today (named party)
+**Expected:** `LedgerMaster` (`PendingBalance`, `Openingbalance`; company alias stripped from party)
+
+- Ledger balance as on today for Reliance Industries at KPW
+- Balance as on today for Commercial Bag Company at Plastene Polyfilms Limited
+- Pending balance for Bright Rubber at Oswal Extrusion Limited
 
 ---
 
@@ -579,4 +587,45 @@ Or run individual suites: `eval_mrn.ps1`, `eval_vendor.ps1`, `eval_ops.ps1`, `ev
 
 ---
 
-*Generated for catalog v3.2.0 — Phases 3b through 7 governed plug-ins.*
+*Generated for catalog v3.3.0 — Phases 3b through 7 governed plug-ins + extended MIS/sales/import governance.*
+
+---
+
+## Extended MIS / sales / import (Phase 8)
+
+| Intent | Governed? | Source |
+|--------|-----------|--------|
+| Own vs traded (KPW1) | Yes | `vw_Sales_EBIDTA` FG/Trading Items split |
+| Payment planning (current) | Yes | `Vw_DueDateCashFlow` + `vw_BillPaymentReqDraft` |
+| RM plant stock | Yes (existing) | `sp_Prod_GetRowMaterialStock_*` |
+| Import tracking / data management | Yes | `vw_ImportPurchasewithPOandMRNqty` |
+| Import document upload / Reliance sheet | Yes | `vw_PurchadeOrderImport` (docs) + `vw_reliancepayment` (Reliance) |
+| Power expense month-wise 3 FY | Yes | `AccountVoucherApproval` power/electric `%Expense%` ledgers, Approved+Pending |
+| Freight expense month-wise 6 mo | Yes | `AccountVoucherApproval` `Freight%Expense%` ledgers (Inward/Outward RCM/GST) |
+| Customer sales FC/INR | Yes | `vw_Salesvoucher` by currency |
+| Qty sold RM/SF/FG by period | Yes | `VW_SALES_EBD_DTL` |
+| Top 5 customers SF/FG | Yes | `VW_SALES_EBD_DTL` + `vw_Salesvoucher` |
+| No order since 90/120/180/360 days | Yes | `vw_Salesvoucher` MAX InvDate |
+| Sales / purchase price per kg | Yes | `vw_Sales_EBIDTA` / `vw_Purchase_EBIDTA` |
+| Payment overdue invoices | Yes (existing) | Ageing SPs + export debtors |
+| Country-wise sales | Yes (existing) | `vw_Countrywise_sales_dashboard` |
+| Item-wise production qty | Yes | `VW_PRODUCTION_EBD_DTL` item/group by period |
+| Wastage kg by period | Yes | `vw_FactoryProduction` period rollup |
+| Ledger balance as on today | Yes | `LedgerMaster` named party; `as on today for {party} at {company}` phrasing |
+| Stock item/group / consumption | Partial | stock + StoreOutwards |
+| Stores inventory value | Yes | `WareHouse` Rate×Qty |
+| Most purchased (non-RM) | Yes | `Vw_StoreInwards` qty/value; top-100 also via SP |
+| Most consumed | Yes | `vw_ItemMonthlyInwardOutward` qty; `StoreOutwards` value |
+| Advance license expiring | Yes | `vw_advancelicenecePOSI` IMPexpirtydate |
+| PO issued not received | Yes (existing) | `Vw_PurchaseOrder` / import view |
+| Creditors debit / debtors credit | Yes | `LedgerMaster` anomaly |
+| Representative-wise sales | Yes | qty + value via `VW_SALES_EBD_DTL` |
+| Sales price per kg (period) | Yes | `vw_Sales_EBIDTA` |
+| Import payment tracking | Yes | Combined: `vw_PurchadeOrderImport` + MRN + `vw_AdvanceLicImportPO` + expiry |
+| Import PO not received | Yes | `vw_ImportPurchasewithPOandMRNqty` |
+| Other expense monthly | Yes | `AccountVoucherApproval` by ledger name |
+| All expense heads month-wise | Yes | `AccountVoucherApproval` by `expensegrouphead` + month |
+| Top expense ledgers (period) | Yes | `AccountVoucherApproval` SUM Debit TOP N |
+| FG/SF stock aging | Yes | `sp_Agingreport_SubgroupName*` (+ subgroup retry; SELECT fallback on vw_inventoryitemwarehouse_all) |
+| Exceptional expenses | Yes | `AccountVoucherApproval` month-over-month spike |
+| MIS stock analysis 3 months | Yes | `SP_STOCKANALYSIS_RPT_*` rolling period |

@@ -36,17 +36,84 @@ public class ErpFinanceReportService
     public async Task<ErpSpReportResult> QueryStockAgeingAsync(ErpFinanceReportPlan plan, CancellationToken ct)
     {
         var sp = plan.StockAgeingSp;
-        var table = await RunSpAsync(sp, cmd =>
-        {
-            cmd.Parameters.AddWithValue("@companyname", plan.CompanyName);
-            cmd.Parameters.AddWithValue("@subgroupname", (object?)plan.SubGroupName ?? DBNull.Value);
-        }, ct);
+        var tried = new List<string>();
+        var merged = new List<Dictionary<string, object?>>();
 
-        return CapResult(table, plan, $"""
+        async Task RunOneAsync(string? subgroup)
+        {
+            var table = await RunSpAsync(sp, cmd =>
+            {
+                cmd.Parameters.AddWithValue("@companyname", plan.CompanyName);
+                cmd.Parameters.AddWithValue("@subgroupname", (object?)subgroup ?? DBNull.Value);
+            }, ct);
+            merged.AddRange(DataTableToRows(table));
+            tried.Add(subgroup is null ? "NULL" : $"'{subgroup}'");
+        }
+
+        await RunOneAsync(plan.SubGroupName);
+        if (merged.Count == 0 && string.IsNullOrWhiteSpace(plan.SubGroupName))
+        {
+            var subgroups = await QueryInventorySubGroupsAsync(plan.CompanyName, plan.GroupName, ct);
+            foreach (var sg in subgroups)
+            {
+                if (merged.Count >= plan.MaxRows) break;
+                await RunOneAsync(sg);
+            }
+        }
+
+        var sqlDesc = $"""
             EXEC {sp}
               @companyname='{plan.CompanyName}',
-              @subgroupname={(plan.SubGroupName is null ? "NULL" : $"'{plan.SubGroupName}'")}
-            """, $"ERP inventory/stock ageing ({sp}) for {plan.CompanyName}.");
+              @subgroupname={(plan.SubGroupName is null ? "NULL" : $"'{plan.SubGroupName}'")}{(tried.Count > 1 ? $" (+ retried {tried.Count - 1} subgroup(s): {string.Join(", ", tried.Skip(1))})" : "")}
+            """;
+        var warnPrefix = merged.Count > 0 && tried.Count > 1
+            ? $"ERP inventory/stock ageing ({sp}) for {plan.CompanyName} — tried {tried.Count} subgroup filter(s)."
+            : $"ERP inventory/stock ageing ({sp}) for {plan.CompanyName}.";
+
+        return CapResultFromRows(merged, plan, sqlDesc, warnPrefix);
+    }
+
+    private async Task<List<string>> QueryInventorySubGroupsAsync(
+        string companyName,
+        string? groupName,
+        CancellationToken ct)
+    {
+        var filters = new List<string>
+        {
+            "CompanyName = @company",
+            "ISNULL(StkInHand, 0) > 0",
+            "ISNULL(SubGroupName, '') <> ''",
+        };
+        if (!string.IsNullOrWhiteSpace(groupName))
+            filters.Add("(GroupName = @group OR Deptt LIKE @groupLike)");
+
+        var sql = $"""
+            SELECT DISTINCT TOP 15 SubGroupName
+            FROM vw_inventoryitemwarehouse_all WITH (NOLOCK)
+            WHERE {string.Join(" AND ", filters)}
+            ORDER BY SubGroupName
+            """;
+
+        await using var connection = _database.CreateConnection();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = sql;
+        cmd.CommandTimeout = SpTimeoutSeconds;
+        cmd.Parameters.AddWithValue("@company", companyName);
+        if (!string.IsNullOrWhiteSpace(groupName))
+        {
+            cmd.Parameters.AddWithValue("@group", groupName);
+            cmd.Parameters.AddWithValue("@groupLike", $"%{groupName}%");
+        }
+
+        var list = new List<string>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var sg = reader["SubGroupName"]?.ToString()?.Trim();
+            if (!string.IsNullOrWhiteSpace(sg)) list.Add(sg);
+        }
+
+        return list;
     }
 
     public async Task<ErpSpReportResult> QueryGroupOverdueDaysAsync(ErpFinanceReportPlan plan, CancellationToken ct)
@@ -166,6 +233,16 @@ public class ErpFinanceReportService
         bool sortByTotal = false)
     {
         var allRows = DataTableToRows(table);
+        return CapResultFromRows(allRows, plan, sqlDesc, warnPrefix, sortByTotal);
+    }
+
+    private ErpSpReportResult CapResultFromRows(
+        List<Dictionary<string, object?>> allRows,
+        ErpFinanceReportPlan plan,
+        string sqlDesc,
+        string warnPrefix,
+        bool sortByTotal = false)
+    {
         if (sortByTotal)
             allRows = SortByTotalDesc(allRows);
         var total = allRows.Count;

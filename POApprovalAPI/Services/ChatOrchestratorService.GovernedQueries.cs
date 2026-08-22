@@ -62,6 +62,7 @@ public partial class ChatOrchestratorService
         if (TryBuildVoucherPartySql(message, out sql, out warning)) return true;
         if (TryBuildEditPurchaseOrderSql(message, out sql, out warning)) return true;
         if (TryBuildImportPoMrnPendingSql(message, out sql, out warning)) return true;
+        if (TryBuildExtendedGovernanceSql(message, out sql, out warning)) return true;
         if (TryBuildPurchaseVoucherSql(message, out sql, out warning)) return true;
         if (TryBuildPaymentVoucherSql(message, out sql, out warning)) return true;
         if (TryBuildPaymentReceiptSql(message, out sql, out warning)) return true;
@@ -82,6 +83,7 @@ public partial class ChatOrchestratorService
         if (TryBuildHighValuePoSql(message, out sql, out warning)) return true;
         if (TryBuildSalesInvoiceTaxSql(message, out sql, out warning)) return true;
         if (TryBuildAboveMaxStockSql(message, out sql, out warning)) return true;
+        if (TryBuildRmWarehouseStockSql(message, out sql, out warning)) return true;
         if (TryBuildStockInHandSql(message, out sql, out warning)) return true;
         if (TryBuildStoreIssueByDeptSql(message, out sql, out warning)) return true;
         if (TryBuildInterUnitSalesSql(message, out sql, out warning)) return true;
@@ -1160,6 +1162,8 @@ public partial class ChatOrchestratorService
             return false;
         if (LooksLikeSalesByGroupQuestion(message))
             return false;
+        if (LooksLikeCustomerSalesCurrencyQuestion(message))
+            return false;
 
         var m = message.ToLowerInvariant();
         if (!m.Contains("sales") && !m.Contains("sale"))
@@ -1694,6 +1698,8 @@ public partial class ChatOrchestratorService
     {
         sql = "";
         warning = "";
+        if (LooksLikeInactiveCustomersQuestion(message))
+            return false;
         if (!LooksLikeDayBucketAgeing(message) || !LooksLikeAgeingQuestion(message))
             return false;
 
@@ -1753,6 +1759,8 @@ public partial class ChatOrchestratorService
     {
         sql = "";
         warning = "";
+        if (LooksLikeInactiveCustomersQuestion(message))
+            return false;
         if (!LooksLikeDayBucketAgeing(message) || !LooksLikeAgeingQuestion(message))
             return false;
 
