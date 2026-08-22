@@ -24,6 +24,7 @@ import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
+import { Route as AppDailyProductionRouteImport } from './routes/_app/daily-production'
 import { Route as AppBomRouteImport } from './routes/_app/bom'
 import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
 import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
@@ -107,6 +108,11 @@ const AppDashboardRoute = AppDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDailyProductionRoute = AppDailyProductionRouteImport.update({
+  id: '/daily-production',
+  path: '/daily-production',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBomRoute = AppBomRouteImport.update({
   id: '/bom',
   path: '/bom',
@@ -151,6 +157,7 @@ const AppBomSplatRoute = AppBomSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/bom': typeof AppBomRouteWithChildren
+  '/daily-production': typeof AppDailyProductionRoute
   '/dashboard': typeof AppDashboardRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
@@ -174,6 +181,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/daily-production': typeof AppDailyProductionRoute
   '/dashboard': typeof AppDashboardRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
@@ -200,6 +208,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
   '/_app/bom': typeof AppBomRouteWithChildren
+  '/_app/daily-production': typeof AppDailyProductionRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/_app/history': typeof AppHistoryRoute
@@ -226,6 +235,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/bom'
+    | '/daily-production'
     | '/dashboard'
     | '/export-bill-overdue'
     | '/history'
@@ -249,6 +259,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/daily-production'
     | '/dashboard'
     | '/export-bill-overdue'
     | '/history'
@@ -274,6 +285,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_app'
     | '/_app/bom'
+    | '/_app/daily-production'
     | '/_app/dashboard'
     | '/_app/export-bill-overdue'
     | '/_app/history'
@@ -408,6 +420,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/daily-production': {
+      id: '/_app/daily-production'
+      path: '/daily-production'
+      fullPath: '/daily-production'
+      preLoaderRoute: typeof AppDailyProductionRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/bom': {
       id: '/_app/bom'
       path: '/bom'
@@ -484,6 +503,7 @@ const AppBomRouteWithChildren =
 
 interface AppRouteChildren {
   AppBomRoute: typeof AppBomRouteWithChildren
+  AppDailyProductionRoute: typeof AppDailyProductionRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
   AppHistoryRoute: typeof AppHistoryRoute
@@ -505,6 +525,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppBomRoute: AppBomRouteWithChildren,
+  AppDailyProductionRoute: AppDailyProductionRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
   AppHistoryRoute: AppHistoryRoute,

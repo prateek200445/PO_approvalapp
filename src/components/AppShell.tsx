@@ -12,6 +12,7 @@ import {
   BarChart3,
   FileWarning,
   Layers,
+  Factory,
   PanelLeftClose,
   PanelLeftOpen,
   Hammer,
@@ -34,6 +35,7 @@ type AppPath =
   | "/sales-dashboard"
   | "/ledgers"
   | "/export-bill-overdue"
+  | "/daily-production"
   | "/bom"
   | "/profile";
 
@@ -160,6 +162,12 @@ export function AppShell() {
       icon: FileWarning,
       label: "Export Bill Overdue",
       match: (p) => p.startsWith("/export-bill-overdue"),
+    },
+    {
+      to: "/daily-production",
+      icon: Factory,
+      label: "Daily Production",
+      match: (p) => p.startsWith("/daily-production"),
     },
     { to: "/bom", icon: Layers, label: "BOM Report", match: (p) => p.startsWith("/bom") },
   ];
