@@ -19,10 +19,10 @@ import { Route as AppPendingRouteImport } from './routes/_app/pending'
 import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
 import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
 import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
-import { Route as AppDebtorStatementRouteImport } from './routes/_app/debtor-statement'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
+import { Route as AppDebtorStatementRouteImport } from './routes/_app/debtor-statement'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppBomRouteImport } from './routes/_app/bom'
 import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
@@ -82,11 +82,6 @@ const AppLedgerSummaryRoute = AppLedgerSummaryRouteImport.update({
   path: '/ledger-summary',
   getParentRoute: () => AppRoute,
 } as any)
-const AppDebtorStatementRoute = AppDebtorStatementRouteImport.update({
-  id: '/debtor-statement',
-  path: '/debtor-statement',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppIndentsRoute = AppIndentsRouteImport.update({
   id: '/indents',
   path: '/indents',
@@ -100,6 +95,11 @@ const AppHistoryRoute = AppHistoryRouteImport.update({
 const AppExportBillOverdueRoute = AppExportBillOverdueRouteImport.update({
   id: '/export-bill-overdue',
   path: '/export-bill-overdue',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDebtorStatementRoute = AppDebtorStatementRouteImport.update({
+  id: '/debtor-statement',
+  path: '/debtor-statement',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDashboardRoute = AppDashboardRouteImport.update({
@@ -152,11 +152,11 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/bom': typeof AppBomRouteWithChildren
   '/dashboard': typeof AppDashboardRoute
+  '/debtor-statement': typeof AppDebtorStatementRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/ledger-summary': typeof AppLedgerSummaryRoute
-  '/debtor-statement': typeof AppDebtorStatementRoute
   '/ledgers': typeof AppLedgersRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
@@ -175,11 +175,11 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof AppDashboardRoute
+  '/debtor-statement': typeof AppDebtorStatementRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/ledger-summary': typeof AppLedgerSummaryRoute
-  '/debtor-statement': typeof AppDebtorStatementRoute
   '/ledgers': typeof AppLedgersRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
@@ -201,11 +201,11 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/_app/bom': typeof AppBomRouteWithChildren
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/debtor-statement': typeof AppDebtorStatementRoute
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/_app/history': typeof AppHistoryRoute
   '/_app/indents': typeof AppIndentsRoute
   '/_app/ledger-summary': typeof AppLedgerSummaryRoute
-  '/_app/debtor-statement': typeof AppDebtorStatementRoute
   '/_app/ledgers': typeof AppLedgersRoute
   '/_app/payments': typeof AppPaymentsRoute
   '/_app/pending': typeof AppPendingRoute
@@ -227,11 +227,11 @@ export interface FileRouteTypes {
     | '/'
     | '/bom'
     | '/dashboard'
+    | '/debtor-statement'
     | '/export-bill-overdue'
     | '/history'
     | '/indents'
     | '/ledger-summary'
-    | '/debtor-statement'
     | '/ledgers'
     | '/payments'
     | '/pending'
@@ -250,11 +250,11 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/dashboard'
+    | '/debtor-statement'
     | '/export-bill-overdue'
     | '/history'
     | '/indents'
     | '/ledger-summary'
-    | '/debtor-statement'
     | '/ledgers'
     | '/payments'
     | '/pending'
@@ -275,11 +275,11 @@ export interface FileRouteTypes {
     | '/_app'
     | '/_app/bom'
     | '/_app/dashboard'
+    | '/_app/debtor-statement'
     | '/_app/export-bill-overdue'
     | '/_app/history'
     | '/_app/indents'
     | '/_app/ledger-summary'
-    | '/_app/debtor-statement'
     | '/_app/ledgers'
     | '/_app/payments'
     | '/_app/pending'
@@ -373,13 +373,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppLedgerSummaryRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/debtor-statement': {
-      id: '/_app/debtor-statement'
-      path: '/debtor-statement'
-      fullPath: '/debtor-statement'
-      preLoaderRoute: typeof AppDebtorStatementRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/indents': {
       id: '/_app/indents'
       path: '/indents'
@@ -399,6 +392,13 @@ declare module '@tanstack/react-router' {
       path: '/export-bill-overdue'
       fullPath: '/export-bill-overdue'
       preLoaderRoute: typeof AppExportBillOverdueRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/debtor-statement': {
+      id: '/_app/debtor-statement'
+      path: '/debtor-statement'
+      fullPath: '/debtor-statement'
+      preLoaderRoute: typeof AppDebtorStatementRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/dashboard': {
@@ -485,11 +485,11 @@ const AppBomRouteWithChildren =
 interface AppRouteChildren {
   AppBomRoute: typeof AppBomRouteWithChildren
   AppDashboardRoute: typeof AppDashboardRoute
+  AppDebtorStatementRoute: typeof AppDebtorStatementRoute
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
   AppHistoryRoute: typeof AppHistoryRoute
   AppIndentsRoute: typeof AppIndentsRoute
   AppLedgerSummaryRoute: typeof AppLedgerSummaryRoute
-  AppDebtorStatementRoute: typeof AppDebtorStatementRoute
   AppLedgersRoute: typeof AppLedgersRoute
   AppPaymentsRoute: typeof AppPaymentsRoute
   AppPendingRoute: typeof AppPendingRoute
@@ -506,11 +506,11 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppBomRoute: AppBomRouteWithChildren,
   AppDashboardRoute: AppDashboardRoute,
+  AppDebtorStatementRoute: AppDebtorStatementRoute,
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
   AppHistoryRoute: AppHistoryRoute,
   AppIndentsRoute: AppIndentsRoute,
   AppLedgerSummaryRoute: AppLedgerSummaryRoute,
-  AppDebtorStatementRoute: AppDebtorStatementRoute,
   AppLedgersRoute: AppLedgersRoute,
   AppPaymentsRoute: AppPaymentsRoute,
   AppPendingRoute: AppPendingRoute,
