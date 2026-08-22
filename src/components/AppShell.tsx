@@ -257,7 +257,7 @@ export function AppShell() {
         fullScreenReport && "flex h-dvh max-h-dvh flex-col overflow-hidden",
       )}
     >
-      <header className="app-glass sticky top-0 z-30 border-b md:hidden">
+      <header className="app-glass sticky top-0 z-30 border-b pt-[env(safe-area-inset-top,0px)] md:hidden">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-3">
           <div className="flex min-w-0 items-center gap-2">
             <button
@@ -314,7 +314,7 @@ export function AppShell() {
       >
         <aside
           className={cn(
-            "app-sidebar-3d fixed inset-y-0 left-0 z-40 hidden flex-col border-r transition-[width] duration-300 ease-in-out md:flex",
+            "app-sidebar-3d fixed inset-y-0 left-0 z-40 hidden flex-col border-r pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] transition-[width] duration-300 ease-in-out md:flex",
             sidebarCollapsed ? "w-[4.5rem]" : "w-64",
           )}
         >
@@ -450,7 +450,7 @@ export function AppShell() {
       <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
         <SheetContent
           side="left"
-          className="app-sidebar-3d flex w-[min(18.5rem,88vw)] flex-col gap-0 p-0 sm:max-w-none md:hidden"
+          className="app-sidebar-3d flex w-[min(18.5rem,88vw)] flex-col gap-0 p-0 pt-[env(safe-area-inset-top,0px)] sm:max-w-none md:hidden"
         >
           <SheetHeader className="border-b border-border px-4 py-4 pr-12 text-left">
             <SheetTitle className="flex items-center gap-3 text-base font-semibold">

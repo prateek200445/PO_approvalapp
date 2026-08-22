@@ -30,6 +30,7 @@ import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
 import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
 import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
 import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
+import { Route as AppIntercompanySettlementRouteImport } from './routes/_app/intercompany.settlement'
 import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
 import { Route as AppBomCustomersRouteImport } from './routes/_app/bom.customers'
 import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
@@ -138,6 +139,12 @@ const AppPaymentPaymentNoRoute = AppPaymentPaymentNoRouteImport.update({
   path: '/payment/$paymentNo',
   getParentRoute: () => AppRoute,
 } as any)
+const AppIntercompanySettlementRoute =
+  AppIntercompanySettlementRouteImport.update({
+    id: '/settlement',
+    path: '/settlement',
+    getParentRoute: () => AppIntercompanyRoute,
+  } as any)
 const AppIndentIndentNoRoute = AppIndentIndentNoRouteImport.update({
   id: '/indent/$indentNo',
   path: '/indent/$indentNo',
@@ -162,7 +169,7 @@ export interface FileRoutesByFullPath {
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
-  '/intercompany': typeof AppIntercompanyRoute
+  '/intercompany': typeof AppIntercompanyRouteWithChildren
   '/ledger-summary': typeof AppLedgerSummaryRoute
   '/ledgers': typeof AppLedgersRoute
   '/payments': typeof AppPaymentsRoute
@@ -174,6 +181,7 @@ export interface FileRoutesByFullPath {
   '/bom/$': typeof AppBomSplatRoute
   '/bom/customers': typeof AppBomCustomersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
+  '/intercompany/settlement': typeof AppIntercompanySettlementRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
@@ -186,7 +194,7 @@ export interface FileRoutesByTo {
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
-  '/intercompany': typeof AppIntercompanyRoute
+  '/intercompany': typeof AppIntercompanyRouteWithChildren
   '/ledger-summary': typeof AppLedgerSummaryRoute
   '/ledgers': typeof AppLedgersRoute
   '/payments': typeof AppPaymentsRoute
@@ -198,6 +206,7 @@ export interface FileRoutesByTo {
   '/bom/$': typeof AppBomSplatRoute
   '/bom/customers': typeof AppBomCustomersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
+  '/intercompany/settlement': typeof AppIntercompanySettlementRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
@@ -213,7 +222,7 @@ export interface FileRoutesById {
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/_app/history': typeof AppHistoryRoute
   '/_app/indents': typeof AppIndentsRoute
-  '/_app/intercompany': typeof AppIntercompanyRoute
+  '/_app/intercompany': typeof AppIntercompanyRouteWithChildren
   '/_app/ledger-summary': typeof AppLedgerSummaryRoute
   '/_app/ledgers': typeof AppLedgersRoute
   '/_app/payments': typeof AppPaymentsRoute
@@ -225,6 +234,7 @@ export interface FileRoutesById {
   '/_app/bom/$': typeof AppBomSplatRoute
   '/_app/bom/customers': typeof AppBomCustomersRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
+  '/_app/intercompany/settlement': typeof AppIntercompanySettlementRoute
   '/_app/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/_app/po/$poNo': typeof AppPoPoNoRoute
   '/_app/workorder/$poNo': typeof AppWorkorderPoNoRoute
@@ -252,6 +262,7 @@ export interface FileRouteTypes {
     | '/bom/$'
     | '/bom/customers'
     | '/indent/$indentNo'
+    | '/intercompany/settlement'
     | '/payment/$paymentNo'
     | '/po/$poNo'
     | '/workorder/$poNo'
@@ -276,6 +287,7 @@ export interface FileRouteTypes {
     | '/bom/$'
     | '/bom/customers'
     | '/indent/$indentNo'
+    | '/intercompany/settlement'
     | '/payment/$paymentNo'
     | '/po/$poNo'
     | '/workorder/$poNo'
@@ -302,6 +314,7 @@ export interface FileRouteTypes {
     | '/_app/bom/$'
     | '/_app/bom/customers'
     | '/_app/indent/$indentNo'
+    | '/_app/intercompany/settlement'
     | '/_app/payment/$paymentNo'
     | '/_app/po/$poNo'
     | '/_app/workorder/$poNo'
@@ -462,6 +475,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppPaymentPaymentNoRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/intercompany/settlement': {
+      id: '/_app/intercompany/settlement'
+      path: '/settlement'
+      fullPath: '/intercompany/settlement'
+      preLoaderRoute: typeof AppIntercompanySettlementRouteImport
+      parentRoute: typeof AppIntercompanyRoute
+    }
     '/_app/indent/$indentNo': {
       id: '/_app/indent/$indentNo'
       path: '/indent/$indentNo'
@@ -501,6 +521,18 @@ const AppBomRouteChildren: AppBomRouteChildren = {
 const AppBomRouteWithChildren =
   AppBomRoute._addFileChildren(AppBomRouteChildren)
 
+interface AppIntercompanyRouteChildren {
+  AppIntercompanySettlementRoute: typeof AppIntercompanySettlementRoute
+}
+
+const AppIntercompanyRouteChildren: AppIntercompanyRouteChildren = {
+  AppIntercompanySettlementRoute: AppIntercompanySettlementRoute,
+}
+
+const AppIntercompanyRouteWithChildren = AppIntercompanyRoute._addFileChildren(
+  AppIntercompanyRouteChildren,
+)
+
 interface AppRouteChildren {
   AppBomRoute: typeof AppBomRouteWithChildren
   AppDailyProductionRoute: typeof AppDailyProductionRoute
@@ -508,7 +540,7 @@ interface AppRouteChildren {
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
   AppHistoryRoute: typeof AppHistoryRoute
   AppIndentsRoute: typeof AppIndentsRoute
-  AppIntercompanyRoute: typeof AppIntercompanyRoute
+  AppIntercompanyRoute: typeof AppIntercompanyRouteWithChildren
   AppLedgerSummaryRoute: typeof AppLedgerSummaryRoute
   AppLedgersRoute: typeof AppLedgersRoute
   AppPaymentsRoute: typeof AppPaymentsRoute
@@ -530,7 +562,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
   AppHistoryRoute: AppHistoryRoute,
   AppIndentsRoute: AppIndentsRoute,
-  AppIntercompanyRoute: AppIntercompanyRoute,
+  AppIntercompanyRoute: AppIntercompanyRouteWithChildren,
   AppLedgerSummaryRoute: AppLedgerSummaryRoute,
   AppLedgersRoute: AppLedgersRoute,
   AppPaymentsRoute: AppPaymentsRoute,
