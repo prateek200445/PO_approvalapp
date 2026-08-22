@@ -69,9 +69,10 @@ function DailyProductionPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Daily Production</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          Upload the Daily Production workbook. Process looks up ERP sales price (
-          <span className="font-medium text-foreground">Rate</span> on marketing invoice, matched by{" "}
-          <span className="font-medium text-foreground">ICO#</span>) and returns the same file with Sales
+          Upload the Daily Production workbook. Process looks up ERP sales price by{" "}
+          <span className="font-medium text-foreground">ICO#</span>, converts it to{" "}
+          <span className="font-medium text-foreground">INR</span> using RBI forex for{" "}
+          <span className="font-medium text-foreground">today (upload date)</span>, and writes Sales
           Price, Currency, and Sales Value on the production tab.
         </p>
       </div>
@@ -111,7 +112,7 @@ function DailyProductionPage() {
 
       {summary ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Stat label="Production rows" value={formatQty(summary.productionRows)} />
             <Stat
               label="ICOs priced"
@@ -119,17 +120,36 @@ function DailyProductionPage() {
             />
             <Stat label="Total pcs" value={formatQty(summary.totalPcs)} />
             <Stat label="Total kg" value={formatQty(summary.totalKgs, 1)} />
+            <Stat label="Sales value (INR)" value={`₹ ${formatMoney(summary.totalSalesValueInr)}`} />
           </div>
+
+          {summary.fx ? (
+            <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+              <h2 className="text-sm font-semibold">Forex used (INR)</h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Converted as of {summary.fx.asOf}
+                {summary.fx.rateFrom ? ` · RBI row from ${summary.fx.rateFrom}` : ""}
+                {summary.fx.rateTo ? ` to ${summary.fx.rateTo}` : ""}
+                {summary.fx.usedFallback ? " · no row for today, used latest earlier rate" : ""}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <FxPill label="USD" value={summary.fx.dollar} />
+                <FxPill label="EUR" value={summary.fx.euro} />
+                <FxPill label="GBP" value={summary.fx.pound} />
+                <FxPill label="CHF" value={summary.fx.chf} />
+              </div>
+            </div>
+          ) : null}
 
           {summary.currencyTotals.length > 0 ? (
             <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-              <h2 className="text-sm font-semibold">Sales value by currency</h2>
-              <p className="mt-1 text-xs text-muted-foreground">Do not add USD, GBP, and INR together.</p>
+              <h2 className="text-sm font-semibold">Sales value (INR)</h2>
+              <p className="mt-1 text-xs text-muted-foreground">All invoice currencies converted to INR.</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {summary.currencyTotals.map((c) => (
                   <div key={c.currency} className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-sm">
                     <div className="text-xs text-muted-foreground">{c.currency}</div>
-                    <div className="font-semibold tabular-nums">{formatMoney(c.salesValue)}</div>
+                    <div className="font-semibold tabular-nums">₹ {formatMoney(c.salesValue)}</div>
                   </div>
                 ))}
               </div>
@@ -147,7 +167,7 @@ function DailyProductionPage() {
             </div>
           ) : null}
 
-          <Section title="By line" subtitle="Which sewing line is filled with higher- vs lower-value bags.">
+          <Section title="By line" subtitle="Sewing-line totals in INR, so lines can be compared.">
             <table className="w-full min-w-[640px] text-left text-sm">
               <thead className="text-xs text-muted-foreground">
                 <tr>
@@ -204,7 +224,10 @@ function DailyProductionPage() {
             </table>
           </Section>
 
-          <Section title="Highest value per kg" subtitle="Priced ICOs ranked by sales value / kg (invoice currency).">
+          <Section
+            title="Highest value per kg"
+            subtitle="Priced ICOs ranked by INR sales value / kg."
+          >
             <IcoTable rows={topIcos} />
           </Section>
 
@@ -271,7 +294,16 @@ function Section({
 
 function formatCurrencies(items: DailyProductionCurrencyTotal[]): string {
   if (!items.length) return "—";
-  return items.map((c) => `${c.currency} ${formatMoney(c.salesValue)}`).join(" · ");
+  return items.map((c) => `₹ ${formatMoney(c.salesValue)}`).join(" · ");
+}
+
+function FxPill({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-border bg-secondary/40 px-3 py-2 text-sm">
+      <div className="text-xs text-muted-foreground">1 {label}</div>
+      <div className="font-semibold tabular-nums">₹ {formatMoney(value)}</div>
+    </div>
+  );
 }
 
 function IcoTable({
@@ -291,8 +323,9 @@ function IcoTable({
           <th className="px-3 py-2 font-medium">Line</th>
           <th className="px-3 py-2 font-medium">kg/pc</th>
           <th className="px-3 py-2 font-medium">Pcs</th>
-          <th className="px-3 py-2 font-medium">Price</th>
-          <th className="px-3 py-2 font-medium">Value / kg</th>
+          <th className="px-3 py-2 font-medium">Price (INR)</th>
+          <th className="px-3 py-2 font-medium">ERP rate</th>
+          <th className="px-3 py-2 font-medium">Value / kg (INR)</th>
         </tr>
       </thead>
       <tbody>
@@ -304,10 +337,15 @@ function IcoTable({
             <td className="px-3 py-2 tabular-nums">{row.weightPerPc ? formatQty(row.weightPerPc, 3) : "—"}</td>
             <td className="px-3 py-2 tabular-nums">{formatQty(row.pcs)}</td>
             <td className="px-3 py-2 tabular-nums">
-              {row.priced ? `${row.currency} ${formatMoney(row.salesPrice)}` : "—"}
+              {row.priced ? `₹ ${formatMoney(row.salesPrice)}` : "—"}
+            </td>
+            <td className="px-3 py-2 tabular-nums text-muted-foreground">
+              {row.priced && row.originalCurrency
+                ? `${row.originalCurrency} ${formatMoney(row.originalPrice)}`
+                : "—"}
             </td>
             <td className="px-3 py-2 tabular-nums">
-              {row.priced ? `${row.currency} ${formatMoney(row.valuePerKg)}` : "—"}
+              {row.priced ? `₹ ${formatMoney(row.valuePerKg)}` : "—"}
             </td>
           </tr>
         ))}

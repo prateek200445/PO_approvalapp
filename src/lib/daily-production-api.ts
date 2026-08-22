@@ -36,6 +36,8 @@ export type DailyProductionIcoRow = {
   weightPerPc: number;
   salesPrice: number | null;
   currency: string;
+  originalPrice: number | null;
+  originalCurrency: string;
   salesValue: number | null;
   valuePerKg: number | null;
   priced: boolean;
@@ -48,6 +50,17 @@ export type DailyProductionUnpricedRow = {
   pcs: number;
 };
 
+export type DailyProductionFxInfo = {
+  asOf: string;
+  rateFrom: string;
+  rateTo: string;
+  usedFallback: boolean;
+  dollar: number;
+  euro: number;
+  pound: number;
+  chf: number;
+};
+
 export type DailyProductionSummary = {
   productionRows: number;
   uniqueIcoCount: number;
@@ -56,6 +69,8 @@ export type DailyProductionSummary = {
   unpricedRowCount: number;
   totalPcs: number;
   totalKgs: number;
+  totalSalesValueInr: number;
+  fx: DailyProductionFxInfo | null;
   currencyTotals: DailyProductionCurrencyTotal[];
   byLine: DailyProductionLineRow[];
   byWeightBand: DailyProductionBandRow[];
@@ -102,6 +117,21 @@ function nullableNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function mapFx(raw: unknown): DailyProductionFxInfo | null {
+  if (raw == null || typeof raw !== "object") return null;
+  const row = raw as Record<string, unknown>;
+  return {
+    asOf: str(row.asOf ?? row.AsOf),
+    rateFrom: str(row.rateFrom ?? row.RateFrom),
+    rateTo: str(row.rateTo ?? row.RateTo),
+    usedFallback: Boolean(row.usedFallback ?? row.UsedFallback),
+    dollar: num(row.dollar ?? row.Dollar),
+    euro: num(row.euro ?? row.Euro),
+    pound: num(row.pound ?? row.Pound),
+    chf: num(row.chf ?? row.Chf ?? row.CHF),
+  };
+}
+
 function mapCurrency(raw: unknown): DailyProductionCurrencyTotal {
   const row = (raw ?? {}) as Record<string, unknown>;
   return {
@@ -127,6 +157,8 @@ function mapSummary(raw: unknown): DailyProductionSummary {
     unpricedRowCount: num(s.unpricedRowCount ?? s.UnpricedRowCount),
     totalPcs: num(s.totalPcs ?? s.TotalPcs),
     totalKgs: num(s.totalKgs ?? s.TotalKgs),
+    totalSalesValueInr: num(s.totalSalesValueInr ?? s.TotalSalesValueInr),
+    fx: mapFx(s.fx ?? s.Fx),
     currencyTotals: ((s.currencyTotals ?? s.CurrencyTotals ?? []) as unknown[]).map(mapCurrency),
     byLine: byLine.map((item) => {
       const row = item as Record<string, unknown>;
@@ -163,6 +195,8 @@ function mapSummary(raw: unknown): DailyProductionSummary {
         weightPerPc: num(row.weightPerPc ?? row.WeightPerPc),
         salesPrice: nullableNum(row.salesPrice ?? row.SalesPrice),
         currency: str(row.currency ?? row.Currency),
+        originalPrice: nullableNum(row.originalPrice ?? row.OriginalPrice),
+        originalCurrency: str(row.originalCurrency ?? row.OriginalCurrency),
         salesValue: nullableNum(row.salesValue ?? row.SalesValue),
         valuePerKg: nullableNum(row.valuePerKg ?? row.ValuePerKg),
         priced: Boolean(row.priced ?? row.Priced),
