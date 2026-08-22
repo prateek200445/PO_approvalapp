@@ -183,7 +183,8 @@ export function AppShell() {
         p.startsWith("/ledgers") ||
         p.startsWith("/ledger-summary") ||
         p.startsWith("/reconciliation") ||
-        p.startsWith("/intercompany"),
+        p.startsWith("/intercompany") ||
+        p.startsWith("/pnl"),
     },
     {
       to: "/export-bill-overdue",

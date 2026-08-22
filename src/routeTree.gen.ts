@@ -19,6 +19,7 @@ import { Route as AppPendingRouteImport } from './routes/_app/pending'
 import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
 import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
 import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
+import { Route as AppPnlRouteImport } from './routes/_app/pnl'
 import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
@@ -85,6 +86,11 @@ const AppLedgersRoute = AppLedgersRouteImport.update({
 const AppLedgerSummaryRoute = AppLedgerSummaryRouteImport.update({
   id: '/ledger-summary',
   path: '/ledger-summary',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPnlRoute = AppPnlRouteImport.update({
+  id: '/pnl',
+  path: '/pnl',
   getParentRoute: () => AppRoute,
 } as any)
 const AppIntercompanyRoute = AppIntercompanyRouteImport.update({
@@ -193,6 +199,7 @@ export interface FileRoutesByFullPath {
   '/intercompany': typeof AppIntercompanyRouteWithChildren
   '/ledger-summary': typeof AppLedgerSummaryRoute
   '/ledgers': typeof AppLedgersRoute
+  '/pnl': typeof AppPnlRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
   '/profile': typeof AppProfileRoute
@@ -221,6 +228,7 @@ export interface FileRoutesByTo {
   '/intercompany': typeof AppIntercompanyRouteWithChildren
   '/ledger-summary': typeof AppLedgerSummaryRoute
   '/ledgers': typeof AppLedgersRoute
+  '/pnl': typeof AppPnlRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
   '/profile': typeof AppProfileRoute
@@ -252,6 +260,7 @@ export interface FileRoutesById {
   '/_app/intercompany': typeof AppIntercompanyRouteWithChildren
   '/_app/ledger-summary': typeof AppLedgerSummaryRoute
   '/_app/ledgers': typeof AppLedgersRoute
+  '/_app/pnl': typeof AppPnlRoute
   '/_app/payments': typeof AppPaymentsRoute
   '/_app/pending': typeof AppPendingRoute
   '/_app/profile': typeof AppProfileRoute
@@ -283,6 +292,7 @@ export interface FileRouteTypes {
     | '/intercompany'
     | '/ledger-summary'
     | '/ledgers'
+    | '/pnl'
     | '/payments'
     | '/pending'
     | '/profile'
@@ -311,6 +321,7 @@ export interface FileRouteTypes {
     | '/intercompany'
     | '/ledger-summary'
     | '/ledgers'
+    | '/pnl'
     | '/payments'
     | '/pending'
     | '/profile'
@@ -341,6 +352,7 @@ export interface FileRouteTypes {
     | '/_app/intercompany'
     | '/_app/ledger-summary'
     | '/_app/ledgers'
+    | '/_app/pnl'
     | '/_app/payments'
     | '/_app/pending'
     | '/_app/profile'
@@ -433,6 +445,13 @@ declare module '@tanstack/react-router' {
       path: '/ledger-summary'
       fullPath: '/ledger-summary'
       preLoaderRoute: typeof AppLedgerSummaryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pnl': {
+      id: '/_app/pnl'
+      path: '/pnl'
+      fullPath: '/pnl'
+      preLoaderRoute: typeof AppPnlRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/intercompany': {
@@ -603,6 +622,7 @@ interface AppRouteChildren {
   AppIntercompanyRoute: typeof AppIntercompanyRouteWithChildren
   AppLedgerSummaryRoute: typeof AppLedgerSummaryRoute
   AppLedgersRoute: typeof AppLedgersRoute
+  AppPnlRoute: typeof AppPnlRoute
   AppPaymentsRoute: typeof AppPaymentsRoute
   AppPendingRoute: typeof AppPendingRoute
   AppProfileRoute: typeof AppProfileRoute
@@ -628,6 +648,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIntercompanyRoute: AppIntercompanyRouteWithChildren,
   AppLedgerSummaryRoute: AppLedgerSummaryRoute,
   AppLedgersRoute: AppLedgersRoute,
+  AppPnlRoute: AppPnlRoute,
   AppPaymentsRoute: AppPaymentsRoute,
   AppPendingRoute: AppPendingRoute,
   AppProfileRoute: AppProfileRoute,
