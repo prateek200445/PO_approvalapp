@@ -36,6 +36,7 @@ function PendingList() {
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
   const [bulkRemarks, setBulkRemarks] = useState("");
   const [isBulkApproving, setIsBulkApproving] = useState(false);
+  const [isTouchSelecting, setIsTouchSelecting] = useState(false);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -264,6 +265,7 @@ function PendingList() {
       gesture.active = false;
       gesture.dragging = false;
       gesture.touchId = null;
+      setIsTouchSelecting(false);
     }
 
     window.addEventListener("touchmove", onTouchMove, { passive: false });
@@ -276,6 +278,20 @@ function PendingList() {
       window.removeEventListener("touchcancel", resetGesture);
     };
   }, [selectMode]);
+
+  useEffect(() => {
+    if (!isTouchSelecting) return;
+
+    const bodyOverflow = document.body.style.overflow;
+    const htmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = bodyOverflow;
+      document.documentElement.style.overflow = htmlOverflow;
+    };
+  }, [isTouchSelecting]);
 
   function startSwipeSelection(transId: number, event: ReactTouchEvent<HTMLButtonElement>) {
     if (!selectMode) return;
@@ -303,6 +319,7 @@ function PendingList() {
       current.suppressNextClick = true;
       current.pressTimer = null;
       selectOne(transId);
+      setIsTouchSelecting(true);
     }, 180);
   }
 
@@ -339,6 +356,7 @@ function PendingList() {
       gesture.active = false;
       gesture.dragging = false;
       gesture.touchId = null;
+      setIsTouchSelecting(false);
     }
   }
 
