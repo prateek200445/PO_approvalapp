@@ -201,6 +201,15 @@ function PendingList() {
     });
   }
 
+  function getCardIdFromPoint(event: ReactPointerEvent<HTMLButtonElement>) {
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const card = element?.closest<HTMLElement>("[data-po-select-id]");
+    if (!card) return null;
+
+    const id = Number(card.dataset.poSelectId);
+    return Number.isFinite(id) ? id : null;
+  }
+
   function startSwipeSelection(_transId: number, event: ReactPointerEvent<HTMLButtonElement>) {
     if (!selectMode || event.pointerType === "mouse") return;
 
@@ -243,7 +252,7 @@ function PendingList() {
     }
 
     gesture.suppressNextClick = true;
-    selectOne(transId);
+    selectOne(getCardIdFromPoint(event) ?? transId);
   }
 
   function endSwipeSelection(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -502,6 +511,7 @@ function PendingList() {
                 <button
                   key={`${p.PoNo}-${transId}`}
                   type="button"
+                  data-po-select-id={transId}
                   disabled={!canSelect}
                   onPointerDown={(event) => startSwipeSelection(transId, event)}
                   onPointerMove={(event) => extendSwipeSelection(transId, event)}
