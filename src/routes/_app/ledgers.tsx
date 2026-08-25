@@ -21,7 +21,7 @@ function LedgersHubPage() {
           to="/pnl"
           icon={LineChart}
           title="P&L / EBITDA"
-          description="Income and expense from trial balance, enter provision and stock value, then generate P&L."
+          description="Income and expense from trial balance, enter provision, stock, and Common / HO, then generate P&L."
         />
         <HubCard
           to="/ledger-summary"

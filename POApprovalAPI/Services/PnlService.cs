@@ -379,6 +379,106 @@ WHERE LTRIM(RTRIM(CompanyName)) = @Company
         }
     }
 
+    public async Task<PnlOverheadState> GetOverheadAsync(string company, DateTime monthStart)
+    {
+        if (IsAggregate(company))
+            throw new ArgumentException("Pick a single company to enter Common / HO expenses.");
+
+        var companyName = (await ResolveCompaniesAsync(company)).First();
+        await EnsureOverheadTableAsync();
+        using var connection = _database.CreateConnection();
+        var row = await connection.QueryFirstOrDefaultAsync<(double CommonLacs, double HoLacs)>(@"
+SELECT CommonLacs, HoLacs
+FROM AppPnlOverhead WITH (NOLOCK)
+WHERE LTRIM(RTRIM(CompanyName)) = @Company AND OverheadMonth = @Month",
+            new { Company = companyName, Month = monthStart });
+
+        return new PnlOverheadState
+        {
+            Company = companyName,
+            Month = monthStart.ToString("yyyy-MM"),
+            CommonLacs = row.CommonLacs,
+            HoLacs = row.HoLacs,
+        };
+    }
+
+    public async Task SaveOverheadAsync(PnlOverheadSaveRequest request)
+    {
+        if (IsAggregate(request.Company))
+            throw new ArgumentException("Pick a single company to save Common / HO expenses.");
+
+        var monthStart = ParseMonth(request.Month);
+        var companyName = (await ResolveCompaniesAsync(request.Company)).First();
+        await EnsureOverheadTableAsync();
+        using var connection = _database.CreateConnection();
+        await connection.ExecuteAsync(@"
+IF EXISTS (
+    SELECT 1 FROM AppPnlOverhead
+    WHERE CompanyName = @Company AND OverheadMonth = @Month
+)
+    UPDATE AppPnlOverhead
+    SET CommonLacs = @Common, HoLacs = @Ho, UpdatedAt = GETDATE()
+    WHERE CompanyName = @Company AND OverheadMonth = @Month
+ELSE
+    INSERT INTO AppPnlOverhead (CompanyName, OverheadMonth, CommonLacs, HoLacs, UpdatedAt)
+    VALUES (@Company, @Month, @Common, @Ho, GETDATE())",
+            new
+            {
+                Company = companyName,
+                Month = monthStart,
+                Common = request.CommonLacs,
+                Ho = request.HoLacs,
+            });
+    }
+
+    private async Task<OverheadBits> SumOverheadAsync(
+        IReadOnlyList<string> companies,
+        DateTime fromMonth,
+        DateTime toMonth)
+    {
+        await EnsureOverheadTableAsync();
+        var allCompanies = companies.Count == 0;
+        var companyFilter = allCompanies ? new List<string> { "__none__" } : companies.ToList();
+        using var connection = _database.CreateConnection();
+        var row = await connection.QuerySingleAsync<(double CommonLacs, double HoLacs)>(@"
+SELECT
+    ISNULL(SUM(CommonLacs), 0) AS CommonLacs,
+    ISNULL(SUM(HoLacs), 0) AS HoLacs
+FROM AppPnlOverhead WITH (NOLOCK)
+WHERE OverheadMonth >= @FromMonth AND OverheadMonth <= @ToMonth
+  AND (@AllCompanies = 1 OR LTRIM(RTRIM(CompanyName)) IN @Companies)",
+            new
+            {
+                FromMonth = fromMonth.Date,
+                ToMonth = toMonth.Date,
+                AllCompanies = allCompanies ? 1 : 0,
+                Companies = companyFilter,
+            });
+        return new OverheadBits
+        {
+            Common = row.CommonLacs * Lacs,
+            Ho = row.HoLacs * Lacs,
+        };
+    }
+
+    private async Task EnsureOverheadTableAsync()
+    {
+        using var connection = _database.CreateConnection();
+        await connection.ExecuteAsync(@"
+IF OBJECT_ID(N'dbo.AppPnlOverhead', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.AppPnlOverhead (
+        Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        CompanyName VARCHAR(150) NOT NULL,
+        OverheadMonth DATE NOT NULL,
+        CommonLacs FLOAT NOT NULL CONSTRAINT DF_AppPnlOverhead_Common DEFAULT (0),
+        HoLacs FLOAT NOT NULL CONSTRAINT DF_AppPnlOverhead_Ho DEFAULT (0),
+        UpdatedAt DATETIME NOT NULL CONSTRAINT DF_AppPnlOverhead_Updated DEFAULT (GETDATE()),
+        CONSTRAINT UQ_AppPnlOverhead UNIQUE (CompanyName, OverheadMonth)
+    );
+END");
+    }
+
     private static int FyStartYear(DateTime month) => month.Month >= 4 ? month.Year : month.Year - 1;
 
     private static List<DateTime> FyMonths(int fyStart) =>
@@ -437,8 +537,11 @@ WHERE LTRIM(RTRIM(CompanyName)) = @Company
             }).ToList(),
         }, useYtdOpening: true);
 
+        var monthOh = await SumOverheadAsync(companies, monthStart, monthStart);
+        var ytdOh = await SumOverheadAsync(companies, ytdFrom, monthStart);
+
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var rows = BuildTemplate(monthHeads, ytdHeads, monthComputed, ytdComputed, used);
+        var rows = BuildTemplate(monthHeads, ytdHeads, monthComputed, ytdComputed, monthOh, ytdOh, used);
 
         var unmapped = monthHeads
             .Where(kv => !used.Contains(kv.Key) && !IsPurchaseFeed(kv.Key) && Math.Abs(kv.Value) > 0.5)
@@ -630,7 +733,15 @@ ELSE
     {
         return rows
             .GroupBy(r => CanonHead(r.Head), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.Amount), StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(g => g.Key, g => g.Sum(PnlSignedAmount), StringComparer.OrdinalIgnoreCase);
+    }
+
+    // TB credits are negative; P&L shows income as positive (Excel style). Expense sign is unchanged.
+    private static double PnlSignedAmount(BookRow row)
+    {
+        if (row.Category.Equals("Income", StringComparison.OrdinalIgnoreCase))
+            return -row.Amount;
+        return row.Amount;
     }
 
     private static InventoryBits ComputeInventory(
@@ -700,6 +811,8 @@ ELSE
         Dictionary<string, double> ytd,
         InventoryBits monthInv,
         InventoryBits ytdInv,
+        OverheadBits ohMonth,
+        OverheadBits ohYtd,
         HashSet<string> used)
     {
         double Line(string name)
@@ -813,9 +926,13 @@ ELSE
         L("miscExp", "Miscellaneous Expense");
         L("oadm", "Other Administrative Expenses");
         L("fx", "Exchange Rate Difference");
+        C("common", "Common Expenses", ohMonth.Common, ohYtd.Common);
+        C("ho", "HO Expenses", ohMonth.Ho, ohYtd.Ho);
         T("adminTotal", "Total Administrative Expenses",
-            Val(built, "ins") + Val(built, "miscExp") + Val(built, "oadm") + Val(built, "fx"),
-            YtdVal(built, "ins") + YtdVal(built, "miscExp") + YtdVal(built, "oadm") + YtdVal(built, "fx"));
+            Val(built, "ins") + Val(built, "miscExp") + Val(built, "oadm") + Val(built, "fx")
+            + Val(built, "common") + Val(built, "ho"),
+            YtdVal(built, "ins") + YtdVal(built, "miscExp") + YtdVal(built, "oadm") + YtdVal(built, "fx")
+            + YtdVal(built, "common") + YtdVal(built, "ho"));
 
         var soldM = Val(built, "cogsTotal") + Val(built, "empTotal") + Val(built, "mfgTotal")
                     + Val(built, "sellTotal") + Val(built, "adminTotal");
@@ -917,5 +1034,11 @@ ELSE
         public double Traded { get; set; }
         public double InventoryChange { get; set; }
         public double Stores { get; set; }
+    }
+
+    private sealed class OverheadBits
+    {
+        public double Common { get; set; }
+        public double Ho { get; set; }
     }
 }

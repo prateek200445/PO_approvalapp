@@ -127,6 +127,33 @@ public class PnlController : ControllerBase
         }
     }
 
+    [HttpGet("overhead")]
+    public async Task<IActionResult> Overhead([FromQuery] string company, [FromQuery] string month)
+    {
+        try
+        {
+            return Ok(await _service.GetOverheadAsync(company, PnlService.ParseMonth(month)));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPut("overhead")]
+    public async Task<IActionResult> SaveOverhead([FromBody] PnlOverheadSaveRequest request)
+    {
+        try
+        {
+            await _service.SaveOverheadAsync(request);
+            return Ok(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("statement")]
     public async Task<IActionResult> Statement([FromQuery] string company, [FromQuery] string month)
     {

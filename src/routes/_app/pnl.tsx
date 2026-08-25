@@ -14,7 +14,10 @@ import {
   getPnlProvisions,
   getPnlStatement,
   getPnlStockYear,
+  savePnlProvisions,
   savePnlStockYear,
+  getPnlOverhead,
+  savePnlOverhead,
 } from "@/lib/pnl-api";
 import {
   currentMonthValue,
@@ -23,6 +26,7 @@ import {
   isSingleCompany,
   monthRange,
   type PnlHeadGroup,
+  type PnlOverheadState,
   type PnlProvisionRow,
   type PnlStockYearRow,
   type PnlStockYearState,
@@ -67,6 +71,12 @@ function PnlPage() {
     enabled: tab === "stock" && single,
   });
 
+  const overheadQuery = useQuery({
+    queryKey: ["pnl-overhead", company, month],
+    queryFn: () => getPnlOverhead(company, month),
+    enabled: tab === "overhead" && single,
+  });
+
   const statementQuery = useQuery({
     queryKey: ["pnl-statement", company, month],
     queryFn: () => getPnlStatement(company, month),
@@ -91,7 +101,7 @@ function PnlPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">P&L / EBITDA</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Income and expense from trial balance, then enter provision and stock value to generate P&amp;L.
+            Income and expense from trial balance, then enter provision, stock, and Common / HO to generate P&amp;L.
           </p>
         </div>
       </div>
@@ -114,10 +124,11 @@ function PnlPage() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4">
+        <TabsList className="flex h-auto w-full flex-wrap gap-1">
           <TabsTrigger value="books">Income / Expense</TabsTrigger>
           <TabsTrigger value="provision">Provision</TabsTrigger>
           <TabsTrigger value="stock">Stock value</TabsTrigger>
+          <TabsTrigger value="overhead">Common / HO</TabsTrigger>
           <TabsTrigger value="statement">P&amp;L</TabsTrigger>
         </TabsList>
 
@@ -150,6 +161,22 @@ function PnlPage() {
             />
           ) : (
             <p className="text-sm text-muted-foreground">Pick a single company to enter stock value (lacs).</p>
+          )}
+        </TabsContent>
+        <TabsContent value="overhead" className="mt-4">
+          {single ? (
+            <OverheadTab
+              key={`${company}-${month}`}
+              company={company}
+              month={month}
+              data={overheadQuery.data}
+              loading={overheadQuery.isLoading}
+              onSaved={() => void overheadQuery.refetch()}
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Pick a single company to enter Common / HO allocation (lacs). Group and All Companies use the sum of saved plants.
+            </p>
           )}
         </TabsContent>
         <TabsContent value="statement" className="mt-4">
@@ -480,6 +507,69 @@ function StockCell({ value, onChange }: { value: number; onChange: (v: number) =
       value={value || ""}
       onChange={(e) => onChange(Number(e.target.value))}
     />
+  );
+}
+
+}
+
+function OverheadTab({
+  company,
+  month,
+  data,
+  loading,
+  onSaved,
+}: {
+  company: string;
+  month: string;
+  data?: PnlOverheadState;
+  loading: boolean;
+  onSaved: () => void;
+}) {
+  const [commonLacs, setCommonLacs] = useState<number | null>(null);
+  const [hoLacs, setHoLacs] = useState<number | null>(null);
+  const common = commonLacs ?? data?.commonLacs ?? 0;
+  const ho = hoLacs ?? data?.hoLacs ?? 0;
+
+  const save = useMutation({
+    mutationFn: () => savePnlOverhead(company, month, common, ho),
+    onSuccess: () => {
+      toast.success("Common / HO saved");
+      onSaved();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  if (loading && !data) return <Busy label="Loading Common / HO…" />;
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Plant share of common and head-office costs for this month, in lacs. Not posted to ERP ledgers — only used on
+        this P&amp;L. Leave 0 if you do not allocate. YTD is the sum of April through this month.
+      </p>
+      <label className="block space-y-1 text-sm">
+        <span className="text-muted-foreground">Common expenses</span>
+        <Input
+          type="number"
+          inputMode="decimal"
+          value={common || ""}
+          onChange={(e) => setCommonLacs(Number(e.target.value))}
+        />
+      </label>
+      <label className="block space-y-1 text-sm">
+        <span className="text-muted-foreground">HO expenses</span>
+        <Input
+          type="number"
+          inputMode="decimal"
+          value={ho || ""}
+          onChange={(e) => setHoLacs(Number(e.target.value))}
+        />
+      </label>
+      <Button onClick={() => save.mutate()} disabled={save.isPending}>
+        {save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+        Save Common / HO
+      </Button>
+    </div>
   );
 }
 

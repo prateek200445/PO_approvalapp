@@ -73,6 +73,13 @@ export type PnlStockYearState = {
   rows: PnlStockYearRow[];
 };
 
+export type PnlOverheadState = {
+  company: string;
+  month: string;
+  commonLacs: number;
+  hoLacs: number;
+};
+
 export type PnlStatementRow = {
   id: string;
   label: string;

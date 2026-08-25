@@ -6,6 +6,7 @@ import type {
   PnlStatementResult,
   PnlStockState,
   PnlStockYearState,
+  PnlOverheadState,
   PnlProvisionRow,
   PnlStockRow,
 } from "@/lib/pnl-types";
@@ -72,6 +73,26 @@ export async function savePnlStockYear(payload: PnlStockYearState) {
       fyStart: payload.fyStart,
       rows: payload.rows,
     }),
+  });
+  return readJson<{ ok: boolean }>(res);
+}
+
+export async function getPnlOverhead(company: string, month: string) {
+  const params = new URLSearchParams({ company, month });
+  const res = await fetch(getApiUrl(`/api/pnl/overhead?${params}`));
+  return readJson<PnlOverheadState>(res);
+}
+
+export async function savePnlOverhead(
+  company: string,
+  month: string,
+  commonLacs: number,
+  hoLacs: number,
+) {
+  const res = await fetch(getApiUrl("/api/pnl/overhead"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ company, month, commonLacs, hoLacs }),
   });
   return readJson<{ ok: boolean }>(res);
 }

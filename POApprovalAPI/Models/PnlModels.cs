@@ -107,6 +107,22 @@ public class PnlStockYearSaveRequest
     public List<PnlStockYearRow> Rows { get; set; } = new();
 }
 
+public class PnlOverheadState
+{
+    public string Company { get; set; } = "";
+    public string Month { get; set; } = "";
+    public double CommonLacs { get; set; }
+    public double HoLacs { get; set; }
+}
+
+public class PnlOverheadSaveRequest
+{
+    public string Company { get; set; } = "";
+    public string Month { get; set; } = "";
+    public double CommonLacs { get; set; }
+    public double HoLacs { get; set; }
+}
+
 public class PnlStatementRow
 {
     public string Id { get; set; } = "";
