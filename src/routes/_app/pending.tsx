@@ -177,7 +177,7 @@ function PendingList() {
   }
 
   function updateAutoScroll(x: number, y: number) {
-    const edgeThreshold = 120;
+    const edgeThreshold = 220;
     const height = window.innerHeight;
     const state = autoScrollRef.current;
 
@@ -186,10 +186,10 @@ function PendingList() {
 
     if (y < edgeThreshold) {
       direction = -1;
-      speed = Math.max(4, Math.round((edgeThreshold - y) / 5));
+      speed = Math.max(6, Math.round((edgeThreshold - y) / 4));
     } else if (y > height - edgeThreshold) {
       direction = 1;
-      speed = Math.max(4, Math.round((y - (height - edgeThreshold)) / 5));
+      speed = Math.max(6, Math.round((y - (height - edgeThreshold)) / 4));
     }
 
     state.direction = direction;
