@@ -132,6 +132,7 @@ function PendingList() {
     dragging: boolean;
     startX: number;
     startY: number;
+    pressTimer: number | null;
   }>({
     active: false,
     pointerId: null,
@@ -139,6 +140,7 @@ function PendingList() {
     dragging: false,
     startX: 0,
     startY: 0,
+    pressTimer: null,
   });
 
   function exitSelectMode() {
@@ -202,35 +204,41 @@ function PendingList() {
   function startSwipeSelection(_transId: number, event: ReactPointerEvent<HTMLButtonElement>) {
     if (!selectMode || event.pointerType === "mouse") return;
 
-    swipeSelectionRef.current = {
-      active: true,
-      pointerId: event.pointerId,
-      suppressNextClick: false,
-      dragging: false,
-      startX: event.clientX,
-      startY: event.clientY,
-    };
+    const gesture = swipeSelectionRef.current;
+    if (gesture.pressTimer) {
+      window.clearTimeout(gesture.pressTimer);
+      gesture.pressTimer = null;
+    }
+
+    gesture.active = false;
+    gesture.pointerId = event.pointerId;
+    gesture.suppressNextClick = false;
+    gesture.dragging = false;
+    gesture.startX = event.clientX;
+    gesture.startY = event.clientY;
+    gesture.pressTimer = window.setTimeout(() => {
+      const current = swipeSelectionRef.current;
+      if (!selectMode || current.pointerId !== event.pointerId) return;
+      current.active = true;
+      current.dragging = true;
+      current.suppressNextClick = true;
+      current.pressTimer = null;
+    }, 180);
   }
 
   function extendSwipeSelection(transId: number, event: ReactPointerEvent<HTMLButtonElement>) {
     const gesture = swipeSelectionRef.current;
-    if (!selectMode || !gesture.active || gesture.pointerId !== event.pointerId) return;
+    if (!selectMode || gesture.pointerId !== event.pointerId) return;
 
-    const dx = Math.abs(event.clientX - gesture.startX);
-    const dy = Math.abs(event.clientY - gesture.startY);
-
-    if (!gesture.dragging) {
-      if (dy > 10 && dy > dx) {
-        gesture.active = false;
-        return;
+    if (!gesture.active) {
+      const dx = Math.abs(event.clientX - gesture.startX);
+      const dy = Math.abs(event.clientY - gesture.startY);
+      if (dx > 8 || dy > 8) {
+        if (gesture.pressTimer) {
+          window.clearTimeout(gesture.pressTimer);
+          gesture.pressTimer = null;
+        }
       }
-
-      if (dx > 10 && dx > dy) {
-        gesture.dragging = true;
-        gesture.suppressNextClick = true;
-        selectOne(transId);
-      }
-
       return;
     }
 
@@ -241,7 +249,12 @@ function PendingList() {
   function endSwipeSelection(event: ReactPointerEvent<HTMLButtonElement>) {
     const gesture = swipeSelectionRef.current;
     if (gesture.pointerId === event.pointerId) {
+      if (gesture.pressTimer) {
+        window.clearTimeout(gesture.pressTimer);
+        gesture.pressTimer = null;
+      }
       gesture.active = false;
+      gesture.dragging = false;
     }
   }
 
@@ -358,7 +371,7 @@ function PendingList() {
 
       {selectMode && (
         <p className="px-1 text-xs text-muted-foreground md:hidden">
-          Swipe across cards to select multiple rows.
+          Long-press a card, then drag up or down to select multiple rows.
         </p>
       )}
 
