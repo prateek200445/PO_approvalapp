@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { getApiUrl } from "@/lib/api-config";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import type { MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from "react";
 import { Search, ArrowUpDown, Filter, X, CheckSquare, Loader2 } from "lucide-react";
 import { formatINR, type POStatus } from "@/lib/mock-data";
 import { useAuth } from "@/lib/auth-context";
@@ -123,6 +124,261 @@ function PendingList() {
 
   const allResultsSelected =
     allSelectableIds.length > 0 && allSelectableIds.every((id) => selected.has(id));
+
+  const swipeSelectionRef = useRef<{
+    active: boolean;
+    touchId: number | null;
+    suppressNextClick: boolean;
+    dragging: boolean;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    pressTimer: number | null;
+  }>({
+    active: false,
+    touchId: null,
+    suppressNextClick: false,
+    dragging: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    pressTimer: null,
+  });
+
+  const autoScrollRef = useRef<{
+    raf: number | null;
+    direction: -1 | 0 | 1;
+    speed: number;
+  }>({
+    raf: null,
+    direction: 0,
+    speed: 0,
+  });
+
+  const currentTouchXRef = useRef(0);
+  const currentTouchYRef = useRef(0);
+
+  function stopAutoScroll() {
+    const state = autoScrollRef.current;
+    if (state.raf != null) {
+      window.cancelAnimationFrame(state.raf);
+      state.raf = null;
+    }
+    state.direction = 0;
+    state.speed = 0;
+  }
+
+  function selectCardAtPoint(x: number, y: number) {
+    const element = document.elementFromPoint(x, y);
+    const card = element?.closest<HTMLElement>("[data-payment-select-id]");
+    if (!card) return;
+    const id = card.dataset.paymentSelectId;
+    if (id) selectOne(id);
+  }
+
+  function updateAutoScroll(x: number, y: number) {
+    const edgeThreshold = 220;
+    const height = window.innerHeight;
+    const state = autoScrollRef.current;
+
+    let direction: -1 | 0 | 1 = 0;
+    let speed = 0;
+
+    if (y < edgeThreshold) {
+      direction = -1;
+      speed = Math.max(6, Math.round((edgeThreshold - y) / 4));
+    } else if (y > height - edgeThreshold) {
+      direction = 1;
+      speed = Math.max(6, Math.round((y - (height - edgeThreshold)) / 4));
+    }
+
+    state.direction = direction;
+    state.speed = speed;
+
+    if (direction === 0) {
+      stopAutoScroll();
+      return;
+    }
+
+    if (state.raf != null) return;
+
+    const tick = () => {
+      const current = autoScrollRef.current;
+      if (current.direction === 0) {
+        current.raf = null;
+        return;
+      }
+
+      window.scrollBy(0, current.direction * current.speed);
+      selectCardAtPoint(currentTouchXRef.current, currentTouchYRef.current);
+      current.raf = window.requestAnimationFrame(tick);
+    };
+
+    state.raf = window.requestAnimationFrame(tick);
+  }
+
+  function getCardIdFromPoint(event: { clientX: number; clientY: number }) {
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const card = element?.closest<HTMLElement>("[data-payment-select-id]");
+    return card?.dataset.paymentSelectId ?? null;
+  }
+
+  function getActiveTouch(event: ReactTouchEvent<HTMLButtonElement>) {
+    const touchId = swipeSelectionRef.current.touchId;
+    if (touchId == null) return null;
+    return Array.from(event.touches).find((touch) => touch.identifier === touchId) ?? null;
+  }
+
+  useEffect(() => {
+    if (!selectMode) return;
+
+    function onTouchMove(event: TouchEvent) {
+      const gesture = swipeSelectionRef.current;
+      if (gesture.touchId == null) return;
+
+      const touch = Array.from(event.touches).find((item) => item.identifier === gesture.touchId);
+      if (!touch) return;
+
+      currentTouchXRef.current = touch.clientX;
+      currentTouchYRef.current = touch.clientY;
+
+      const dx = Math.abs(touch.clientX - gesture.startX);
+      const dy = Math.abs(touch.clientY - gesture.startY);
+
+      if (!gesture.active) {
+        if (dx > 8 || dy > 8) {
+          if (gesture.pressTimer) {
+            window.clearTimeout(gesture.pressTimer);
+            gesture.pressTimer = null;
+          }
+          stopAutoScroll();
+        }
+        return;
+      }
+
+      event.preventDefault();
+      gesture.suppressNextClick = true;
+
+      const element = document.elementFromPoint(touch.clientX, touch.clientY);
+      const card = element?.closest<HTMLElement>("[data-payment-select-id]");
+      const id = card?.dataset.paymentSelectId;
+      if (id) selectOne(id);
+
+      updateAutoScroll(touch.clientX, touch.clientY);
+    }
+
+    function resetGesture(event: TouchEvent) {
+      const gesture = swipeSelectionRef.current;
+      if (gesture.touchId == null) return;
+
+      const ended = Array.from(event.changedTouches).some((item) => item.identifier === gesture.touchId);
+      if (!ended) return;
+
+      if (gesture.pressTimer) {
+        window.clearTimeout(gesture.pressTimer);
+        gesture.pressTimer = null;
+      }
+      gesture.active = false;
+      gesture.dragging = false;
+      gesture.touchId = null;
+      stopAutoScroll();
+    }
+
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("touchend", resetGesture);
+    window.addEventListener("touchcancel", resetGesture);
+
+    return () => {
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", resetGesture);
+      window.removeEventListener("touchcancel", resetGesture);
+    };
+  }, [selectMode]);
+
+  function startSwipeSelection(paymentNo: string, event: ReactTouchEvent<HTMLButtonElement>) {
+    if (!selectMode) return;
+
+    const touch = event.changedTouches[0];
+    if (!touch) return;
+
+    const gesture = swipeSelectionRef.current;
+    if (gesture.pressTimer) {
+      window.clearTimeout(gesture.pressTimer);
+      gesture.pressTimer = null;
+    }
+
+    gesture.active = false;
+    gesture.touchId = touch.identifier;
+    gesture.suppressNextClick = false;
+    gesture.dragging = false;
+    gesture.startX = touch.clientX;
+    gesture.startY = touch.clientY;
+    gesture.pressTimer = window.setTimeout(() => {
+      const current = swipeSelectionRef.current;
+      if (!selectMode || current.touchId !== touch.identifier) return;
+      current.active = true;
+      current.dragging = true;
+      current.suppressNextClick = true;
+      current.pressTimer = null;
+      selectOne(paymentNo);
+    }, 180);
+  }
+
+  function extendSwipeSelection(paymentNo: string, event: ReactTouchEvent<HTMLButtonElement>) {
+    const gesture = swipeSelectionRef.current;
+    const touch = getActiveTouch(event);
+    if (!selectMode || !touch || gesture.touchId !== touch.identifier) return;
+
+    if (!gesture.active) {
+      const dx = Math.abs(touch.clientX - gesture.startX);
+      const dy = Math.abs(touch.clientY - gesture.startY);
+      if (dx > 8 || dy > 8) {
+        if (gesture.pressTimer) {
+          window.clearTimeout(gesture.pressTimer);
+          gesture.pressTimer = null;
+        }
+      }
+      return;
+    }
+
+    event.preventDefault();
+    gesture.suppressNextClick = true;
+    selectOne(getCardIdFromPoint(touch) ?? paymentNo);
+  }
+
+  function endSwipeSelection(event: ReactTouchEvent<HTMLButtonElement>) {
+    const gesture = swipeSelectionRef.current;
+    const touch = event.changedTouches[0];
+    if (touch && gesture.touchId === touch.identifier) {
+      if (gesture.pressTimer) {
+        window.clearTimeout(gesture.pressTimer);
+        gesture.pressTimer = null;
+      }
+      gesture.active = false;
+      gesture.dragging = false;
+      gesture.touchId = null;
+    }
+  }
+
+  function handleSwipeClick(
+    paymentNo: string,
+    canSelect: boolean,
+    event: ReactMouseEvent<HTMLButtonElement>
+  ) {
+    const gesture = swipeSelectionRef.current;
+    if (gesture.suppressNextClick) {
+      gesture.suppressNextClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    if (canSelect) {
+      toggleOne(paymentNo);
+    }
+  }
 
   function exitSelectMode() {
     setSelectMode(false);
@@ -394,18 +650,25 @@ function PendingList() {
                 <button
                   key={paymentNo}
                   type="button"
+                  data-payment-select-id={paymentNo}
                   disabled={!canSelect}
-                  onClick={() => canSelect && toggleOne(paymentNo)}
+                  onTouchStart={(event) => startSwipeSelection(paymentNo, event)}
+                  onClick={(event) => handleSwipeClick(paymentNo, canSelect, event)}
+                  onContextMenu={(event) => event.preventDefault()}
                   style={selectMode ? { touchAction: "none" } : undefined}
                   className={`block w-full min-w-0 max-w-full text-left rounded-2xl border bg-card p-4 shadow-soft ${
                     isChecked ? "border-primary ring-1 ring-primary/30" : "border-border"
-                  } ${!canSelect ? "opacity-50" : ""}`}
+                  } ${!canSelect ? "opacity-50" : ""} select-none`}
                 >
                   <div className="flex items-start gap-3">
                     <input
                       type="checkbox"
                       checked={!!isChecked}
-                      readOnly
+                      onTouchStart={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (canSelect) toggleOne(paymentNo);
+                      }}
                       className="mt-1 h-4 w-4"
                       tabIndex={-1}
                     />
