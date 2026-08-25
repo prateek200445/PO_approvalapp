@@ -216,6 +216,67 @@ function PendingList() {
     return Array.from(event.touches).find((touch) => touch.identifier === touchId) ?? null;
   }
 
+  useEffect(() => {
+    if (!selectMode) return;
+
+    function onTouchMove(event: TouchEvent) {
+      const gesture = swipeSelectionRef.current;
+      if (gesture.touchId == null) return;
+
+      const touch = Array.from(event.touches).find((item) => item.identifier === gesture.touchId);
+      if (!touch) return;
+
+      const dx = Math.abs(touch.clientX - gesture.startX);
+      const dy = Math.abs(touch.clientY - gesture.startY);
+
+      if (!gesture.active) {
+        if (dx > 8 || dy > 8) {
+          if (gesture.pressTimer) {
+            window.clearTimeout(gesture.pressTimer);
+            gesture.pressTimer = null;
+          }
+        }
+        return;
+      }
+
+      event.preventDefault();
+      gesture.suppressNextClick = true;
+
+      const element = document.elementFromPoint(touch.clientX, touch.clientY);
+      const card = element?.closest<HTMLElement>("[data-po-select-id]");
+      const id = card ? Number(card.dataset.poSelectId) : null;
+      if (Number.isFinite(id)) {
+        selectOne(id as number);
+      }
+    }
+
+    function resetGesture(event: TouchEvent) {
+      const gesture = swipeSelectionRef.current;
+      if (gesture.touchId == null) return;
+
+      const ended = Array.from(event.changedTouches).some((item) => item.identifier === gesture.touchId);
+      if (!ended) return;
+
+      if (gesture.pressTimer) {
+        window.clearTimeout(gesture.pressTimer);
+        gesture.pressTimer = null;
+      }
+      gesture.active = false;
+      gesture.dragging = false;
+      gesture.touchId = null;
+    }
+
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("touchend", resetGesture);
+    window.addEventListener("touchcancel", resetGesture);
+
+    return () => {
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", resetGesture);
+      window.removeEventListener("touchcancel", resetGesture);
+    };
+  }, [selectMode]);
+
   function startSwipeSelection(transId: number, event: ReactTouchEvent<HTMLButtonElement>) {
     if (!selectMode) return;
 
@@ -528,9 +589,6 @@ function PendingList() {
                   data-po-select-id={transId}
                   disabled={!canSelect}
                   onTouchStart={(event) => startSwipeSelection(transId, event)}
-                  onTouchMove={(event) => extendSwipeSelection(transId, event)}
-                  onTouchEnd={endSwipeSelection}
-                  onTouchCancel={endSwipeSelection}
                   onClick={(event) => handleSwipeClick(transId, canSelect, event)}
                   onContextMenu={(event) => event.preventDefault()}
                   style={selectMode ? { touchAction: "pan-y" } : undefined}
