@@ -510,8 +510,6 @@ function StockCell({ value, onChange }: { value: number; onChange: (v: number) =
   );
 }
 
-}
-
 function OverheadTab({
   company,
   month,
