@@ -371,7 +371,7 @@ function PendingList() {
 
       {selectMode && (
         <p className="px-1 text-xs text-muted-foreground md:hidden">
-          Long-press a card, then drag up or down to select multiple rows.
+          Tap the checkbox, or long-press a card then drag up or down to select multiple rows.
         </p>
       )}
 
@@ -509,16 +509,21 @@ function PendingList() {
                   onPointerUp={endSwipeSelection}
                   onPointerCancel={endSwipeSelection}
                   onClick={(event) => handleSwipeClick(transId, canSelect, event)}
+                  onContextMenu={(event) => event.preventDefault()}
                   style={selectMode ? { touchAction: "pan-y" } : undefined}
                   className={`block w-full min-w-0 max-w-full text-left rounded-2xl border bg-card p-4 shadow-soft ${
                     isChecked ? "border-primary ring-1 ring-primary/30" : "border-border"
-                  } ${!canSelect ? "opacity-50" : ""}`}
+                  } ${!canSelect ? "opacity-50" : ""} select-none`}
                 >
                   <div className="flex items-start gap-3">
                     <input
                       type="checkbox"
                       checked={!!isChecked}
-                      readOnly
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (canSelect) toggleOne(transId);
+                      }}
                       className="mt-1 h-4 w-4"
                       tabIndex={-1}
                     />
