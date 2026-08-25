@@ -404,6 +404,7 @@ function PendingList() {
                   type="button"
                   disabled={!canSelect}
                   onClick={() => canSelect && toggleOne(transId)}
+                  style={selectMode ? { touchAction: "none" } : undefined}
                   className={`block w-full min-w-0 max-w-full text-left rounded-2xl border bg-card p-4 shadow-soft ${
                     isChecked ? "border-primary ring-1 ring-primary/30" : "border-border"
                   } ${!canSelect ? "opacity-50" : ""}`}
