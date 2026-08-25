@@ -234,8 +234,8 @@ function PendingList() {
 
   return (
     <div className={`w-full min-w-0 max-w-full overflow-x-hidden space-y-6 ${selectMode && selected.size > 0 ? "pb-24 md:pb-0" : ""}`}>
-      <div className="flex min-w-0 items-end justify-between gap-3">
-        <div className="min-w-0 flex-1">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0 w-full flex-1">
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
             Payment Approvals
           </h1>
@@ -244,7 +244,7 @@ function PendingList() {
             {totalPages > 1 && `(Page ${currentPage} of ${totalPages})`}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <div className="flex w-full shrink-0 flex-wrap items-center justify-start gap-2 md:w-auto md:justify-end">
           {selectMode && selected.size > 0 && (
             <button
               type="button"

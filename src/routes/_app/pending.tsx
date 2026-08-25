@@ -129,10 +129,16 @@ function PendingList() {
     active: boolean;
     pointerId: number | null;
     suppressNextClick: boolean;
+    dragging: boolean;
+    startX: number;
+    startY: number;
   }>({
     active: false,
     pointerId: null,
     suppressNextClick: false,
+    dragging: false,
+    startX: 0,
+    startY: 0,
   });
 
   function exitSelectMode() {
@@ -200,12 +206,33 @@ function PendingList() {
       active: true,
       pointerId: event.pointerId,
       suppressNextClick: false,
+      dragging: false,
+      startX: event.clientX,
+      startY: event.clientY,
     };
   }
 
   function extendSwipeSelection(transId: number, event: ReactPointerEvent<HTMLButtonElement>) {
     const gesture = swipeSelectionRef.current;
     if (!selectMode || !gesture.active || gesture.pointerId !== event.pointerId) return;
+
+    const dx = Math.abs(event.clientX - gesture.startX);
+    const dy = Math.abs(event.clientY - gesture.startY);
+
+    if (!gesture.dragging) {
+      if (dy > 10 && dy > dx) {
+        gesture.active = false;
+        return;
+      }
+
+      if (dx > 10 && dx > dy) {
+        gesture.dragging = true;
+        gesture.suppressNextClick = true;
+        selectOne(transId);
+      }
+
+      return;
+    }
 
     gesture.suppressNextClick = true;
     selectOne(transId);
@@ -288,15 +315,15 @@ function PendingList() {
 
   return (
     <div className={`w-full min-w-0 max-w-full overflow-x-hidden space-y-6 ${selectMode && selected.size > 0 ? "pb-24 md:pb-0" : ""}`}>
-      <div className="flex min-w-0 items-end justify-between gap-3">
-        <div className="card-3d min-w-0 flex-1 rounded-2xl px-4 py-3">
+      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div className="card-3d min-w-0 w-full flex-1 rounded-2xl px-4 py-3">
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Purchase Orders</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {filtered.length} result{filtered.length !== 1 ? "s" : ""}{" "}
             {totalPages > 1 && `(Page ${currentPage} of ${totalPages})`}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <div className="flex w-full shrink-0 flex-wrap items-center justify-start gap-2 md:w-auto md:justify-end">
           {selectMode && selected.size > 0 && (
             <button
               type="button"
@@ -328,6 +355,12 @@ function PendingList() {
           </button>
         </div>
       </div>
+
+      {selectMode && (
+        <p className="px-1 text-xs text-muted-foreground md:hidden">
+          Swipe across cards to select multiple rows.
+        </p>
+      )}
 
       {/* Filters - Desktop Only */}
       <div className="hidden rounded-2xl border border-border bg-card p-4 shadow-soft md:flex md:flex-col md:gap-3">
@@ -458,11 +491,12 @@ function PendingList() {
                   type="button"
                   disabled={!canSelect}
                   onPointerDown={(event) => startSwipeSelection(transId, event)}
+                  onPointerMove={(event) => extendSwipeSelection(transId, event)}
                   onPointerEnter={(event) => extendSwipeSelection(transId, event)}
                   onPointerUp={endSwipeSelection}
                   onPointerCancel={endSwipeSelection}
                   onClick={(event) => handleSwipeClick(transId, canSelect, event)}
-                  style={selectMode ? { touchAction: "none" } : undefined}
+                  style={selectMode ? { touchAction: "pan-y" } : undefined}
                   className={`block w-full min-w-0 max-w-full text-left rounded-2xl border bg-card p-4 shadow-soft ${
                     isChecked ? "border-primary ring-1 ring-primary/30" : "border-border"
                   } ${!canSelect ? "opacity-50" : ""}`}

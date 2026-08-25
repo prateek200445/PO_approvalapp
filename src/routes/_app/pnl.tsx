@@ -5,9 +5,9 @@ import { ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { MonthPickerField } from "@/components/MonthPickerField";
 import {
   getPnlCompanies,
   getPnlIncomeExpense,
@@ -118,8 +118,8 @@ function PnlPage() {
           />
         </label>
         <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Month</span>
-          <Input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          <span className="text-muted-foreground">Month / Year</span>
+          <MonthPickerField value={month} onChange={setMonth} placeholder="Select month" />
         </label>
       </div>
 
