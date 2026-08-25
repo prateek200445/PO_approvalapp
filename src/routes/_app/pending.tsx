@@ -133,6 +133,8 @@ function PendingList() {
     dragging: boolean;
     startX: number;
     startY: number;
+    lastX: number;
+    lastY: number;
     pressTimer: number | null;
   }>({
     active: false,
@@ -141,8 +143,82 @@ function PendingList() {
     dragging: false,
     startX: 0,
     startY: 0,
+    lastX: 0,
+    lastY: 0,
     pressTimer: null,
   });
+
+  const autoScrollRef = useRef<{
+    raf: number | null;
+    direction: -1 | 0 | 1;
+    speed: number;
+  }>({
+    raf: null,
+    direction: 0,
+    speed: 0,
+  });
+
+  function stopAutoScroll() {
+    const state = autoScrollRef.current;
+    if (state.raf != null) {
+      window.cancelAnimationFrame(state.raf);
+      state.raf = null;
+    }
+    state.direction = 0;
+    state.speed = 0;
+  }
+
+  function selectCardAtPoint(x: number, y: number) {
+    const element = document.elementFromPoint(x, y);
+    const card = element?.closest<HTMLElement>("[data-po-select-id]");
+    if (!card) return;
+    const id = Number(card.dataset.poSelectId);
+    if (Number.isFinite(id)) selectOne(id);
+  }
+
+  function updateAutoScroll(x: number, y: number) {
+    const edgeThreshold = 120;
+    const height = window.innerHeight;
+    const state = autoScrollRef.current;
+
+    let direction: -1 | 0 | 1 = 0;
+    let speed = 0;
+
+    if (y < edgeThreshold) {
+      direction = -1;
+      speed = Math.max(4, Math.round((edgeThreshold - y) / 5));
+    } else if (y > height - edgeThreshold) {
+      direction = 1;
+      speed = Math.max(4, Math.round((y - (height - edgeThreshold)) / 5));
+    }
+
+    state.direction = direction;
+    state.speed = speed;
+
+    if (direction === 0) {
+      stopAutoScroll();
+      return;
+    }
+
+    if (state.raf != null) return;
+
+    const tick = () => {
+      const current = autoScrollRef.current;
+      if (current.direction === 0) {
+        current.raf = null;
+        return;
+      }
+
+      window.scrollBy(0, current.direction * current.speed);
+      selectCardAtPoint(currentTouchXRef.current, currentTouchYRef.current);
+      current.raf = window.requestAnimationFrame(tick);
+    };
+
+    state.raf = window.requestAnimationFrame(tick);
+  }
+
+  const currentTouchXRef = useRef(0);
+  const currentTouchYRef = useRef(0);
 
   function exitSelectMode() {
     setSelectMode(false);
@@ -227,6 +303,9 @@ function PendingList() {
       const touch = Array.from(event.touches).find((item) => item.identifier === gesture.touchId);
       if (!touch) return;
 
+      currentTouchXRef.current = touch.clientX;
+      currentTouchYRef.current = touch.clientY;
+
       const dx = Math.abs(touch.clientX - gesture.startX);
       const dy = Math.abs(touch.clientY - gesture.startY);
 
@@ -236,6 +315,7 @@ function PendingList() {
             window.clearTimeout(gesture.pressTimer);
             gesture.pressTimer = null;
           }
+          stopAutoScroll();
         }
         return;
       }
@@ -249,6 +329,8 @@ function PendingList() {
       if (Number.isFinite(id)) {
         selectOne(id as number);
       }
+
+      updateAutoScroll(touch.clientX, touch.clientY);
     }
 
     function resetGesture(event: TouchEvent) {
@@ -266,6 +348,7 @@ function PendingList() {
       gesture.dragging = false;
       gesture.touchId = null;
       setIsTouchSelecting(false);
+      stopAutoScroll();
     }
 
     window.addEventListener("touchmove", onTouchMove, { passive: false });
