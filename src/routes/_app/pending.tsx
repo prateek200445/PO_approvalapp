@@ -233,6 +233,12 @@ function PendingList() {
       current.suppressNextClick = true;
       current.pressTimer = null;
     }, 180);
+
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Ignore browsers that do not support pointer capture for this element.
+    }
   }
 
   function extendSwipeSelection(transId: number, event: ReactPointerEvent<HTMLButtonElement>) {
@@ -264,6 +270,14 @@ function PendingList() {
       }
       gesture.active = false;
       gesture.dragging = false;
+
+      try {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+      } catch {
+        // Ignore browsers that do not support releasing pointer capture here.
+      }
     }
   }
 
