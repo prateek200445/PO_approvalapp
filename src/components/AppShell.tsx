@@ -32,6 +32,7 @@ type AppPath =
   | "/pending"
   | "/workorders"
   | "/payments"
+  | "/advance-payments"
   | "/indents"
   | "/sales-dashboard"
   | "/ledgers"
@@ -148,6 +149,14 @@ export function AppShell() {
       shortLabel: "Pay",
       match: (p) => p.startsWith("/payment"),
       badge: "payment",
+    },
+    {
+      to: "/advance-payments",
+      icon: CreditCard,
+      label: "Advance Payments",
+      shortLabel: "Adv Pay",
+      match: (p) => p.startsWith("/advance-payment") || p.startsWith("/advance-payments"),
+      badge: "advancePayment",
     },
     {
       to: "/indents",

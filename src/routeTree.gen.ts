@@ -25,8 +25,9 @@ import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppDailyProductionRouteImport } from './routes/_app/daily-production'
-import { Route as AppAssistantRouteImport } from './routes/_app/assistant'
 import { Route as AppBomRouteImport } from './routes/_app/bom'
+import { Route as AppAssistantRouteImport } from './routes/_app/assistant'
+import { Route as AppAdvancePaymentsRouteImport } from './routes/_app/advance-payments'
 import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
 import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
 import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
@@ -35,6 +36,7 @@ import { Route as AppIntercompanySettlementRouteImport } from './routes/_app/int
 import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
 import { Route as AppBomCustomersRouteImport } from './routes/_app/bom.customers'
 import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
+import { Route as AppAdvancePaymentPaymentNoRouteImport } from './routes/_app/advance-payment.$paymentNo'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -115,14 +117,19 @@ const AppDailyProductionRoute = AppDailyProductionRouteImport.update({
   path: '/daily-production',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBomRoute = AppBomRouteImport.update({
+  id: '/bom',
+  path: '/bom',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAssistantRoute = AppAssistantRouteImport.update({
   id: '/assistant',
   path: '/assistant',
   getParentRoute: () => AppRoute,
 } as any)
-const AppBomRoute = AppBomRouteImport.update({
-  id: '/bom',
-  path: '/bom',
+const AppAdvancePaymentsRoute = AppAdvancePaymentsRouteImport.update({
+  id: '/advance-payments',
+  path: '/advance-payments',
   getParentRoute: () => AppRoute,
 } as any)
 const AppBomIndexRoute = AppBomIndexRouteImport.update({
@@ -166,9 +173,16 @@ const AppBomSplatRoute = AppBomSplatRouteImport.update({
   path: '/$',
   getParentRoute: () => AppBomRoute,
 } as any)
+const AppAdvancePaymentPaymentNoRoute =
+  AppAdvancePaymentPaymentNoRouteImport.update({
+    id: '/advance-payment/$paymentNo',
+    path: '/advance-payment/$paymentNo',
+    getParentRoute: () => AppRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/advance-payments': typeof AppAdvancePaymentsRoute
   '/assistant': typeof AppAssistantRoute
   '/bom': typeof AppBomRouteWithChildren
   '/daily-production': typeof AppDailyProductionRoute
@@ -185,6 +199,7 @@ export interface FileRoutesByFullPath {
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
+  '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
   '/bom/$': typeof AppBomSplatRoute
   '/bom/customers': typeof AppBomCustomersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
@@ -196,6 +211,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/advance-payments': typeof AppAdvancePaymentsRoute
   '/assistant': typeof AppAssistantRoute
   '/daily-production': typeof AppDailyProductionRoute
   '/dashboard': typeof AppDashboardRoute
@@ -211,6 +227,7 @@ export interface FileRoutesByTo {
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
+  '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
   '/bom/$': typeof AppBomSplatRoute
   '/bom/customers': typeof AppBomCustomersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
@@ -224,6 +241,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/_app': typeof AppRouteWithChildren
+  '/_app/advance-payments': typeof AppAdvancePaymentsRoute
   '/_app/assistant': typeof AppAssistantRoute
   '/_app/bom': typeof AppBomRouteWithChildren
   '/_app/daily-production': typeof AppDailyProductionRoute
@@ -240,6 +258,7 @@ export interface FileRoutesById {
   '/_app/reconciliation': typeof AppReconciliationRoute
   '/_app/sales-dashboard': typeof AppSalesDashboardRoute
   '/_app/workorders': typeof AppWorkordersRoute
+  '/_app/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
   '/_app/bom/$': typeof AppBomSplatRoute
   '/_app/bom/customers': typeof AppBomCustomersRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
@@ -253,6 +272,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/advance-payments'
     | '/assistant'
     | '/bom'
     | '/daily-production'
@@ -269,6 +289,7 @@ export interface FileRouteTypes {
     | '/reconciliation'
     | '/sales-dashboard'
     | '/workorders'
+    | '/advance-payment/$paymentNo'
     | '/bom/$'
     | '/bom/customers'
     | '/indent/$indentNo'
@@ -280,6 +301,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/advance-payments'
     | '/assistant'
     | '/daily-production'
     | '/dashboard'
@@ -295,6 +317,7 @@ export interface FileRouteTypes {
     | '/reconciliation'
     | '/sales-dashboard'
     | '/workorders'
+    | '/advance-payment/$paymentNo'
     | '/bom/$'
     | '/bom/customers'
     | '/indent/$indentNo'
@@ -307,6 +330,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/_app'
+    | '/_app/advance-payments'
     | '/_app/assistant'
     | '/_app/bom'
     | '/_app/daily-production'
@@ -323,6 +347,7 @@ export interface FileRouteTypes {
     | '/_app/reconciliation'
     | '/_app/sales-dashboard'
     | '/_app/workorders'
+    | '/_app/advance-payment/$paymentNo'
     | '/_app/bom/$'
     | '/_app/bom/customers'
     | '/_app/indent/$indentNo'
@@ -452,6 +477,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDailyProductionRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/bom': {
+      id: '/_app/bom'
+      path: '/bom'
+      fullPath: '/bom'
+      preLoaderRoute: typeof AppBomRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/assistant': {
       id: '/_app/assistant'
       path: '/assistant'
@@ -459,11 +491,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAssistantRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/bom': {
-      id: '/_app/bom'
-      path: '/bom'
-      fullPath: '/bom'
-      preLoaderRoute: typeof AppBomRouteImport
+    '/_app/advance-payments': {
+      id: '/_app/advance-payments'
+      path: '/advance-payments'
+      fullPath: '/advance-payments'
+      preLoaderRoute: typeof AppAdvancePaymentsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/bom/': {
@@ -522,6 +554,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBomSplatRouteImport
       parentRoute: typeof AppBomRoute
     }
+    '/_app/advance-payment/$paymentNo': {
+      id: '/_app/advance-payment/$paymentNo'
+      path: '/advance-payment/$paymentNo'
+      fullPath: '/advance-payment/$paymentNo'
+      preLoaderRoute: typeof AppAdvancePaymentPaymentNoRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -553,6 +592,7 @@ const AppIntercompanyRouteWithChildren = AppIntercompanyRoute._addFileChildren(
 )
 
 interface AppRouteChildren {
+  AppAdvancePaymentsRoute: typeof AppAdvancePaymentsRoute
   AppAssistantRoute: typeof AppAssistantRoute
   AppBomRoute: typeof AppBomRouteWithChildren
   AppDailyProductionRoute: typeof AppDailyProductionRoute
@@ -569,6 +609,7 @@ interface AppRouteChildren {
   AppReconciliationRoute: typeof AppReconciliationRoute
   AppSalesDashboardRoute: typeof AppSalesDashboardRoute
   AppWorkordersRoute: typeof AppWorkordersRoute
+  AppAdvancePaymentPaymentNoRoute: typeof AppAdvancePaymentPaymentNoRoute
   AppIndentIndentNoRoute: typeof AppIndentIndentNoRoute
   AppPaymentPaymentNoRoute: typeof AppPaymentPaymentNoRoute
   AppPoPoNoRoute: typeof AppPoPoNoRoute
@@ -576,6 +617,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAdvancePaymentsRoute: AppAdvancePaymentsRoute,
   AppAssistantRoute: AppAssistantRoute,
   AppBomRoute: AppBomRouteWithChildren,
   AppDailyProductionRoute: AppDailyProductionRoute,
@@ -592,6 +634,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppReconciliationRoute: AppReconciliationRoute,
   AppSalesDashboardRoute: AppSalesDashboardRoute,
   AppWorkordersRoute: AppWorkordersRoute,
+  AppAdvancePaymentPaymentNoRoute: AppAdvancePaymentPaymentNoRoute,
   AppIndentIndentNoRoute: AppIndentIndentNoRoute,
   AppPaymentPaymentNoRoute: AppPaymentPaymentNoRoute,
   AppPoPoNoRoute: AppPoPoNoRoute,

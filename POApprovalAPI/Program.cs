@@ -62,6 +62,7 @@ builder.Services.AddScoped<DailyReportProcessorService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<PoApprovalService>();
 builder.Services.AddScoped<WorkOrderApprovalService>();
+builder.Services.AddScoped<AdvancePaymentService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient(nameof(DmsRemoteFileService), client =>
 {

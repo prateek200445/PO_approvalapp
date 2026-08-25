@@ -28,6 +28,7 @@ export type InboxCounts = {
   po: number;
   workorder: number;
   payment: number;
+  advancePayment: number;
   indent: number;
   total: number;
 };
@@ -99,6 +100,33 @@ function mapPayments(rows: Record<string, unknown>[]): InboxItem[] {
     .filter((row): row is InboxItem => row != null);
 }
 
+function mapAdvancePayments(rows: Record<string, unknown>[]): InboxItem[] {
+  return rows
+    .map((row) => {
+      const id = pick(row, "PaymentNo", "paymentNo");
+      if (!id) return null;
+      const date = pick(row, "PaymentDate", "paymentDate");
+      const statusRaw = pick(row, "ApprovalStatus", "approvalStatus");
+      const status =
+        statusRaw === "1" ? "Approved" : statusRaw === "2" ? "Rejected" : "Pending";
+      return {
+        kind: "advancePayment" as const,
+        id,
+        title: id,
+        subtitle:
+          pick(row, "CompanyName", "companyName") ||
+          pick(row, "PaymentTypeNo", "paymentTypeNo") ||
+          "—",
+        amount: pickAmount(row, "PaymentAmount", "paymentAmount", "PaymentAmt", "paymentAmt"),
+        extra: pick(row, "PaymentTypeNo", "paymentTypeNo", "Remarks", "remarks"),
+        date,
+        days: daysWaiting(date),
+        status,
+      } satisfies InboxItem;
+    })
+    .filter((row): row is InboxItem => row != null);
+}
+
 function mapIndents(rows: Record<string, unknown>[]): InboxItem[] {
   return rows
     .map((row) => {
@@ -150,6 +178,14 @@ export function useApprovalInbox(username?: string) {
     enabled,
   });
 
+  const advancePaymentQuery = useQuery({
+    queryKey: ["advance-payment-list", username, "", "gte"],
+    queryFn: () =>
+      fetchPendingList(`/api/AdvancePayment/pending/${username}?amount=&filterType=gte`),
+    ...inboxQueryOptions,
+    enabled,
+  });
+
   const indentQuery = useQuery({
     queryKey: ["indent-list", username, "", "gte"],
     queryFn: () => fetchPendingList(`/api/Indent/pending/${username}?amount=&filterType=gte`),
@@ -163,19 +199,29 @@ export function useApprovalInbox(username?: string) {
     [workorderQuery.data],
   );
   const paymentItems = useMemo(() => mapPayments(paymentQuery.data ?? []), [paymentQuery.data]);
+  const advancePaymentItems = useMemo(
+    () => mapAdvancePayments(advancePaymentQuery.data ?? []),
+    [advancePaymentQuery.data],
+  );
   const indentItems = useMemo(() => mapIndents(indentQuery.data ?? []), [indentQuery.data]);
 
   const counts: InboxCounts = {
     po: poItems.length,
     workorder: workorderItems.length,
     payment: paymentItems.length,
+    advancePayment: advancePaymentItems.length,
     indent: indentItems.length,
-    total: poItems.length + workorderItems.length + paymentItems.length + indentItems.length,
+    total:
+      poItems.length +
+      workorderItems.length +
+      paymentItems.length +
+      advancePaymentItems.length +
+      indentItems.length,
   };
 
   const allItems = useMemo(
-    () => [...poItems, ...workorderItems, ...paymentItems, ...indentItems],
-    [poItems, workorderItems, paymentItems, indentItems],
+    () => [...poItems, ...workorderItems, ...paymentItems, ...advancePaymentItems, ...indentItems],
+    [poItems, workorderItems, paymentItems, advancePaymentItems, indentItems],
   );
 
   const recent = useMemo(() => {
@@ -201,13 +247,22 @@ export function useApprovalInbox(username?: string) {
     poItems,
     workorderItems,
     paymentItems,
+    advancePaymentItems,
     indentItems,
     isLoading:
-      poQuery.isLoading || workorderQuery.isLoading || paymentQuery.isLoading || indentQuery.isLoading,
+      poQuery.isLoading ||
+      workorderQuery.isLoading ||
+      paymentQuery.isLoading ||
+      advancePaymentQuery.isLoading ||
+      indentQuery.isLoading,
     queues: {
       po: { loading: poQuery.isLoading, error: poQuery.isError },
       workorder: { loading: workorderQuery.isLoading, error: workorderQuery.isError },
       payment: { loading: paymentQuery.isLoading, error: paymentQuery.isError },
+      advancePayment: {
+        loading: advancePaymentQuery.isLoading,
+        error: advancePaymentQuery.isError,
+      },
       indent: { loading: indentQuery.isLoading, error: indentQuery.isError },
     },
   };

@@ -16,6 +16,9 @@ public PaymentService(
     _emailService = emailService;
 }
 
+    public const int MaxBulkSize = int.MaxValue;
+    private const int BulkParallelism = 8;
+
     public async Task<IEnumerable<PaymentRequestModel>> GetPendingPayments(
     string username,
     decimal? amount = null,
@@ -355,9 +358,6 @@ return true;
         throw;
     }
 }
-
-public const int MaxBulkSize = 50;
-private const int BulkParallelism = 4;
 
 public async Task<PaymentBulkApproveResponse> ApproveBulkAsync(PaymentBulkApproveRequest request)
 {

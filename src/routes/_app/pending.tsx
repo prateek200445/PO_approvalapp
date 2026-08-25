@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { getApiUrl } from "@/lib/api-config";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { Search, ArrowUpDown, Filter, X, CheckSquare, Loader2 } from "lucide-react";
 import { formatINR, type POStatus } from "@/lib/mock-data";
 import { useAuth } from "@/lib/auth-context";
@@ -11,8 +12,6 @@ import { SkeletonPendingList } from "@/components/SkeletonLoader";
 import { toast } from "sonner";
 import { setApprovalListNav } from "@/lib/approval-list-nav";
 import { formatShortDate } from "@/lib/utils";
-
-const MAX_BULK = 50;
 
 export const Route = createFileRoute("/_app/pending")({
   head: () => ({ meta: [{ title: "Pending POs — Approval Portal" }] }),
@@ -111,9 +110,30 @@ function PendingList() {
     [paginatedData]
   );
 
+  const allSelectableIds = useMemo(
+    () =>
+      filtered
+        .filter((p) => p.Status === "Pending" && (p.TransId ?? p.Transid))
+        .map((p) => Number(p.TransId ?? p.Transid)),
+    [filtered]
+  );
+
   const allPageSelected =
     pageSelectableIds.length > 0 &&
     pageSelectableIds.every((id) => selected.has(id));
+
+  const allResultsSelected =
+    allSelectableIds.length > 0 && allSelectableIds.every((id) => selected.has(id));
+
+  const swipeSelectionRef = useRef<{
+    active: boolean;
+    pointerId: number | null;
+    suppressNextClick: boolean;
+  }>({
+    active: false,
+    pointerId: null,
+    suppressNextClick: false,
+  });
 
   function exitSelectMode() {
     setSelectMode(false);
@@ -135,13 +155,16 @@ function PendingList() {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(transId)) next.delete(transId);
-      else {
-        if (next.size >= MAX_BULK) {
-          toast.error(`You can select at most ${MAX_BULK} POs at once`);
-          return prev;
-        }
-        next.add(transId);
-      }
+      else next.add(transId);
+      return next;
+    });
+  }
+
+  function selectOne(transId: number) {
+    setSelected((prev) => {
+      if (prev.has(transId)) return prev;
+      const next = new Set(prev);
+      next.add(transId);
       return next;
     });
   }
@@ -152,16 +175,65 @@ function PendingList() {
       if (allPageSelected) {
         pageSelectableIds.forEach((id) => next.delete(id));
       } else {
-        for (const id of pageSelectableIds) {
-          if (next.size >= MAX_BULK) {
-            toast.error(`You can select at most ${MAX_BULK} POs at once`);
-            break;
-          }
-          next.add(id);
-        }
+        pageSelectableIds.forEach((id) => next.add(id));
       }
       return next;
     });
+  }
+
+  function toggleSelectAllResults() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allResultsSelected) {
+        allSelectableIds.forEach((id) => next.delete(id));
+      } else {
+        allSelectableIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }
+
+  function startSwipeSelection(_transId: number, event: ReactPointerEvent<HTMLButtonElement>) {
+    if (!selectMode || event.pointerType === "mouse") return;
+
+    swipeSelectionRef.current = {
+      active: true,
+      pointerId: event.pointerId,
+      suppressNextClick: false,
+    };
+  }
+
+  function extendSwipeSelection(transId: number, event: ReactPointerEvent<HTMLButtonElement>) {
+    const gesture = swipeSelectionRef.current;
+    if (!selectMode || !gesture.active || gesture.pointerId !== event.pointerId) return;
+
+    gesture.suppressNextClick = true;
+    selectOne(transId);
+  }
+
+  function endSwipeSelection(event: ReactPointerEvent<HTMLButtonElement>) {
+    const gesture = swipeSelectionRef.current;
+    if (gesture.pointerId === event.pointerId) {
+      gesture.active = false;
+    }
+  }
+
+  function handleSwipeClick(
+    transId: number,
+    canSelect: boolean,
+    event: ReactMouseEvent<HTMLButtonElement>
+  ) {
+    const gesture = swipeSelectionRef.current;
+    if (gesture.suppressNextClick) {
+      gesture.suppressNextClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+
+    if (canSelect) {
+      toggleOne(transId);
+    }
   }
 
   async function runBulkApprove() {
@@ -233,6 +305,16 @@ function PendingList() {
               className="hidden h-10 items-center rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:inline-flex"
             >
               Approve selected ({selected.size})
+            </button>
+          )}
+          {selectMode && allSelectableIds.length > 0 && (
+            <button
+              type="button"
+              onClick={toggleSelectAllResults}
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-input bg-surface px-3 text-sm font-medium hover:bg-secondary"
+            >
+              <CheckSquare className="h-4 w-4" />
+              {allResultsSelected ? "Clear all" : "Select all"}
             </button>
           )}
           <button
@@ -375,7 +457,12 @@ function PendingList() {
                   key={`${p.PoNo}-${transId}`}
                   type="button"
                   disabled={!canSelect}
-                  onClick={() => canSelect && toggleOne(transId)}
+                  onPointerDown={(event) => startSwipeSelection(transId, event)}
+                  onPointerEnter={(event) => extendSwipeSelection(transId, event)}
+                  onPointerUp={endSwipeSelection}
+                  onPointerCancel={endSwipeSelection}
+                  onClick={(event) => handleSwipeClick(transId, canSelect, event)}
+                  style={selectMode ? { touchAction: "none" } : undefined}
                   className={`block w-full min-w-0 max-w-full text-left rounded-2xl border bg-card p-4 shadow-soft ${
                     isChecked ? "border-primary ring-1 ring-primary/30" : "border-border"
                   } ${!canSelect ? "opacity-50" : ""}`}
@@ -622,7 +709,6 @@ function PendingList() {
           <div className="flex items-center gap-3">
             <div className="min-w-0 flex-1 text-sm font-medium">
               {selected.size} selected
-              <span className="ml-1.5 text-xs text-muted-foreground">(max {MAX_BULK})</span>
             </div>
             <button
               type="button"

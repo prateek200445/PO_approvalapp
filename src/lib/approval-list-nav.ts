@@ -1,4 +1,4 @@
-export type ApprovalListKind = "po" | "payment" | "workorder" | "indent";
+export type ApprovalListKind = "po" | "payment" | "advancePayment" | "workorder" | "indent";
 
 function storageKey(kind: ApprovalListKind) {
   return `${kind}-approval-nav`;

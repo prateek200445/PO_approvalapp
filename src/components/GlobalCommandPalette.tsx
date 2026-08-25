@@ -11,6 +11,7 @@ const KIND_LABEL: Record<InboxKind, string> = {
   po: "PO",
   workorder: "WO",
   payment: "Pay",
+  advancePayment: "Adv Pay",
   indent: "Indent",
 };
 
@@ -70,6 +71,8 @@ export function GlobalCommandPalette() {
     if (item.kind === "po") navigate({ to: "/po/$poNo", params: { poNo: item.id } });
     else if (item.kind === "workorder") navigate({ to: "/workorder/$poNo", params: { poNo: item.id } });
     else if (item.kind === "payment") navigate({ to: "/payment/$paymentNo", params: { paymentNo: item.id } });
+    else if (item.kind === "advancePayment")
+      navigate({ to: "/advance-payment/$paymentNo", params: { paymentNo: item.id } });
     else navigate({ to: "/indent/$indentNo", params: { indentNo: item.id } });
     setOpen(false);
   }

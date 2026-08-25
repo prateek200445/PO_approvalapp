@@ -5,8 +5,8 @@ namespace POApprovalAPI.Services;
 
 public class PoApprovalService
 {
-    public const int MaxBulkSize = 50;
-    private const int BulkParallelism = 4;
+    public const int MaxBulkSize = int.MaxValue;
+    private const int BulkParallelism = 8;
 
     private readonly DatabaseService _database;
     private readonly EmailService _emailService;

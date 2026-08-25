@@ -6,6 +6,7 @@ import {
   CreditCard,
   FileText,
   Hammer,
+  Wallet,
   CheckCircle2,
   XCircle,
   ArrowRight,
@@ -52,6 +53,14 @@ const KIND_META: Record<
     tone: "bg-success/15 text-success border-success/25",
     bar: "bg-success",
     icon: CreditCard,
+  },
+  advancePayment: {
+    label: "Advance Payments",
+    shortLabel: "Adv Pay",
+    listLabel: "Adv",
+    tone: "bg-cyan-500/15 text-cyan-600 border-cyan-500/25",
+    bar: "bg-cyan-500",
+    icon: Wallet,
   },
   indent: {
     label: "Indents",
@@ -131,6 +140,18 @@ function InboxItemLink({ item, ids }: { item: InboxItem; ids: string[] }) {
       </Link>
     );
   }
+  if (item.kind === "advancePayment") {
+    return (
+      <Link
+        to="/advance-payment/$paymentNo"
+        params={{ paymentNo: item.id }}
+        onClick={onClick}
+        className={className}
+      >
+        {body}
+      </Link>
+    );
+  }
   return (
     <Link
       to="/indent/$indentNo"
@@ -167,10 +188,14 @@ function Dashboard() {
   const poApproved = statsData?.approved ?? statsData?.Approved ?? null;
   const poRejected = statsData?.rejected ?? statsData?.Rejected ?? null;
 
-  const queues: { kind: InboxKind; to: "/pending" | "/workorders" | "/payments" | "/indents" }[] = [
+  const queues: {
+    kind: InboxKind;
+    to: "/pending" | "/workorders" | "/payments" | "/advance-payments" | "/indents";
+  }[] = [
     { kind: "po", to: "/pending" },
     { kind: "workorder", to: "/workorders" },
     { kind: "payment", to: "/payments" },
+    { kind: "advancePayment", to: "/advance-payments" },
     { kind: "indent", to: "/indents" },
   ];
 
@@ -178,6 +203,7 @@ function Dashboard() {
     po: inbox.poItems.map((row) => row.id),
     workorder: inbox.workorderItems.map((row) => row.id),
     payment: inbox.paymentItems.map((row) => row.id),
+    advancePayment: inbox.advancePaymentItems.map((row) => row.id),
     indent: inbox.indentItems.map((row) => row.id),
   };
 
