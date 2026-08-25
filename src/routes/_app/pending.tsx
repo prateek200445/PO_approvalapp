@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { getApiUrl } from "@/lib/api-config";
 import { useState, useEffect, useMemo, useRef } from "react";
-import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from "react";
 import { Search, ArrowUpDown, Filter, X, CheckSquare, Loader2 } from "lucide-react";
 import { formatINR, type POStatus } from "@/lib/mock-data";
 import { useAuth } from "@/lib/auth-context";
@@ -127,7 +127,7 @@ function PendingList() {
 
   const swipeSelectionRef = useRef<{
     active: boolean;
-    pointerId: number | null;
+    touchId: number | null;
     suppressNextClick: boolean;
     dragging: boolean;
     startX: number;
@@ -135,7 +135,7 @@ function PendingList() {
     pressTimer: number | null;
   }>({
     active: false,
-    pointerId: null,
+    touchId: null,
     suppressNextClick: false,
     dragging: false,
     startX: 0,
@@ -201,7 +201,7 @@ function PendingList() {
     });
   }
 
-  function getCardIdFromPoint(event: ReactPointerEvent<HTMLButtonElement>) {
+  function getCardIdFromPoint(event: { clientX: number; clientY: number }) {
     const element = document.elementFromPoint(event.clientX, event.clientY);
     const card = element?.closest<HTMLElement>("[data-po-select-id]");
     if (!card) return null;
@@ -210,8 +210,17 @@ function PendingList() {
     return Number.isFinite(id) ? id : null;
   }
 
-  function startSwipeSelection(_transId: number, event: ReactPointerEvent<HTMLButtonElement>) {
-    if (!selectMode || event.pointerType === "mouse") return;
+  function getActiveTouch(event: ReactTouchEvent<HTMLButtonElement>) {
+    const touchId = swipeSelectionRef.current.touchId;
+    if (touchId == null) return null;
+    return Array.from(event.touches).find((touch) => touch.identifier === touchId) ?? null;
+  }
+
+  function startSwipeSelection(transId: number, event: ReactTouchEvent<HTMLButtonElement>) {
+    if (!selectMode) return;
+
+    const touch = event.changedTouches[0];
+    if (!touch) return;
 
     const gesture = swipeSelectionRef.current;
     if (gesture.pressTimer) {
@@ -220,34 +229,30 @@ function PendingList() {
     }
 
     gesture.active = false;
-    gesture.pointerId = event.pointerId;
+    gesture.touchId = touch.identifier;
     gesture.suppressNextClick = false;
     gesture.dragging = false;
-    gesture.startX = event.clientX;
-    gesture.startY = event.clientY;
+    gesture.startX = touch.clientX;
+    gesture.startY = touch.clientY;
     gesture.pressTimer = window.setTimeout(() => {
       const current = swipeSelectionRef.current;
-      if (!selectMode || current.pointerId !== event.pointerId) return;
+      if (!selectMode || current.touchId !== touch.identifier) return;
       current.active = true;
       current.dragging = true;
       current.suppressNextClick = true;
       current.pressTimer = null;
+      selectOne(transId);
     }, 180);
-
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // Ignore browsers that do not support pointer capture for this element.
-    }
   }
 
-  function extendSwipeSelection(transId: number, event: ReactPointerEvent<HTMLButtonElement>) {
+  function extendSwipeSelection(transId: number, event: ReactTouchEvent<HTMLButtonElement>) {
     const gesture = swipeSelectionRef.current;
-    if (!selectMode || gesture.pointerId !== event.pointerId) return;
+    const touch = getActiveTouch(event);
+    if (!selectMode || !touch || gesture.touchId !== touch.identifier) return;
 
     if (!gesture.active) {
-      const dx = Math.abs(event.clientX - gesture.startX);
-      const dy = Math.abs(event.clientY - gesture.startY);
+      const dx = Math.abs(touch.clientX - gesture.startX);
+      const dy = Math.abs(touch.clientY - gesture.startY);
       if (dx > 8 || dy > 8) {
         if (gesture.pressTimer) {
           window.clearTimeout(gesture.pressTimer);
@@ -257,27 +262,22 @@ function PendingList() {
       return;
     }
 
+    event.preventDefault();
     gesture.suppressNextClick = true;
-    selectOne(getCardIdFromPoint(event) ?? transId);
+    selectOne(getCardIdFromPoint(touch) ?? transId);
   }
 
-  function endSwipeSelection(event: ReactPointerEvent<HTMLButtonElement>) {
+  function endSwipeSelection(event: ReactTouchEvent<HTMLButtonElement>) {
     const gesture = swipeSelectionRef.current;
-    if (gesture.pointerId === event.pointerId) {
+    const touch = event.changedTouches[0];
+    if (touch && gesture.touchId === touch.identifier) {
       if (gesture.pressTimer) {
         window.clearTimeout(gesture.pressTimer);
         gesture.pressTimer = null;
       }
       gesture.active = false;
       gesture.dragging = false;
-
-      try {
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-      } catch {
-        // Ignore browsers that do not support releasing pointer capture here.
-      }
+      gesture.touchId = null;
     }
   }
 
@@ -527,11 +527,10 @@ function PendingList() {
                   type="button"
                   data-po-select-id={transId}
                   disabled={!canSelect}
-                  onPointerDown={(event) => startSwipeSelection(transId, event)}
-                  onPointerMove={(event) => extendSwipeSelection(transId, event)}
-                  onPointerEnter={(event) => extendSwipeSelection(transId, event)}
-                  onPointerUp={endSwipeSelection}
-                  onPointerCancel={endSwipeSelection}
+                  onTouchStart={(event) => startSwipeSelection(transId, event)}
+                  onTouchMove={(event) => extendSwipeSelection(transId, event)}
+                  onTouchEnd={endSwipeSelection}
+                  onTouchCancel={endSwipeSelection}
                   onClick={(event) => handleSwipeClick(transId, canSelect, event)}
                   onContextMenu={(event) => event.preventDefault()}
                   style={selectMode ? { touchAction: "pan-y" } : undefined}
@@ -543,7 +542,7 @@ function PendingList() {
                     <input
                       type="checkbox"
                       checked={!!isChecked}
-                      onPointerDown={(event) => event.stopPropagation()}
+                      onTouchStart={(event) => event.stopPropagation()}
                       onClick={(event) => {
                         event.stopPropagation();
                         if (canSelect) toggleOne(transId);
