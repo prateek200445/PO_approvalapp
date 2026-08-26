@@ -20,8 +20,14 @@ function LedgersHubPage() {
         <HubCard
           to="/pnl"
           icon={LineChart}
-          title="P&L / EBITDA"
-          description="Income and expense from trial balance, enter provision, stock, and Common / HO, then generate P&L."
+          title="P&L Inputs"
+          description="Maintain monthly stock, provision, and Common / HO inputs used by the result page."
+        />
+        <HubCard
+          to="/pnl-result"
+          icon={LineChart}
+          title="P&L / EBITDA Result"
+          description="Select company and month to generate the final P&L and EBITDA statement."
         />
         <HubCard
           to="/ledger-summary"

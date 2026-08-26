@@ -154,6 +154,54 @@ public class PnlController : ControllerBase
         }
     }
 
+    [HttpGet("uploads")]
+    public async Task<IActionResult> Uploads([FromQuery] string company, [FromQuery] string month)
+    {
+        try
+        {
+            return Ok(await _service.GetUploadsAsync(company, PnlService.ParseMonth(month)));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("uploads/{uploadType}")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(25_000_000)]
+    public async Task<IActionResult> SaveUpload(
+        string uploadType,
+        IFormFile file,
+        [FromForm] string company,
+        [FromForm] string month,
+        [FromForm] string? remarks = null)
+    {
+        try
+        {
+            ValidateExcel(file);
+            await using var stream = file.OpenReadStream();
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            await _service.SaveUploadAsync(
+                company,
+                PnlService.ParseMonth(month),
+                uploadType,
+                file.FileName,
+                file.ContentType ?? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ms.ToArray(),
+                remarks);
+
+            return Ok(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("statement")]
     public async Task<IActionResult> Statement([FromQuery] string company, [FromQuery] string month)
     {
@@ -165,5 +213,18 @@ public class PnlController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+    }
+
+    private static void ValidateExcel(IFormFile? file)
+    {
+        if (file == null || file.Length == 0)
+            throw new InvalidOperationException("Excel file is required.");
+
+        if (file.Length > 25_000_000)
+            throw new InvalidOperationException("File exceeds the 25 MB limit.");
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (ext is not ".xlsx")
+            throw new InvalidOperationException("Only .xlsx files are supported.");
     }
 }

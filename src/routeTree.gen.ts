@@ -15,6 +15,7 @@ import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
 import { Route as AppSalesDashboardRouteImport } from './routes/_app/sales-dashboard'
 import { Route as AppReconciliationRouteImport } from './routes/_app/reconciliation'
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
+import { Route as AppPnlResultRouteImport } from './routes/_app/pnl-result'
 import { Route as AppPnlRouteImport } from './routes/_app/pnl'
 import { Route as AppPendingRouteImport } from './routes/_app/pending'
 import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
@@ -66,6 +67,11 @@ const AppReconciliationRoute = AppReconciliationRouteImport.update({
 const AppProfileRoute = AppProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPnlResultRoute = AppPnlResultRouteImport.update({
+  id: '/pnl-result',
+  path: '/pnl-result',
   getParentRoute: () => AppRoute,
 } as any)
 const AppPnlRoute = AppPnlRouteImport.update({
@@ -202,6 +208,7 @@ export interface FileRoutesByFullPath {
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
   '/pnl': typeof AppPnlRoute
+  '/pnl-result': typeof AppPnlResultRoute
   '/profile': typeof AppProfileRoute
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
@@ -231,6 +238,7 @@ export interface FileRoutesByTo {
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
   '/pnl': typeof AppPnlRoute
+  '/pnl-result': typeof AppPnlResultRoute
   '/profile': typeof AppProfileRoute
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
@@ -263,6 +271,7 @@ export interface FileRoutesById {
   '/_app/payments': typeof AppPaymentsRoute
   '/_app/pending': typeof AppPendingRoute
   '/_app/pnl': typeof AppPnlRoute
+  '/_app/pnl-result': typeof AppPnlResultRoute
   '/_app/profile': typeof AppProfileRoute
   '/_app/reconciliation': typeof AppReconciliationRoute
   '/_app/sales-dashboard': typeof AppSalesDashboardRoute
@@ -295,6 +304,7 @@ export interface FileRouteTypes {
     | '/payments'
     | '/pending'
     | '/pnl'
+    | '/pnl-result'
     | '/profile'
     | '/reconciliation'
     | '/sales-dashboard'
@@ -324,6 +334,7 @@ export interface FileRouteTypes {
     | '/payments'
     | '/pending'
     | '/pnl'
+    | '/pnl-result'
     | '/profile'
     | '/reconciliation'
     | '/sales-dashboard'
@@ -355,6 +366,7 @@ export interface FileRouteTypes {
     | '/_app/payments'
     | '/_app/pending'
     | '/_app/pnl'
+    | '/_app/pnl-result'
     | '/_app/profile'
     | '/_app/reconciliation'
     | '/_app/sales-dashboard'
@@ -417,6 +429,13 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/profile'
       preLoaderRoute: typeof AppProfileRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pnl-result': {
+      id: '/_app/pnl-result'
+      path: '/pnl-result'
+      fullPath: '/pnl-result'
+      preLoaderRoute: typeof AppPnlResultRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/pnl': {
@@ -625,6 +644,7 @@ interface AppRouteChildren {
   AppPaymentsRoute: typeof AppPaymentsRoute
   AppPendingRoute: typeof AppPendingRoute
   AppPnlRoute: typeof AppPnlRoute
+  AppPnlResultRoute: typeof AppPnlResultRoute
   AppProfileRoute: typeof AppProfileRoute
   AppReconciliationRoute: typeof AppReconciliationRoute
   AppSalesDashboardRoute: typeof AppSalesDashboardRoute
@@ -651,6 +671,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppPaymentsRoute: AppPaymentsRoute,
   AppPendingRoute: AppPendingRoute,
   AppPnlRoute: AppPnlRoute,
+  AppPnlResultRoute: AppPnlResultRoute,
   AppProfileRoute: AppProfileRoute,
   AppReconciliationRoute: AppReconciliationRoute,
   AppSalesDashboardRoute: AppSalesDashboardRoute,

@@ -123,6 +123,19 @@ public class PnlOverheadSaveRequest
     public double HoLacs { get; set; }
 }
 
+public class PnlUploadItem
+{
+    public int Id { get; set; }
+    public string Company { get; set; } = "";
+    public string Month { get; set; } = "";
+    public string UploadType { get; set; } = "";
+    public string OriginalFileName { get; set; } = "";
+    public string ContentType { get; set; } = "";
+    public long FileSizeBytes { get; set; }
+    public string? Remarks { get; set; }
+    public DateTime UploadedAt { get; set; }
+}
+
 public class PnlStatementRow
 {
     public string Id { get; set; } = "";

@@ -265,7 +265,7 @@ VALUES (@Company, @Date, @Ledger, @Amount, @Remarks)",
         using var connection = _database.CreateConnection();
         var stored = (await connection.QueryAsync<(string Category, DateTime StockMonth, double AmountLacs)>(@"
 SELECT Category, StockMonth, AmountLacs
-FROM AppPnlStockValue WITH (NOLOCK)
+FROM PnlStockValue WITH (NOLOCK)
 WHERE LTRIM(RTRIM(CompanyName)) = @Company
   AND StockMonth IN (@Prev, @Month)",
             new { Company = companyName, Prev = prev, Month = monthStart })).ToList();
@@ -308,7 +308,7 @@ WHERE LTRIM(RTRIM(CompanyName)) = @Company
         using var connection = _database.CreateConnection();
         var stored = (await connection.QueryAsync<(string Category, DateTime StockMonth, double AmountLacs)>(@"
 SELECT Category, StockMonth, AmountLacs
-FROM AppPnlStockValue WITH (NOLOCK)
+FROM PnlStockValue WITH (NOLOCK)
 WHERE LTRIM(RTRIM(CompanyName)) = @Company
   AND StockMonth IN @Months",
             new { Company = companyName, Months = loadMonths })).ToList();
@@ -383,7 +383,7 @@ WHERE LTRIM(RTRIM(CompanyName)) = @Company
         using var connection = _database.CreateConnection();
         var row = await connection.QueryFirstOrDefaultAsync<(double CommonLacs, double HoLacs)>(@"
 SELECT CommonLacs, HoLacs
-FROM AppPnlOverhead WITH (NOLOCK)
+FROM PnlOverhead WITH (NOLOCK)
 WHERE LTRIM(RTRIM(CompanyName)) = @Company AND OverheadMonth = @Month",
             new { Company = companyName, Month = monthStart });
 
@@ -407,14 +407,14 @@ WHERE LTRIM(RTRIM(CompanyName)) = @Company AND OverheadMonth = @Month",
         using var connection = _database.CreateConnection();
         await connection.ExecuteAsync(@"
 IF EXISTS (
-    SELECT 1 FROM AppPnlOverhead
+    SELECT 1 FROM PnlOverhead
     WHERE CompanyName = @Company AND OverheadMonth = @Month
 )
-    UPDATE AppPnlOverhead
-    SET CommonLacs = @Common, HoLacs = @Ho, UpdatedAt = GETDATE()
+    UPDATE PnlOverhead
+    SET CommonLacs = @Common, HoLacs = @Ho, UploadedAt = GETDATE()
     WHERE CompanyName = @Company AND OverheadMonth = @Month
 ELSE
-    INSERT INTO AppPnlOverhead (CompanyName, OverheadMonth, CommonLacs, HoLacs, UpdatedAt)
+    INSERT INTO PnlOverhead (CompanyName, OverheadMonth, CommonLacs, HoLacs, UploadedAt)
     VALUES (@Company, @Month, @Common, @Ho, GETDATE())",
             new
             {
@@ -422,6 +422,84 @@ ELSE
                 Month = monthStart,
                 Common = request.CommonLacs,
                 Ho = request.HoLacs,
+            });
+    }
+
+    public async Task<List<PnlUploadItem>> GetUploadsAsync(string company, DateTime monthStart)
+    {
+        if (IsAggregate(company))
+            throw new ArgumentException("Pick a single company to view uploads.");
+
+        var companyName = (await ResolveCompaniesAsync(company)).First();
+        await EnsureUploadTableAsync();
+
+        using var connection = _database.CreateConnection();
+        var rows = (await connection.QueryAsync<PnlUploadItem>(@"
+SELECT
+    Id,
+    LTRIM(RTRIM(CompanyName)) AS Company,
+    CONVERT(varchar(7), MonthStart, 120) AS Month,
+    UploadType,
+    OriginalFileName,
+    ContentType,
+    DATALENGTH(FileBytes) AS FileSizeBytes,
+    Remarks,
+    UploadedAt
+FROM PnlUploadInbox WITH (NOLOCK)
+WHERE LTRIM(RTRIM(CompanyName)) = @Company
+  AND MonthStart = @Month
+ORDER BY UploadedAt DESC, Id DESC",
+            new { Company = companyName, Month = monthStart.Date })).ToList();
+        return rows;
+    }
+
+    public async Task SaveUploadAsync(
+        string company,
+        DateTime monthStart,
+        string uploadType,
+        string fileName,
+        string contentType,
+        byte[] fileBytes,
+        string? remarks = null)
+    {
+        if (IsAggregate(company))
+            throw new ArgumentException("Pick a single company to upload a file.");
+
+        var companyName = (await ResolveCompaniesAsync(company)).First();
+        var type = NormalizeUploadType(uploadType);
+        await EnsureUploadTableAsync();
+
+        using var connection = _database.CreateConnection();
+        await connection.ExecuteAsync(@"
+MERGE PnlUploadInbox AS tgt
+USING (
+    SELECT
+        @Company AS CompanyName,
+        @Month AS MonthStart,
+        @UploadType AS UploadType
+) AS src
+ON LTRIM(RTRIM(tgt.CompanyName)) = LTRIM(RTRIM(src.CompanyName))
+   AND tgt.MonthStart = src.MonthStart
+   AND LTRIM(RTRIM(tgt.UploadType)) = LTRIM(RTRIM(src.UploadType))
+WHEN MATCHED THEN
+    UPDATE SET
+        OriginalFileName = @FileName,
+        ContentType = @ContentType,
+        FileBytes = @FileBytes,
+        Remarks = @Remarks,
+        UploadedAt = GETDATE()
+WHEN NOT MATCHED THEN
+    INSERT (CompanyName, MonthStart, UploadType, OriginalFileName, ContentType, FileBytes, Remarks, UploadedAt)
+    VALUES (@Company, @Month, @UploadType, @FileName, @ContentType, @FileBytes, @Remarks, GETDATE());",
+            new
+            {
+                Company = companyName,
+                Month = monthStart.Date,
+                UploadType = type,
+                FileName = fileName,
+                ContentType = contentType,
+                FileBytes = fileBytes,
+                Remarks = remarks,
             });
     }
 
@@ -438,7 +516,7 @@ ELSE
 SELECT
     ISNULL(SUM(CommonLacs), 0) AS CommonLacs,
     ISNULL(SUM(HoLacs), 0) AS HoLacs
-FROM AppPnlOverhead WITH (NOLOCK)
+FROM PnlOverhead WITH (NOLOCK)
 WHERE OverheadMonth >= @FromMonth AND OverheadMonth <= @ToMonth
   AND (@AllCompanies = 1 OR LTRIM(RTRIM(CompanyName)) IN @Companies)",
             new
@@ -459,17 +537,42 @@ WHERE OverheadMonth >= @FromMonth AND OverheadMonth <= @ToMonth
     {
         using var connection = _database.CreateConnection();
         await connection.ExecuteAsync(@"
-IF OBJECT_ID(N'dbo.AppPnlOverhead', N'U') IS NULL
+IF OBJECT_ID(N'dbo.PnlOverhead', N'U') IS NULL
 BEGIN
-    CREATE TABLE dbo.AppPnlOverhead (
+    CREATE TABLE dbo.PnlOverhead (
         Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
         CompanyName VARCHAR(150) NOT NULL,
         OverheadMonth DATE NOT NULL,
-        CommonLacs FLOAT NOT NULL CONSTRAINT DF_AppPnlOverhead_Common DEFAULT (0),
-        HoLacs FLOAT NOT NULL CONSTRAINT DF_AppPnlOverhead_Ho DEFAULT (0),
-        UpdatedAt DATETIME NOT NULL CONSTRAINT DF_AppPnlOverhead_Updated DEFAULT (GETDATE()),
-        CONSTRAINT UQ_AppPnlOverhead UNIQUE (CompanyName, OverheadMonth)
+        CommonLacs FLOAT NOT NULL CONSTRAINT DF_PnlOverhead_Common DEFAULT (0),
+        HoLacs FLOAT NOT NULL CONSTRAINT DF_PnlOverhead_Ho DEFAULT (0),
+        UploadedBy VARCHAR(100) NULL,
+        UploadedAt DATETIME NOT NULL CONSTRAINT DF_PnlOverhead_Uploaded DEFAULT (GETDATE()),
+        Remarks VARCHAR(500) NULL,
+        CONSTRAINT UQ_PnlOverhead UNIQUE (CompanyName, OverheadMonth)
     );
+END");
+    }
+
+    private async Task EnsureUploadTableAsync()
+    {
+        using var connection = _database.CreateConnection();
+        await connection.ExecuteAsync(@"
+IF OBJECT_ID(N'dbo.PnlUploadInbox', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.PnlUploadInbox (
+        Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        CompanyName VARCHAR(150) NOT NULL,
+        MonthStart DATE NOT NULL,
+        UploadType VARCHAR(30) NOT NULL,
+        OriginalFileName VARCHAR(260) NOT NULL,
+        ContentType VARCHAR(100) NOT NULL,
+        FileBytes VARBINARY(MAX) NOT NULL,
+        Remarks VARCHAR(500) NULL,
+        UploadedAt DATETIME NOT NULL CONSTRAINT DF_PnlUploadInbox_UploadedAt DEFAULT (GETDATE())
+    );
+
+    CREATE UNIQUE INDEX UX_PnlUploadInbox_CompanyMonthType
+    ON dbo.PnlUploadInbox (CompanyName, MonthStart, UploadType);
 END");
     }
 
@@ -682,16 +785,19 @@ WHERE LTRIM(RTRIM(ISNULL(GroupName, N''))) = @Group",
     {
         using var connection = _database.CreateConnection();
         await connection.ExecuteAsync(@"
-IF OBJECT_ID(N'dbo.AppPnlStockValue', N'U') IS NULL
+IF OBJECT_ID(N'dbo.PnlStockValue', N'U') IS NULL
 BEGIN
-    CREATE TABLE dbo.AppPnlStockValue (
+    CREATE TABLE dbo.PnlStockValue (
         Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
         CompanyName VARCHAR(150) NOT NULL,
+        PlantName VARCHAR(100) NULL,
         StockMonth DATE NOT NULL,
         Category VARCHAR(40) NOT NULL,
-        AmountLacs FLOAT NOT NULL CONSTRAINT DF_AppPnlStockValue_Amount DEFAULT (0),
-        UpdatedAt DATETIME NOT NULL CONSTRAINT DF_AppPnlStockValue_Updated DEFAULT (GETDATE()),
-        CONSTRAINT UQ_AppPnlStockValue UNIQUE (CompanyName, StockMonth, Category)
+        AmountLacs FLOAT NOT NULL CONSTRAINT DF_PnlStockValue_Amount DEFAULT (0),
+        UploadedBy VARCHAR(100) NULL,
+        UploadedAt DATETIME NOT NULL CONSTRAINT DF_PnlStockValue_UploadedAt DEFAULT (GETDATE()),
+        Remarks VARCHAR(500) NULL,
+        CONSTRAINT UQ_PnlStockValue UNIQUE (CompanyName, PlantName, StockMonth, Category)
     );
 END");
     }
@@ -705,14 +811,14 @@ END");
     {
         await connection.ExecuteAsync(@"
 IF EXISTS (
-    SELECT 1 FROM AppPnlStockValue
+    SELECT 1 FROM PnlStockValue
     WHERE CompanyName = @Company AND StockMonth = @Month AND Category = @Category
 )
-    UPDATE AppPnlStockValue
-    SET AmountLacs = @Amount, UpdatedAt = GETDATE()
+    UPDATE PnlStockValue
+    SET AmountLacs = @Amount, UploadedAt = GETDATE()
     WHERE CompanyName = @Company AND StockMonth = @Month AND Category = @Category
 ELSE
-    INSERT INTO AppPnlStockValue (CompanyName, StockMonth, Category, AmountLacs, UpdatedAt)
+    INSERT INTO PnlStockValue (CompanyName, StockMonth, Category, AmountLacs, UploadedAt)
     VALUES (@Company, @Month, @Category, @Amount, GETDATE())",
             new
             {
@@ -721,6 +827,21 @@ ELSE
                 Category = category,
                 Amount = amountLacs,
             });
+    }
+
+    private static string NormalizeUploadType(string uploadType)
+    {
+        var type = (uploadType ?? "").Trim().ToLowerInvariant();
+        return type switch
+        {
+            "stock" => "Stock",
+            "provision" => "Provision",
+            "common" => "CommonExpense",
+            "commonexpense" => "CommonExpense",
+            "common-expense" => "CommonExpense",
+            "common expense" => "CommonExpense",
+            _ => throw new ArgumentException("Upload type must be Stock, Provision, or CommonExpense."),
+        };
     }
 
     private static Dictionary<string, double> SumHeads(IEnumerable<BookRow> rows)

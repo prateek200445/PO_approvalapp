@@ -9,6 +9,7 @@ import type {
   PnlOverheadState,
   PnlProvisionRow,
   PnlStockRow,
+  PnlUploadItem,
 } from "@/lib/pnl-types";
 
 async function readJson<T>(res: Response): Promise<T> {
@@ -101,4 +102,29 @@ export async function getPnlStatement(company: string, month: string) {
   const params = new URLSearchParams({ company, month });
   const res = await fetch(getApiUrl(`/api/pnl/statement?${params}`));
   return readJson<PnlStatementResult>(res);
+}
+
+export async function getPnlUploads(company: string, month: string) {
+  const params = new URLSearchParams({ company, month });
+  const res = await fetch(getApiUrl(`/api/pnl/uploads?${params}`));
+  return readJson<PnlUploadItem[]>(res);
+}
+
+export async function savePnlUpload(
+  uploadType: "stock" | "provision" | "common" | "commonexpense" | "common-expense",
+  company: string,
+  month: string,
+  file: File,
+  remarks?: string,
+) {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("company", company);
+  body.append("month", month);
+  if (remarks) body.append("remarks", remarks);
+  const res = await fetch(getApiUrl(`/api/pnl/uploads/${uploadType}`), {
+    method: "POST",
+    body,
+  });
+  return readJson<{ ok: boolean }>(res);
 }

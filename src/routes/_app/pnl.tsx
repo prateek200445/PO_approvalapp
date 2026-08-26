@@ -1,50 +1,44 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, FileSpreadsheet, Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { MonthPickerField } from "@/components/MonthPickerField";
 import {
   getPnlCompanies,
-  getPnlIncomeExpense,
   getPnlProvisions,
-  getPnlStatement,
   getPnlStockYear,
+  getPnlUploads,
+  getPnlOverhead,
   savePnlProvisions,
   savePnlStockYear,
-  getPnlOverhead,
   savePnlOverhead,
+  savePnlUpload,
 } from "@/lib/pnl-api";
 import {
   currentMonthValue,
   formatLacs,
-  formatPct,
   isSingleCompany,
-  monthRange,
-  type PnlHeadGroup,
   type PnlOverheadState,
   type PnlProvisionRow,
   type PnlStockYearRow,
   type PnlStockYearState,
+  type PnlUploadItem,
 } from "@/lib/pnl-types";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/pnl")({
-  head: () => ({ meta: [{ title: "P&L / EBITDA — PO Portal" }] }),
+  head: () => ({ meta: [{ title: "P&L Inputs — PO Portal" }] }),
   component: PnlPage,
 });
 
 function PnlPage() {
   const [company, setCompany] = useState("All Companies");
   const [month, setMonth] = useState(currentMonthValue());
-  const [tab, setTab] = useState("books");
-  const range = monthRange(month);
   const single = isSingleCompany(company);
 
   const companiesQuery = useQuery({
@@ -53,36 +47,11 @@ function PnlPage() {
     staleTime: 60 * 60_000,
   });
 
-  const booksQuery = useQuery({
-    queryKey: ["pnl-books", company, range.from, range.to],
-    queryFn: () => getPnlIncomeExpense(company, range.from, range.to),
-    enabled: tab === "books",
-    staleTime: 5 * 60_000,
-  });
-
-  const provisionQuery = useQuery({
-    queryKey: ["pnl-provision", company, month],
-    queryFn: () => getPnlProvisions(company, month),
-    enabled: tab === "provision" && single,
-  });
-
-  const stockQuery = useQuery({
-    queryKey: ["pnl-stock-year", company, month],
-    queryFn: () => getPnlStockYear(company, month),
-    enabled: tab === "stock" && single,
-  });
-
-  const overheadQuery = useQuery({
-    queryKey: ["pnl-overhead", company, month],
-    queryFn: () => getPnlOverhead(company, month),
-    enabled: tab === "overhead" && single,
-  });
-
-  const statementQuery = useQuery({
-    queryKey: ["pnl-statement", company, month],
-    queryFn: () => getPnlStatement(company, month),
-    enabled: tab === "statement",
-    staleTime: 30_000,
+  const uploadsQuery = useQuery({
+    queryKey: ["pnl-uploads", company, month],
+    queryFn: () => getPnlUploads(company, month),
+    enabled: single,
+    staleTime: 15_000,
   });
 
   const companyOptions = useMemo(
@@ -100,9 +69,10 @@ function PnlPage() {
           <ArrowLeft className="h-5 w-5" />
         </Link>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">P&L / EBITDA</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">P&L Inputs</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Income and expense from trial balance, then enter provision, stock, and Common / HO to generate P&amp;L.
+            Maintain the monthly inputs used by the P&amp;L result page: trial balance heads, provisions, stock,
+            and Common / HO allocations.
           </p>
         </div>
       </div>
@@ -124,108 +94,151 @@ function PnlPage() {
         </label>
       </div>
 
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="flex h-auto w-full flex-wrap gap-1">
-          <TabsTrigger value="books">Income / Expense</TabsTrigger>
-          <TabsTrigger value="provision">Provision</TabsTrigger>
-          <TabsTrigger value="stock">Stock value</TabsTrigger>
-          <TabsTrigger value="overhead">Common / HO</TabsTrigger>
-          <TabsTrigger value="statement">P&amp;L</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="books" className="mt-4">
-          <BooksTab query={booksQuery} />
-        </TabsContent>
-        <TabsContent value="provision" className="mt-4">
-          {single ? (
-            <ProvisionTab
-              key={`${company}-${month}`}
-              company={company}
-              month={month}
-              data={provisionQuery.data}
-              loading={provisionQuery.isLoading}
-              onSaved={() => void provisionQuery.refetch()}
-            />
-          ) : (
-            <p className="text-sm text-muted-foreground">Pick a single company to enter provision.</p>
-          )}
-        </TabsContent>
-        <TabsContent value="stock" className="mt-4">
-          {single ? (
-            <StockTab
-              key={`${company}-${month}`}
-              company={company}
-              month={month}
-              data={stockQuery.data}
-              loading={stockQuery.isLoading}
-              onSaved={() => void stockQuery.refetch()}
-            />
-          ) : (
-            <p className="text-sm text-muted-foreground">Pick a single company to enter stock value (lacs).</p>
-          )}
-        </TabsContent>
-        <TabsContent value="overhead" className="mt-4">
-          {single ? (
-            <OverheadTab
-              key={`${company}-${month}`}
-              company={company}
-              month={month}
-              data={overheadQuery.data}
-              loading={overheadQuery.isLoading}
-              onSaved={() => void overheadQuery.refetch()}
-            />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Pick a single company to enter Common / HO allocation (lacs). Group and All Companies use the sum of saved plants.
-            </p>
-          )}
-        </TabsContent>
-        <TabsContent value="statement" className="mt-4">
-          <StatementTab query={statementQuery} />
-        </TabsContent>
-      </Tabs>
+      {single ? (
+        <UploadInboxPanel
+          company={company}
+          month={month}
+          uploads={uploadsQuery.data}
+          loading={uploadsQuery.isLoading}
+          onSaved={() => void uploadsQuery.refetch()}
+        />
+      ) : (
+        <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
+          Pick a single company to upload the three Excel files.
+        </p>
+      )}
     </div>
   );
 }
 
-function BooksTab({
-  query,
+function UploadInboxPanel({
+  company,
+  month,
+  uploads,
+  loading,
+  onSaved,
 }: {
-  query: { data?: { incomeLacs: number; expenseLacs: number; heads: PnlHeadGroup[] }; isLoading: boolean; error: Error | null };
+  company: string;
+  month: string;
+  uploads?: PnlUploadItem[];
+  loading: boolean;
+  onSaved: () => void;
 }) {
-  if (query.isLoading) return <Busy label="Loading trial balance income / expense…" />;
-  if (query.error) return <p className="text-sm text-destructive">{query.error.message}</p>;
-  const data = query.data;
-  if (!data) return null;
+  const [files, setFiles] = useState<{
+    stock: File | null;
+    provision: File | null;
+    common: File | null;
+  }>({
+    stock: null,
+    provision: null,
+    common: null,
+  });
+
+  const upload = useMutation({
+    mutationFn: async (input: { type: "stock" | "provision" | "common"; file: File }) => {
+      await savePnlUpload(input.type, company, month, input.file);
+    },
+    onSuccess: () => {
+      toast.success("File uploaded");
+      setFiles({ stock: null, provision: null, common: null });
+      onSaved();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const cards: { key: keyof typeof files; type: "stock" | "provision" | "common"; title: string; hint: string }[] = [
+    {
+      key: "stock",
+      type: "stock",
+      title: "Stock Excel",
+      hint: "Any workbook layout is fine for now.",
+    },
+    {
+      key: "provision",
+      type: "provision",
+      title: "Provision Excel",
+      hint: "Upload the month-wise provision workbook as received.",
+    },
+    {
+      key: "common",
+      type: "common",
+      title: "Common / HO Excel",
+      hint: "Upload the Common and HO expense workbook.",
+    },
+  ];
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <Kpi label="Income" value={data.incomeLacs} />
-        <Kpi label="Expense" value={data.expenseLacs} />
+    <div className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Excel Upload Inbox</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Upload each Excel as-is for this company and month. We will standardize the sheet format later.
+          </p>
+        </div>
+        <FileSpreadsheet className="h-5 w-5 text-muted-foreground" />
       </div>
-      <p className="text-xs text-muted-foreground">
-        Amounts in lacs. Includes this month’s provision and reverses last month’s provision.
-      </p>
-      {data.heads.map((head) => (
-        <Collapsible key={`${head.category}-${head.head}`} className="rounded-lg border bg-card">
-          <CollapsibleTrigger className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">{head.category}</div>
-              <div className="text-sm font-medium">{head.head}</div>
-            </div>
-            <div className="font-medium tabular-nums">{formatLacs(head.amountLacs)}</div>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="border-t px-3 py-2">
-            {head.ledgers.map((led) => (
-              <div key={led.ledgerName} className="flex justify-between gap-2 py-1 text-sm">
-                <span className="text-muted-foreground">{led.ledgerName}</span>
-                <span className="tabular-nums">{formatLacs(led.amountLacs)}</span>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        {cards.map((card) => (
+          <div key={card.key} className="rounded-lg border p-3">
+            <div className="text-sm font-medium">{card.title}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{card.hint}</div>
+            <label className="mt-3 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed px-3 py-6 text-center hover:bg-secondary/40">
+              <Upload className="h-5 w-5 text-muted-foreground" />
+              <span className="text-xs font-medium">
+                {files[card.key]?.name ?? "Choose .xlsx"}
+              </span>
+              <input
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="sr-only"
+                onChange={(e) => {
+                  const next = e.target.files?.[0] ?? null;
+                  setFiles((prev) => ({ ...prev, [card.key]: next }));
+                }}
+              />
+            </label>
+            <Button
+              type="button"
+              className="mt-3 w-full"
+              disabled={!files[card.key] || upload.isPending}
+              onClick={() => {
+                const file = files[card.key];
+                if (!file) return;
+                upload.mutate({ type: card.type, file });
+              }}
+            >
+              {upload.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Upload
+            </Button>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-lg border bg-muted/20 p-3">
+        <div className="text-sm font-medium">Latest uploads</div>
+        <div className="mt-2 space-y-2">
+          {loading ? (
+            <Busy label="Loading uploaded files…" />
+          ) : (uploads ?? []).length > 0 ? (
+            uploads!.map((item) => (
+              <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <div>
+                  <span className="font-medium">{item.uploadType}</span>
+                  <span className="mx-2 text-muted-foreground">•</span>
+                  <span className="text-muted-foreground">{item.originalFileName}</span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {item.fileSizeBytes.toLocaleString("en-IN")} bytes • {new Date(item.uploadedAt).toLocaleString()}
+                </div>
               </div>
-            ))}
-          </CollapsibleContent>
-        </Collapsible>
-      ))}
+            ))
+          ) : (
+            <p className="text-sm text-muted-foreground">No files uploaded yet for this company and month.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -567,104 +580,6 @@ function OverheadTab({
       <Button onClick={() => save.mutate()} disabled={save.isPending}>
         {save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
         Save Common / HO
-      </Button>
-    </div>
-  );
-}
-
-function StatementTab({
-  query,
-}: {
-  query: {
-    data?: {
-      ebitdaLacs: number;
-      pbtLacs: number;
-      stockIncomplete: boolean;
-      rows: {
-        id: string;
-        label: string;
-        kind: string;
-        monthLacs: number | null;
-        pctToSales: number | null;
-        ytdLacs: number | null;
-        ytdPctToSales: number | null;
-      }[];
-      unmapped: PnlHeadGroup[];
-    };
-    isLoading: boolean;
-    error: Error | null;
-    refetch: () => void;
-  };
-}) {
-  if (query.isLoading) return <Busy label="Generating P&L…" />;
-  if (query.error) return <p className="text-sm text-destructive">{query.error.message}</p>;
-  const data = query.data;
-  if (!data) return null;
-
-  return (
-    <div className="space-y-3">
-      {data.stockIncomplete ? (
-        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
-          Stock values are empty. Enter opening/closing stock so materials consumed and inventory change are correct.
-        </p>
-      ) : null}
-      <div className="grid grid-cols-2 gap-3">
-        <Kpi label="EBITDA" value={data.ebitdaLacs} />
-        <Kpi label="PBT" value={data.pbtLacs} />
-      </div>
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[28rem] text-sm">
-          <thead className="bg-muted/60 text-left text-xs text-muted-foreground">
-            <tr>
-              <th className="px-2 py-2 font-medium">Particulars</th>
-              <th className="px-2 py-2 text-right font-medium">Month</th>
-              <th className="px-2 py-2 text-right font-medium">%</th>
-              <th className="px-2 py-2 text-right font-medium">YTD</th>
-              <th className="px-2 py-2 text-right font-medium">YTD %</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.rows.map((row) => (
-              <tr
-                key={row.id}
-                className={cn(
-                  "border-t",
-                  row.kind === "header" && "bg-muted/40 font-semibold",
-                  row.kind === "total" && "font-semibold",
-                  row.kind === "result" && "bg-primary/10 font-semibold",
-                )}
-              >
-                <td className={cn("px-2 py-1.5", row.kind === "line" && "pl-4")}>{row.label}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">
-                  {row.kind === "header" ? "" : formatLacs(row.monthLacs)}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
-                  {row.kind === "header" ? "" : formatPct(row.pctToSales)}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums">
-                  {row.kind === "header" ? "" : formatLacs(row.ytdLacs)}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
-                  {row.kind === "header" ? "" : formatPct(row.ytdPctToSales)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {data.unmapped.length > 0 ? (
-        <div>
-          <h3 className="mb-2 text-sm font-medium">Unmapped TB heads</h3>
-          {data.unmapped.map((h) => (
-            <div key={h.head} className="flex justify-between text-sm">
-              <span className="text-muted-foreground">{h.head}</span>
-              <span className="tabular-nums">{formatLacs(h.amountLacs)}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      <Button variant="outline" onClick={() => query.refetch()}>
-        Refresh P&amp;L
       </Button>
     </div>
   );

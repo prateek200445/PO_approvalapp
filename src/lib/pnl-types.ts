@@ -80,6 +80,18 @@ export type PnlOverheadState = {
   hoLacs: number;
 };
 
+export type PnlUploadItem = {
+  id: number;
+  company: string;
+  month: string;
+  uploadType: string;
+  originalFileName: string;
+  contentType: string;
+  fileSizeBytes: number;
+  remarks?: string | null;
+  uploadedAt: string;
+};
+
 export type PnlStatementRow = {
   id: string;
   label: string;
