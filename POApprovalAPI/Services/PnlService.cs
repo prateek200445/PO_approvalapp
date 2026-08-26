@@ -234,16 +234,11 @@ WHERE LTRIM(RTRIM(companyname)) = @Company
             new { Company = companyName, From = monthStart, To = monthEnd },
             tx);
 
-        var nextId = await connection.ExecuteScalarAsync<int>(@"
-SELECT ISNULL(MAX(transid), 0) FROM Provisioning",
-            transaction: tx);
-
         foreach (var row in rows)
         {
-            nextId++;
             await connection.ExecuteAsync(@"
-INSERT INTO Provisioning (companyname, sysdate, Ledgername, Amount, remarks, transid)
-VALUES (@Company, @Date, @Ledger, @Amount, @Remarks, @TransId)",
+INSERT INTO Provisioning (companyname, sysdate, Ledgername, Amount, remarks)
+VALUES (@Company, @Date, @Ledger, @Amount, @Remarks)",
                 new
                 {
                     Company = companyName,
@@ -251,7 +246,6 @@ VALUES (@Company, @Date, @Ledger, @Amount, @Remarks, @TransId)",
                     Ledger = row.Ledger,
                     Amount = row.Amount,
                     Remarks = "App P&L provision",
-                    TransId = nextId,
                 },
                 tx);
         }
