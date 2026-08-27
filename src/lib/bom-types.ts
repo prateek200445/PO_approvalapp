@@ -197,6 +197,7 @@ export type BomCreateRequest = {
 };
 
 export type BomCreatePreviewResult = {
+  previewId: string;
   filePoNo: string;
   customer: string;
   lineCount: number;

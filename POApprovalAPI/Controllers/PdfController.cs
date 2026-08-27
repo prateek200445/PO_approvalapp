@@ -20,11 +20,13 @@ public class PdfController : ControllerBase
 
     private readonly DatabaseService _database;
     private readonly BomService _bomService;
+    private readonly BomCreationService _creationService;
 
-    public PdfController(DatabaseService database, BomService bomService)
+    public PdfController(DatabaseService database, BomService bomService, BomCreationService creationService)
     {
         _database = database;
         _bomService = bomService;
+        _creationService = creationService;
     }
 
     [HttpGet("bom")]
@@ -38,6 +40,32 @@ public class PdfController : ControllerBase
             var model = await _bomService.BuildPdfModelAsync(filePoNo);
             if (model is null)
                 return NotFound(new { message = "BOM not found for this quotation number." });
+
+            var pdfBytes = new BillOfMaterialDocument(model).GeneratePdf();
+            Response.Headers["Content-Disposition"] = "inline";
+            return File(pdfBytes, "application/pdf");
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new
+            {
+                Success = false,
+                Error = ex.ToString()
+            });
+        }
+    }
+
+    [HttpGet("bom-preview/{previewId}")]
+    public async Task<IActionResult> GetBomPreviewPdf(string previewId)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(previewId))
+                return BadRequest(new { message = "Preview id is required." });
+
+            var model = await _creationService.GetPreviewPdfModelAsync(previewId);
+            if (model is null)
+                return NotFound(new { message = "Preview PDF expired or was not found. Run preview again." });
 
             var pdfBytes = new BillOfMaterialDocument(model).GeneratePdf();
             Response.Headers["Content-Disposition"] = "inline";

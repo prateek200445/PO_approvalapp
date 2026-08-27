@@ -1,0 +1,56 @@
+﻿[
+    {
+        "id":  "stock_item_wip00013",
+        "pass":  false,
+        "failedChecks":  "sql_has:WareHouse|vw_itemwiseStock|vw_inventoryitemwarehouse;sql_has:WIP00013;sql_has:Oswal;sql_has:StkInHand;rows_gt:0",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "The remote server returned an error: (400) Bad Request.",
+        "warning":  "The remote server returned an error: (400) Bad Request."
+    },
+    {
+        "id":  "oswal_top_stock",
+        "pass":  false,
+        "failedChecks":  "sql_has:WareHouse|vw_itemwiseStock;sql_has:CompanyName;sql_has:StkInHand;rows_gt:0",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "The underlying connection was closed: An unexpected error occurred on a receive.",
+        "warning":  "The underlying connection was closed: An unexpected error occurred on a receive."
+    },
+    {
+        "id":  "below_reorder",
+        "pass":  false,
+        "failedChecks":  "sql_has:WareHouse;sql_has:ReOrder;sql_has:StkInHand;sql_has:Oswal;rows_gt:0",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "The remote server returned an error: (400) Bad Request.",
+        "warning":  "The remote server returned an error: (400) Bad Request."
+    },
+    {
+        "id":  "godown_list",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT DISTINCT Warehousename FROM WareHouseMaster WHERE companyname = \u0027Oswal Extrusion Limited\u0027",
+        "rowCount":  23,
+        "answer":  "Oswal Extrusion Limited has 21 warehouses or godowns: Bobbin Godown, Consumable Godown, Despatch Godown, FIBC Bag Godown, General Godown, Inhouse Liner Bag Godown, Lamination Godown, Liner Bag Godown, Loom Godown, Needle Loom Godown, OEL3 Godown, OEL3 SUB STORE, Parekh Godown, Raw Material Godown, Roll Material Godown, RP Plant Godown, Sample Material Godown, Small Bag Godown, Spares Godown, Stock Adjustment Entry, Tape Plant Godown, TFO Godown, Wastage Godown.",
+        "warning":  null
+    },
+    {
+        "id":  "stock_by_group",
+        "pass":  false,
+        "failedChecks":  "sql_has:vw_inventoryitemwarehouse|WareHouse;sql_has:Oswal;rows_gt:0",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "Unable to connect to the remote server",
+        "warning":  "Unable to connect to the remote server"
+    },
+    {
+        "id":  "messy_stock",
+        "pass":  false,
+        "failedChecks":  "sql_has:WareHouse|vw_itemwiseStock;sql_has:WIP00013;rows_gt:0",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "Unable to connect to the remote server",
+        "warning":  "Unable to connect to the remote server"
+    }
+]

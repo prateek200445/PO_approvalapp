@@ -17,11 +17,22 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { bomPdfUrl, fetchBomCustomer, fetchBomDetail, sendBomEmail, waitForBomEmailResult } from "@/lib/bom-api";
+import {
+  bomPdfUrl,
+  bomPreviewPdfUrl,
+  fetchBomCustomer,
+  fetchBomDetail,
+  fetchBomPreviewDetail,
+  sendBomEmail,
+  waitForBomEmailResult,
+} from "@/lib/bom-api";
 import { formatBomDate, formatDimension, type BomDetailResult } from "@/lib/bom-types";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/bom/$")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    previewId: typeof search.previewId === "string" ? search.previewId : "",
+  }),
   head: ({ params }) => ({
     meta: [{ title: `${decodeBomQtnParam(params._splat)} — BOM` }],
   }),
@@ -68,11 +79,13 @@ function SummaryGroup({
 
 function BomDetailPage() {
   const { _splat } = Route.useParams();
+  const { previewId } = Route.useSearch();
   const qtnNo = decodeBomQtnParam(_splat);
+  const isPreviewSession = previewId.trim().length > 0;
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["bom-detail", qtnNo],
-    queryFn: () => fetchBomDetail(qtnNo),
+    queryKey: ["bom-detail", isPreviewSession ? previewId : qtnNo],
+    queryFn: () => (isPreviewSession ? fetchBomPreviewDetail(previewId) : fetchBomDetail(qtnNo)),
     staleTime: 60_000,
   });
 
@@ -107,11 +120,12 @@ function BomDetailPage() {
     );
   }
 
-  return <BomDetailContent qtnNo={qtnNo} data={data} />;
+  return <BomDetailContent qtnNo={qtnNo} data={data} previewId={isPreviewSession ? previewId : ""} />;
 }
 
-function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResult }) {
-  const pdfUrl = bomPdfUrl(qtnNo);
+function BomDetailContent({ qtnNo, data, previewId = "" }: { qtnNo: string; data: BomDetailResult; previewId?: string }) {
+  const isPreviewSession = previewId.trim().length > 0;
+  const pdfUrl = isPreviewSession ? bomPreviewPdfUrl(previewId) : bomPdfUrl(qtnNo);
   const { header, lines } = data;
 
   const defaultSubject = useMemo(
@@ -197,7 +211,7 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
     }
   }
 
-  const safeFileName = qtnNo.replace(/[/\\?%*:|"<>]/g, "-");
+  const safeFileName = header.qtnNo.replace(/[/\\?%*:|"<>]/g, "-");
   const cleanInstruction = header.instruction?.replace(/<\/?b>/g, "").replace(/<>/g, "") ?? "";
 
   return (
@@ -211,14 +225,19 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
                 Back
               </Link>
             </Button>
-            <Button variant="outline" size="sm" className="shrink-0" asChild>
-              <Link to="/bom/create" search={{ filePoNo: qtnNo }}>
-                Open editor
-              </Link>
-            </Button>
+            {!isPreviewSession ? (
+              <Button variant="outline" size="sm" className="shrink-0" asChild>
+                <Link to="/bom/create" search={{ filePoNo: qtnNo }}>
+                  Open editor
+                </Link>
+              </Button>
+            ) : null}
             <div className="min-w-0 border-l border-border/60 pl-3">
               <p className="truncate font-mono text-sm font-semibold">{header.qtnNo}</p>
-              <p className="truncate text-xs text-muted-foreground">{header.partyName}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {header.partyName}
+                {isPreviewSession ? " · Preview session" : ""}
+              </p>
             </div>
           </div>
         </div>
@@ -228,7 +247,7 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
       <div className="mb-5 grid gap-5 lg:grid-cols-[1fr_280px]">
         <BomPanel
           title="PDF preview"
-          subtitle="Generated from ERP BOM data"
+          subtitle={isPreviewSession ? "Generated from current unsaved preview" : "Generated from ERP BOM data"}
           headerRight={
             <Badge variant="secondary" className="font-normal">
               QuestPDF
@@ -271,6 +290,7 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
       </div>
 
       {/* Email — full width, original layout */}
+      {!isPreviewSession ? (
       <BomPanel className="mb-5">
         <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3.5 md:px-5">
           <Mail className="h-5 w-5 text-amber-600" />
@@ -323,6 +343,7 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
           </div>
         </form>
       </BomPanel>
+      ) : null}
 
       {/* Full BOM summary — restored grid layout */}
       <BomPanel title="BOM summary" className="mb-5">

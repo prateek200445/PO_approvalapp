@@ -1,20 +1,37 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { FilePlus2, Loader2, RefreshCcw, Save } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  Database,
+  FilePlus2,
+  FileText,
+  Layers,
+  Loader2,
+  Package,
+  RefreshCcw,
+  Ruler,
+  Save,
+  Settings2,
+  Sparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth-context";
-import { createBom, fetchBomEditor, previewBom, updateBom } from "@/lib/bom-api";
+import { bomPreviewPdfUrl, createBom, fetchBomEditor, previewBom, updateBom } from "@/lib/bom-api";
 import type {
   BomCreateHeaderInput,
   BomCreateLineInput,
   BomCreatePreviewResult,
   BomCreateRequest,
 } from "@/lib/bom-types";
-import { BomFieldLabel, BomPageHeader, BomPageShell, BomPanel } from "@/components/bom/bom-ui";
+import { BomFieldLabel, BomPageHeader, BomPageShell } from "@/components/bom/bom-ui";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_app/bom/create")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -86,6 +103,8 @@ function BomCreatePage() {
       bom3Count: countPairs(bom3Text),
     };
   }, [approvalsText, bom1Text, bom3Text]);
+  const bom1Draft = useMemo(() => parseKeyValueTextLenient(bom1Text), [bom1Text]);
+  const bom3Draft = useMemo(() => parseKeyValueTextLenient(bom3Text), [bom3Text]);
 
   function setHeaderField<K extends keyof BomCreateHeaderInput>(key: K, value: BomCreateHeaderInput[K]) {
     setPreview(null);
@@ -147,6 +166,7 @@ function BomCreatePage() {
       setBom3Text(stringifyMap(snapshot.bom3Values));
       setLinesText(JSON.stringify(snapshot.lines, null, 2));
       setPreview({
+        previewId: "",
         filePoNo: snapshot.header.filePoNo,
         customer: snapshot.header.customer,
         lineCount: snapshot.lines.length,
@@ -233,313 +253,523 @@ function BomCreatePage() {
   }
 
   return (
-    <BomPageShell>
+    <BomPageShell className="bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.12),_transparent_32%),linear-gradient(180deg,rgba(15,23,42,0.18),transparent_40%)]">
       <BomPageHeader
         title="BOM Creation"
-        description="Create, preview, or update BOMs using the new backend contract. Keep the raw Bom1/Bom3 values close to ERP field names so server-side derivation can fill the rows."
+        description="A guided workspace for building BOMs without drowning users in ERP field noise. Fill the essentials, tune the components, then preview and save."
         backTo="/bom"
-        actions={
-          <>
-            <Badge variant="outline">{stats.approvalCount} approvals</Badge>
-            <Badge variant="outline">{stats.bom1Count} Bom1 keys</Badge>
-            <Badge variant="outline">{stats.bom3Count} Bom3 keys</Badge>
-          </>
-        }
       />
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <MiniStat
+          icon={Package}
+          label="Quotation"
+          value={header.filePoNo || "Start a new BOM"}
+          tone="amber"
+        />
+        <MiniStat
+          icon={Ruler}
+          label="Bag profile"
+          value={
+            header.bagType
+              ? `${header.bagType}${header.sizeL && header.sizeW && header.sizeH ? ` · ${header.sizeL} × ${header.sizeW} × ${header.sizeH}` : ""}`
+              : "Bag type and dimensions"
+          }
+        />
+        <MiniStat
+          icon={Layers}
+          label="Data richness"
+          value={`${stats.bom1Count} Bom1 · ${stats.bom3Count} Bom3`}
+        />
+        <MiniStat
+          icon={CheckCircle2}
+          label="Save status"
+          value={preview ? "Ready to create or update" : "Preview required before save"}
+          tone={preview ? "emerald" : "slate"}
+        />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="space-y-5">
-          <BomPanel title="Header" subtitle="Core BOM fields stored in BOM1.">
-            <div className="grid gap-4 p-4 md:grid-cols-2 md:p-5 xl:grid-cols-3">
-              <Field label="Quotation No">
-                <Input value={header.filePoNo} onChange={(e) => setHeaderField("filePoNo", e.target.value)} />
-              </Field>
-              <Field label="Customer">
-                <Input value={header.customer} onChange={(e) => setHeaderField("customer", e.target.value)} />
-              </Field>
-              <Field label="Date">
-                <Input type="date" value={header.sysDate ?? ""} onChange={(e) => setHeaderField("sysDate", e.target.value)} />
-              </Field>
-              <Field label="Print type">
-                <Input value={header.printType} onChange={(e) => setHeaderField("printType", e.target.value)} />
-              </Field>
-              <Field label="PO No">
-                <Input value={header.poNo} onChange={(e) => setHeaderField("poNo", e.target.value)} />
-              </Field>
-              <Field label="PO Nos">
-                <Input value={header.poNos} onChange={(e) => setHeaderField("poNos", e.target.value)} />
-              </Field>
-              <Field label="Bag type">
-                <Input value={header.bagType} onChange={(e) => setHeaderField("bagType", e.target.value)} placeholder="UPanel/Non-Builder/Std" />
-              </Field>
-              <Field label="Size L">
-                <Input value={toInputValue(header.sizeL)} onChange={(e) => setHeaderField("sizeL", parseOptionalNumber(e.target.value))} />
-              </Field>
-              <Field label="Size W">
-                <Input value={toInputValue(header.sizeW)} onChange={(e) => setHeaderField("sizeW", parseOptionalNumber(e.target.value))} />
-              </Field>
-              <Field label="Size H">
-                <Input value={toInputValue(header.sizeH)} onChange={(e) => setHeaderField("sizeH", parseOptionalNumber(e.target.value))} />
-              </Field>
-              <Field label="Size type">
-                <Input value={header.sizeType} onChange={(e) => setHeaderField("sizeType", e.target.value)} />
-              </Field>
-              <Field label="SWL">
-                <Input value={header.swl} onChange={(e) => setHeaderField("swl", e.target.value)} />
-              </Field>
-              <Field label="SF ratio">
-                <Input value={header.sfRatio} onChange={(e) => setHeaderField("sfRatio", e.target.value)} />
-              </Field>
-              <Field label="Qty">
-                <Input value={header.qty} onChange={(e) => setHeaderField("qty", e.target.value)} />
-              </Field>
-              <Field label="Qty unit">
-                <Input value={header.qtyUnit} onChange={(e) => setHeaderField("qtyUnit", e.target.value)} />
-              </Field>
-              <Field label="Top spout type">
-                <Input value={header.fsType} onChange={(e) => setHeaderField("fsType", e.target.value)} />
-              </Field>
-              <Field label="Bottom type">
-                <Input value={header.dsType} onChange={(e) => setHeaderField("dsType", e.target.value)} />
-              </Field>
-              <Field label="Bottom type 1">
-                <Input value={header.dsType1} onChange={(e) => setHeaderField("dsType1", e.target.value)} />
-              </Field>
-              <Field label="Bottom type 2">
-                <Input value={header.dsType2} onChange={(e) => setHeaderField("dsType2", e.target.value)} />
-              </Field>
-              <Field label="Loop type">
-                <Input value={header.loopType} onChange={(e) => setHeaderField("loopType", e.target.value)} />
-              </Field>
-              <Field label="Fabric color">
-                <Input value={header.fabColor} onChange={(e) => setHeaderField("fabColor", e.target.value)} />
-              </Field>
-              <Field label="Ref no">
-                <Input value={header.refNo} onChange={(e) => setHeaderField("refNo", e.target.value)} />
-              </Field>
-              <Field label="Doc">
-                <Input value={header.doc} onChange={(e) => setHeaderField("doc", e.target.value)} />
-              </Field>
-              <Field label="Doc1">
-                <Input value={header.doc1} onChange={(e) => setHeaderField("doc1", e.target.value)} />
-              </Field>
-              <Field label="Doc2">
-                <Input value={header.doc2} onChange={(e) => setHeaderField("doc2", e.target.value)} />
-              </Field>
-              <Field label="Doc unit">
-                <Input value={header.docUnit} onChange={(e) => setHeaderField("docUnit", e.target.value)} />
-              </Field>
-              <Field label="Doc number">
-                <Input value={header.docNumber} onChange={(e) => setHeaderField("docNumber", e.target.value)} />
-              </Field>
-              <Field label="Knot type">
-                <Input value={header.knotType} onChange={(e) => setHeaderField("knotType", e.target.value)} />
-              </Field>
-              <Field label="RP fabric">
-                <Input value={header.rpFabric} onChange={(e) => setHeaderField("rpFabric", e.target.value)} />
-              </Field>
-              <Field label="User name">
-                <Input value={header.userName} onChange={(e) => setHeaderField("userName", e.target.value)} />
-              </Field>
-              <label className="flex items-center gap-2 rounded-xl border border-border/60 bg-muted/20 px-3 py-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={header.isDropLoop}
-                  onChange={(e) => setHeaderField("isDropLoop", e.target.checked)}
-                />
-                Drop loop
-              </label>
+          <Tabs defaultValue="basics" className="space-y-4">
+            <div className="sticky top-3 z-10 rounded-2xl border border-border/70 bg-background/85 p-2 shadow-sm backdrop-blur">
+              <TabsList className="grid h-auto w-full grid-cols-1 gap-2 bg-transparent p-0 md:grid-cols-3">
+                <TabsTrigger value="basics" className="min-w-0 h-auto justify-start rounded-xl border border-border/60 px-4 py-3 data-[state=active]:border-amber-500/30 data-[state=active]:bg-amber-500/10">
+                  <div className="flex min-w-0 items-center gap-3 text-left">
+                    <Package className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">Basics</p>
+                      <p className="whitespace-normal break-words text-xs text-muted-foreground">Quotation, bag profile, approvals</p>
+                    </div>
+                  </div>
+                </TabsTrigger>
+                <TabsTrigger value="components" className="min-w-0 h-auto justify-start rounded-xl border border-border/60 px-4 py-3 data-[state=active]:border-amber-500/30 data-[state=active]:bg-amber-500/10">
+                  <div className="flex min-w-0 items-center gap-3 text-left">
+                    <Layers className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">Components</p>
+                      <p className="whitespace-normal break-words text-xs text-muted-foreground">Fabric, spouts, ties, liner, docs</p>
+                    </div>
+                  </div>
+                </TabsTrigger>
+                <TabsTrigger value="advanced" className="min-w-0 h-auto justify-start rounded-xl border border-border/60 px-4 py-3 data-[state=active]:border-amber-500/30 data-[state=active]:bg-amber-500/10">
+                  <div className="flex min-w-0 items-center gap-3 text-left">
+                    <Database className="h-4 w-4 text-amber-600 dark:text-amber-300" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold">Advanced</p>
+                      <p className="whitespace-normal break-words text-xs text-muted-foreground">Raw ERP values and manual overrides</p>
+                    </div>
+                  </div>
+                </TabsTrigger>
+              </TabsList>
             </div>
-            <div className="grid gap-4 border-t border-border/60 p-4 md:grid-cols-2 md:p-5">
-              <Field label="Instruction">
-                <Textarea value={header.instruction} onChange={(e) => setHeaderField("instruction", e.target.value)} rows={5} />
-              </Field>
-              <div className="grid gap-4">
-                <Field label="Body remarks">
-                  <Textarea value={header.bodyRemarks} onChange={(e) => setHeaderField("bodyRemarks", e.target.value)} rows={2} />
-                </Field>
-                <Field label="Printing remarks">
-                  <Textarea value={header.printingRemarks} onChange={(e) => setHeaderField("printingRemarks", e.target.value)} rows={2} />
-                </Field>
-              </div>
-            </div>
-          </BomPanel>
 
-          <BomPanel title="Approvals" subtitle="One value per line or comma-separated.">
-            <div className="p-4 md:p-5">
-              <Textarea
-                value={approvalsText}
-                onChange={(e) => setApprovalsValue(e.target.value)}
-                rows={4}
-                placeholder={"Marketing\nProduction\nQuality"}
-              />
-            </div>
-          </BomPanel>
+            <TabsContent value="basics" className="space-y-5">
+              <StudioCard
+                icon={Package}
+                title="Identity & Bag Profile"
+                subtitle="Capture the business identity first, then define the bag dimensions and commercial context."
+              >
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  <Field label="Quotation No">
+                    <Input value={header.filePoNo} onChange={(e) => setHeaderField("filePoNo", e.target.value)} />
+                  </Field>
+                  <Field label="Customer">
+                    <Input value={header.customer} onChange={(e) => setHeaderField("customer", e.target.value)} />
+                  </Field>
+                  <Field label="Date">
+                    <Input type="date" value={header.sysDate ?? ""} onChange={(e) => setHeaderField("sysDate", e.target.value)} />
+                  </Field>
+                  <Field label="Bag type">
+                    <Input value={header.bagType} onChange={(e) => setHeaderField("bagType", e.target.value)} placeholder="UPanel/Non-Builder/Std" />
+                  </Field>
+                  <Field label="Size L">
+                    <Input value={toInputValue(header.sizeL)} onChange={(e) => setHeaderField("sizeL", parseOptionalNumber(e.target.value))} />
+                  </Field>
+                  <Field label="Size W">
+                    <Input value={toInputValue(header.sizeW)} onChange={(e) => setHeaderField("sizeW", parseOptionalNumber(e.target.value))} />
+                  </Field>
+                  <Field label="Size H">
+                    <Input value={toInputValue(header.sizeH)} onChange={(e) => setHeaderField("sizeH", parseOptionalNumber(e.target.value))} />
+                  </Field>
+                  <Field label="Size type">
+                    <Input value={header.sizeType} onChange={(e) => setHeaderField("sizeType", e.target.value)} />
+                  </Field>
+                  <Field label="Fabric color">
+                    <Input value={header.fabColor} onChange={(e) => setHeaderField("fabColor", e.target.value)} />
+                  </Field>
+                </div>
+              </StudioCard>
 
-          <BomPanel title="Common Inputs" subtitle="Friendly fields for the usual BOM values. These write the Bom1/Bom3 keys for you.">
-            <div className="grid gap-4 p-4 md:grid-cols-2 md:p-5">
-              <div className="space-y-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Bom1 common keys</p>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {COMMON_BOM1_FIELDS.map((field) => (
-                    <Field key={field.key} label={`${field.label} · ${field.key}`}>
-                      <Input
-                        value={getKeyValueFromText(bom1Text, field.key)}
-                        onChange={(e) => setBom1KeyValue(field.key, e.target.value)}
+              <div className="grid gap-5 lg:grid-cols-2">
+                <StudioCard
+                  icon={Ruler}
+                  title="Commercial Setup"
+                  subtitle="These values drive preview totals and downstream PDF metadata."
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label="SWL">
+                      <Input value={header.swl} onChange={(e) => setHeaderField("swl", e.target.value)} />
+                    </Field>
+                    <Field label="SF ratio">
+                      <Input value={header.sfRatio} onChange={(e) => setHeaderField("sfRatio", e.target.value)} />
+                    </Field>
+                    <Field label="Qty">
+                      <Input value={header.qty} onChange={(e) => setHeaderField("qty", e.target.value)} />
+                    </Field>
+                    <Field label="Qty unit">
+                      <Input value={header.qtyUnit} onChange={(e) => setHeaderField("qtyUnit", e.target.value)} />
+                    </Field>
+                    <Field label="Print type">
+                      <Input value={header.printType} onChange={(e) => setHeaderField("printType", e.target.value)} />
+                    </Field>
+                    <Field label="User name">
+                      <Input value={header.userName} onChange={(e) => setHeaderField("userName", e.target.value)} />
+                    </Field>
+                    <label className="flex items-center gap-2 rounded-xl border border-border/60 bg-background/60 px-3 py-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={header.isDropLoop}
+                        onChange={(e) => setHeaderField("isDropLoop", e.target.checked)}
+                      />
+                      Drop loop
+                    </label>
+                  </div>
+                </StudioCard>
+
+                <StudioCard
+                  icon={FileText}
+                  title="References & Approvals"
+                  subtitle="Reference numbers, pouch specs, and sign-off routing for the final BOM."
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label="PO No">
+                      <Input value={header.poNo} onChange={(e) => setHeaderField("poNo", e.target.value)} />
+                    </Field>
+                    <Field label="PO Nos">
+                      <Input value={header.poNos} onChange={(e) => setHeaderField("poNos", e.target.value)} />
+                    </Field>
+                    <Field label="Ref no">
+                      <Input value={header.refNo} onChange={(e) => setHeaderField("refNo", e.target.value)} />
+                    </Field>
+                    <Field label="Knot type">
+                      <Input value={header.knotType} onChange={(e) => setHeaderField("knotType", e.target.value)} />
+                    </Field>
+                    <Field label="RP fabric">
+                      <Input value={header.rpFabric} onChange={(e) => setHeaderField("rpFabric", e.target.value)} />
+                    </Field>
+                    <Field label="Approvals">
+                      <Textarea
+                        value={approvalsText}
+                        onChange={(e) => setApprovalsValue(e.target.value)}
+                        rows={4}
+                        placeholder={"Marketing\nProduction\nQuality"}
                       />
                     </Field>
-                  ))}
-                </div>
+                  </div>
+                </StudioCard>
               </div>
 
-              <div className="space-y-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Bom3 common keys</p>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {COMMON_BOM3_FIELDS.map((field) => (
-                    <Field key={field.key} label={`${field.label} · ${field.key}`}>
-                      <Input
-                        value={getKeyValueFromText(bom3Text, field.key)}
-                        onChange={(e) => setBom3KeyValue(field.key, e.target.value)}
-                      />
+              <StudioCard
+                icon={Settings2}
+                title="Notes"
+                subtitle="Use these notes for BOM context and instructions that should follow the item through review."
+              >
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field label="Instruction">
+                    <Textarea value={header.instruction} onChange={(e) => setHeaderField("instruction", e.target.value)} rows={6} />
+                  </Field>
+                  <div className="grid gap-4">
+                    <Field label="Body remarks">
+                      <Textarea value={header.bodyRemarks} onChange={(e) => setHeaderField("bodyRemarks", e.target.value)} rows={3} />
                     </Field>
-                  ))}
+                    <Field label="Printing remarks">
+                      <Textarea value={header.printingRemarks} onChange={(e) => setHeaderField("printingRemarks", e.target.value)} rows={3} />
+                    </Field>
+                  </div>
                 </div>
+              </StudioCard>
+            </TabsContent>
+
+            <TabsContent value="components" className="space-y-5">
+              <div className="grid gap-5 xl:grid-cols-2">
+                <StudioCard
+                  icon={Layers}
+                  title="Core Fabric"
+                  subtitle="The structural fabric settings that drive body, side, top, loop, liner, and document calculations."
+                >
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {COMMON_BOM1_FIELDS.filter((field) => CORE_BOM1_KEYS.has(field.key)).map((field) => (
+                      <Field key={field.key} label={field.label}>
+                        <Input
+                          value={bom1Draft[field.key] ?? ""}
+                          onChange={(e) => setBom1KeyValue(field.key, e.target.value)}
+                        />
+                      </Field>
+                    ))}
+                  </div>
+                </StudioCard>
+
+                <StudioCard
+                  icon={Sparkles}
+                  title="Spouts, Ties & Behavior"
+                  subtitle="Friendly controls for spout/tie counts and the logic switches that influence derived rows."
+                >
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {COMMON_BOM1_FIELDS.filter((field) => SPOUT_BOM1_KEYS.has(field.key)).map((field) => (
+                      <Field key={field.key} label={field.label}>
+                        <Input
+                          value={bom1Draft[field.key] ?? ""}
+                          onChange={(e) => setBom1KeyValue(field.key, e.target.value)}
+                        />
+                      </Field>
+                    ))}
+                    {COMMON_BOM3_FIELDS.map((field) => (
+                      <Field key={field.key} label={field.label}>
+                        <Input
+                          value={bom3Draft[field.key] ?? ""}
+                          onChange={(e) => setBom3KeyValue(field.key, e.target.value)}
+                        />
+                      </Field>
+                    ))}
+                  </div>
+                </StudioCard>
               </div>
-            </div>
-          </BomPanel>
 
-          <BomPanel title="ERP Raw Values" subtitle="Use key=value lines. Blank lines and # comments are ignored.">
-            <div className="grid gap-4 p-4 md:grid-cols-2 md:p-5">
-              <Field label="Bom1 values">
-                <Textarea
-                  value={bom1Text}
-                  onChange={(e) => setBom1ValueText(e.target.value)}
-                  rows={18}
-                  className="font-mono text-xs"
-                  placeholder={BOM1_PLACEHOLDER}
-                />
-              </Field>
-              <Field label="Bom3 values">
-                <Textarea
-                  value={bom3Text}
-                  onChange={(e) => setBom3ValueText(e.target.value)}
-                  rows={18}
-                  className="font-mono text-xs"
-                  placeholder={BOM3_PLACEHOLDER}
-                />
-              </Field>
-            </div>
-          </BomPanel>
+              <div className="grid gap-5 xl:grid-cols-2">
+                <StudioCard
+                  icon={FileText}
+                  title="Document & Reference Pouches"
+                  subtitle="These fields shape the document pouch calculations and what the final PDF will display."
+                >
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label="Doc">
+                      <Input value={header.doc} onChange={(e) => setHeaderField("doc", e.target.value)} />
+                    </Field>
+                    <Field label="Doc1">
+                      <Input value={header.doc1} onChange={(e) => setHeaderField("doc1", e.target.value)} />
+                    </Field>
+                    <Field label="Doc2">
+                      <Input value={header.doc2} onChange={(e) => setHeaderField("doc2", e.target.value)} />
+                    </Field>
+                    <Field label="Doc unit">
+                      <Input value={header.docUnit} onChange={(e) => setHeaderField("docUnit", e.target.value)} />
+                    </Field>
+                    <Field label="Doc number">
+                      <Input value={header.docNumber} onChange={(e) => setHeaderField("docNumber", e.target.value)} />
+                    </Field>
+                    {COMMON_BOM1_FIELDS.filter((field) => DOC_BOM1_KEYS.has(field.key)).map((field) => (
+                      <Field key={field.key} label={field.label}>
+                        <Input
+                          value={bom1Draft[field.key] ?? ""}
+                          onChange={(e) => setBom1KeyValue(field.key, e.target.value)}
+                        />
+                      </Field>
+                    ))}
+                  </div>
+                </StudioCard>
 
-          <BomPanel title="Explicit Lines Override" subtitle="Optional JSON array. Leave empty to let the backend derive rows from Bom1/Bom3 values.">
-            <div className="p-4 md:p-5">
-              <Textarea
-                value={linesText}
-                onChange={(e) => setLinesValueText(e.target.value)}
-                rows={16}
-                className="font-mono text-xs"
-                placeholder={LINES_PLACEHOLDER}
-              />
-            </div>
-          </BomPanel>
+                <StudioCard
+                  icon={Settings2}
+                  title="Styling Principles"
+                  subtitle="Preview will only show what’s relevant. Use advanced raw values later for uncommon ERP edge cases."
+                >
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <HintTile
+                      title="Friendly first"
+                      text="Users fill meaningful labels like Body GSM and Top Spout Dia instead of memorizing ERP keys."
+                    />
+                    <HintTile
+                      title="Raw still available"
+                      text="Every friendly field writes through to the Bom1/Bom3 dictionaries, so compatibility stays intact."
+                    />
+                    <HintTile
+                      title="Preview gated save"
+                      text="Create and update stay disabled until the current draft has been previewed."
+                    />
+                    <HintTile
+                      title="Advanced only when needed"
+                      text="Use the Advanced tab for rare line overrides, debugging, or power-user ERP tweaks."
+                    />
+                  </div>
+                </StudioCard>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="advanced" className="space-y-5">
+              <StudioCard
+                icon={Database}
+                title="Advanced ERP Surface"
+                subtitle="Everything below is still available, but it no longer clutters the main editing flow."
+              >
+                <Accordion type="multiple" defaultValue={["raw", "manual"]} className="space-y-3">
+                  <AccordionItem value="raw" className="rounded-2xl border border-border/60 px-4">
+                    <AccordionTrigger className="py-4 text-base font-semibold hover:no-underline">
+                      Raw Bom1 / Bom3 values
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-4">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Field label="Bom1 values">
+                          <Textarea
+                            value={bom1Text}
+                            onChange={(e) => setBom1ValueText(e.target.value)}
+                            rows={18}
+                            className="font-mono text-xs"
+                            placeholder={BOM1_PLACEHOLDER}
+                          />
+                        </Field>
+                        <Field label="Bom3 values">
+                          <Textarea
+                            value={bom3Text}
+                            onChange={(e) => setBom3ValueText(e.target.value)}
+                            rows={18}
+                            className="font-mono text-xs"
+                            placeholder={BOM3_PLACEHOLDER}
+                          />
+                        </Field>
+                      </div>
+                    </AccordionContent>
+                  </AccordionItem>
+
+                  <AccordionItem value="manual" className="rounded-2xl border border-border/60 px-4">
+                    <AccordionTrigger className="py-4 text-base font-semibold hover:no-underline">
+                      Explicit line override JSON
+                    </AccordionTrigger>
+                    <AccordionContent className="pb-4">
+                      <Field label="Explicit lines override">
+                        <Textarea
+                          value={linesText}
+                          onChange={(e) => setLinesValueText(e.target.value)}
+                          rows={16}
+                          className="font-mono text-xs"
+                          placeholder={LINES_PLACEHOLDER}
+                        />
+                      </Field>
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              </StudioCard>
+            </TabsContent>
+          </Tabs>
         </div>
 
         <div className="space-y-5">
-          <BomPanel title="Actions" className="xl:sticky xl:top-6">
-            <div className="space-y-4 p-4 md:p-5">
-              <p className="text-sm text-muted-foreground">
-                Load an existing quotation to edit it, or keep the form blank and create a new BOM.
-              </p>
-              <div className="grid gap-2">
-                <Button type="button" variant="outline" onClick={handleLoadExisting} disabled={loadingSnapshot}>
-                  {loadingSnapshot ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
-                  Load existing quotation
-                </Button>
-                <Button type="button" onClick={handlePreview} disabled={previewing || saving !== null}>
-                  {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />}
-                  Preview derived BOM
-                </Button>
-                <Button type="button" variant={canPersist ? "default" : "secondary"} onClick={() => void handleSave("create")} disabled={!canPersist}>
-                  {saving === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Create BOM
-                </Button>
-                <Button type="button" variant={canPersist ? "outline" : "secondary"} onClick={() => void handleSave("update")} disabled={!canPersist}>
-                  {saving === "update" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  Update BOM
-                </Button>
-                <Button type="button" variant="ghost" onClick={resetForm} disabled={loadingSnapshot || previewing || saving !== null}>
-                  Reset form
-                </Button>
-              </div>
-              <div className="rounded-xl border border-border/60 bg-muted/20 p-3 text-xs text-muted-foreground">
-                <p>`Create BOM` uses `POST /api/bom`.</p>
-                <p>`Update BOM` uses `PUT /api/bom/{`{filePoNo}`}`.</p>
-                <p>`Preview derived BOM` uses `POST /api/bom/preview`.</p>
-              </div>
-            </div>
-          </BomPanel>
-
-          <BomPanel
-            title="Preview"
-            subtitle={preview ? `${preview.lineCount} lines · ${preview.totalKg.toFixed(4)} kg` : "Run preview to inspect derived lines before saving."}
-          >
-            {preview ? (
-              <div className="space-y-4 p-4 md:p-5">
-                {preview.warnings.length > 0 ? (
-                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
-                    {preview.warnings.map((warning) => (
-                      <p key={warning}>{warning}</p>
-                    ))}
+          <div className="xl:sticky xl:top-6">
+            <div className="space-y-5">
+              <StudioCard
+                icon={Sparkles}
+                title="Review & Actions"
+                subtitle="A focused control tower for loading, previewing, and saving the current draft."
+                className="border-amber-500/20 bg-gradient-to-br from-amber-500/[0.08] via-card/95 to-card/90"
+              >
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-border/60 bg-background/70 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold">Current state</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {preview
+                            ? "Preview is current. You can create or update this BOM now."
+                            : "Make your edits, then run Preview derived BOM to unlock save actions."}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="secondary"
+                        className={cn(
+                          "border",
+                          preview
+                            ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                            : "border-border/60 bg-muted/40 text-muted-foreground",
+                        )}
+                      >
+                        {preview ? "Ready" : "Preview needed"}
+                      </Badge>
+                    </div>
                   </div>
-                ) : null}
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border/60 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                        <th className="px-2 py-2">Heading</th>
-                        <th className="px-2 py-2">GSM</th>
-                        <th className="px-2 py-2">Lami</th>
-                        <th className="px-2 py-2">Color</th>
-                        <th className="px-2 py-2">Fabric</th>
-                        <th className="px-2 py-2">Cut</th>
-                        <th className="px-2 py-2">Mtr</th>
-                        <th className="px-2 py-2">Kg</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {preview.lines.map((line, index) => (
-                        <tr key={`${line.heading}-${index}`}>
-                          <td className="whitespace-nowrap px-2 py-2 font-medium">{line.heading}</td>
-                          <td className="px-2 py-2">{line.gsm || "—"}</td>
-                          <td className="px-2 py-2">{line.lami || "—"}</td>
-                          <td className="px-2 py-2">{line.color || "—"}</td>
-                          <td className="px-2 py-2">{line.fabricSize || "—"}</td>
-                          <td className="px-2 py-2">{line.cutSize || "—"}</td>
-                          <td className="px-2 py-2">{formatMaybeNumber(line.totalMtr)}</td>
-                          <td className="px-2 py-2">{formatMaybeNumber(line.totalKg)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              <div className="p-5 text-sm text-muted-foreground">No preview yet.</div>
-            )}
-          </BomPanel>
 
-          <BomPanel title="Tips">
-            <div className="space-y-2 p-4 text-sm text-muted-foreground md:p-5">
-              <p>Use `Load existing quotation` first if you want to edit a saved BOM.</p>
-              <p>Keep ERP-style key names in Bom1/Bom3 so the backend can derive extra rows like ropes, flaps, tunnel, and inner components.</p>
-              <p>Paste explicit line JSON only when you want to override or add rows that are easier to manage directly.</p>
-              <p>
-                <Link to="/bom" className="text-amber-700 underline underline-offset-4 dark:text-amber-300">
-                  Return to BOM report
-                </Link>
-              </p>
+                  <div className="grid gap-2">
+                    <Button type="button" variant="outline" onClick={handleLoadExisting} disabled={loadingSnapshot}>
+                      {loadingSnapshot ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                      Load existing quotation
+                    </Button>
+                    <Button type="button" onClick={handlePreview} disabled={previewing || saving !== null}>
+                      {previewing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />}
+                      Preview derived BOM
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={canPersist ? "default" : "secondary"}
+                      className={cn(canPersist && "shadow-lg shadow-amber-500/20")}
+                      onClick={() => void handleSave("create")}
+                      disabled={!canPersist}
+                    >
+                      {saving === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      Create BOM
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => void handleSave("update")} disabled={!canPersist}>
+                      {saving === "update" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      Update BOM
+                    </Button>
+                    {preview?.previewId ? (
+                      <>
+                        <Button type="button" variant="outline" asChild>
+                          <Link to="/bom/$" params={{ _splat: "preview" }} search={{ previewId: preview.previewId }} target="_blank">
+                            <ArrowRight className="h-4 w-4" />
+                            Open report preview
+                          </Link>
+                        </Button>
+                        <Button type="button" variant="outline" asChild>
+                          <a href={bomPreviewPdfUrl(preview.previewId)} target="_blank" rel="noreferrer">
+                            <FileText className="h-4 w-4" />
+                            Open PDF preview
+                          </a>
+                        </Button>
+                      </>
+                    ) : null}
+                    <Button type="button" variant="ghost" onClick={resetForm} disabled={loadingSnapshot || previewing || saving !== null}>
+                      Reset form
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <HintTile title="1. Basics" text="Quotation, bag type, size, and approvals." />
+                    <HintTile title="2. Components" text="Friendly material fields that map raw keys for you." />
+                    <HintTile title="3. Advanced" text="Raw Bom1/Bom3 and explicit line overrides stay tucked away." />
+                    <HintTile title="4. Review" text="Preview first, then create or update with confidence." />
+                  </div>
+                </div>
+              </StudioCard>
+
+              <StudioCard
+                icon={FileText}
+                title="Preview"
+                subtitle={preview ? `${preview.lineCount} lines · ${preview.totalKg.toFixed(4)} kg` : "Run preview to inspect derived lines before saving."}
+              >
+                {preview ? (
+                  <div className="space-y-4">
+                    {preview.warnings.length > 0 ? (
+                      <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+                        {preview.warnings.map((warning) => (
+                          <p key={warning}>{warning}</p>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="overflow-x-auto rounded-2xl border border-border/60">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-muted/30">
+                          <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                            <th className="px-3 py-2">Heading</th>
+                            <th className="px-3 py-2">GSM</th>
+                            <th className="px-3 py-2">Lami</th>
+                            <th className="px-3 py-2">Color</th>
+                            <th className="px-3 py-2">Fabric</th>
+                            <th className="px-3 py-2">Cut</th>
+                            <th className="px-3 py-2">Mtr</th>
+                            <th className="px-3 py-2">Kg</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/50 bg-background/60">
+                          {preview.lines.map((line, index) => (
+                            <tr key={`${line.heading}-${index}`} className="hover:bg-muted/20">
+                              <td className="whitespace-nowrap px-3 py-2 font-medium">{line.heading}</td>
+                              <td className="px-3 py-2">{line.gsm || "—"}</td>
+                              <td className="px-3 py-2">{line.lami || "—"}</td>
+                              <td className="px-3 py-2">{line.color || "—"}</td>
+                              <td className="px-3 py-2">{line.fabricSize || "—"}</td>
+                              <td className="px-3 py-2">{line.cutSize || "—"}</td>
+                              <td className="px-3 py-2">{formatMaybeNumber(line.totalMtr)}</td>
+                              <td className="px-3 py-2">{formatMaybeNumber(line.totalKg)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-border/70 bg-muted/15 p-5 text-sm text-muted-foreground">
+                    No preview yet. Fill the basics, tune the components, then click <span className="font-medium text-foreground">Preview derived BOM</span>.
+                  </div>
+                )}
+              </StudioCard>
+
+              <StudioCard
+                icon={Database}
+                title="Developer Notes"
+                subtitle="A small reminder of what powers the page under the hood."
+              >
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  <p>The modern form writes friendly inputs into the same `Bom1` / `Bom3` key dictionaries used by the backend.</p>
+                  <p>The advanced tab remains available for ERP-specific overrides, unusual structures, and manual line injection.</p>
+                  <p>
+                    <Link to="/bom" className="inline-flex items-center gap-1 text-amber-700 underline underline-offset-4 dark:text-amber-300">
+                      Return to BOM report
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </Link>
+                  </p>
+                </div>
+              </StudioCard>
             </div>
-          </BomPanel>
+          </div>
         </div>
       </div>
     </BomPageShell>
@@ -552,6 +782,84 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <BomFieldLabel>{label}</BomFieldLabel>
       {children}
     </label>
+  );
+}
+
+function StudioCard({
+  icon: Icon,
+  title,
+  subtitle,
+  children,
+  className,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={cn(
+        "overflow-hidden rounded-[28px] border border-border/70 bg-card/85 shadow-[0_18px_50px_-24px_rgba(15,23,42,0.65)] backdrop-blur-sm",
+        className,
+      )}
+    >
+      <div className="border-b border-border/60 bg-gradient-to-r from-amber-500/[0.08] via-transparent to-transparent px-5 py-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-amber-500/12 text-amber-600 ring-1 ring-amber-500/20 dark:text-amber-300">
+            <Icon className="h-4 w-4" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold tracking-tight">{title}</h2>
+            {subtitle ? <p className="mt-1 max-w-2xl whitespace-normal break-words text-sm text-muted-foreground">{subtitle}</p> : null}
+          </div>
+        </div>
+      </div>
+      <div className="p-5">{children}</div>
+    </section>
+  );
+}
+
+function MiniStat({
+  icon: Icon,
+  label,
+  value,
+  tone = "slate",
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  value: string;
+  tone?: "slate" | "amber" | "emerald";
+}) {
+  const toneClass =
+    tone === "amber"
+      ? "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-300"
+      : tone === "emerald"
+        ? "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300"
+        : "bg-muted/50 text-muted-foreground ring-border/60";
+
+  return (
+    <div className="rounded-3xl border border-border/70 bg-card/80 p-4 shadow-sm backdrop-blur-sm">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ring-1", toneClass)}>
+          <Icon className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{label}</p>
+          <p className="mt-1 break-words text-sm font-medium text-foreground">{value}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HintTile({ title, text }: { title: string; text: string }) {
+  return (
+    <div className="rounded-2xl border border-border/60 bg-background/55 p-3">
+      <p className="text-sm font-semibold text-foreground">{title}</p>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{text}</p>
+    </div>
   );
 }
 
@@ -669,11 +977,6 @@ function stringifyMap(map: Record<string, string | null>): string {
     .join("\n");
 }
 
-function getKeyValueFromText(text: string, key: string): string {
-  const value = parseKeyValueTextLenient(text)[key];
-  return value ?? "";
-}
-
 function setKeyValueInText(text: string, key: string, value: string): string {
   const map = parseKeyValueTextLenient(text);
   const trimmedValue = value.trim();
@@ -778,6 +1081,39 @@ const COMMON_BOM1_FIELDS: Array<{ key: string; label: string }> = [
   { key: "docl", label: "Doc Length" },
   { key: "docw", label: "Doc Width" },
 ];
+
+const CORE_BOM1_KEYS = new Set([
+  "BodyGSM",
+  "BodyLami",
+  "SideGSM",
+  "SideLami",
+  "TopGSM",
+  "TopLami",
+  "LoopGSM",
+  "LoopL",
+  "LoopW",
+  "loopRemarks",
+  "loopconst",
+  "LinerGSM",
+  "LinerL",
+]);
+
+const SPOUT_BOM1_KEYS = new Set([
+  "FSGSM",
+  "FSLami",
+  "FSL",
+  "FSW",
+  "FSTieGSM",
+  "FSTieFabric",
+  "FSTieRemarks",
+  "DSGSM",
+  "DSLami",
+  "DSL",
+  "DSW",
+  "DSTieGSM",
+]);
+
+const DOC_BOM1_KEYS = new Set(["DocGSM", "docl", "docw"]);
 
 const COMMON_BOM3_FIELDS: Array<{ key: string; label: string }> = [
   { key: "toptypes", label: "Top Type" },

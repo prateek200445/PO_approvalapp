@@ -1,6 +1,7 @@
 using System.Data;
 using Dapper;
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace POApprovalAPI.Models
 {
@@ -68,6 +69,7 @@ namespace POApprovalAPI.Models
 
     public sealed class BomCreatePreviewResult
     {
+        public string PreviewId { get; set; } = "";
         public string FilePoNo { get; set; } = "";
         public string Customer { get; set; } = "";
         public int LineCount { get; set; }
@@ -106,6 +108,8 @@ namespace POApprovalAPI.Services
         private const int BomCommandTimeoutSeconds = 120;
         private const string PartyMappingCacheKey = "bom:party-mapping:v2";
         private const string UsersCacheKey = "bom:users:v1";
+        private const string PreviewCacheKeyPrefix = "bom:preview-report:";
+        private static readonly TimeSpan PreviewCacheTtl = TimeSpan.FromMinutes(20);
 
         private static readonly HashSet<string> ReservedBom1Columns = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -207,8 +211,16 @@ namespace POApprovalAPI.Services
             if (normalized.Bom3Values.Count == 0)
                 warnings.Add("No BOM3 editor-state values were supplied; re-opening in a future editor may be limited.");
 
+            var previewId = Guid.NewGuid().ToString("N");
+            _cache.Set(GetPreviewCacheKey(previewId), new BomPreviewSession
+            {
+                Detail = BuildPreviewDetail(normalized),
+                PdfModel = BuildPreviewPdfModel(normalized),
+            }, PreviewCacheTtl);
+
             return Task.FromResult(new BomCreatePreviewResult
             {
+                PreviewId = previewId,
                 FilePoNo = normalized.Header.FilePoNo,
                 Customer = normalized.Header.Customer,
                 LineCount = normalized.Lines.Count,
@@ -217,6 +229,28 @@ namespace POApprovalAPI.Services
                 Warnings = warnings,
                 Lines = normalized.Lines,
             });
+        }
+
+        public Task<BomDetailResult?> GetPreviewDetailAsync(string previewId)
+        {
+            if (string.IsNullOrWhiteSpace(previewId))
+                throw new ArgumentException("Preview id is required.", nameof(previewId));
+
+            return Task.FromResult(
+                _cache.TryGetValue(GetPreviewCacheKey(previewId.Trim()), out BomPreviewSession? session)
+                    ? session?.Detail
+                    : null);
+        }
+
+        public Task<BomPdfModel?> GetPreviewPdfModelAsync(string previewId)
+        {
+            if (string.IsNullOrWhiteSpace(previewId))
+                throw new ArgumentException("Preview id is required.", nameof(previewId));
+
+            return Task.FromResult(
+                _cache.TryGetValue(GetPreviewCacheKey(previewId.Trim()), out BomPreviewSession? session)
+                    ? session?.PdfModel
+                    : null);
         }
 
         public async Task<BomEditorSnapshot?> GetEditorAsync(string filePoNo)
@@ -464,6 +498,172 @@ ORDER BY ISNULL(TransId, 0), Heading", new { FilePoNo = trimmed }, commandTimeou
             if (!isUpdate && string.IsNullOrWhiteSpace(request.Header.UserName))
                 throw new ArgumentException("User name is required.");
         }
+
+        private static string GetPreviewCacheKey(string previewId) => PreviewCacheKeyPrefix + previewId;
+
+        private static BomDetailResult BuildPreviewDetail(BomCreateRequest request)
+        {
+            var model = BuildPreviewPdfModel(request);
+            return new BomDetailResult
+            {
+                Header = new BomHeader
+                {
+                    QtnNo = model.QtnNo,
+                    PartyName = model.PartyName,
+                    Date = model.Date,
+                    User = model.User,
+                    BagType = model.BagType,
+                    SizeL = model.SizeL,
+                    SizeW = model.SizeW,
+                    SizeH = model.SizeH,
+                    SizeType = model.SizeType,
+                    Swl = model.Swl,
+                    SfRatio = model.SfRatio,
+                    Qty = model.Qty,
+                    QtyUnit = model.QtyUnit,
+                    TotalKg = model.TotalKgPerBag,
+                    PrintType = model.PrintType,
+                    PoNo = model.PoNo,
+                    PoNos = model.PoNos,
+                    SrNo = "",
+                    Instruction = model.Instruction,
+                    RefNo = model.RefNo,
+                    Doc = model.Doc,
+                    Doc1 = model.Doc1,
+                    Doc2 = model.Doc2,
+                    LoopSpec = model.LoopSpec,
+                    LinerSpec = model.LinerSpec,
+                    TopSpoutType = model.TopSpoutType,
+                    BottomType = model.BottomType,
+                    FabColor = model.FabColor,
+                    PrintingRemarks = model.PrintingRemarks,
+                    BodyRemarks = model.BodyRemarks,
+                    MarketingInvNo = model.MarketingInvNo,
+                    IsDropLoop = model.IsDropLoop,
+                    RpFabric = model.RpFabric,
+                    KnotType = model.KnotType,
+                },
+                Lines = model.Lines.Select(line => new BomLineItem
+                {
+                    SortOrder = line.SortOrder,
+                    Heading = line.Heading,
+                    Gsm = line.Gsm,
+                    Lami = line.Lami,
+                    Color = line.Color,
+                    FabricSize = line.FabricSize,
+                    CutSize = line.CutSize,
+                    TotalMtr = line.TotalMtr,
+                    TotalKg = line.TotalKg,
+                    Gpm = line.Gpm,
+                    Remarks = line.Remarks,
+                }).ToList(),
+                ReportLines = Array.Empty<BomReportLine>(),
+            };
+        }
+
+        private static BomPdfModel BuildPreviewPdfModel(BomCreateRequest request)
+        {
+            var header = request.Header;
+            return new BomPdfModel
+            {
+                QtnNo = header.FilePoNo,
+                PartyName = header.Customer,
+                Date = header.SysDate,
+                User = header.UserName,
+                RefNo = header.RefNo,
+                PoNo = header.PoNo,
+                PoNos = header.PoNos,
+                MarketingInvNo = "",
+                BagType = header.BagType,
+                SizeType = header.SizeType,
+                SizeL = header.SizeL,
+                SizeW = header.SizeW,
+                SizeH = header.SizeH,
+                Swl = header.Swl,
+                SfRatio = FirstNonEmpty(header.SfRatio, GetValue(request.Bom1Values, "L")),
+                Qty = header.Qty,
+                QtyUnit = header.QtyUnit,
+                PrintType = header.PrintType,
+                Doc = NormalizeDocValue(header.Doc),
+                Doc1 = NormalizeDocValue(header.Doc1),
+                Doc2 = NormalizeDocValue(header.Doc2),
+                LoopSpec = BuildPreviewLoopSpec(request),
+                LinerSpec = BuildPreviewLinerSpec(request),
+                TopSpoutType = header.FSType,
+                BottomType = BuildPreviewBottomSpec(request),
+                FabColor = header.FabColor,
+                IsDropLoop = header.IsDropLoop ? "yes" : "no",
+                RpFabric = header.RpFabric,
+                KnotType = header.KnotType,
+                TotalKgPerBag = CalculateTotalKg(request.Lines),
+                Instruction = header.Instruction,
+                PrintingRemarks = header.PrintingRemarks,
+                BodyRemarks = header.BodyRemarks,
+                Lines = request.Lines
+                    .OrderBy(line => line.SortOrder)
+                    .Select(line => new BomPdfLine
+                    {
+                        SortOrder = line.SortOrder,
+                        Heading = line.Heading,
+                        Gsm = line.Gsm,
+                        Lami = line.Lami,
+                        Color = line.Color,
+                        FabricSize = line.FabricSize,
+                        CutSize = line.CutSize,
+                        TotalMtr = line.TotalMtr,
+                        TotalKg = line.TotalKg,
+                        Gpm = line.Gpm,
+                        Remarks = line.Remarks,
+                    })
+                    .ToList(),
+            };
+        }
+
+        private static string BuildPreviewLoopSpec(BomCreateRequest request)
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(request.Header.LoopType))
+                parts.Add(request.Header.LoopType);
+
+            var loopL = GetValue(request.Bom1Values, "LoopL");
+            var loopW = GetValue(request.Bom1Values, "LoopW");
+            var loopDim = GetValue(request.Bom1Values, "LoopDim");
+            if (!string.IsNullOrWhiteSpace(loopL)) parts.Add($"L {loopL}");
+            if (!string.IsNullOrWhiteSpace(loopW)) parts.Add($"W {loopW}");
+            if (!string.IsNullOrWhiteSpace(loopDim)) parts.Add(loopDim);
+            return string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+        }
+
+        private static string BuildPreviewLinerSpec(BomCreateRequest request)
+        {
+            var liner = GetValue(request.Bom1Values, "Liner");
+            var linerL = GetValue(request.Bom1Values, "LinerL");
+            var linerW = GetValue(request.Bom1Values, "LinerW");
+            var linerDim = GetValue(request.Bom1Values, "LinerDim");
+            if (string.IsNullOrWhiteSpace(liner) && string.IsNullOrWhiteSpace(linerL))
+                return "";
+
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(liner)) parts.Add(liner);
+            if (!string.IsNullOrWhiteSpace(linerL) || !string.IsNullOrWhiteSpace(linerW))
+                parts.Add($"{linerL} × {linerW} {linerDim}".Trim());
+            return string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+        }
+
+        private static string BuildPreviewBottomSpec(BomCreateRequest request)
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(request.Header.DSType)) parts.Add(request.Header.DSType);
+
+            var dsl = GetValue(request.Bom1Values, "DSL");
+            var dsw = GetValue(request.Bom1Values, "DSW");
+            if (!string.IsNullOrWhiteSpace(dsl) || !string.IsNullOrWhiteSpace(dsw))
+                parts.Add($"{dsl} × {dsw}".Trim());
+            return string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+        }
+
+        private static string NormalizeDocValue(string value) =>
+            string.IsNullOrWhiteSpace(value) ? "N/A" : value;
 
         private async Task EnsureFilePoNoAvailableAsync(SqlConnection connection, string filePoNo)
         {
@@ -2802,6 +3002,12 @@ VALUES
         {
             _cache.Remove(PartyMappingCacheKey);
             _cache.Remove(UsersCacheKey);
+        }
+
+        private sealed class BomPreviewSession
+        {
+            public BomDetailResult Detail { get; init; } = new();
+            public BomPdfModel PdfModel { get; init; } = new();
         }
     }
 }

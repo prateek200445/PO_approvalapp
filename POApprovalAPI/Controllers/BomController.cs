@@ -209,6 +209,26 @@ public class BomController : ControllerBase
         }
     }
 
+    [HttpGet("preview-report/{previewId}")]
+    public async Task<IActionResult> GetPreviewReport(string previewId)
+    {
+        try
+        {
+            var detail = await _creationService.GetPreviewDetailAsync(previewId);
+            if (detail is null)
+                return NotFound(new { message = "Preview report expired or was not found. Run preview again." });
+            return Ok(detail);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] BomCreateRequest? request)
     {

@@ -86,6 +86,12 @@ export async function fetchBomDetail(filePoNo: string): Promise<BomDetailResult>
   return normalizeDetail(data);
 }
 
+export async function fetchBomPreviewDetail(previewId: string): Promise<BomDetailResult> {
+  const res = await fetch(getApiUrl(`/api/bom/preview-report/${encodeURIComponent(previewId)}`));
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeDetail(data);
+}
+
 export async function fetchBomEditor(filePoNo: string): Promise<BomEditorSnapshot | null> {
   const res = await fetch(getApiUrl(`/api/bom/editor/${encodeURIComponent(filePoNo)}`));
   if (res.status === 404) return null;
@@ -216,6 +222,10 @@ export async function waitForBomEmailResult(
 
 export function bomPdfUrl(qtnNo: string): string {
   return getApiUrl(`/api/pdf/bom?filePoNo=${encodeURIComponent(qtnNo)}`);
+}
+
+export function bomPreviewPdfUrl(previewId: string): string {
+  return getApiUrl(`/api/pdf/bom-preview/${encodeURIComponent(previewId)}`);
 }
 
 function strField(obj: Record<string, unknown>, ...keys: string[]): string {
@@ -366,6 +376,7 @@ function normalizePreview(data: Record<string, unknown>): BomCreatePreviewResult
   const warnings = (data.warnings ?? data.Warnings ?? []) as unknown[];
 
   return {
+    previewId: strField(data, "previewId", "PreviewId"),
     filePoNo: strField(data, "filePoNo", "FilePoNo"),
     customer: strField(data, "customer", "Customer"),
     lineCount: Number(data.lineCount ?? data.LineCount ?? 0),
