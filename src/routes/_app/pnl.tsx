@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, FileSpreadsheet, Loader2, Plus, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, Download, FileSpreadsheet, Loader2, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
   savePnlProvisions,
   savePnlStockYear,
   savePnlOverhead,
+  downloadPnlTemplate,
   savePnlUpload,
 } from "@/lib/pnl-api";
 import {
@@ -146,26 +147,40 @@ function UploadInboxPanel({
     onError: (err: Error) => toast.error(err.message),
   });
 
+  const [downloading, setDownloading] = useState<"stock" | "provision" | "common" | null>(null);
+
   const cards: { key: keyof typeof files; type: "stock" | "provision" | "common"; title: string; hint: string }[] = [
     {
       key: "stock",
       type: "stock",
       title: "Stock Excel",
-      hint: "Any workbook layout is fine for now.",
+      hint: "Download the standard stock template, fill it, then upload it.",
     },
     {
       key: "provision",
       type: "provision",
       title: "Provision Excel",
-      hint: "Upload the month-wise provision workbook as received.",
+      hint: "Download the standard provision template, fill it, then upload it.",
     },
     {
       key: "common",
       type: "common",
       title: "Common / HO Excel",
-      hint: "Upload the Common and HO expense workbook.",
+      hint: "Download the standard Common / HO template, fill it, then upload it.",
     },
   ];
+
+  async function handleTemplateDownload(type: "stock" | "provision" | "common") {
+    setDownloading(type);
+    try {
+      await downloadPnlTemplate(type, company, month);
+      toast.success("Template downloaded");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to download template");
+    } finally {
+      setDownloading(null);
+    }
+  }
 
   return (
     <div className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
@@ -184,6 +199,16 @@ function UploadInboxPanel({
           <div key={card.key} className="rounded-lg border p-3">
             <div className="text-sm font-medium">{card.title}</div>
             <div className="mt-1 text-xs text-muted-foreground">{card.hint}</div>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-3 w-full"
+              disabled={downloading === card.type}
+              onClick={() => handleTemplateDownload(card.type)}
+            >
+              {downloading === card.type ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+              Download template
+            </Button>
             <label className="mt-3 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed px-3 py-6 text-center hover:bg-secondary/40">
               <Upload className="h-5 w-5 text-muted-foreground" />
               <span className="text-xs font-medium">

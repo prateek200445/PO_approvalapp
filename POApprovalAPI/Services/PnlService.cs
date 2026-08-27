@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using ClosedXML.Excel;
 using Dapper;
 using POApprovalAPI.Models;
 
@@ -468,6 +469,7 @@ ORDER BY UploadedAt DESC, Id DESC",
         var companyName = (await ResolveCompaniesAsync(company)).First();
         var type = NormalizeUploadType(uploadType);
         await EnsureUploadTableAsync();
+        await ImportUploadAsync(companyName, monthStart.Date, type, fileBytes);
 
         using var connection = _database.CreateConnection();
         await connection.ExecuteAsync(@"
@@ -501,6 +503,356 @@ WHEN NOT MATCHED THEN
                 FileBytes = fileBytes,
                 Remarks = remarks,
             });
+    }
+
+    public async Task<(byte[] Bytes, string FileName)> GetUploadTemplateAsync(
+        string company,
+        DateTime monthStart,
+        string uploadType)
+    {
+        if (IsAggregate(company))
+            throw new ArgumentException("Pick a single company to download a template.");
+
+        var companyName = (await ResolveCompaniesAsync(company)).First();
+        var type = NormalizeUploadType(uploadType);
+
+        using var workbook = new XLWorkbook();
+        var sheet = workbook.AddWorksheet(type switch
+        {
+            "Stock" => "Stock Upload",
+            "Provision" => "Provision Upload",
+            _ => "Common HO Upload",
+        });
+
+        BuildTemplateHeader(sheet, companyName, monthStart, type);
+
+        switch (type)
+        {
+            case "Stock":
+                BuildStockTemplate(sheet);
+                break;
+            case "Provision":
+                var ledgers = await GetProvisionLedgerOptionsAsync(companyName);
+                BuildProvisionTemplate(sheet, ledgers);
+                break;
+            case "CommonExpense":
+                BuildCommonHoTemplate(sheet);
+                break;
+        }
+
+        using var ms = new MemoryStream();
+        workbook.SaveAs(ms);
+
+        var fileName = type switch
+        {
+            "Stock" => $"pnl-stock-template-{SafeFilePart(companyName)}-{monthStart:yyyy-MM}.xlsx",
+            "Provision" => $"pnl-provision-template-{SafeFilePart(companyName)}-{monthStart:yyyy-MM}.xlsx",
+            _ => $"pnl-common-ho-template-{SafeFilePart(companyName)}-{monthStart:yyyy-MM}.xlsx",
+        };
+
+        return (ms.ToArray(), fileName);
+    }
+
+    private async Task ImportUploadAsync(string companyName, DateTime monthStart, string type, byte[] fileBytes)
+    {
+        using var workbook = new XLWorkbook(new MemoryStream(fileBytes));
+        switch (type)
+        {
+            case "Stock":
+                await ImportStockTemplateAsync(companyName, monthStart, workbook);
+                break;
+            case "Provision":
+                await ImportProvisionTemplateAsync(companyName, monthStart, workbook);
+                break;
+            case "CommonExpense":
+                await ImportCommonHoTemplateAsync(companyName, monthStart, workbook);
+                break;
+            default:
+                throw new ArgumentException("Unsupported upload type.");
+        }
+    }
+
+    private async Task ImportStockTemplateAsync(string companyName, DateTime monthStart, XLWorkbook workbook)
+    {
+        var sheet = FindWorksheet(workbook, "Stock Upload", "Stock");
+        var headerRow = FindHeaderRow(sheet, "Category", "Amount Lacs");
+        var lastRow = sheet.LastRowUsed()?.RowNumber() ?? headerRow;
+        var rows = new List<(string Category, double AmountLacs)>();
+
+        for (var r = headerRow + 1; r <= lastRow; r++)
+        {
+            var row = sheet.Row(r);
+            var categoryText = row.Cell(1).GetString().Trim();
+            var amountCell = row.Cell(2);
+            if (string.IsNullOrWhiteSpace(categoryText) && amountCell.IsEmpty())
+                continue;
+
+            var category = NormalizeStockCategory(categoryText);
+            var amount = ReadNumber(amountCell);
+            rows.Add((category, amount));
+        }
+
+        if (rows.Count == 0)
+            throw new InvalidOperationException("No stock rows were found in the template.");
+
+        await SaveStockMonthAsync(companyName, monthStart, rows);
+    }
+
+    private async Task ImportProvisionTemplateAsync(string companyName, DateTime monthStart, XLWorkbook workbook)
+    {
+        var sheet = FindWorksheet(workbook, "Provision Upload", "Provision");
+        var headerRow = FindHeaderRow(sheet, "Ledger Name", "Amount Lacs");
+        var lastRow = sheet.LastRowUsed()?.RowNumber() ?? headerRow;
+        var rows = new List<PnlProvisionRow>();
+
+        for (var r = headerRow + 1; r <= lastRow; r++)
+        {
+            var row = sheet.Row(r);
+            var ledgerName = row.Cell(1).GetString().Trim();
+            var amountCell = row.Cell(2);
+            if (string.IsNullOrWhiteSpace(ledgerName) && amountCell.IsEmpty())
+                continue;
+
+            var amount = ReadNumber(amountCell);
+            if (Math.Abs(amount) < 0.0001)
+                continue;
+
+            rows.Add(new PnlProvisionRow
+            {
+                LedgerName = ledgerName,
+                Amount = amount * Lacs,
+                AmountLacs = amount,
+            });
+        }
+
+        if (rows.Count == 0)
+            throw new InvalidOperationException("No provision rows were found in the template.");
+
+        await SaveProvisionsAsync(new PnlProvisionSaveRequest
+        {
+            Company = companyName,
+            Month = monthStart.ToString("yyyy-MM"),
+            Rows = rows,
+        });
+    }
+
+    private async Task ImportCommonHoTemplateAsync(string companyName, DateTime monthStart, XLWorkbook workbook)
+    {
+        var sheet = FindWorksheet(workbook, "Common HO Upload", "Common HO", "Common & HO");
+        var headerRow = FindHeaderRow(sheet, "Particular", "Amount Lacs");
+        var lastRow = sheet.LastRowUsed()?.RowNumber() ?? headerRow;
+        double common = 0;
+        double ho = 0;
+        var seen = 0;
+
+        for (var r = headerRow + 1; r <= lastRow; r++)
+        {
+            var row = sheet.Row(r);
+            var label = row.Cell(1).GetString().Trim();
+            var amountCell = row.Cell(2);
+            if (string.IsNullOrWhiteSpace(label) && amountCell.IsEmpty())
+                continue;
+
+            var amount = ReadNumber(amountCell);
+            if (label.Equals("Common expenses", StringComparison.OrdinalIgnoreCase) ||
+                label.Equals("Common expense", StringComparison.OrdinalIgnoreCase) ||
+                label.Equals("Common", StringComparison.OrdinalIgnoreCase))
+            {
+                common = amount;
+                seen++;
+                continue;
+            }
+
+            if (label.Equals("HO expenses", StringComparison.OrdinalIgnoreCase) ||
+                label.Equals("HO expense", StringComparison.OrdinalIgnoreCase) ||
+                label.Equals("HO", StringComparison.OrdinalIgnoreCase))
+            {
+                ho = amount;
+                seen++;
+            }
+        }
+
+        if (seen == 0)
+            throw new InvalidOperationException("No Common / HO rows were found in the template.");
+
+        await SaveOverheadAsync(new PnlOverheadSaveRequest
+        {
+            Company = companyName,
+            Month = monthStart.ToString("yyyy-MM"),
+            CommonLacs = common,
+            HoLacs = ho,
+        });
+    }
+
+    private async Task SaveStockMonthAsync(string companyName, DateTime monthStart, IReadOnlyList<(string Category, double AmountLacs)> rows)
+    {
+        await EnsureStockTableAsync();
+        using var connection = _database.CreateConnection();
+        foreach (var row in rows)
+            await UpsertStockAsync(connection, companyName, monthStart, row.Category, row.AmountLacs);
+    }
+
+    private static void BuildTemplateHeader(IXLWorksheet sheet, string companyName, DateTime monthStart, string type)
+    {
+        sheet.Cell("A1").Value = "P&L Upload Template";
+        sheet.Range("A1:C1").Merge();
+        sheet.Cell("A2").Value = "Company";
+        sheet.Cell("B2").Value = companyName;
+        sheet.Cell("A3").Value = "Month";
+        sheet.Cell("B3").Value = monthStart.ToString("yyyy-MM");
+        sheet.Cell("A4").Value = "Upload Type";
+        sheet.Cell("B4").Value = type;
+        sheet.Cell("A5").Value = "Instructions";
+        sheet.Cell("B5").Value = "Fill the amounts in lacs and keep the sheet layout unchanged.";
+
+        sheet.Range("A1:C1").Style.Font.Bold = true;
+        sheet.Range("A1:C1").Style.Fill.BackgroundColor = XLColor.FromHtml("#E8EEF9");
+        sheet.Range("A2:A5").Style.Font.Bold = true;
+        sheet.Column("A").Width = 28;
+        sheet.Column("B").Width = 24;
+        sheet.Column("C").Width = 40;
+    }
+
+    private static void BuildStockTemplate(IXLWorksheet sheet)
+    {
+        sheet.Cell("A7").Value = "Category";
+        sheet.Cell("B7").Value = "Amount Lacs";
+        sheet.Cell("C7").Value = "Remarks";
+        sheet.Range("A7:C7").Style.Font.Bold = true;
+        sheet.Range("A7:C7").Style.Fill.BackgroundColor = XLColor.FromHtml("#DDEBF7");
+
+        var row = 8;
+        foreach (var category in StockCategories)
+        {
+            sheet.Cell(row, 1).Value = StockLabels[category];
+            row++;
+        }
+
+        sheet.SheetView.FreezeRows(7);
+    }
+
+    private async Task<List<string>> GetProvisionLedgerOptionsAsync(string companyName)
+    {
+        using var connection = _database.CreateConnection();
+        return (await connection.QueryAsync<string>(@"
+SELECT DISTINCT LTRIM(RTRIM(LedgerName))
+FROM LedgerMaster WITH (NOLOCK)
+WHERE CompanyName = @Company
+  AND Category IN ('Expense','Income')
+  AND ISNULL(LedgerName, '') <> ''
+ORDER BY 1",
+            new { Company = companyName })).ToList();
+    }
+
+    private static void BuildProvisionTemplate(IXLWorksheet sheet, IReadOnlyList<string> ledgers)
+    {
+        sheet.Cell("A7").Value = "Ledger Name";
+        sheet.Cell("B7").Value = "Amount Lacs";
+        sheet.Cell("C7").Value = "Remarks";
+        sheet.Range("A7:C7").Style.Font.Bold = true;
+        sheet.Range("A7:C7").Style.Fill.BackgroundColor = XLColor.FromHtml("#E2F0D9");
+
+        var row = 8;
+        foreach (var ledger in ledgers)
+        {
+            sheet.Cell(row, 1).Value = ledger;
+            row++;
+        }
+
+        if (row == 8)
+        {
+            sheet.Cell("A8").Value = "Sample ledger";
+            sheet.Cell("B8").Value = 0;
+            sheet.Cell("C8").Value = "No ledgers found for this company";
+        }
+
+        sheet.SheetView.FreezeRows(7);
+    }
+
+    private static void BuildCommonHoTemplate(IXLWorksheet sheet)
+    {
+        sheet.Cell("A7").Value = "Particular";
+        sheet.Cell("B7").Value = "Amount Lacs";
+        sheet.Cell("C7").Value = "Remarks";
+        sheet.Range("A7:C7").Style.Font.Bold = true;
+        sheet.Range("A7:C7").Style.Fill.BackgroundColor = XLColor.FromHtml("#FCE4D6");
+        sheet.Cell("A8").Value = "Common expenses";
+        sheet.Cell("A9").Value = "HO expenses";
+        sheet.SheetView.FreezeRows(7);
+    }
+
+    private static IXLWorksheet FindWorksheet(XLWorkbook workbook, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var sheet = workbook.Worksheets.FirstOrDefault(ws => ws.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (sheet is not null)
+                return sheet;
+        }
+
+        return workbook.Worksheets.First();
+    }
+
+    private static int FindHeaderRow(IXLWorksheet sheet, params string[] expectedHeaders)
+    {
+        var lastRow = Math.Min(sheet.LastRowUsed()?.RowNumber() ?? 1, 20);
+        for (var row = 1; row <= lastRow; row++)
+        {
+            var values = sheet.Row(row).CellsUsed()
+                .Select(c => Canon(c.GetString()))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (expectedHeaders.All(h => values.Contains(Canon(h))))
+                return row;
+        }
+
+        throw new InvalidOperationException($"Could not find the header row in sheet '{sheet.Name}'.");
+    }
+
+    private static string NormalizeStockCategory(string value)
+    {
+        var text = Canon(value);
+        foreach (var category in StockCategories)
+        {
+            if (Canon(category) == text)
+                return category;
+
+            if (StockLabels.TryGetValue(category, out var label) && Canon(label) == text)
+                return category;
+        }
+
+        throw new InvalidOperationException($"Unknown stock category '{value}'.");
+    }
+
+    private static double ReadNumber(IXLCell cell)
+    {
+        if (cell.TryGetValue<double>(out var value))
+            return value;
+
+        var text = cell.GetFormattedString().Trim();
+        if (string.IsNullOrWhiteSpace(text))
+            return 0;
+
+        text = text.Replace(",", "");
+        if (double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
+            return parsed;
+
+        if (double.TryParse(text, NumberStyles.Any, CultureInfo.GetCultureInfo("en-IN"), out parsed))
+            return parsed;
+
+        return 0;
+    }
+
+    private static string SafeFilePart(string value)
+    {
+        var safe = Regex.Replace((value ?? "").Trim(), @"[^a-zA-Z0-9]+", "-").Trim('-');
+        return string.IsNullOrWhiteSpace(safe) ? "company" : safe.ToLowerInvariant();
+    }
+
+    private static string Canon(string value)
+    {
+        var text = (value ?? "").Trim().ToLowerInvariant();
+        return Regex.Replace(text, @"\s+", " ");
     }
 
     private async Task<OverheadBits> SumOverheadAsync(

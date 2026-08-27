@@ -167,6 +167,23 @@ public class PnlController : ControllerBase
         }
     }
 
+    [HttpGet("templates/{uploadType}")]
+    public async Task<IActionResult> Template(
+        string uploadType,
+        [FromQuery] string company,
+        [FromQuery] string month)
+    {
+        try
+        {
+            var (bytes, fileName) = await _service.GetUploadTemplateAsync(company, PnlService.ParseMonth(month), uploadType);
+            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("uploads/{uploadType}")]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(25_000_000)]

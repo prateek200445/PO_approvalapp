@@ -128,3 +128,27 @@ export async function savePnlUpload(
   });
   return readJson<{ ok: boolean }>(res);
 }
+
+export async function downloadPnlTemplate(
+  uploadType: "stock" | "provision" | "common",
+  company: string,
+  month: string,
+) {
+  const params = new URLSearchParams({ company, month });
+  const res = await fetch(getApiUrl(`/api/pnl/templates/${uploadType}?${params}`));
+  if (!res.ok) {
+    return readJson<{ message?: string }>(res).then((data) => {
+      throw new Error(data.message || res.statusText);
+    });
+  }
+
+  const bytes = await res.blob();
+  const url = URL.createObjectURL(bytes);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `pnl-${uploadType}-template-${company.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${month}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
