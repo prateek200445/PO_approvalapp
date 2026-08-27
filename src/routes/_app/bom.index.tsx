@@ -175,9 +175,14 @@ function BomReportPage() {
         title="Bill of Materials"
         description="Search saved BOMs by party, user, or date. Select a row to view the full report, PDF, and email."
         actions={
-          <Button variant="outline" size="sm" asChild>
-            <Link to="/bom/customers">Customer master</Link>
-          </Button>
+          <>
+            <Button size="sm" asChild>
+              <Link to="/bom/create">Create BOM</Link>
+            </Button>
+            <Button variant="outline" size="sm" asChild>
+              <Link to="/bom/customers">Customer master</Link>
+            </Button>
+          </>
         }
       />
 

@@ -37,6 +37,7 @@ import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$
 import { Route as AppIntercompanySettlementRouteImport } from './routes/_app/intercompany.settlement'
 import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
 import { Route as AppBomCustomersRouteImport } from './routes/_app/bom.customers'
+import { Route as AppBomCreateRouteImport } from './routes/_app/bom.create'
 import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
 import { Route as AppAdvancePaymentPaymentNoRouteImport } from './routes/_app/advance-payment.$paymentNo'
 
@@ -180,6 +181,11 @@ const AppBomCustomersRoute = AppBomCustomersRouteImport.update({
   path: '/customers',
   getParentRoute: () => AppBomRoute,
 } as any)
+const AppBomCreateRoute = AppBomCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
+  getParentRoute: () => AppBomRoute,
+} as any)
 const AppBomSplatRoute = AppBomSplatRouteImport.update({
   id: '/$',
   path: '/$',
@@ -215,6 +221,7 @@ export interface FileRoutesByFullPath {
   '/workorders': typeof AppWorkordersRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
   '/bom/$': typeof AppBomSplatRoute
+  '/bom/create': typeof AppBomCreateRoute
   '/bom/customers': typeof AppBomCustomersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/intercompany/settlement': typeof AppIntercompanySettlementRoute
@@ -245,6 +252,7 @@ export interface FileRoutesByTo {
   '/workorders': typeof AppWorkordersRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
   '/bom/$': typeof AppBomSplatRoute
+  '/bom/create': typeof AppBomCreateRoute
   '/bom/customers': typeof AppBomCustomersRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/intercompany/settlement': typeof AppIntercompanySettlementRoute
@@ -278,6 +286,7 @@ export interface FileRoutesById {
   '/_app/workorders': typeof AppWorkordersRoute
   '/_app/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
   '/_app/bom/$': typeof AppBomSplatRoute
+  '/_app/bom/create': typeof AppBomCreateRoute
   '/_app/bom/customers': typeof AppBomCustomersRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/_app/intercompany/settlement': typeof AppIntercompanySettlementRoute
@@ -311,6 +320,7 @@ export interface FileRouteTypes {
     | '/workorders'
     | '/advance-payment/$paymentNo'
     | '/bom/$'
+    | '/bom/create'
     | '/bom/customers'
     | '/indent/$indentNo'
     | '/intercompany/settlement'
@@ -341,6 +351,7 @@ export interface FileRouteTypes {
     | '/workorders'
     | '/advance-payment/$paymentNo'
     | '/bom/$'
+    | '/bom/create'
     | '/bom/customers'
     | '/indent/$indentNo'
     | '/intercompany/settlement'
@@ -373,6 +384,7 @@ export interface FileRouteTypes {
     | '/_app/workorders'
     | '/_app/advance-payment/$paymentNo'
     | '/_app/bom/$'
+    | '/_app/bom/create'
     | '/_app/bom/customers'
     | '/_app/indent/$indentNo'
     | '/_app/intercompany/settlement'
@@ -585,6 +597,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBomCustomersRouteImport
       parentRoute: typeof AppBomRoute
     }
+    '/_app/bom/create': {
+      id: '/_app/bom/create'
+      path: '/create'
+      fullPath: '/bom/create'
+      preLoaderRoute: typeof AppBomCreateRouteImport
+      parentRoute: typeof AppBomRoute
+    }
     '/_app/bom/$': {
       id: '/_app/bom/$'
       path: '/$'
@@ -604,12 +623,14 @@ declare module '@tanstack/react-router' {
 
 interface AppBomRouteChildren {
   AppBomSplatRoute: typeof AppBomSplatRoute
+  AppBomCreateRoute: typeof AppBomCreateRoute
   AppBomCustomersRoute: typeof AppBomCustomersRoute
   AppBomIndexRoute: typeof AppBomIndexRoute
 }
 
 const AppBomRouteChildren: AppBomRouteChildren = {
   AppBomSplatRoute: AppBomSplatRoute,
+  AppBomCreateRoute: AppBomCreateRoute,
   AppBomCustomersRoute: AppBomCustomersRoute,
   AppBomIndexRoute: AppBomIndexRoute,
 }

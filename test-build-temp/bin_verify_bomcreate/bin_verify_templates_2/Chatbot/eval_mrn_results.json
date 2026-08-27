@@ -1,0 +1,128 @@
+﻿[
+    {
+        "id":  "rm283_items",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  50,
+        "warning":  null,
+        "sql":  "SELECT TOP 50 ItemName, ItemCode, RecdQty, AcceptedQty, OrderQty, PendingQty\nFROM Vw_StoreInwards\nWHERE MRNo = \u0027RM 283\u0027",
+        "answer":  "**Materials received under receipt RM 283 (RecdQty shown):**\n\n- PP UL Fabric With UV (WIP00023) – 3 131  \n- PP UL Bags Without UV (WIP00038) – 836  \n- PP UL Fabric With UV (WIP00023) – 1 591  \n- PP Lam Fabric With UV (WIP00025) – 2 157  \n- PP UL Fabric With UV (WIP00023) – 234  \n- PP UL Fabric With UV (WIP00023) – 4 463  \n- LDPE/LLDPE Bags/Liner (WIP00013) – 612.75  \n- LDPE RIL J24FS040 (RAW05810) – 5 000  \n- FIBC Bags With UV Without Liner (WIP00004) – 17 297.1  \n- Crimp Yarn (WIP00021) – 357.15  \n- Webbing (WIP00032) – 34.9  \n- Webbing (WIP00032) – 841.2  \n- Webbing (WIP00032) – 1 622.1  \n- PP Lam Fabric With UV (WIP00025) – 780  \n- PP UL Fabric With UV (WIP00023) – 1 915  \n- PP UL Fabric With UV (WIP00023) – 76  \n- LDPE/LLDPE Bags/Liner (WIP00013) – 101  \n- LDPE/LLDPE Bags/Liner (WIP00013) – 1 239  \n- PP UL Fabric With UV (WIP00023) – 658  \n- Crimp Yarn (WIP00021) – 1 798.33  \n- PP/HD Wastage/Scrap (WIP00031) – 350  \n- Webbing (WIP00032) – 194.4  \n- PP MF Yarn Twisted 3000 Denier UV NW (WIP00191) – 1 114.3  \n- PP Lam Fabric With UV (WIP00025) – 10 061  \n- PP Braided Rope MW 6 to 8 GPM (WIP00236) – 29.2  \n- UV Alok NFG AM 13350 20% (RAW05831) – 3 000  \n- PP UL Fabric With UV (WIP00023) – 1 100  \n- LDPE/LLDPE Bags/Liner (WIP00013) – 3.4  \n- Webbing (WIP00032) – 193.9  \n- Webbing (WIP00032) – 275  \n- PP MF Yarn Twisted 3000 Denier UV NW (WIP00191) – 2 124.35  \n- Webbing (WIP00032) – 578.2  \n- PP IOCL P1XHF/P1XLF (RAW06072) – 22 000  \n- RP Granules (WIP00002) – 2 370  \n- FIBC Bags With UV With Liner (WIP00003) – 6 050  \n- Monofilament Yarn 400 Denier (WIP00020) – 746.72  \n- PP UL Fabric With UV (WIP00023) – 777.03  \n- PP Lam Fabric Without UV (WIP00026) – 24 637  \n- Ink Huber Poly Black VLX 579 (RMC00069) – 100  \n-"
+    },
+    {
+        "id":  "rm283_vendor_bill",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  50,
+        "warning":  null,
+        "sql":  "SELECT TOP 50 PartyName AS Vendor, BillNo, Amount\nFROM Vw_StoreInwards\nWHERE MRNo = \u0027RM 283\u0027",
+        "answer":  "The receipt **RM 283** contains many line‑items. Each line shows the vendor, the bill number that was recorded for that purchase and the amount charged:\n\n| Vendor | Bill No | Amount |\n|--------|---------|--------|\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/D/1404 | 135.26 |\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/D/1404 | 150.98 |\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/D/1404 | 142.26 |\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/D/1404 | 140.26 |\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/D/1404 | 162.12 |\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/E/358 | 225.00 |\n| Reliance Industries Ltd – Gujarat | 24183001033449 | 97.97 |\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/D/1632 | 76.11 |\n| Plastene India Ltd – Unit 2 (Purchase) | PIL2/D/1385 | 111.30 |\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/E/284 | 138.36 |\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/E/655 | 113.41 |\n| Plastene Polyfilms Ltd (Purchase) | PPL/D/540 | 174.19 |\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/D/380 | 144.04 |\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/D/380 | 123.04 |\n| Plastene India Ltd – Unit 1 (Purchase) | PIL1/D/380 | 120.04 |\n| Plastene India Ltd – Unit 1 (Purchase"
+    },
+    {
+        "id":  "rm269_paid_utr",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  4,
+        "warning":  null,
+        "sql":  "SELECT DISTINCT PaymentNo, UTRno\nFROM BillPaymentEntry\nWHERE MRNno = \u0027RM 269\u0027\n  AND PaymentNo IS NOT NULL",
+        "answer":  "Yes. Receipt **RM 269** has already been paid. The payments are:\n\n| Payment No | UTR |\n|------------|-------------------|\n| PIL/PRQ/20-21/1194 | BARBD20357353206 |\n| PIL2/PRQ/21-22/1737 | SBIN321275274926 |\n| PIL/PRQ/23-24/898 | BARBD23196337368 |\n| KPV/PRQ/23-24/1009 | BARBD23231336271 |"
+    },
+    {
+        "id":  "rm283_po",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  47,
+        "warning":  null,
+        "sql":  "SELECT DISTINCT TOP 50 PONo\nFROM Vw_StoreInwards\nWHERE MRNo = \u0027RM 283\u0027",
+        "answer":  "The material receipt **RM 283** is linked to multiple purchase orders. The distinct PONo values found are:\n\n- KPW3/RAW/23-24/290  \n- KPW3/RAW/22-23/263  \n- KPV/RAW/24-25/236  \n- HPBL/RAW/24-25/300  \n- GPL/RAW/21-22/273  \n- KPV/RAW/20-21/100  \n- KPV/RAW/21-22/249  \n- PIL/RAW/24-25/239  \n- PIL6/RAW/23-24/331  \n- PIL2/RAW/23-24/231  \n- PIL2/RAW/22-23/252  \n- PPL/RAW/22-23/272  \n- PIL6/RAW/22-23/288  \n- PIL/RAW/22-23/210  \n- PIL6/RAW/24-25/319  \n- PPL/RAW/21-22/271  \n- PIL6/RAW/21-22/312  \n- PIL6/RAW/20-21/298  \n- PIL2/RAW/20-21/234  \n- PIL/RAW/20-21/255  \n- KPW3/RAW/21-22/312  \n- KPW2/RAW/21-22/291  \n- PPL/RAW/24-25/266  \n- KPW3/RAW/24-25/280  \n- KPV/25-26/DEE/2  \n- HPBL/RAW/25-26/278  \n- KPW3/RAW/26-27/132  \n- HPBL4/RAW/26-27/286  \n- PPL/RAW/26-27/283  \n- KPW3/RAW/25-26/123  \n- PIL/RAW/25-26/181  \n- KPV/RAW/26-27/337  \n- PIL/RAW/26-27/281  \n- PIL2/RAW/25-26/289  \n- PPL/RAW/25-26/277  \n- KPV/RAW/22-23/252  \n- HPBL4/RAW/25-26/263  \n- OEL/RAW/20-21/302  \n- KPV/RAW/23-24/241  \n- PIL/RAW/23-24/237  \n- PPL/23-24/DEE/1  \n- PPL/RAW/20-21/281  \n- PIL2/RAW/21-22/235  \n- PIL/RAW/21-22/168  \n- OEL/RAW/21-22/282  \n- PIL2/RAW/24-25/194  \n- PIL2/RAW/26-27/256  \n\nThus, **RM 283** was received against all of the above purchase orders."
+    },
+    {
+        "id":  "plastene_party_receipts",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  50,
+        "warning":  null,
+        "sql":  "SELECT TOP 50 MRNo, PartyName, BillNo, BillDate, SysDate\nFROM Vw_StoreInwards\nWHERE PartyName = \u0027Plastene Polyfilms Ltd-Purchase\u0027\nORDER BY COALESCE(BillDate, SysDate) DESC",
+        "answer":  "**Recent goods‑receipt entries for Plastene Polyfilms Ltd‑Purchase**\n\n| MR No | Bill No | Bill Date |\n|-------|---------|-----------|\n| RM 278 | PPL/D/472 | 10 Aug 2026 |\n| RM 927 | PPL/D/471 | 10 Aug 2026 |\n| RM 926 | PPL/D/473 | 10 Aug 2026 |\n| RM 501 | PPL/D/469 | 09 Aug 2026 |\n| RM 918 | PPL/D/468 | 09 Aug 2026 |\n| RM 500 | PPL/D/467 | 08 Aug 2026 |\n| RM 391 | PPL/D/466. | 08 Aug 2026 |\n| RM 390 | PPL/D/465 | 08 Aug 2026 |\n| GNSP 514 | PPL/D/464 | 08 Aug 2026 |\n| RM 491 | PPL/D/462 | 07 Aug 2026 |\n| GNCN 331 | PPL/D/463 | 07 Aug 2026 |\n| … | … | … |\n\nThe list is ordered by the most recent BillDate (or SysDate when BillDate is null). Duplicate rows in the source have been collapsed to show each distinct receipt once."
+    },
+    {
+        "id":  "oswal_pending_qty",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  50,
+        "warning":  null,
+        "sql":  "SELECT TOP 50 SrNo, MRNo, PONo, CompanyName, PartyName, BillNo, BillDate, GateInwardDate, SysDate, ItemName, ItemCode, RecdQty, AcceptedQty, OrderQty, PendingQty, Rate, Amount, Deptt, IndentNo, GateInwardNo, VendorGST, MRNStatus, LoginName\nFROM Vw_StoreInwards\nWHERE CompanyName = \u0027Oswal Extrusion Limited\u0027 AND PendingQty \u003e 0",
+        "answer":  "**Material receipts for Oswal Extrusion Limited that still have quantity pending**\n\n| SrNo | Item (code) | Order Qty | Pending Qty |\n|------|-------------|-----------|-------------|\n| OEL/25-26/SII00777 | Pine Wooden Pallet STD90110 (PAC00584) | 500 | **195** |\n| OEL/25-26/SII00778 | Pine Wooden Pallet PC90110 (PAC00586) | 400 | **23** |\n| OEL/25-26/SII00855 | Spreader, Upper For Overedge Stitching (81507) (FIB03442) | 15 | **11** |\n| OEL/25-26/SII00774 | Pine Wooden Pallet STD90110 (PAC00584) | 500 | **495** |\n| OEL/25-26/SII00775 | Pine Wooden Pallet STD90110 (PAC00584) | 500 | **395** |\n| OEL/25-26/SII00776 | Pine Wooden Pallet STD90110 (PAC00584) | 500 | **295** |\n| OEL/25-26/SII00860 | Heddle Belt 20 Hole 98×490 mm (LOO01961) | 100 | **50** |\n| OEL/25-26/SII00860 | Heddle Belt 98 × 245 mm 20 Hole (LOO02524) | 100 | **50** |\n| OEL/25-26/SII00837 | Food‑Grade Wooden Top Plank 85×105 cm (FIB10083) | 100 | **80** |\n| OEL/25-26/SII00853 | Looper Big A8376 ("
+    },
+    {
+        "id":  "bill_ppl_d_540",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  16,
+        "warning":  null,
+        "sql":  "SELECT TOP 50 * \nFROM Vw_StoreInwards \nWHERE BillNo = \u0027PPL/D/540\u0027",
+        "answer":  "The bill **PPL/D/540** is linked to a single receipt:\n\n- **Receipt (SrNo):** PIL/23‑24/SII02999  \n\nAll rows returned for this bill share the same SrNo, indicating that only one receipt is associated with it."
+    },
+    {
+        "id":  "rm269_payment_amount",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  4,
+        "warning":  null,
+        "sql":  "SELECT PaymentNo, MRNno, BillNo, PaymentAmount, BillAmount, status, isPaid\nFROM BillPaymentEntry\nWHERE MRNno = \u0027RM 269\u0027",
+        "answer":  "Yes. Four payments were raised against material receipt **RM 269**:\n\n| PaymentNo                     | PaymentAmount |\n|------------------------------|--------------:|\n| PIL/PRQ/20-21/1194           | 493,240 |\n| PIL2/PRQ/21-22/1737          | 148,680 |\n| PIL/PRQ/23-24/898            | 14,079 |\n| KPV/PRQ/23-24/1009           | 75,114 |\n\n**Total paid:** **731,113**."
+    },
+    {
+        "id":  "messy_rm283_items",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  50,
+        "warning":  null,
+        "sql":  "SELECT TOP 50 ItemName, ItemCode, RecdQty, AcceptedQty, OrderQty, PendingQty\nFROM Vw_StoreInwards\nWHERE MRNo = \u0027RM 283\u0027",
+        "answer":  ""
+    },
+    {
+        "id":  "messy_rm269_paid",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  4,
+        "warning":  null,
+        "sql":  "SELECT TOP 50 PaymentNo, UTRno\nFROM BillPaymentEntry\nWHERE MRNno = \u0027RM 269\u0027 AND isPaid = \u0027yes\u0027",
+        "answer":  "Yes, RM 269 has been paid. The payments recorded are:\n\n| Payment No                | UTR No                |\n|---------------------------|-----------------------|\n| PIL/PRQ/20-21/1194        | BARBD20357353206      |\n| PIL2/PRQ/21-22/1737       | SBIN321275274926      |\n| PIL/PRQ/23-24/898         | BARBD23196337368      |\n| KPV/PRQ/23-24/1009        | BARBD23231336271      |\n\nAll four entries have a non‑null PaymentNo, confirming the payment status as “yes.”"
+    },
+    {
+        "id":  "messy_plastene",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  50,
+        "warning":  null,
+        "sql":  "SELECT TOP 50 SrNo, MRNo, BillNo, BillDate, ItemName, RecdQty, AcceptedQty, Rate, Amount\nFROM Vw_StoreInwards\nWHERE PartyName = \u0027Plastene Polyfilms Ltd-Purchase\u0027\nORDER BY SysDate DESC",
+        "answer":  "**Recent goods‑receipt entries for Plastene Polyfilms Ltd‑Purchase (ordered by receipt date, newest first)**  \n\n| Bill No | Bill Date | Item Name | Received Qty | Rate | Amount |\n|---------|-----------|-----------|--------------|------|--------|\n| PPL/D/471 | 2026‑08‑10 | LDPE/LLDPE Film | 30.85 | 306 | 306 |\n| PPL/D/473 | 2026‑08‑10 | PP Lam Fabric With UV | 481 | 160.58 | 160.58 |\n| PPL/D/473 | 2026‑08‑10 | PP Lam Fabric With UV | 1 957 | 139.58 | 139.58 |\n| PPL/D/473 | 2026‑08‑10 | PP Lam Fabric With UV | 3 027 | 135.58 | 135.58 |\n| PPL/D/472 | 2026‑08‑10 | FIBC Bags With UV Without Liner | 827 | 187.27 | 187.27 |\n| PPL/D/472 | 2026‑08‑10 | FIBC Bags With UV Without Liner | 3 069 | 187.37 | 187.37 |\n| PPL/D/472 | 2026‑08‑10 | FIBC Bags With UV Without Liner | 3 886 | 198.96 | 198.96 |\n| PPL/D/472 | 2026‑08‑10 | FIBC Bags With UV Without Liner | 1 251 | 212.34 | 212.34 |\n| PPL/D/472 | 2026‑08‑10 | FIBC Bags With UV Without Liner | 1 700 | 200.57 | 200.57 |\n| PPL/D/472 | 2026‑08‑10 | FIBC Bags With UV Without Liner | 1 239 | 197.11 | 197.11 |\n| PPL/D/472 | 2026‑08‑10 | FIBC Bags With UV Without Liner | 7 031 | 193.38 | 193.38 |\n\n*All rows are from the most recent receipt date (10 Aug 2026).*  \n*Each line shows the bill number, date, item received, quantity received, unit rate, and the amount recorded for that line.*"
+    },
+    {
+        "id":  "messy_oswal_pending",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  50,
+        "warning":  null,
+        "sql":  "SELECT DISTINCT TOP 50 MRNo, PendingQty\nFROM Vw_StoreInwards\nWHERE CompanyName = \u0027Oswal Extrusion Limited\u0027\n  AND PendingQty \u003e 0",
+        "answer":  "**Oswal Extrusion Limited – MRNs that still have pending quantities**\n\n| MRNo | Pending Qty (total) |\n|------|--------------------|\n| GNMS 5 | 11 |\n| GNSP 2 | 15 (5 + 10) |\n| GNPK 54 | 23 |\n| GNPK 53 | 195 |\n| GNPK 52 | 295 |\n| GNSP 16 | 53 (45 + 8) |\n| GNPK 51 | 395 |\n| GNPK 50 | 495 |\n| GNSP 349 | 6 |\n| RM 44 | 506.91 |\n| GNCN 5 | 24 |\n| GNCN 3 | 350 (250 + 100) |\n| RM 41 | 4.26 |\n| GNSP 355 | 50 |\n| GNCN 33 | 8 000 |\n| GNCN 38 | 300 |\n| GNSP 350 | 11 |\n| GNCN 30 | 1 507 |\n| GNPK 59 | 80 |\n| GNCN 28 | 5 000 |\n| GNCN 39 | 1 006.2 |\n| GNSP 67 | 23 (18 + 5) |\n| GNSP 26 | 15 |\n| GNCN 24 | 1 000 |\n| GNCN 43 | 493.4 |\n| GNCN 25 | 500 |\n| GNCN 45 | 1 200 |\n| GNCN 46 | 998.33 |\n| GNCN 49 | 3 000 |\n| GNSP 85 | 31 (2 + 29) |\n| GNSP 57 | 9 |\n| GNSP 21 | 19 (9 + 10) |\n| GNSP 99 | 7 |\n| GNCN 17 | 2.51 |\n| GNCN 58 | 500 |\n| GNSP 117 | 10 |\n| GNSP 118 | 50 ("
+    },
+    {
+        "id":  "messy_bill_ppl",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  16,
+        "warning":  null,
+        "sql":  "SELECT TOP 50 SrNo, MRNo, PONo, CompanyName, PartyName, BillNo, BillDate, GateInwardDate, SysDate, ItemName, ItemCode, RecdQty, AcceptedQty, OrderQty, PendingQty, Rate, Amount, Deptt, IndentNo, GateInwardNo, VendorGST, MRNStatus, LoginName\nFROM Vw_StoreInwards\nWHERE BillNo = \u0027PPL/D/540\u0027",
+        "answer":  ""
+    },
+    {
+        "id":  "messy_rm269_how_much",
+        "pass":  true,
+        "failedChecks":  "",
+        "rowCount":  4,
+        "warning":  null,
+        "sql":  "SELECT PaymentNo, MRNno, BillNo, PaymentAmount, BillAmount, status, isPaid\nFROM BillPaymentEntry\nWHERE MRNno = \u0027RM 269\u0027",
+        "answer":  "Payments for MRN RM 269:\n\n- **PIL/PRQ/20-21/1194** – 493,240\n- **PIL2/PRQ/21-22/1737** – 148,680\n- **PIL/PRQ/23-24/898** – 14,079\n- **KPV/PRQ/23-24/1009** – 75,114  \n\n**Total amount paid:** **731,113**."
+    }
+]

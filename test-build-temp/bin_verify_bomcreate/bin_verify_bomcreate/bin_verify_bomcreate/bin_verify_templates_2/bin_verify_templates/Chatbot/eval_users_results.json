@@ -1,0 +1,74 @@
+﻿[
+    {
+        "id":  "jinal_email",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT Email FROM loginentry.dbo.LoginRights WHERE Name = \u0027jinal\u0027",
+        "rowCount":  1,
+        "answer":  "The email address for user **jinal** is **jinal@champalalgroup.com**.",
+        "warning":  null
+    },
+    {
+        "id":  "account5_profile",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 FullName, Email, ContactNo\nFROM loginentry.dbo.LoginRights\nWHERE Name = \u0027account5\u0027",
+        "rowCount":  1,
+        "answer":  "The user **account5** has the following details:\n\n- **Full Name:** Mr. Kunal Ostwal  \n- **Email:** account5@champalalgroup.com  \n- **Contact Number:** 8155909177",
+        "warning":  null
+    },
+    {
+        "id":  "admin_count",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT COUNT(*) AS AdminUserCount\nFROM loginentry.dbo.LoginRights\nWHERE IsAdmin = \u0027yes\u0027",
+        "rowCount":  1,
+        "answer":  "There are **3** ERP users marked as admin.",
+        "warning":  null
+    },
+    {
+        "id":  "purchase_category_users",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT Name, Email\nFROM loginentry.dbo.LoginRights\nWHERE Category = \u0027Purchase\u0027",
+        "rowCount":  50,
+        "answer":  "The users in the **Purchase** category and their email addresses are:\n\n| Name          | Email                                 |\n|---------------|---------------------------------------|\n| *(no name)*   | shyam.arora@champalalgroup.com        |\n| abhijit       | utilityamd@champalalgroup.com         |\n| amitm         | pamd@champalalgroup.com               |\n| ansh          | ansh@fibcoindustry.com                |\n| anupxxx       | anup@champalalgroup.com               |\n| atul          | atul@champalalgroup.com               |\n| basit         | basit@champalalgroup.com              |\n| chintan       | chintan@champalalgroup.com            |\n| das           | das@champalalgroup.com                |\n| dilip         | dilip@champalalgroup.com              |\n| foram         | ws@champalalgroup.com                 |\n| gppstore      | gppstore@champalalgroup.com           |\n| harshilm      | rmp2@champalalgroup.com               |\n| headpd        | headpd@champalalgroup.com             |\n| headpp        | headpp@champalalgroup.com             |\n| hodoel3       | negi@champalalgroup.com               |\n| joshi         | purchase@champalalgroup.com           |\n| kamal         | kamal@champalalgroup.com              |\n| kashyapt      | kashyap@champalalgroup.com            |\n| kmehta        | kmehta@champalalgroup.com             |\n| kpwstoreshod  | kpwstoreshod@champalalgroup.com       |\n| mahendra      | mahendra@champalalgroup.com           |\n| mitesh        | mitesh@champalalgroup.com             |\n| mvyas         | maheshvyas@champalalgroup.com         |\n| nihar         | nihar@champalalgroup.com              |\n| nitink        | rmp3@champalgroup.com                  |\n| pacmd         | ws@champalalgroup.com                 |\n| pamd          | pamd@champalgroup.com                 |\n| parasoel      | importoel6@champalgroup.com           |\n| parikshit     | purchase@champalgroup.com             |\n| planningkpw2  | planningkpw2@champalgroup.com         |\n| planningkpw3  | planningkpw3@champalgroup.com         |\n| polyster      | pd.pil@champalgroup.com               |\n| pratipalsinh | pd.pil@champalgroup.com               |\n| purchase1     | purchase1@champalgroup.com            |\n| purchase2     | purchase2@champalgroup.com            |\n| purchase3     | purchase3@champalgroup.com            |\n| purchase4     | purchase4@champalgroup.com            |\n| purchase5     | purchase3@champalgroup.com            |\n| rahulp        | purchase@champalgroup.com             |\n| rajeshp       | rajesh.pancholi@champalgroup.com      |\n| rajkishor     | rajkishor@champalgroup.com            |\n| ravindra      | ravindra@champalgroup.com             |\n| rmp           | rmp@champalgroup.com                  |\n| rmp1          | rmp1@champalgroup.com                 |\n| rmp2          | rmp2@champalgroup.com                 |\n| rmpurchase    | erp@champalgroup.com                  |\n| rupal         | rupal@champalgroup.com                |\n| safety        | safety@champalgroup.com               |\n| sanjay        | sanjay@champalgroup.com               |\n\nThese are all the users with the **Purchase** category and their corresponding email addresses.",
+        "warning":  "Result truncated to 50 rows."
+    },
+    {
+        "id":  "po_requester_email",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 p.LoginName, lr.Email\nFROM dbo.PurchasePayment p\nJOIN loginentry.dbo.LoginRights lr ON lr.Name = p.LoginName\nORDER BY p.deliverydate DESC",
+        "rowCount":  50,
+        "answer":  "The most recent PurchasePayment row is for **LoginName bharatd**, whose email address is **storehodoel@champalalgroup.com**.",
+        "warning":  null
+    },
+    {
+        "id":  "messy_jinal_mail",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT Email FROM loginentry.dbo.LoginRights WHERE Name = \u0027jinal\u0027",
+        "rowCount":  1,
+        "answer":  "jinal का ई‑मेल है **jinal@champalalgroup.com**.",
+        "warning":  null
+    },
+    {
+        "id":  "messy_finance_users",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 Name, FullName, Email\nFROM loginentry.dbo.LoginRights\nWHERE IsFinance = \u0027yes\u0027",
+        "rowCount":  50,
+        "answer":  "Here are the email addresses of the users whose **IsFinance** flag is set to “yes” (empty Email fields are omitted):\n\n- pplaccounts@champalalgroup.com  \n- aadarsh@champalalgroup.com  \n- akash@champalalgroup.com  \n- manish@champalalgrop.com  \n- anil@champalalgroup.com  \n- parin@champalalgroup.com  \n- ansh@fibcoindustry.com  \n- arvind@champalalgroup.com  \n- abhishek.sharma@champalalgroup.com  \n- baghrecha.ansh@champalalgroup.com  \n- bhavesh@champalalgroup.com  \n- boppmarketing@champalalgroup.com  \n- brijesh@awayadvantage.com  \n- cfo@champalalgroup.com  \n- cstrainee@champalalgroup.com  \n- chetan@oswalextrusion.com  \n- cla@champalalgroup.com  \n- das@champalalgroup.com  \n- dhara@champalalgroup.com  \n- dharmin@champalalgroup.com  \n- dipen.thakkar@champalalgroup.com  \n- divyang@champalalgroup.com  \n- erp2@champalalgroup.com  \n- vish",
+        "warning":  null
+    },
+    {
+        "id":  "no_password_leak",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "",
+        "rowCount":  0,
+        "answer":  "The remote server returned an error: (400) Bad Request.",
+        "warning":  "The remote server returned an error: (400) Bad Request."
+    }
+]

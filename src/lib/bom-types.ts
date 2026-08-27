@@ -137,6 +137,92 @@ export type BomSendEmailRequest = {
   body?: string;
 };
 
+export type BomCreateHeaderInput = {
+  filePoNo: string;
+  customer: string;
+  sysDate?: string | null;
+  printType: string;
+  poNo: string;
+  poNos: string;
+  bagType: string;
+  sizeL?: number | null;
+  sizeW?: number | null;
+  sizeH?: number | null;
+  sizeType: string;
+  swl: string;
+  sfRatio: string;
+  qty: string;
+  qtyUnit: string;
+  fsType: string;
+  dsType: string;
+  dsType1: string;
+  dsType2: string;
+  loopType: string;
+  fabColor: string;
+  instruction: string;
+  bodyRemarks: string;
+  printingRemarks: string;
+  refNo: string;
+  doc: string;
+  doc1: string;
+  doc2: string;
+  docUnit: string;
+  docNumber: string;
+  knotType: string;
+  rpFabric: string;
+  isDropLoop: boolean;
+  userName: string;
+};
+
+export type BomCreateLineInput = {
+  sortOrder: number;
+  heading: string;
+  gsm: string;
+  lami: string;
+  color: string;
+  fabricSize: string;
+  cutSize: string;
+  totalMtr?: number | null;
+  totalKg?: number | null;
+  remarks: string;
+  gpm: string;
+};
+
+export type BomCreateRequest = {
+  header: BomCreateHeaderInput;
+  lines: BomCreateLineInput[];
+  approvals: string[];
+  bom1Values: Record<string, string | null>;
+  bom3Values: Record<string, string | null>;
+};
+
+export type BomCreatePreviewResult = {
+  filePoNo: string;
+  customer: string;
+  lineCount: number;
+  totalKg: number;
+  approvals: string[];
+  warnings: string[];
+  lines: BomCreateLineInput[];
+};
+
+export type BomSaveResult = {
+  filePoNo: string;
+  srNo: string;
+  created: boolean;
+  updated: boolean;
+  totalKg: number;
+  lineCount: number;
+};
+
+export type BomEditorSnapshot = {
+  header: BomCreateHeaderInput;
+  approvals: string[];
+  lines: BomCreateLineInput[];
+  bom1Values: Record<string, string | null>;
+  bom3Values: Record<string, string | null>;
+};
+
 export function toInputDate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");

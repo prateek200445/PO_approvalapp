@@ -1,0 +1,74 @@
+﻿[
+    {
+        "id":  "pr_by_code",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 ItemCode, ItemDesc, ReqQty FROM Vw_PurchaseReq WHERE Code = \u0027PIL/PR/25-26/STO00700\u0027",
+        "rowCount":  1,
+        "answer":  "The purchase requisition **PIL/PR/25-26/STO00700** contains a single item:\n\n- **ItemCode:** STO02825  \n  **Description:** Silicon rubber conveyor belt W‑55 cm × Lay flat Length‑170 cm × Thick. 8 mm  \n  **Requested Quantity:** 1.",
+        "warning":  null
+    },
+    {
+        "id":  "oswal_pending_pr",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 Code, ItemCode, ItemDesc, ReqQty, POQty\nFROM Vw_PurchaseReq\nWHERE CompanyName = \u0027Oswal Extrusion Limited\u0027 AND ReqQty \u003e POQty",
+        "rowCount":  50,
+        "answer":  "The query returns many rows where the requested quantity (ReqQty) is higher than the quantity already ordered (POQty).  \n\n**Distinct requisition codes with such mismatches (4 total):**\n\n| Requisition Code | Item Code | Item Description | Requested | PO |\n|------------------|-----------|------------------|----------|----|\n| OEL/PR/18-19/TFO00016 | TFO00597 | Paper Tube Cut Nose ID –55 mm, Bul Nose ID‑45 mm, Length‑230 mm (0.090 kg) | 15 000 | 10 000 |\n| OEL/PR/19-20/GEN00098 | CAP01656 | Polo T‑Shirt with Collar \u0026 Cuff S/Slv (Sky Blue) | 120 (×4) | 40 (×2) / 20 (×6) / 40 (once) |\n| OEL/PR/19-20/GEN00098 | GEN01801 | T‑Shirts Polo Type, Colour Black | 650 (×6) | 100 (×2) / 50 (×8) |\n| OEL/PR/19-20/GEN00098 | CAP01721 | Polo T‑Shirt with Collar \u0026 Cuff S/Slv (White) | 35 (×6) / 10 (×4) | 10 (×2) / 5 (×8) |\n| OEL/PR/19-20/GEN00098 | GEN01813 | Apron Navy Blue Color | 800 | 200 |\n| oel/pr/20-21/con00163 | RAW05939 | Zip Lock Bags | 8 000 (×4) | 5 100 |\n| oel/pr/20-21/con00199 | RAW05939 | Zip Lock Bags | 10",
+        "warning":  null
+    },
+    {
+        "id":  "vendors_quoted_po",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 FirmName, Rate\nFROM Vw_Quotation\nWHERE PurchaseCode = \u0027KPV/SPR/26-27/539\u0027",
+        "rowCount":  3,
+        "answer":  "The following vendors submitted quotations for purchase code **KPV/SPR/26-27/539**:\n\n- **Bright Rubber** – Rate: 2050  \n- **Tradelink** – Rate: 2225  \n- **Krishna Enterprise (Asarwa)** – Rate: 2350",
+        "warning":  null
+    },
+    {
+        "id":  "quote_vs_final",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 FirmName, Rate, NegoRate\nFROM Vw_Quotation\nWHERE PurchaseCode = \u0027KPV/SPR/26-27/539\u0027",
+        "rowCount":  3,
+        "answer":  "For purchase order **KPV/SPR/26-27/539**, the quotation lines are:\n\n| FirmName                     | Rate | NegoRate |\n|------------------------------|------|----------|\n| Bright Rubber                | 2050 | 2050 |\n| Tradelink                    | 2225 | 2225 |\n| Krishna Enterprise (Asarwa) | 2350 | 2350 |",
+        "warning":  null
+    },
+    {
+        "id":  "indent_quotes",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 Storecode AS IndentNo, ItemCode, itemdesc, Qty, Rate, NegoRate, Discount\nFROM Vw_IndentQuotation\nWHERE Storecode = \u0027GPL/20-21/RWM00004\u0027",
+        "rowCount":  6,
+        "answer":  "**Quotation rates for indent GPL/20‑21/RWM00004**\n\n| ItemCode | Description                              | Qty | Rate (per unit) | Negotiated total (NegoRate) | Discount |\n|----------|------------------------------------------|-----|----------------|-----------------------------|----------|\n| RMC00011 | Thinner Jalaram                          | 1 020 | 76  | 77 520 | 0 |\n| RMC00009 | Ink Jalaram Black                        | 150   | 150 | 22 500 | 0 |\n| RMC00019 | Ink Jalaram Poly Reflex Blue VLX 573    | 50    | 190 | 9 500  | 0 |\n| RAW05107 | Ink Elite Jolly Orange 021C (rate 213)   | 100   | 213 | 21 300 | 0 |\n| RAW05107 | Ink Elite Jolly Orange 021C (rate 178)   | 100   | 178 | 17 800 | 0 |\n| RAW05107 | Ink Elite Jolly Orange 021C (rate 225)   | 100   | 225 | 22 500 | 0 |\n\n*The same item (RAW05107) appears with three different quoted rates.*",
+        "warning":  null
+    },
+    {
+        "id":  "messy_pr_oswal",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 Code, ItemCode, ItemDesc, ReqQty, POQty, RecdQty, IndentQty, ChallanQty, PurchaseCode, Deptt, category, loginname, sysdate\nFROM Vw_PurchaseReq\nWHERE CompanyName = \u0027Oswal Extrusion Limited\u0027 AND ReqQty \u003e POQty",
+        "rowCount":  50,
+        "answer":  "",
+        "warning":  null
+    },
+    {
+        "id":  "messy_who_quoted",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 FirmName, Rate\nFROM Vw_Quotation\nWHERE PurchaseCode = \u0027KPV/SPR/26-27/539\u0027",
+        "rowCount":  3,
+        "answer":  "The following firms quoted for PO KPV/SPR/26‑27/539:\n\n- Bright Rubber – Rate 2050  \n- Tradelink – Rate 2225  \n- Krishna Enterprise (Asarwa) – Rate 2350",
+        "warning":  null
+    },
+    {
+        "id":  "no_empty_approve_quotation",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 q.PurchaseCode, q.FirmName, q.ItemCode, q.Rate, q.Total\nFROM Vw_Quotation q\nWHERE q.PurchaseCode NOT IN (SELECT DISTINCT PurchaseCode FROM FinalQuotation)",
+        "rowCount":  0,
+        "answer":  "There are no pending quotations—no records were returned.",
+        "warning":  null
+    }
+]

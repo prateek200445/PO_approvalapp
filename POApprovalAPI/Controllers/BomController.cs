@@ -9,11 +9,16 @@ namespace POApprovalAPI.Controllers;
 public class BomController : ControllerBase
 {
     private readonly BomService _service;
+    private readonly BomCreationService _creationService;
     private readonly BomEmailBackgroundService _emailQueue;
 
-    public BomController(BomService service, BomEmailBackgroundService emailQueue)
+    public BomController(
+        BomService service,
+        BomCreationService creationService,
+        BomEmailBackgroundService emailQueue)
     {
         _service = service;
+        _creationService = creationService;
         _emailQueue = emailQueue;
     }
 
@@ -161,6 +166,97 @@ public class BomController : ControllerBase
         }
     }
 
+    [HttpPost("preview")]
+    public async Task<IActionResult> Preview([FromBody] BomCreateRequest? request)
+    {
+        try
+        {
+            var payload = request ?? new BomCreateRequest();
+            var userName = ResolveBomUserName(payload.Header?.UserName);
+            return Ok(await _creationService.PreviewAsync(payload, userName));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("editor/{*filePoNo}")]
+    public async Task<IActionResult> GetEditor(string filePoNo)
+    {
+        try
+        {
+            var snapshot = await _creationService.GetEditorAsync(Uri.UnescapeDataString(filePoNo));
+            if (snapshot is null)
+                return NotFound(new { message = "BOM not found for this quotation number." });
+            return Ok(snapshot);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] BomCreateRequest? request)
+    {
+        try
+        {
+            var payload = request ?? new BomCreateRequest();
+            var userName = ResolveBomUserName(payload.Header?.UserName);
+            var result = await _creationService.CreateAsync(payload, userName);
+            return CreatedAtAction(nameof(GetEditor), new { filePoNo = result.FilePoNo }, result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpPut("{*filePoNo}")]
+    public async Task<IActionResult> Update(string filePoNo, [FromBody] BomCreateRequest? request)
+    {
+        try
+        {
+            var payload = request ?? new BomCreateRequest();
+            var userName = ResolveBomUserName(payload.Header?.UserName);
+            var result = await _creationService.UpdateAsync(Uri.UnescapeDataString(filePoNo), payload, userName);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
     [HttpGet("{*filePoNo}")]
     public async Task<IActionResult> GetDetail(string filePoNo)
     {
@@ -193,7 +289,17 @@ public class BomController : ControllerBase
             || first.Equals("customers", StringComparison.OrdinalIgnoreCase)
             || first.Equals("party-mapping", StringComparison.OrdinalIgnoreCase)
             || first.Equals("search", StringComparison.OrdinalIgnoreCase)
+            || first.Equals("preview", StringComparison.OrdinalIgnoreCase)
+            || first.Equals("editor", StringComparison.OrdinalIgnoreCase)
             || first.Equals("email", StringComparison.OrdinalIgnoreCase)
             || first.Equals("email-status", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveBomUserName(string? requestedUserName)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedUserName))
+            return requestedUserName.Trim();
+
+        return "portal";
     }
 }

@@ -1,5 +1,10 @@
 import { getApiUrl } from "@/lib/api-config";
 import type {
+  BomCreateLineInput,
+  BomCreatePreviewResult,
+  BomCreateRequest,
+  BomEditorSnapshot,
+  BomSaveResult,
   BomCustomerOption,
   BomCustomerUpdate,
   BomDetailResult,
@@ -79,6 +84,43 @@ export async function fetchBomDetail(filePoNo: string): Promise<BomDetailResult>
   const res = await fetch(getApiUrl(`/api/bom/${encodeURIComponent(filePoNo)}`));
   const data = await parseJson<Record<string, unknown>>(res);
   return normalizeDetail(data);
+}
+
+export async function fetchBomEditor(filePoNo: string): Promise<BomEditorSnapshot | null> {
+  const res = await fetch(getApiUrl(`/api/bom/editor/${encodeURIComponent(filePoNo)}`));
+  if (res.status === 404) return null;
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeEditorSnapshot(data);
+}
+
+export async function previewBom(request: BomCreateRequest): Promise<BomCreatePreviewResult> {
+  const res = await fetch(getApiUrl("/api/bom/preview"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizePreview(data);
+}
+
+export async function createBom(request: BomCreateRequest): Promise<BomSaveResult> {
+  const res = await fetch(getApiUrl("/api/bom"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeSaveResult(data);
+}
+
+export async function updateBom(filePoNo: string, request: BomCreateRequest): Promise<BomSaveResult> {
+  const res = await fetch(getApiUrl(`/api/bom/${encodeURIComponent(filePoNo)}`), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeSaveResult(data);
 }
 
 export async function updateBomCustomer(
@@ -253,10 +295,109 @@ function normalizeDetail(data: Record<string, unknown>): BomDetailResult {
   };
 }
 
+function normalizeCreateLine(row: Record<string, unknown>): BomCreateLineInput {
+  return {
+    sortOrder: Number(row.sortOrder ?? row.SortOrder ?? 0),
+    heading: strField(row, "heading", "Heading"),
+    gsm: strField(row, "gsm", "Gsm"),
+    lami: strField(row, "lami", "Lami"),
+    color: strField(row, "color", "Color"),
+    fabricSize: strField(row, "fabricSize", "FabricSize"),
+    cutSize: strField(row, "cutSize", "CutSize"),
+    totalMtr: num(row.totalMtr ?? row.TotalMtr),
+    totalKg: num(row.totalKg ?? row.TotalKg),
+    remarks: strField(row, "remarks", "Remarks"),
+    gpm: strField(row, "gpm", "Gpm"),
+  };
+}
+
+function normalizeEditorSnapshot(data: Record<string, unknown>): BomEditorSnapshot {
+  const header = (data.header ?? data.Header ?? {}) as Record<string, unknown>;
+  const lines = (data.lines ?? data.Lines ?? []) as Array<Record<string, unknown>>;
+  const approvals = (data.approvals ?? data.Approvals ?? []) as unknown[];
+
+  return {
+    header: {
+      filePoNo: strField(header, "filePoNo", "FilePoNo"),
+      customer: strField(header, "customer", "Customer"),
+      sysDate: (header.sysDate ?? header.SysDate) as string | null,
+      printType: strField(header, "printType", "PrintType"),
+      poNo: strField(header, "poNo", "PoNo"),
+      poNos: strField(header, "poNos", "PoNos"),
+      bagType: strField(header, "bagType", "BagType"),
+      sizeL: num(header.sizeL ?? header.SizeL),
+      sizeW: num(header.sizeW ?? header.SizeW),
+      sizeH: num(header.sizeH ?? header.SizeH),
+      sizeType: strField(header, "sizeType", "SizeType"),
+      swl: strField(header, "swl", "Swl"),
+      sfRatio: strField(header, "sfRatio", "SfRatio"),
+      qty: strField(header, "qty", "Qty"),
+      qtyUnit: strField(header, "qtyUnit", "QtyUnit"),
+      fsType: strField(header, "fsType", "FSType"),
+      dsType: strField(header, "dsType", "DSType"),
+      dsType1: strField(header, "dsType1", "DSType1"),
+      dsType2: strField(header, "dsType2", "DSType2"),
+      loopType: strField(header, "loopType", "LoopType"),
+      fabColor: strField(header, "fabColor", "FabColor"),
+      instruction: strField(header, "instruction", "Instruction"),
+      bodyRemarks: strField(header, "bodyRemarks", "BodyRemarks"),
+      printingRemarks: strField(header, "printingRemarks", "PrintingRemarks"),
+      refNo: strField(header, "refNo", "RefNo"),
+      doc: strField(header, "doc", "Doc"),
+      doc1: strField(header, "doc1", "Doc1"),
+      doc2: strField(header, "doc2", "Doc2"),
+      docUnit: strField(header, "docUnit", "DocUnit"),
+      docNumber: strField(header, "docNumber", "DocNumber"),
+      knotType: strField(header, "knotType", "KnotType"),
+      rpFabric: strField(header, "rpFabric", "RpFabric"),
+      isDropLoop: Boolean(header.isDropLoop ?? header.IsDropLoop),
+      userName: strField(header, "userName", "UserName"),
+    },
+    approvals: approvals.map((value) => String(value)).filter(Boolean),
+    lines: lines.map(normalizeCreateLine),
+    bom1Values: normalizeStringMap(data.bom1Values ?? data.Bom1Values),
+    bom3Values: normalizeStringMap(data.bom3Values ?? data.Bom3Values),
+  };
+}
+
+function normalizePreview(data: Record<string, unknown>): BomCreatePreviewResult {
+  const lines = (data.lines ?? data.Lines ?? []) as Array<Record<string, unknown>>;
+  const approvals = (data.approvals ?? data.Approvals ?? []) as unknown[];
+  const warnings = (data.warnings ?? data.Warnings ?? []) as unknown[];
+
+  return {
+    filePoNo: strField(data, "filePoNo", "FilePoNo"),
+    customer: strField(data, "customer", "Customer"),
+    lineCount: Number(data.lineCount ?? data.LineCount ?? 0),
+    totalKg: Number(data.totalKg ?? data.TotalKg ?? 0),
+    approvals: approvals.map((value) => String(value)).filter(Boolean),
+    warnings: warnings.map((value) => String(value)).filter(Boolean),
+    lines: lines.map(normalizeCreateLine),
+  };
+}
+
+function normalizeSaveResult(data: Record<string, unknown>): BomSaveResult {
+  return {
+    filePoNo: strField(data, "filePoNo", "FilePoNo"),
+    srNo: strField(data, "srNo", "SrNo"),
+    created: Boolean(data.created ?? data.Created),
+    updated: Boolean(data.updated ?? data.Updated),
+    totalKg: Number(data.totalKg ?? data.TotalKg ?? 0),
+    lineCount: Number(data.lineCount ?? data.LineCount ?? 0),
+  };
+}
+
 function num(v: unknown): number | null {
   if (v == null || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function normalizeStringMap(value: unknown): Record<string, string | null> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, item == null ? null : String(item)]),
+  );
 }
 
 export type { BomListItem };

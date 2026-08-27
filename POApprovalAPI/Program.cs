@@ -78,6 +78,7 @@ builder.Services.AddScoped<LedgerSummaryService>();
 builder.Services.AddScoped<PnlService>();
 builder.Services.AddScoped<IntercompanyBalanceService>();
 builder.Services.AddScoped<BomService>();
+builder.Services.AddScoped<BomCreationService>();
 builder.Services.AddScoped<DailyProductionPriceService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());

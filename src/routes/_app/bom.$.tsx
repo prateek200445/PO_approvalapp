@@ -211,6 +211,11 @@ function BomDetailContent({ qtnNo, data }: { qtnNo: string; data: BomDetailResul
                 Back
               </Link>
             </Button>
+            <Button variant="outline" size="sm" className="shrink-0" asChild>
+              <Link to="/bom/create" search={{ filePoNo: qtnNo }}>
+                Open editor
+              </Link>
+            </Button>
             <div className="min-w-0 border-l border-border/60 pl-3">
               <p className="truncate font-mono text-sm font-semibold">{header.qtnNo}</p>
               <p className="truncate text-xs text-muted-foreground">{header.partyName}</p>

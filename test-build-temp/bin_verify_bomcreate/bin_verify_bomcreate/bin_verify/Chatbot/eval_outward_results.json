@@ -1,0 +1,74 @@
+﻿[
+    {
+        "id":  "slip_350_kp",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 Itemcode, ItemName, Qty\nFROM StoreOutwards\nWHERE IssueSlipNo = \u0027350\u0027\n  AND CompName = \u0027K.P. WOVEN PRIVATE LIMITED\u0027",
+        "rowCount":  50,
+        "answer":  "**Store issue slip 350 – K.P. WOVEN PRIVATE LIMITED**\n\n| Item code | Item name | Qty |\n|-----------|-----------|-----|\n| RAW05939 | Zip Lock Bags | 2000 |\n| OTH00618 | Register 03 Quir | 1 |\n| ELE02557 | Pvc Tape Roll  Black “Steel Grip” Make | 5 |\n| LOO01419 | On/Off Push Button Switch (As Per Sample) | 3 |\n| FIN00130 | Nicrome Wire 18 Swg ( Kg ) | 0.5 |\n| GEN00984 | Measuring Tape 05 Mtr | 1 |\n| OTH00820 | Permanent Marker Pen | 1 |\n| LAM00014 | Alfa Blade | 5 |\n| LOO01284 | White Oil:- 12 No | 60 |\n| RAW05764 | Thinner Vyankatesh Thinner | 40 |\n| GEN00049 | Cutter Lifter | 2 |\n| NEE00034 | Latch Needle 5821 Code 254512 Needle Deha 7.9 . 121 . G 01 “Groz Beckert” Make | 25 |\n| OTH00820 | Permanent Marker Pen | 10 |\n| GEN00596 | Tablet Combiflam | 60 |\n| OTH00738 | Ball Pen | 2 |\n| OTH00820 | Permanent Marker Pen | 2 |\n| OTH00650 | Xerox Paper A/4 | 2 |\n| RAW05764 | Thinner Vyankatesh Thinner | 80 |\n| OTH00202 | Cotton Waste | 10 |\n| GEN00869 | Measuring Tape 03 Mtr | 1 |\n| OTH00820 | Permanent Marker Pen | 2 |\n| PAC00377 | Alfa Blade For Sdi Cutter Knife. Size;-18mm No.1404H | 10 |\n| OTH00738 | Ball Pen | 1 |\n| PAC00229 | Velcro 100 mm Male And Female ( Black ) | 750 |\n| SUL00736 | Pinion Shaft 10Teeth (For Sulzer Teckup) - 911110341 | 1 |\n| TAP00032 | Blade Supermax | 1450 |\n| PAC00377 | Alfa Blade For Sdi Cutter Knife. Size;-18mm No.1404H | 10 |\n| WOR00294 | Trolly Wheel With Bearing Revolving 6” | 1 |\n| ELE03913 | 24 Pin 500V,16 Amp, Male Female Connector For Tape Plant Die Zone Connection | 1 |\n| ELE01919 | Battery 9 Volt Dc | 1 |\n| ELE05543 | 15 W Led Square Panel Light | 25 |\n| R.P00375 | Dieface Cutter Blade For Gaurav R.P.M/C | 20 |\n| LAM00014 | Alfa Blade | 10 |\n| OTH00177 | Cello Tape W-2” Natural X L-65 Mtr | 5 |\n| OTH00177 | Cello Tape W-2” Natural X L-65 Mtr | 4 |\n| LAM00014 | Alfa Blade | 10 |\n| OTH00738 | Ball Pen | 1 |\n| RMC00013 | Ink Jalaram Poly Process Yellow VLX 671 | 100 |\n| RAW05730 | Ink Vyankatesh Poly Reflex Blue VLX 573 | 25 |\n| RAW06021 | PP China L5E89 | 13 900 |\n| RAW05141 | PP Basell OG | 350 |\n| RAW06135 | PP Marlex HGX-030SP | 3 800 |\n| RAW05173 | PP RIL H030SG | 2 175 |\n| RAW05566 | LLDPE RIL JF19010 | 650 |\n| RAW05831 | UV Alok NFG AM 13350 20% | 325 |\n| RAW05974 | Filler Everplus E102 PP | 1 100 |\n| RAW05974 | Filler Everplus E102 PP | 75 |\n| RAW05179 | PP RIL H350FG | 850 |\n| RAW06114 | LDPE Sabic 7019EC 148 | 75 |\n| WIP00002 | RP Granules | 75 |\n\nThese are all the items (code, name, and quantity) recorded for",
+        "warning":  null
+    },
+    {
+        "id":  "oswal_slip_215",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 IssueSlipNo, Itemcode, ItemName, Qty, Deptt, IssueTo, WareHouse, sysDate\nFROM StoreOutwards\nWHERE CompName = \u0027Oswal Extrusion Limited\u0027 AND IssueSlipNo = \u0027215\u0027",
+        "rowCount":  50,
+        "answer":  "**Materials issued on Issue Slip 215 (Oswal Extrusion Limited)**  \n\n| Item Code | Item Name | Qty issued |\n|-----------|-----------|------------|\n| SMF00054 | PP Fibrillated Tape Twisted 3200 MW | 100 |\n| SMF00047 | PP Fibrillated Tape Twisted 3000 Blue | 100 |\n| ELE01664 | Cable Tie 250 mm | 2 |\n| ELE01094 | Capacitor 3.15 Mfd | 1 |\n| ELE02557 | PVC Tape Roll Black “Steel Grip” Make (first entry) | 2 |\n| ELE04060 | Coil For Solenoid Valve Castal Make Type Hm‑2 220‑230 V | 1 |\n| OTH01878 | Hex Bolt 08×30 mm Full Thread | 54 |\n| TAP00547 | Hex Nut 08 mm | 100 |\n| OTH01962 | J Hook 5″ Set (With Nut, Cup Washer, Bitumin Washer) | 100 |\n| STI00813 | Feed Dog 213‑49303 | 1 |\n| STI00665 | Screw SS 8660530‑Tp (1/4 40 L‑4.5) | 2 |\n| FIB02498 | Needle No 29 UY 9848 GS 300 | 2 |\n| STI00927 | Needle No 28 (2020‑06‑01) | 2 |\n| OTH00202 | Cotton Waste | 2 |\n| STI00702 | Needle 25 No. Dpx17 | 2 |\n| SMF00149 | Tyvek Labels | 7.3 |\n| RAW05124 | LDPE/LLDPE Film | 41.8 |\n| OTH00820 | Permanent Marker Pen | 1 |\n| (Marker Pen CD/DVD/OHP) | – | 2 |\n| OTH00650 | Xerox Paper A/4 | 20 |\n| LOO01284 | White Oil – 12 No | 15 |\n| GEN00057 | White Sheet Felt 07 mm ± 1 mm | 0.5 |\n| FIB03900 | Ha 43 X Feed Lift E",
+        "warning":  null
+    },
+    {
+        "id":  "oswal_issued_to_fibc",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 IssueSlipNo, ItemName, Qty, sysDate\nFROM StoreOutwards\nWHERE CompName = \u0027Oswal Extrusion Limited\u0027\n  AND IssueTo = \u0027FIBC\u0027\nORDER BY sysDate DESC",
+        "rowCount":  50,
+        "answer":  "**Oswal Extrusion Limited – Store outwards to FIBC (most recent date 2026‑08‑11)**  \n\n| Item | Qty |\n|------|-----|\n| Webbing | 673 |\n| PP Lam Fabric With UV | 8 269 |\n| PP UL Fabric With UV | 4 639 |\n| LDPE/LLDPE Bags/Liner | 6 988.5 |\n| Lower Feed Dog 81305A | 1 |\n| Needle No 34 UY 9853 GA 430/172 | 10 |\n| Looking Disc 81348 | 4 |\n| 35741 A Connecting Rod. | 1 |\n| Needle No 28 | 2 |\n| Needle No 28 (second line) | 8 |\n| Needle 25 No. Dpx17 | 4 |\n| Looper Big A8376 | 1 |\n| Looper # 502J123 | 2 |\n| Clutch Linier (With Plate) | 2 |\n| White Oil ‑ 12 No | 45 |\n| Ball Stud 81345 (Orsan M/C) | 1 |\n| Throath Plate For Filler Cord (81324 A‑Yuv) | 1 |\n| Cross Looper For Double Lock Stitch (81311 B) | 2 |\n| Looper For Double Locked Stitch (41308 C) | 1 |\n| Needle No 29 UY 9848 GS 300 | 3 |\n| Oil 20W/40 | 6 |\n| Feed Dog Lower 802C83 (three entries) | 2, 1, 2 |\n\nThese are the items and quantities issued on the latest store‑outward date (2026‑08‑11). No other dates are more recent in the data.",
+        "warning":  null
+    },
+    {
+        "id":  "daily_outward_oswal",
+        "pass":  false,
+        "failedChecks":  "rows_gt:0",
+        "sql":  "SELECT TOP 50 ItemCode, ItemName, Outwardqty, [Date]\r\nFROM vw_ItemInwardOutward\r\nWHERE companyname = \u0027Oswal Extrusion Limited\u0027\r\n  AND CAST([Date] AS date) = CAST(GETDATE() AS date)",
+        "rowCount":  0,
+        "answer":  "There are no records for Oswal Extrusion Limited with an outward quantity on today’s date.",
+        "warning":  null
+    },
+    {
+        "id":  "item_wip00013_movement",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 Date, InwardQty, Outwardqty\nFROM vw_ItemInwardOutward\nWHERE companyname = \u0027Oswal Extrusion Limited\u0027\n  AND ItemCode = \u0027WIP00013\u0027\nORDER BY Date DESC",
+        "rowCount":  50,
+        "answer":  "**Oswal Extrusion Limited – Item WIP00013**\n\n| Date (most recent) | Inward Qty | Outward Qty |\n|---------------------|-----------|------------|\n| 2026‑08‑11 | **6,988.50** | **6,988.50** |\n| 2026‑08‑10 | 3,733.00 | 3,933.00 |\n| 2026‑08‑09 | 0.00 | 150.00 |\n| 2026‑08‑08 | 1,380.00 | 1,470.00 |\n| 2026‑08‑07 | 1,481.00 | 150.00 |\n\nThe latest entry (2026‑08‑11) shows equal inward and outward quantities of **6,988.5 units**. Over the 50‑day sample, both inward and outward movements vary daily, with some days having only outward activity (e.g., 2026‑08‑09) and others with large inbound receipts (e.g., 2026‑06‑30: 10,198.90 in, 9,312.90 out).",
+        "warning":  null
+    },
+    {
+        "id":  "monthly_aug_2026",
+        "pass":  true,
+        "failedChecks":  "",
+        "sql":  "SELECT TOP 50 Itemcode, Itemname, OutwardQty\nFROM vw_ItemMonthlyInwardOutward\nWHERE companyname = \u0027Oswal Extrusion Limited\u0027\n  AND Year = 2026\n  AND Month = 8",
+        "rowCount":  50,
+        "answer":  "In August 2026 Oswal Extrusion Limited shipped **26 different items**. The combined outward quantity was **1,060.10 units**.  \n\nKey items (Itemcode – Itemname – OutwardQty) include:\n\n- **CON00097 – Ss Screen Dia 125 mm Mesh 120:** 400.00  \n- **CON00149 – Technomelt PS 977CPFA:** 140.00  \n- **CAP00458 – Stretch Film 500mm x 23 Mic:** 108.10  \n- **ELE01679 – PVC Flexible Conduit Pipe 1/2″ (16 mm):** 100.00  \n- **CAP01656 – Polo T‑Shirt (Sky Blue):** 59.00  \n- **CAP00824 – PVC Strip:** 50.00  \n- **ELE01615 – 16 Sq mm Copper Lugs Ring Type:** 45.00  \n- **CON00055 – Double‑Side Adhesive Tape 36 mm x 45 m:** 30.00  \n- **ELE01734 – Fuse Glass 4 A 5×20 mm:** 30.00  \n\nAll other shipped items had quantities ranging from 1 to 20 units. No outward quantity was recorded for the remaining items in the list.",
+        "warning":  null
+    },
+    {
+        "id":  "messy_issue_slip",
+        "pass":  false,
+        "failedChecks":  "sql_has:StoreOutwards;rows_gt:0",
+        "sql":  "SELECT TOP 50 RollNO, Quality, NetWt, Partyname, Invno, sysdate, PONO\nFROM vw_MISrolldespatch\nWHERE Companyname = \u0027kp woven\u0027 AND Invno = \u0027350\u0027",
+        "rowCount":  0,
+        "answer":  "No issue slip records were found for KP Woven with invoice number 350.",
+        "warning":  null
+    },
+    {
+        "id":  "messy_oswal_outward",
+        "pass":  false,
+        "failedChecks":  "rows_gt:0",
+        "sql":  "SELECT TOP 50 ItemCode, ItemName, Outwardqty\nFROM vw_ItemInwardOutward\nWHERE companyname = \u0027Oswal Extrusion Limited\u0027\n  AND CAST([Date] AS date) = CAST(GETDATE() AS date)",
+        "rowCount":  0,
+        "answer":  "No stock was issued outward today for any item at Oswal Extrusion Limited.",
+        "warning":  null
+    }
+]
