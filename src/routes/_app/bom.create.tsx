@@ -195,6 +195,10 @@ function BomCreatePage() {
   }
 
   useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, []);
+
+  useEffect(() => {
     if (!search.filePoNo || search.filePoNo === header.filePoNo) return;
     setHeader((current) => ({ ...current, filePoNo: search.filePoNo }));
     void loadSnapshot(search.filePoNo, {
