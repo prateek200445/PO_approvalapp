@@ -28,6 +28,31 @@ export type PlanningOrderRoute = {
   updatedAt: string | null;
 };
 
+export type PlanningOrderComponentRoute = {
+  componentRouteId?: number | null;
+  orderNo: string;
+  heading: string;
+  category: string;
+  planningKind: string;
+  isLoomEligible: boolean;
+  supplyCompanyName: string;
+  fibcCompanyName: string;
+  transferBufferDays: number;
+  isInterUnit: boolean;
+  routeSource: string;
+  dueDate: string | null;
+  gsm: string;
+  fabricSize: number | null;
+  totalMtr: number | null;
+  totalKg: number | null;
+};
+
+export type PlanningOrderComponentPlan = {
+  orderRoute: PlanningOrderRoute;
+  dispatchDate: string | null;
+  components: PlanningOrderComponentRoute[];
+};
+
 export type PlanningFactoryOption = {
   factoryInfoSrNo: number;
   companyName: string;
@@ -409,5 +434,37 @@ export function normalizeOrderRoute(data: Record<string, unknown>): PlanningOrde
     routeSource: String(data.routeSource ?? data.RouteSource ?? "Default"),
     autoDetectedReason: optStr(data, "autoDetectedReason", "AutoDetectedReason"),
     updatedAt: optStr(data, "updatedAt", "UpdatedAt"),
+  };
+}
+
+export function normalizeOrderComponentRoute(row: Record<string, unknown>): PlanningOrderComponentRoute {
+  return {
+    componentRouteId: optNum(row, "componentRouteId", "ComponentRouteId"),
+    orderNo: String(row.orderNo ?? row.OrderNo ?? ""),
+    heading: String(row.heading ?? row.Heading ?? ""),
+    category: String(row.category ?? row.Category ?? "Other"),
+    planningKind: String(row.planningKind ?? row.PlanningKind ?? "Other"),
+    isLoomEligible: boolField(row, "isLoomEligible", "IsLoomEligible"),
+    supplyCompanyName: String(row.supplyCompanyName ?? row.SupplyCompanyName ?? ""),
+    fibcCompanyName: String(row.fibcCompanyName ?? row.FibcCompanyName ?? ""),
+    transferBufferDays: numField(row, "transferBufferDays", "TransferBufferDays"),
+    isInterUnit: boolField(row, "isInterUnit", "IsInterUnit"),
+    routeSource: String(row.routeSource ?? row.RouteSource ?? "OrderDefault"),
+    dueDate: optStr(row, "dueDate", "DueDate")?.slice(0, 10) ?? null,
+    gsm: String(row.gsm ?? row.Gsm ?? ""),
+    fabricSize: optNum(row, "fabricSize", "FabricSize"),
+    totalMtr: optNum(row, "totalMtr", "TotalMtr"),
+    totalKg: optNum(row, "totalKg", "TotalKg"),
+  };
+}
+
+export function normalizeOrderComponentPlan(data: Record<string, unknown>): PlanningOrderComponentPlan {
+  const orderRouteRaw = (data.orderRoute ?? data.OrderRoute ?? {}) as Record<string, unknown>;
+  const components = (data.components ?? data.Components ?? []) as Array<Record<string, unknown>>;
+  const dispatch = data.dispatchDate ?? data.DispatchDate;
+  return {
+    orderRoute: normalizeOrderRoute(orderRouteRaw),
+    dispatchDate: dispatch ? String(dispatch).slice(0, 10) : null,
+    components: components.map(normalizeOrderComponentRoute),
   };
 }

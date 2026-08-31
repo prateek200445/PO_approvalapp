@@ -7,6 +7,7 @@ import {
   normalizeLoomAllotmentContext,
   normalizeLoomAllotmentResult,
   normalizeLoomAllocationGridResult,
+  normalizeLoomComponentBatchResult,
   normalizeLoomMaster,
   normalizeLoomOrderContext,
   normalizeLoomPlanningConfig,
@@ -14,6 +15,7 @@ import {
   type LoomAllotmentRequest,
   type LoomAllotmentResult,
   type LoomAllocationGridResult,
+  type LoomComponentBatchResult,
   type LoomMaster,
   type LoomOrderAllotmentContext,
   type LoomOrderContext,
@@ -136,6 +138,9 @@ export async function fetchLoomOrderPlan(orderNo: string): Promise<LoomOrderPlan
       fabricSize: (row.fabricSize ?? row.FabricSize ?? null) as number | null,
       totalMtr: (row.totalMtr ?? row.TotalMtr ?? null) as number | null,
       totalKg: (row.totalKg ?? row.TotalKg ?? null) as number | null,
+      category: String(row.category ?? row.Category ?? "Other"),
+      planningKind: String(row.planningKind ?? row.PlanningKind ?? "Other"),
+      isLoomEligible: Boolean(row.isLoomEligible ?? row.IsLoomEligible),
     })),
   };
 }
@@ -178,6 +183,36 @@ export async function previewLoomAllotment(body: LoomAllotmentRequest): Promise<
   });
   const data = await parseJson<Record<string, unknown>>(res);
   return normalizeLoomAllotmentResult(data);
+}
+
+export async function previewAllLoomComponents(body: {
+  orderNo: string;
+  companyName?: string;
+  partyName?: string;
+  fabricRequirementDate?: string;
+}): Promise<LoomComponentBatchResult> {
+  const res = await fetch(getApiUrl("/api/planning/loom/allot/preview-components"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeLoomComponentBatchResult(data);
+}
+
+export async function confirmAllLoomComponents(body: {
+  orderNo: string;
+  companyName?: string;
+  partyName?: string;
+  fabricRequirementDate?: string;
+}): Promise<LoomComponentBatchResult> {
+  const res = await fetch(getApiUrl("/api/planning/loom/allot/confirm-components"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeLoomComponentBatchResult(data);
 }
 
 export async function confirmLoomAllotment(body: LoomAllotmentRequest): Promise<LoomAllotmentConfirmResult> {

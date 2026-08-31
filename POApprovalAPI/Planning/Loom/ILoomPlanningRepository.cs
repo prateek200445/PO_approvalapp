@@ -51,6 +51,7 @@ public interface ILoomPlanningRepository
         string? partyName,
         IReadOnlyList<LoomProposedSegmentDto> segments,
         bool replaceExisting,
+        string? heading,
         CancellationToken ct = default);
 
     Task<(int RowsShifted, int RowsInserted)> ApplyLoomShiftPlanAsync(
@@ -59,5 +60,6 @@ public interface ILoomPlanningRepository
         IReadOnlyList<LoomProposedSegmentDto> segments,
         IReadOnlyList<LoomOrderShiftDisplacementDto> displacements,
         bool replaceExisting,
+        string? heading,
         CancellationToken ct = default);
 }

@@ -90,6 +90,9 @@ export async function fetchFibcOrderPlan(orderNo: string): Promise<FibcOrderPlan
       fabricSize: (row.fabricSize ?? row.FabricSize ?? null) as number | null,
       totalMtr: (row.totalMtr ?? row.TotalMtr ?? null) as number | null,
       totalKg: (row.totalKg ?? row.TotalKg ?? null) as number | null,
+      category: String(row.category ?? row.Category ?? "Other"),
+      planningKind: String(row.planningKind ?? row.PlanningKind ?? "Other"),
+      isLoomEligible: Boolean(row.isLoomEligible ?? row.IsLoomEligible),
     })),
   };
 }

@@ -1,5 +1,6 @@
 using Dapper;
 using Microsoft.Extensions.Options;
+using POApprovalAPI.Planning.Bom;
 using POApprovalAPI.Planning.Fibc.Models;
 using POApprovalAPI.Services;
 
@@ -162,20 +163,33 @@ FROM production.dbo.Vw_Bom_PPC WITH (NOLOCK)
 WHERE FilePONo = @OrderNo
 ORDER BY Heading", new { OrderNo = orderNo.Trim() }, commandTimeout: CommandTimeoutSeconds);
 
-        return rows.Select(row => new FibcFabricRequirementDto
-        {
-            Customer = row.Customer ?? "",
-            FilePoNo = row.FilePONo ?? "",
-            BagType = row.BagType ?? "",
-            Qty = row.Qty,
-            PoDate = row.PODate,
-            TargetDate = row.Targetdate,
-            Heading = row.Heading ?? "",
-            Gsm = row.GSM ?? "",
-            FabricSize = ParseNullableDouble(row.FabricSize),
-            TotalMtr = row.TotalMtr,
-            TotalKg = row.Totalkg,
-        }).ToList();
+        return rows
+            .Select(row =>
+            {
+                var heading = row.Heading ?? "";
+                var size = ParseNullableDouble(row.FabricSize);
+                var classified = BomComponentClassifier.Classify(heading, row.GSM, size, row.TotalMtr, row.Totalkg);
+                return new FibcFabricRequirementDto
+                {
+                    Customer = row.Customer ?? "",
+                    FilePoNo = row.FilePONo ?? "",
+                    BagType = row.BagType ?? "",
+                    Qty = row.Qty,
+                    PoDate = row.PODate,
+                    TargetDate = row.Targetdate,
+                    Heading = heading,
+                    Gsm = row.GSM ?? "",
+                    FabricSize = size,
+                    TotalMtr = row.TotalMtr,
+                    TotalKg = row.Totalkg,
+                    Category = classified.Category,
+                    PlanningKind = classified.PlanningKind,
+                    IsLoomEligible = classified.IsLoomEligible,
+                };
+            })
+            .OrderBy(row => BomComponentClassifier.SortRank(row.Category))
+            .ThenBy(row => row.Heading, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     public async Task<FibcOrderAllotmentContextDto?> GetOrderAllotmentContextAsync(

@@ -74,3 +74,29 @@ public sealed class BailingReconciliationDto
     public bool ReadyForDispatch { get; set; }
     public string Message { get; set; } = "";
 }
+
+public sealed class AccessoryMaterialStatusDto
+{
+    public string Heading { get; set; } = "";
+    public string Category { get; set; } = "";
+    public double? RequiredQty { get; set; }
+    public string Unit { get; set; } = "";
+    public string Status { get; set; } = "NotFound";
+    public string? IndentNo { get; set; }
+    public string? ItemCode { get; set; }
+    public string? ItemDesc { get; set; }
+    public double? IndentQty { get; set; }
+    public string? MrnNo { get; set; }
+    public double ReceivedQty { get; set; }
+    public double PendingQty { get; set; }
+    public string? CompanyName { get; set; }
+    public string? Detail { get; set; }
+}
+
+public sealed class AccessoryMaterialBoardDto
+{
+    public string OrderNo { get; set; } = "";
+    public DateTime? DispatchDate { get; set; }
+    public IReadOnlyList<AccessoryMaterialStatusDto> Items { get; set; } = Array.Empty<AccessoryMaterialStatusDto>();
+    public IReadOnlyList<string> Warnings { get; set; } = Array.Empty<string>();
+}

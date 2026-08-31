@@ -12,11 +12,13 @@ import {
   normalizeLoomPreferenceChart,
   normalizeInterUnitDefaults,
   normalizeOrderRoute,
+  normalizeOrderComponentPlan,
   type PlanningBacklog,
   type PlanningDowntime,
   type PlanningLoomPreferenceChart,
   type PlanningInterUnitDefaults,
   type PlanningOrderRoute,
+  type PlanningOrderComponentPlan,
   type PlanningFactoryConfig,
   type PlanningFactoryOption,
   type PlanningLineConfig,
@@ -273,4 +275,31 @@ export async function saveOrderPlanningRoute(route: {
   });
   const data = await parseJson<Record<string, unknown>>(res);
   return normalizeOrderRoute(data);
+}
+
+export async function fetchOrderComponentPlan(orderNo: string): Promise<PlanningOrderComponentPlan> {
+  const params = new URLSearchParams({ orderNo });
+  const res = await fetch(getApiUrl(`/api/planning/setup/order-routes/components?${params.toString()}`));
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeOrderComponentPlan(data);
+}
+
+export async function saveOrderComponentRoutes(payload: {
+  orderNo: string;
+  components: Array<{ heading: string; supplyCompanyName: string; transferBufferDays?: number }>;
+}): Promise<PlanningOrderComponentPlan> {
+  const res = await fetch(getApiUrl("/api/planning/setup/order-routes/components"), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      orderNo: payload.orderNo,
+      components: payload.components.map((row) => ({
+        heading: row.heading,
+        supplyCompanyName: row.supplyCompanyName,
+        transferBufferDays: row.transferBufferDays,
+      })),
+    }),
+  });
+  const data = await parseJson<Record<string, unknown>>(res);
+  return normalizeOrderComponentPlan(data);
 }

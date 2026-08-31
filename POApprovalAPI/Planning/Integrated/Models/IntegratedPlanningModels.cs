@@ -38,5 +38,28 @@ public sealed class IntegratedOrderTimelineDto
     public IReadOnlyList<LoomOrderAllocationLineDto> LoomAllocations { get; set; } = Array.Empty<LoomOrderAllocationLineDto>();
     public IReadOnlyList<FibcFabricRequirementDto> FabricRequirements { get; set; } = Array.Empty<FibcFabricRequirementDto>();
     public IReadOnlyList<FibcOrderPlanLineDto> FibcPlanLines { get; set; } = Array.Empty<FibcOrderPlanLineDto>();
+    public IReadOnlyList<IntegratedBomComponentDto> BomComponents { get; set; } = Array.Empty<IntegratedBomComponentDto>();
     public IReadOnlyList<string> Warnings { get; set; } = Array.Empty<string>();
+}
+
+public sealed class IntegratedBomComponentDto
+{
+    public string Heading { get; set; } = "";
+    public string Category { get; set; } = "Other";
+    public string PlanningKind { get; set; } = "Other";
+    public bool IsLoomEligible { get; set; }
+    public string Gsm { get; set; } = "";
+    public double? FabricSize { get; set; }
+    public double? TotalMtr { get; set; }
+    public double? TotalKg { get; set; }
+    public DateTime? TargetDate { get; set; }
+    public string? SupplyCompanyName { get; set; }
+    public DateTime? DueDate { get; set; }
+    public bool IsInterUnit { get; set; }
+    public int TransferBufferDays { get; set; }
+    public string Readiness { get; set; } = "Unplanned";
+    public string? Detail { get; set; }
+    public string? MaterialStatus { get; set; }
+    public string? IndentNo { get; set; }
+    public double ReceivedQty { get; set; }
 }

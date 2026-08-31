@@ -9,10 +9,12 @@ namespace POApprovalAPI.Controllers;
 public class PlanningSetupController : ControllerBase
 {
     private readonly PlanningSetupService _service;
+    private readonly OrderPlanningRouteService _routeService;
 
-    public PlanningSetupController(PlanningSetupService service)
+    public PlanningSetupController(PlanningSetupService service, OrderPlanningRouteService routeService)
     {
         _service = service;
+        _routeService = routeService;
     }
 
     [HttpGet("constants")]
@@ -324,8 +326,7 @@ public class PlanningSetupController : ControllerBase
             if (string.IsNullOrWhiteSpace(orderNo))
                 return BadRequest(new { message = "orderNo query parameter is required." });
 
-            var routeService = HttpContext.RequestServices.GetRequiredService<OrderPlanningRouteService>();
-            return Ok(await routeService.ResolveAsync(orderNo, ct));
+            return Ok(await _routeService.ResolveAsync(orderNo, ct));
         }
         catch (Exception ex)
         {
@@ -379,6 +380,41 @@ public class PlanningSetupController : ControllerBase
                 return NotFound(new { message = "No saved route for this order." });
 
             return Ok(new { success = true });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("order-routes/components")]
+    public async Task<IActionResult> ResolveComponentPlan([FromQuery] string orderNo, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
+            return Ok(await _routeService.ResolvePlanAsync(orderNo, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpPut("order-routes/components")]
+    public async Task<IActionResult> SaveComponentRoutes(
+        [FromBody] SavePlanningOrderComponentRoutesRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.OrderNo))
+                return BadRequest(new { message = "OrderNo is required." });
+
+            await _service.SaveComponentRoutesAsync(request, ct);
+            return Ok(await _routeService.ResolvePlanAsync(request.OrderNo, ct));
         }
         catch (Exception ex)
         {

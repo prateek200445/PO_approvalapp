@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   confirmLoomAllotment,
+  confirmAllLoomComponents,
   fetchLoomAllocationGrid,
   fetchLoomMaster,
   fetchLoomOrderAllotmentContext,
@@ -29,9 +30,10 @@ import {
   fetchLoomPlanningConfig,
   fetchLoomProductionMeters,
   parsePlanningGsm,
+  previewAllLoomComponents,
   previewLoomAllotment,
 } from "@/lib/planning/loom-api";
-import { searchPlanningFactories } from "@/lib/planning/setup-api";
+import { searchPlanningFactories, fetchOrderComponentPlan, saveOrderComponentRoutes } from "@/lib/planning/setup-api";
 import {
   defaultPlanningDateFrom,
   formatPlanDate,
@@ -40,6 +42,8 @@ import {
   type LoomAllocationGridResult,
   type LoomAllotmentRequest,
   type LoomAllotmentResult,
+  type LoomComponentBatchResult,
+  type LoomFabricRequirement,
   type LoomMaster,
   type LoomOrderPlanDetail,
   type LoomPlanningConfig,
@@ -563,6 +567,7 @@ function OrderDetailPanel({
                   <thead>
                     <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
                       <th className="px-2 py-2 font-medium">Heading</th>
+                      <th className="px-2 py-2 font-medium">Kind</th>
                       <th className="px-2 py-2 font-medium">GSM</th>
                       <th className="px-2 py-2 font-medium">Size</th>
                       <th className="px-2 py-2 font-medium">Meters</th>
@@ -573,6 +578,9 @@ function OrderDetailPanel({
                     {detail.fabricRequirements.map((row, idx) => (
                       <tr key={`fabric-${idx}`} className="border-b border-border/60 last:border-0">
                         <td className="px-2 py-2.5">{row.heading}</td>
+                        <td className="px-2 py-2.5 text-xs text-muted-foreground">
+                          {row.isLoomEligible ? "Loom" : row.planningKind}
+                        </td>
                         <td className="px-2 py-2.5">{row.gsm || "—"}</td>
                         <td className="px-2 py-2.5">{row.fabricSize ?? "—"}</td>
                         <td className="px-2 py-2.5">{row.totalMtr?.toLocaleString() ?? "—"}</td>
@@ -610,7 +618,9 @@ function PlanOrderPanel({
   const [fabricReqDate, setFabricReqDate] = useState("");
   const [heading, setHeading] = useState("");
   const [previewResult, setPreviewResult] = useState<LoomAllotmentResult | null>(null);
+  const [batchResult, setBatchResult] = useState<LoomComponentBatchResult | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmAllOpen, setConfirmAllOpen] = useState(false);
   const [replaceExisting, setReplaceExisting] = useState(false);
   const [contextOrderNo, setContextOrderNo] = useState<string | null>(null);
   const queryClient = useQueryClient();
@@ -633,6 +643,27 @@ function PlanOrderPanel({
     enabled: Boolean(contextOrderNo),
     retry: false,
   });
+
+  const { data: componentPlan } = useQuery({
+    queryKey: ["order-component-plan", contextOrderNo],
+    queryFn: () => fetchOrderComponentPlan(contextOrderNo!),
+    enabled: Boolean(contextOrderNo),
+    retry: false,
+  });
+
+  const [routeDrafts, setRouteDrafts] = useState<Record<string, { supply: string; days: string }>>({});
+
+  useEffect(() => {
+    if (!componentPlan) return;
+    const next: Record<string, { supply: string; days: string }> = {};
+    for (const row of componentPlan.components) {
+      next[row.heading] = {
+        supply: row.supplyCompanyName,
+        days: String(row.transferBufferDays),
+      };
+    }
+    setRouteDrafts(next);
+  }, [componentPlan]);
 
   const autoRouteOrderRef = useRef<string | null>(null);
 
@@ -663,16 +694,29 @@ function PlanOrderPanel({
 
   useEffect(() => {
     if (!planContext) return;
-    const line = planContext.fabricLines[0];
-    if (line?.gsm) setReqGsm(parsePlanningGsm(line.gsm));
-    if (line?.fabricSize != null) setSize(String(line.fabricSize));
-    if (line?.totalMtr != null && line.totalMtr > 0) setRequiredMeters(String(line.totalMtr));
-    if (line?.heading) setHeading(line.heading);
+    const preferred =
+      planContext.loomEligibleLines.find((l) => l.category === "Body") ??
+      planContext.loomEligibleLines[0] ??
+      planContext.fabricLines.find((l) => l.isLoomEligible) ??
+      planContext.fabricLines[0];
+    applyFabricLine(preferred);
     if (planContext.fabricRequirementDate) {
       const parsed = new Date(planContext.fabricRequirementDate);
       if (!Number.isNaN(parsed.getTime())) setFabricReqDate(toInputDate(parsed));
     }
   }, [planContext]);
+
+  function applyFabricLine(line?: LoomFabricRequirement) {
+    if (!line) return;
+    if (line.gsm) setReqGsm(parsePlanningGsm(line.gsm));
+    if (line.fabricSize != null) setSize(String(line.fabricSize));
+    if (line.totalMtr != null && line.totalMtr > 0) setRequiredMeters(String(line.totalMtr));
+    if (line.heading) setHeading(line.heading);
+    const supply = routeDrafts[line.heading]?.supply;
+    if (supply) setWeavingCompany(supply);
+    setPreviewResult(null);
+    setBatchResult(null);
+  }
 
   const previewMutation = useMutation({
     mutationFn: previewLoomAllotment,
@@ -682,6 +726,35 @@ function PlanOrderPanel({
       else toast.error(result.message);
     },
     onError: (err: Error) => toast.error(err.message || "Preview failed."),
+  });
+
+  const batchMutation = useMutation({
+    mutationFn: previewAllLoomComponents,
+    onSuccess: (result) => {
+      setBatchResult(result);
+      if (result.success) toast.success(result.message);
+      else toast.message(result.message);
+    },
+    onError: (err: Error) => toast.error(err.message || "Component preview failed."),
+  });
+
+  const confirmAllMutation = useMutation({
+    mutationFn: confirmAllLoomComponents,
+    onSuccess: (result) => {
+      setBatchResult(result);
+      setConfirmAllOpen(false);
+      if (result.savedCount && result.savedCount > 0) {
+        toast.success(result.message);
+        onGridRefresh();
+        const trimmed = planOrderNo.trim();
+        if (trimmed) {
+          setContextOrderNo(trimmed);
+          queryClient.invalidateQueries({ queryKey: ["loom-order", trimmed] });
+          queryClient.invalidateQueries({ queryKey: ["loom-plan-context", trimmed] });
+        }
+      } else toast.message(result.message);
+    },
+    onError: (err: Error) => toast.error(err.message || "Confirm all failed."),
   });
 
   const confirmMutation = useMutation({
@@ -702,6 +775,37 @@ function PlanOrderPanel({
     },
     onError: (err: Error) => toast.error(err.message || "Confirm failed."),
   });
+
+  const saveRoutesMutation = useMutation({
+    mutationFn: saveOrderComponentRoutes,
+    onSuccess: (plan) => {
+      toast.success("Saved component supply factories.");
+      queryClient.setQueryData(["order-component-plan", contextOrderNo], plan);
+    },
+    onError: (err: Error) => toast.error(err.message || "Failed to save component routes."),
+  });
+
+  function handleSaveComponentRoutes() {
+    const orderNo = planOrderNo.trim();
+    if (!orderNo) {
+      toast.error("Order number is required.");
+      return;
+    }
+    const components = (componentPlan?.components ?? planContext?.fabricLines ?? []).map((row) => {
+      const heading = "heading" in row ? row.heading : "";
+      const draft = routeDrafts[heading];
+      return {
+        heading,
+        supplyCompanyName: draft?.supply?.trim() ?? "",
+        transferBufferDays: Number(draft?.days) || 0,
+      };
+    }).filter((row) => row.heading && row.supplyCompanyName);
+    if (components.length === 0) {
+      toast.error("Enter a supply factory on at least one component.");
+      return;
+    }
+    saveRoutesMutation.mutate({ orderNo, components });
+  }
 
   const buildRequest = (): LoomAllotmentRequest | null => {
     const orderNo = planOrderNo.trim();
@@ -737,7 +841,28 @@ function PlanOrderPanel({
     const req = buildRequest();
     if (!req) return;
     setContextOrderNo(req.orderNo);
+    setBatchResult(null);
     previewMutation.mutate(req);
+  };
+
+  const handlePreviewAllComponents = () => {
+    const orderNo = planOrderNo.trim();
+    if (!orderNo) {
+      toast.error("Order number is required.");
+      return;
+    }
+    if (!fabricReqDate) {
+      toast.error("Fabric requirement date is required.");
+      return;
+    }
+    setContextOrderNo(orderNo);
+    setPreviewResult(null);
+    batchMutation.mutate({
+      orderNo,
+      companyName: weavingCompany || fibcCompany,
+      partyName: planContext?.partyName ?? undefined,
+      fabricRequirementDate: fabricReqDate,
+    });
   };
 
   const handleConfirm = () => {
@@ -746,11 +871,32 @@ function PlanOrderPanel({
     confirmMutation.mutate(req);
   };
 
+  const handleConfirmAllComponents = () => {
+    const orderNo = planOrderNo.trim();
+    if (!orderNo) {
+      toast.error("Order number is required.");
+      return;
+    }
+    if (!fabricReqDate) {
+      toast.error("Fabric requirement date is required.");
+      return;
+    }
+    confirmAllMutation.mutate({
+      orderNo,
+      companyName: weavingCompany || fibcCompany,
+      partyName: planContext?.partyName ?? undefined,
+      fabricRequirementDate: fabricReqDate,
+    });
+  };
+
   const hasExistingPlan = (planContext?.existingAllocationCount ?? 0) > 0;
-  const canConfirmSave =
-    previewResult?.success &&
-    previewResult.fullyAllotted &&
-    (!(planContext?.existingAllocationCount ?? 0) || (replaceExisting && config?.replaceExistingEnabled));
+  const canConfirmSave = Boolean(previewResult?.success && previewResult.fullyAllotted && config?.confirmSaveEnabled);
+  const canConfirmAll = Boolean(
+    batchResult &&
+      !batchResult.confirmed &&
+      batchResult.fullyAllottedCount > 0 &&
+      config?.confirmSaveEnabled,
+  );
 
   return (
     <>
@@ -797,6 +943,10 @@ function PlanOrderPanel({
               <span className="text-xs font-medium text-muted-foreground">FIBC factory (fixed)</span>
               <Input value={fibcCompany} readOnly className="bg-muted/30" />
             </label>
+            <label className="block space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">BOM component</span>
+              <Input value={heading || "—"} readOnly className="bg-muted/30" />
+            </label>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-muted-foreground">GSM</span>
@@ -825,7 +975,8 @@ function PlanOrderPanel({
                 <div className="flex items-start gap-2">
                   <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
                   <div>
-                    This order already has {planContext?.existingAllocationCount} saved loom row(s) in ERP.
+                    This order already has {planContext?.existingAllocationCount} saved loom row(s). Leave replace
+                    unchecked to append this component. Replace deletes every loom row for the order.
                     {config?.replaceExistingEnabled ? (
                       <label className="mt-2 flex cursor-pointer items-center gap-2">
                         <input
@@ -852,6 +1003,34 @@ function PlanOrderPanel({
                 )}
                 Preview allotment
               </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handlePreviewAllComponents}
+                disabled={batchMutation.isPending || !planOrderNo.trim()}
+              >
+                {batchMutation.isPending ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="mr-1 h-4 w-4" />
+                )}
+                Preview all loom fabrics
+              </Button>
+              {config?.confirmSaveEnabled ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setConfirmAllOpen(true)}
+                  disabled={!canConfirmAll || confirmAllMutation.isPending}
+                >
+                  {confirmAllMutation.isPending ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-1 h-4 w-4" />
+                  )}
+                  Confirm all fabrics
+                </Button>
+              ) : null}
               {config?.confirmSaveEnabled ? (
                 <Button
                   type="button"
@@ -884,6 +1063,139 @@ function PlanOrderPanel({
             )}
           </div>
         </div>
+
+        {planContext && planContext.fabricLines.length > 0 ? (
+          <div className="mt-4 overflow-x-auto">
+            <h4 className="mb-2 text-sm font-medium">
+              BOM components ({planContext.loomEligibleLines.length} loom fabric
+              {planContext.accessoryLines.length > 0 ? `, ${planContext.accessoryLines.length} accessory` : ""})
+            </h4>
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className="px-2 py-2 font-medium">Heading</th>
+                  <th className="px-2 py-2 font-medium">Category</th>
+                  <th className="px-2 py-2 font-medium">Plan as</th>
+                  <th className="px-2 py-2 font-medium">Supply factory</th>
+                  <th className="px-2 py-2 font-medium">Xfer days</th>
+                  <th className="px-2 py-2 font-medium">Due</th>
+                  <th className="px-2 py-2 font-medium">GSM</th>
+                  <th className="px-2 py-2 font-medium">Width</th>
+                  <th className="px-2 py-2 font-medium">Meters</th>
+                </tr>
+              </thead>
+              <tbody>
+                {planContext.fabricLines.map((row, idx) => (
+                  <tr
+                    key={`bom-${idx}`}
+                    className={cn(
+                      "border-b border-border/60 last:border-0",
+                      row.isLoomEligible ? "cursor-pointer hover:bg-muted/40" : "opacity-90",
+                      heading === row.heading && "bg-primary/5",
+                    )}
+                    onClick={() => {
+                      if (row.isLoomEligible) applyFabricLine(row);
+                    }}
+                  >
+                    <td className="px-2 py-2.5">{row.heading}</td>
+                    <td className="px-2 py-2.5 text-xs">{row.category}</td>
+                    <td className="px-2 py-2.5 text-xs text-muted-foreground">
+                      {row.isLoomEligible ? "Loom" : row.planningKind}
+                    </td>
+                    <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <Input
+                        className="h-8 min-w-[160px] text-xs"
+                        value={routeDrafts[row.heading]?.supply ?? ""}
+                        onChange={(e) =>
+                          setRouteDrafts((prev) => ({
+                            ...prev,
+                            [row.heading]: {
+                              supply: e.target.value,
+                              days: prev[row.heading]?.days ?? "0",
+                            },
+                          }))
+                        }
+                        placeholder={row.isLoomEligible ? "Weaving factory" : "FIBC / supplier"}
+                      />
+                    </td>
+                    <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <Input
+                        className="h-8 w-16 text-xs"
+                        value={routeDrafts[row.heading]?.days ?? "0"}
+                        onChange={(e) =>
+                          setRouteDrafts((prev) => ({
+                            ...prev,
+                            [row.heading]: {
+                              supply: prev[row.heading]?.supply ?? "",
+                              days: e.target.value,
+                            },
+                          }))
+                        }
+                      />
+                    </td>
+                    <td className="px-2 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
+                      {componentPlan?.components.find((c) => c.heading === row.heading)?.dueDate?.slice(0, 10) ?? "—"}
+                    </td>
+                    <td className="px-2 py-2.5">{row.gsm || "—"}</td>
+                    <td className="px-2 py-2.5">{row.fabricSize ?? "—"}</td>
+                    <td className="px-2 py-2.5">{row.totalMtr?.toLocaleString() ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSaveComponentRoutes}
+                disabled={saveRoutesMutation.isPending}
+              >
+                {saveRoutesMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                <span className="ml-1">Save component factories</span>
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Click a loom-eligible row to load GSM, width, and meters. Accessories are due at FIBC sewing — assign a
+                supplier here, they are not slotted on looms.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {batchResult ? (
+          <div className="mt-4 overflow-x-auto">
+            <h4 className="mb-2 text-sm font-medium">
+              {batchResult.confirmed ? "All loom fabrics confirm" : "All loom fabrics preview"}
+            </h4>
+            {batchResult.warnings.map((w, i) => (
+              <p key={i} className="mb-2 text-xs text-amber-800 dark:text-amber-200">
+                {w}
+              </p>
+            ))}
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className="px-2 py-2 font-medium">Component</th>
+                  <th className="px-2 py-2 font-medium">Status</th>
+                  <th className="px-2 py-2 font-medium">Meters</th>
+                  <th className="px-2 py-2 font-medium">Segments</th>
+                </tr>
+              </thead>
+              <tbody>
+                {batchResult.components.map((row, idx) => (
+                  <tr key={`batch-${idx}`} className="border-b border-border/60 last:border-0">
+                    <td className="px-2 py-2.5">{row.heading || "—"}</td>
+                    <td className="px-2 py-2.5 text-xs">{row.fullyAllotted ? "Fully allotted" : row.message}</td>
+                    <td className="px-2 py-2.5">
+                      {row.allottedMeters.toLocaleString()} / {row.requiredMeters.toLocaleString()}
+                    </td>
+                    <td className="px-2 py-2.5">{row.proposedSegments.length}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
 
         {previewResult && previewResult.displacements.length > 0 ? (
           <div className="mt-4 overflow-x-auto">
@@ -958,15 +1270,17 @@ function PlanOrderPanel({
               {previewResult?.displacements.length ? (
                 <>
                   Shift {previewResult.displacements.length} blocking order(s), then insert{" "}
-                  {previewResult.proposedSegments.length} row(s) into Prod_LoomAlocationMaster for order{" "}
-                  <span className="font-medium">{planOrderNo.trim() || "—"}</span>. The server re-runs preview before
-                  saving.
+                  {previewResult.proposedSegments.length} row(s) into Prod_LoomAlocationMaster for{" "}
+                  <span className="font-medium">{heading || planOrderNo.trim() || "—"}</span>
+                  {replaceExisting ? " (replace all existing loom rows for this order)" : " (append this component)"}.
+                  The server re-runs preview before saving.
                 </>
               ) : (
                 <>
-                  Insert {previewResult?.proposedSegments.length ?? 0} row(s) into Prod_LoomAlocationMaster for order{" "}
-                  <span className="font-medium">{planOrderNo.trim() || "—"}</span>. The server re-runs preview before
-                  saving.
+                  Insert {previewResult?.proposedSegments.length ?? 0} row(s) into Prod_LoomAlocationMaster for{" "}
+                  <span className="font-medium">{heading || planOrderNo.trim() || "—"}</span>
+                  {replaceExisting ? " (replace all existing loom rows for this order)" : " (append this component)"}.
+                  The server re-runs preview before saving.
                 </>
               )}
             </AlertDialogDescription>
@@ -975,6 +1289,24 @@ function PlanOrderPanel({
             <AlertDialogCancel disabled={confirmMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirm} disabled={confirmMutation.isPending}>
               {confirmMutation.isPending ? "Saving…" : "Confirm & save"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmAllOpen} onOpenChange={setConfirmAllOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save all loom fabrics to ERP?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Confirms each loom-eligible BOM heading in sequence (append). Later fabrics see earlier saves. Headings
+              that already have loom rows are skipped. This does not replace the whole order plan.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={confirmAllMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmAllComponents} disabled={confirmAllMutation.isPending}>
+              {confirmAllMutation.isPending ? "Saving…" : "Confirm all & save"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

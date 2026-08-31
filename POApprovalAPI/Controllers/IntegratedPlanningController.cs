@@ -33,4 +33,36 @@ public class IntegratedPlanningController : ControllerBase
             return StatusCode(500, new { message = ex.Message });
         }
     }
+
+    [HttpPost("orders/plan/preview")]
+    public async Task<IActionResult> PreviewFullOrder([FromBody] POApprovalAPI.Planning.Integrated.Models.FullOrderPlanRequest request, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.OrderNo))
+                return BadRequest(new { message = "OrderNo is required." });
+
+            return Ok(await _service.PreviewFullOrderAsync(request.OrderNo, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("orders/plan/confirm")]
+    public async Task<IActionResult> ConfirmFullOrder([FromBody] POApprovalAPI.Planning.Integrated.Models.FullOrderPlanRequest request, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.OrderNo))
+                return BadRequest(new { message = "OrderNo is required." });
+
+            return Ok(await _service.ConfirmFullOrderAsync(request, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
 }

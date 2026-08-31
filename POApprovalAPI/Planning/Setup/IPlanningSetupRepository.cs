@@ -64,5 +64,13 @@ public interface IPlanningSetupRepository
 
     Task<bool> DeleteOrderRouteAsync(string orderNo, CancellationToken ct = default);
 
+    Task<IReadOnlyList<PlanningBomComponentLineDto>> GetBomComponentLinesAsync(string orderNo, CancellationToken ct = default);
+
+    Task<DateTime?> GetMarketingDispatchDateAsync(string orderNo, CancellationToken ct = default);
+
+    Task<IReadOnlyList<PlanningOrderComponentRouteDto>> GetSavedComponentRoutesAsync(string orderNo, CancellationToken ct = default);
+
+    Task SaveComponentRoutesAsync(SavePlanningOrderComponentRoutesRequest request, CancellationToken ct = default);
+
     Task<IReadOnlyList<string>> DetectBomInterUnitSignalsAsync(string orderNo, CancellationToken ct = default);
 }

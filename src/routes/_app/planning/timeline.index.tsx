@@ -1,14 +1,19 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Factory, Layers, Loader2, Search, Truck, ArrowLeftRight } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowRight, Factory, Layers, Loader2, Search, Sparkles, Save, Truck, ArrowLeftRight, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { PlanningPageHeader, PlanningPageShell, PlanningPanel } from "@/components/planning/planning-ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchIntegratedOrderTimeline } from "@/lib/planning/integrated-api";
+import {
+  confirmFullOrderPlan,
+  fetchIntegratedOrderTimeline,
+  previewFullOrderPlan,
+} from "@/lib/planning/integrated-api";
 import {
   formatTimelineDate,
+  type FullOrderPlan,
   type IntegratedOrderTimeline,
   type IntegratedTimelineMilestone,
 } from "@/lib/planning/integrated-types";
@@ -28,6 +33,7 @@ const stageStyles: Record<string, { ring: string; bg: string; icon: typeof Facto
 };
 
 function IntegratedPlanningPage() {
+  const queryClient = useQueryClient();
   const [orderNo, setOrderNo] = useState("");
   const [searchOrder, setSearchOrder] = useState<string | null>(null);
 
@@ -56,7 +62,7 @@ function IntegratedPlanningPage() {
     <PlanningPageShell>
       <PlanningPageHeader
         title="Integrated planning timeline"
-        description="Loom weaving → fabric ready → FIBC line slots → dispatch — one view across ERP planning tables."
+        description="Enter an order: the planner times FIBC sewing from dispatch, then weaves every BOM fabric to arrive before sewing."
         backTo="/profile"
       />
 
@@ -77,6 +83,15 @@ function IntegratedPlanningPage() {
           </Button>
         </div>
       </PlanningPanel>
+
+      {searchOrder ? (
+        <FullOrderPlanPanel
+          orderNo={searchOrder}
+          onSaved={() => {
+            void queryClient.invalidateQueries({ queryKey: ["integrated-timeline", searchOrder] });
+          }}
+        />
+      ) : null}
 
       {isLoading ? (
         <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
@@ -231,6 +246,67 @@ function TimelineView({ timeline }: { timeline: IntegratedOrderTimeline }) {
         </PlanningPanel>
       </div>
 
+      {timeline.bomComponents.length > 0 ? (
+        <PlanningPanel
+          title="BOM component readiness"
+          subtitle="Loom fabrics vs accessories from Vw_Bom_PPC"
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[960px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className="px-2 py-2 font-medium">Heading</th>
+                  <th className="px-2 py-2 font-medium">Category</th>
+                  <th className="px-2 py-2 font-medium">Readiness</th>
+                  <th className="px-2 py-2 font-medium">Supply</th>
+                  <th className="px-2 py-2 font-medium">Due</th>
+                  <th className="px-2 py-2 font-medium">Meters / kg</th>
+                  <th className="px-2 py-2 font-medium">Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {timeline.bomComponents
+                  .filter((row) => row.readiness !== "Ignored")
+                  .map((row, idx) => (
+                    <tr key={idx} className="border-b border-border/60 last:border-0">
+                      <td className="px-2 py-2.5">{row.heading}</td>
+                      <td className="px-2 py-2.5 text-xs">{row.category}</td>
+                      <td className="px-2 py-2.5">
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-0.5 text-xs font-medium",
+                            row.readiness === "Planned" && "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300",
+                            row.readiness === "Ready" && "bg-emerald-500/15 text-emerald-800 dark:text-emerald-300",
+                            row.readiness === "Unplanned" && "bg-amber-500/15 text-amber-800 dark:text-amber-300",
+                            row.readiness === "Partial" && "bg-amber-500/15 text-amber-800 dark:text-amber-300",
+                            row.readiness === "Indented" && "bg-sky-500/15 text-sky-800 dark:text-sky-300",
+                            row.readiness === "Accessory" && "bg-sky-500/15 text-sky-800 dark:text-sky-300",
+                            row.readiness === "NotApplicable" && "bg-muted text-muted-foreground",
+                          )}
+                        >
+                          {row.readiness}
+                        </span>
+                      </td>
+                      <td className="px-2 py-2.5 text-xs">
+                        {row.supplyCompanyName ?? "—"}
+                        {row.isInterUnit ? (
+                          <span className="ml-1 text-amber-800 dark:text-amber-200">(+{row.transferBufferDays}d)</span>
+                        ) : null}
+                      </td>
+                      <td className="px-2 py-2.5 text-xs whitespace-nowrap">{formatTimelineDate(row.dueDate)}</td>
+                      <td className="px-2 py-2.5 text-xs text-muted-foreground">
+                        {row.totalMtr != null ? `${row.totalMtr.toLocaleString()} m` : "—"}
+                        {row.totalKg != null ? ` / ${row.totalKg.toLocaleString()} kg` : ""}
+                      </td>
+                      <td className="px-2 py-2.5 text-xs text-muted-foreground">{row.detail ?? "—"}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </PlanningPanel>
+      ) : null}
+
       {timeline.fabricRequirements.length > 0 ? (
         <PlanningPanel title="BOM fabric requirements" subtitle="From Vw_Bom_PPC">
           <div className="overflow-x-auto">
@@ -307,5 +383,120 @@ function MilestoneRail({ milestones }: { milestones: IntegratedTimelineMilestone
         })}
       </div>
     </div>
+  );
+}
+
+function FullOrderPlanPanel({ orderNo, onSaved }: { orderNo: string; onSaved: () => void }) {
+  const [plan, setPlan] = useState<FullOrderPlan | null>(null);
+  const [replaceFibc, setReplaceFibc] = useState(false);
+
+  useEffect(() => {
+    setPlan(null);
+  }, [orderNo]);
+
+  const previewMutation = useMutation({
+    mutationFn: () => previewFullOrderPlan(orderNo),
+    onSuccess: (result) => {
+      setPlan(result);
+      if (result.readyToConfirm) toast.success(result.message);
+      else toast.message(result.message || "Plan has blockers.");
+    },
+    onError: (err: Error) => toast.error(err.message || "Full-order preview failed."),
+  });
+
+  const confirmMutation = useMutation({
+    mutationFn: () => confirmFullOrderPlan(orderNo, replaceFibc),
+    onSuccess: (result) => {
+      setPlan(result);
+      if (result.saved) {
+        toast.success(result.message);
+        onSaved();
+      } else toast.error(result.message);
+    },
+    onError: (err: Error) => toast.error(err.message || "Full-order confirm failed."),
+  });
+
+  return (
+    <PlanningPanel
+      title="Plan entire order"
+      subtitle="FIBC sewing from dispatch → every BOM fabric timed to arrive before sewing"
+      className="mb-6"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" onClick={() => previewMutation.mutate()} disabled={previewMutation.isPending}>
+          {previewMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}
+          Preview full plan
+        </Button>
+        <Button
+          type="button"
+          disabled={!plan?.readyToConfirm || confirmMutation.isPending}
+          onClick={() => confirmMutation.mutate()}
+        >
+          {confirmMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
+          Confirm & save to ERP
+        </Button>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={replaceFibc}
+            onChange={(e) => setReplaceFibc(e.target.checked)}
+            className="h-4 w-4 rounded border-border"
+          />
+          Replace existing FIBC slots
+        </label>
+      </div>
+
+      {plan ? (
+        <div className="mt-4 space-y-3">
+          <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+            <div>
+              <dt className="text-xs text-muted-foreground">Loom fabrics</dt>
+              <dd className="font-medium">
+                {plan.loomFullyAllotted}/{plan.loomEligible} allotted
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">FIBC slots</dt>
+              <dd className="font-medium">{plan.fibcSlots}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Fabric at FIBC</dt>
+              <dd className="font-medium">{formatTimelineDate(plan.fabricAtFibcDate)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Sewing</dt>
+              <dd className="font-medium">
+                {formatTimelineDate(plan.fibcStartDate)} → {formatTimelineDate(plan.fibcEndDate)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Dispatch</dt>
+              <dd className="font-medium">{formatTimelineDate(plan.dispatchDate)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">Sequence</dt>
+              <dd className="font-medium">{plan.sequenceOk ? "Fabric before sewing" : "Broken"}</dd>
+            </div>
+          </dl>
+          {plan.blockers.length > 0 ? (
+            <ul className="space-y-1 text-sm text-destructive">
+              {plan.blockers.map((b) => (
+                <li key={b} className="flex gap-2">
+                  <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                  {b}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-emerald-700 dark:text-emerald-300">{plan.message}</p>
+          )}
+          {plan.warnings.slice(0, 8).map((w) => (
+            <p key={w} className="text-xs text-amber-800 dark:text-amber-200">
+              {w}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </PlanningPanel>
   );
 }

@@ -175,6 +175,41 @@ public class LoomPlanningController : ControllerBase
         }
     }
 
+    [HttpPost("allot/preview-components")]
+    public async Task<IActionResult> PreviewAllLoomComponents([FromBody] LoomComponentBatchRequest request, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.OrderNo))
+                return BadRequest(new { message = "Order number is required." });
+
+            return Ok(await _service.PreviewAllLoomComponentsAsync(request, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("allot/confirm-components")]
+    public async Task<IActionResult> ConfirmAllLoomComponents([FromBody] LoomComponentBatchRequest request, CancellationToken ct)
+    {
+        try
+        {
+            if (!_options.AllowConfirmSave)
+                return StatusCode(403, new { message = "Confirm save is disabled (LoomPlanning:AllowConfirmSave)." });
+
+            if (string.IsNullOrWhiteSpace(request.OrderNo))
+                return BadRequest(new { message = "Order number is required." });
+
+            return Ok(await _service.ConfirmAllLoomComponentsAsync(request, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
     [HttpPost("allot/confirm")]
     public async Task<IActionResult> ConfirmAllotment([FromBody] LoomAllotmentRequest request, CancellationToken ct)
     {

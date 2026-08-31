@@ -1,5 +1,6 @@
 using Dapper;
 using Microsoft.Extensions.Options;
+using POApprovalAPI.Planning.Bom;
 using POApprovalAPI.Planning.Loom.Models;
 using POApprovalAPI.Services;
 
@@ -198,7 +199,19 @@ FROM production.dbo.Vw_Bom_PPC WITH (NOLOCK)
 WHERE FilePONo = @OrderNo
 ORDER BY Heading", new { OrderNo = orderNo.Trim() }, commandTimeout: CommandTimeoutSeconds);
 
-        return rows.Select(row => new LoomFabricRequirementDto
+        return rows
+            .Select(MapFabricRequirement)
+            .OrderBy(row => BomComponentClassifier.SortRank(row.Category))
+            .ThenBy(row => row.Heading, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static LoomFabricRequirementDto MapFabricRequirement(FabricRequirementRow row)
+    {
+        var heading = row.Heading ?? "";
+        var size = ParseNullableDouble(row.FabricSize);
+        var classified = BomComponentClassifier.Classify(heading, row.GSM, size, row.TotalMtr, row.Totalkg);
+        return new LoomFabricRequirementDto
         {
             Customer = row.Customer ?? "",
             FilePoNo = row.FilePONo ?? "",
@@ -206,12 +219,15 @@ ORDER BY Heading", new { OrderNo = orderNo.Trim() }, commandTimeout: CommandTime
             Qty = row.Qty,
             PoDate = row.PODate,
             TargetDate = row.Targetdate,
-            Heading = row.Heading ?? "",
+            Heading = heading,
             Gsm = row.GSM ?? "",
-            FabricSize = ParseNullableDouble(row.FabricSize),
+            FabricSize = size,
             TotalMtr = row.TotalMtr,
             TotalKg = row.Totalkg,
-        }).ToList();
+            Category = classified.Category,
+            PlanningKind = classified.PlanningKind,
+            IsLoomEligible = classified.IsLoomEligible,
+        };
     }
 
     public async Task<LoomOrderContextDto?> GetOrderContextAsync(string orderNo, CancellationToken ct = default)
@@ -285,6 +301,8 @@ WHERE PONO = @OrderNo
             BagType = basic?.BagType,
             ExistingAllocationCount = basic?.ExistingAllocationCount ?? 0,
             FabricLines = fabric,
+            LoomEligibleLines = fabric.Where(f => f.IsLoomEligible).ToList(),
+            AccessoryLines = fabric.Where(f => f.PlanningKind == BomComponentClassifier.KindAccessory).ToList(),
         };
     }
 
@@ -463,6 +481,7 @@ ORDER BY FormulaId DESC", commandTimeout: CommandTimeoutSeconds);
         string? partyName,
         IReadOnlyList<LoomProposedSegmentDto> segments,
         bool replaceExisting,
+        string? heading,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -528,7 +547,7 @@ VALUES
                         FormulaID = formulaId,
                         WarpBobin = "",
                         WeftBobin = "",
-                        Remarks = "0",
+                        Remarks = FormatHeadingRemarks(heading),
                         IsActive = "Yes",
                         asize = seg.Size,
                         AllocationType = $"WEB-{seg.AllotmentCase}",
@@ -560,6 +579,7 @@ VALUES
         IReadOnlyList<LoomProposedSegmentDto> segments,
         IReadOnlyList<LoomOrderShiftDisplacementDto> displacements,
         bool replaceExisting,
+        string? heading,
         CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -645,7 +665,7 @@ VALUES
                         FormulaID = seg.FormulaId ?? 0,
                         WarpBobin = "",
                         WeftBobin = "",
-                        Remarks = "0",
+                        Remarks = FormatHeadingRemarks(heading),
                         IsActive = "Yes",
                         asize = seg.Size,
                         AllocationType = $"WEB-{seg.AllotmentCase}",
@@ -682,6 +702,14 @@ WHERE PONO = @OrderNo
   AND (isActive IS NULL OR UPPER(LTRIM(RTRIM(isActive))) <> 'N')",
             new { OrderNo = orderNo },
             commandTimeout: CommandTimeoutSeconds);
+    }
+
+    private static string FormatHeadingRemarks(string? heading)
+    {
+        if (string.IsNullOrWhiteSpace(heading))
+            return "0";
+        var trimmed = heading.Trim();
+        return trimmed.Length <= 200 ? trimmed : trimmed[..200];
     }
 
     private string ResolveCompany(string? companyName) =>

@@ -1,4 +1,5 @@
 using Dapper;
+using POApprovalAPI.Planning.Bom;
 using POApprovalAPI.Planning.Execution.Models;
 using POApprovalAPI.Planning.Setup;
 using POApprovalAPI.Services;
@@ -210,6 +211,103 @@ GROUP BY LTRIM(RTRIM(CAST(TeamNo AS NVARCHAR(50)))), [Shift], CAST(Sysdate AS DA
         };
     }
 
+    public async Task<AccessoryMaterialBoardDto> GetAccessoryMaterialsAsync(
+        string orderNo,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var order = orderNo.Trim();
+        var board = new AccessoryMaterialBoardDto { OrderNo = order };
+        if (string.IsNullOrEmpty(order))
+            return board;
+
+        var bomLines = await _setup.GetBomComponentLinesAsync(order, ct);
+        var accessories = bomLines
+            .Where(l => l.PlanningKind == BomComponentClassifier.KindAccessory)
+            .ToList();
+        board.DispatchDate = await _setup.GetMarketingDispatchDateAsync(order, ct);
+
+        if (accessories.Count == 0)
+        {
+            board.Warnings = ["No accessory BOM headings found for this order."];
+            return board;
+        }
+
+        List<IndentLineRow> indents;
+        List<MrnLineRow> mrns;
+        try
+        {
+            using var connection = _database.CreateConnection();
+            var like = $"%{order}%";
+            indents = (await connection.QueryAsync<IndentLineRow>(@"
+SELECT TOP 200
+    Expr1 AS IndentNo,
+    itemcode AS ItemCode,
+    itemdesc AS ItemDesc,
+    Qty,
+    Unit,
+    Purpose,
+    CompanyName
+FROM Vw_StoreDeptt WITH (NOLOCK)
+WHERE Purpose LIKE @Like OR itemdesc LIKE @Like",
+                new { Like = like }, commandTimeout: CommandTimeoutSeconds)).ToList();
+
+            var indentNos = indents
+                .Select(i => i.IndentNo)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            mrns = (await connection.QueryAsync<MrnLineRow>(@"
+SELECT TOP 200
+    MRNo,
+    PONo,
+    IndentNo,
+    ItemCode,
+    ItemName,
+    RecdQty,
+    AcceptedQty,
+    OrderQty,
+    PendingQty,
+    CompanyName,
+    PartyName,
+    SysDate
+FROM Vw_StoreInwards WITH (NOLOCK)
+WHERE PONo = @OrderNo
+   OR (@HasIndents = 1 AND IndentNo IN @IndentNos)",
+                new
+                {
+                    OrderNo = order,
+                    HasIndents = indentNos.Count > 0,
+                    IndentNos = indentNos.Count > 0 ? indentNos : new List<string> { "" },
+                },
+                commandTimeout: CommandTimeoutSeconds)).ToList();
+        }
+        catch (Exception ex)
+        {
+            board.Warnings = [$"Could not read indent/MRN views: {ex.Message}"];
+            board.Items = accessories.Select(a => MapAccessory(a, null, [])).ToList();
+            return board;
+        }
+
+        if (indents.Count == 0 && mrns.Count == 0)
+            board.Warnings = ["No indent Purpose/itemdesc or MRN PONo matched this order number."];
+
+        board.Items = accessories.Select(acc =>
+        {
+            var indent = FindBestIndent(acc, indents);
+            var relatedMrns = mrns.Where(m => MatchesAccessory(acc, m.ItemName, m.ItemCode)
+                || (indent is not null
+                    && ((!string.IsNullOrWhiteSpace(indent.ItemCode)
+                            && indent.ItemCode.Equals(m.ItemCode, StringComparison.OrdinalIgnoreCase))
+                        || indent.IndentNo.Equals(m.IndentNo, StringComparison.OrdinalIgnoreCase))))
+                .ToList();
+            return MapAccessory(acc, indent, relatedMrns);
+        }).ToList();
+
+        return board;
+    }
+
     public async Task<FactoryExecutionBoardDto> GetFactoryBoardAsync(
         string companyName,
         DateTime? date,
@@ -346,6 +444,120 @@ WHERE LTRIM(RTRIM(MarketingOrdNo)) = @OrderNo",
         }
 
         return suggestions;
+    }
+
+    private static IndentLineRow? FindBestIndent(
+        Planning.Setup.Models.PlanningBomComponentLineDto acc,
+        IReadOnlyList<IndentLineRow> indents)
+    {
+        return indents
+            .Select(row => (row, score: MatchScore(acc, row.ItemDesc, row.ItemCode)))
+            .Where(x => x.score > 0)
+            .OrderByDescending(x => x.score)
+            .Select(x => x.row)
+            .FirstOrDefault();
+    }
+
+    private static bool MatchesAccessory(
+        Planning.Setup.Models.PlanningBomComponentLineDto acc,
+        string? itemName,
+        string? itemCode) =>
+        MatchScore(acc, itemName, itemCode) > 0;
+
+    private static int MatchScore(
+        Planning.Setup.Models.PlanningBomComponentLineDto acc,
+        string? itemName,
+        string? itemCode)
+    {
+        var text = $"{itemName} {itemCode}".ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(text.Trim()))
+            return 0;
+
+        var heading = BomComponentClassifier.NormalizeHeading(acc.Heading).ToUpperInvariant();
+        var score = 0;
+        if (heading.Length >= 3 && text.Contains(heading, StringComparison.OrdinalIgnoreCase))
+            score += 5;
+        foreach (var keyword in BomComponentClassifier.MatchKeywords(acc.Category))
+        {
+            if (text.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                score += 2;
+        }
+
+        return score;
+    }
+
+    private static AccessoryMaterialStatusDto MapAccessory(
+        Planning.Setup.Models.PlanningBomComponentLineDto acc,
+        IndentLineRow? indent,
+        IReadOnlyList<MrnLineRow> mrns)
+    {
+        var received = mrns.Sum(m => m.AcceptedQty > 0 ? m.AcceptedQty : m.RecdQty);
+        var pending = mrns.Sum(m => m.PendingQty);
+        var required = acc.TotalKg ?? acc.TotalMtr;
+        var unit = acc.TotalKg is > 0 ? "kg" : acc.TotalMtr is > 0 ? "m" : "";
+        string status;
+        if (received > 0.01 && required is > 0 && received >= required.Value * 0.95)
+            status = "Received";
+        else if (received > 0.01)
+            status = "Partial";
+        else if (indent is not null)
+            status = "Indented";
+        else
+            status = "NotFound";
+
+        var mrnNo = mrns.Select(m => m.MRNo).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n));
+        var detail = status switch
+        {
+            "Received" => $"MRN {mrnNo} received {received:N1} {unit}".Trim(),
+            "Partial" => $"Received {received:N1} of {required:N1} {unit}".Trim(),
+            "Indented" => $"Indent {indent!.IndentNo} — awaiting MRN",
+            _ => "No indent/MRN matched this heading yet",
+        };
+
+        return new AccessoryMaterialStatusDto
+        {
+            Heading = acc.Heading,
+            Category = acc.Category,
+            RequiredQty = required,
+            Unit = unit,
+            Status = status,
+            IndentNo = indent?.IndentNo,
+            ItemCode = indent?.ItemCode ?? mrns.FirstOrDefault()?.ItemCode,
+            ItemDesc = indent?.ItemDesc ?? mrns.FirstOrDefault()?.ItemName,
+            IndentQty = indent?.Qty,
+            MrnNo = mrnNo,
+            ReceivedQty = received,
+            PendingQty = pending,
+            CompanyName = indent?.CompanyName ?? mrns.FirstOrDefault()?.CompanyName,
+            Detail = detail,
+        };
+    }
+
+    private sealed class IndentLineRow
+    {
+        public string IndentNo { get; set; } = "";
+        public string? ItemCode { get; set; }
+        public string? ItemDesc { get; set; }
+        public double Qty { get; set; }
+        public string? Unit { get; set; }
+        public string? Purpose { get; set; }
+        public string? CompanyName { get; set; }
+    }
+
+    private sealed class MrnLineRow
+    {
+        public string? MRNo { get; set; }
+        public string? PONo { get; set; }
+        public string? IndentNo { get; set; }
+        public string? ItemCode { get; set; }
+        public string? ItemName { get; set; }
+        public double RecdQty { get; set; }
+        public double AcceptedQty { get; set; }
+        public double OrderQty { get; set; }
+        public double PendingQty { get; set; }
+        public string? CompanyName { get; set; }
+        public string? PartyName { get; set; }
+        public DateTime? SysDate { get; set; }
     }
 
     private sealed class PlanRow

@@ -228,6 +228,60 @@ public sealed class UpsertPlanningOrderRouteRequest
     public bool? IsInterUnit { get; set; }
 }
 
+public sealed class PlanningBomComponentLineDto
+{
+    public string Heading { get; set; } = "";
+    public string Gsm { get; set; } = "";
+    public double? FabricSize { get; set; }
+    public double? TotalMtr { get; set; }
+    public double? TotalKg { get; set; }
+    public DateTime? TargetDate { get; set; }
+    public string Category { get; set; } = "Other";
+    public string PlanningKind { get; set; } = "Other";
+    public bool IsLoomEligible { get; set; }
+}
+
+public sealed class PlanningOrderComponentRouteDto
+{
+    public int? ComponentRouteId { get; set; }
+    public string OrderNo { get; set; } = "";
+    public string Heading { get; set; } = "";
+    public string Category { get; set; } = "Other";
+    public string PlanningKind { get; set; } = "Other";
+    public bool IsLoomEligible { get; set; }
+    public string SupplyCompanyName { get; set; } = "";
+    public string FibcCompanyName { get; set; } = "";
+    public int TransferBufferDays { get; set; }
+    public bool IsInterUnit { get; set; }
+    public string RouteSource { get; set; } = "OrderDefault";
+    public DateTime? DueDate { get; set; }
+    public string Gsm { get; set; } = "";
+    public double? FabricSize { get; set; }
+    public double? TotalMtr { get; set; }
+    public double? TotalKg { get; set; }
+}
+
+public sealed class PlanningOrderComponentPlanDto
+{
+    public PlanningOrderRouteDto OrderRoute { get; set; } = new();
+    public DateTime? DispatchDate { get; set; }
+    public IReadOnlyList<PlanningOrderComponentRouteDto> Components { get; set; } = Array.Empty<PlanningOrderComponentRouteDto>();
+}
+
+public sealed class UpsertPlanningOrderComponentRouteRequest
+{
+    public string Heading { get; set; } = "";
+    public string SupplyCompanyName { get; set; } = "";
+    public int? TransferBufferDays { get; set; }
+}
+
+public sealed class SavePlanningOrderComponentRoutesRequest
+{
+    public string OrderNo { get; set; } = "";
+    public IReadOnlyList<UpsertPlanningOrderComponentRouteRequest> Components { get; set; } =
+        Array.Empty<UpsertPlanningOrderComponentRouteRequest>();
+}
+
 public static class PlanningSetupConstants
 {
     public static readonly string[] BagFamilies = ["UPanel", "Buffle", "Circular"];

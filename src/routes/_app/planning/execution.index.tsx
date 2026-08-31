@@ -7,7 +7,7 @@ import { PlanningPageHeader, PlanningPageShell, PlanningPanel } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { fetchBailingReconciliation, fetchOrderExecution } from "@/lib/planning/execution-api";
+import { fetchBailingReconciliation, fetchOrderExecution, fetchAccessoryMaterials } from "@/lib/planning/execution-api";
 import { formatPlanDate } from "@/lib/planning/fibc-types";
 
 const DEFAULT_COMPANY = "Plastene India Limited (Unit -II)";
@@ -32,6 +32,13 @@ function ExecutionPage() {
     queryKey: ["planning-bailing", lookup, DEFAULT_COMPANY],
     queryFn: () => fetchBailingReconciliation(lookup!, DEFAULT_COMPANY),
     enabled: Boolean(lookup) && Boolean(execution),
+    retry: false,
+  });
+
+  const { data: accessories } = useQuery({
+    queryKey: ["planning-accessories", lookup],
+    queryFn: () => fetchAccessoryMaterials(lookup!),
+    enabled: Boolean(lookup),
     retry: false,
   });
 
@@ -218,6 +225,48 @@ function ExecutionPage() {
       ) : lookup ? (
         <PlanningPanel title="No data" className="mt-6">
           <p className="text-sm text-muted-foreground">No execution data found for {lookup}.</p>
+        </PlanningPanel>
+      ) : null}
+
+      {accessories && accessories.items.length > 0 ? (
+        <PlanningPanel title="Accessory indent / MRN" className="mt-6" subtitle="Matched from Vw_StoreDeptt + Vw_StoreInwards by order number">
+          {accessories.warnings.map((w) => (
+            <p key={w} className="mb-2 text-xs text-amber-800 dark:text-amber-200">
+              {w}
+            </p>
+          ))}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs text-muted-foreground">
+                  <th className="px-2 py-2">Heading</th>
+                  <th className="px-2 py-2">Status</th>
+                  <th className="px-2 py-2">Required</th>
+                  <th className="px-2 py-2">Indent</th>
+                  <th className="px-2 py-2">MRN</th>
+                  <th className="px-2 py-2">Received</th>
+                  <th className="px-2 py-2">Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accessories.items.map((row) => (
+                  <tr key={row.heading} className="border-b border-border/60">
+                    <td className="px-2 py-1.5">{row.heading}</td>
+                    <td className="px-2 py-1.5">
+                      <Badge variant={row.status === "Received" ? "default" : "secondary"}>{row.status}</Badge>
+                    </td>
+                    <td className="px-2 py-1.5 text-xs">
+                      {row.requiredQty != null ? `${row.requiredQty.toLocaleString()} ${row.unit}` : "—"}
+                    </td>
+                    <td className="px-2 py-1.5 text-xs">{row.indentNo ?? "—"}</td>
+                    <td className="px-2 py-1.5 text-xs">{row.mrnNo ?? "—"}</td>
+                    <td className="px-2 py-1.5 text-xs">{row.receivedQty ? row.receivedQty.toLocaleString() : "—"}</td>
+                    <td className="px-2 py-1.5 text-xs text-muted-foreground">{row.detail ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </PlanningPanel>
       ) : null}
     </PlanningPageShell>

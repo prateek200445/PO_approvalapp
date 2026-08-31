@@ -14,6 +14,18 @@ public sealed class LoomAllotmentRequest
     public string? Color { get; set; }
     public string? Sector { get; set; }
     public bool ReplaceExisting { get; set; }
+    /// <summary>In-memory occupancy from earlier components in a chained batch preview (not persisted).</summary>
+    public IReadOnlyList<LoomOccupancyBlockDto>? OccupancyOverlay { get; set; }
+}
+
+public sealed class LoomOccupancyBlockDto
+{
+    public int LoomNo { get; set; }
+    public DateTime FromDate { get; set; }
+    public DateTime ToDate { get; set; }
+    public string? Heading { get; set; }
+    public double ReqGsm { get; set; }
+    public double Size { get; set; }
 }
 
 public sealed class LoomProposedSegmentDto
@@ -31,6 +43,7 @@ public sealed class LoomProposedSegmentDto
     public int? FormulaId { get; set; }
     public double ReqGsm { get; set; }
     public double Size { get; set; }
+    public string? Heading { get; set; }
 }
 
 public sealed class LoomOrderShiftDisplacementDto
@@ -52,6 +65,8 @@ public class LoomAllotmentResult
     public bool FullyAllotted { get; set; }
     public string Message { get; set; } = "";
     public string OrderNo { get; set; } = "";
+    public string? CompanyName { get; set; }
+    public string? Heading { get; set; }
     public double ReqGsm { get; set; }
     public double Size { get; set; }
     public double RequiredMeters { get; set; }
@@ -85,6 +100,30 @@ public sealed class LoomOrderAllotmentContextDto
     public string? BagType { get; set; }
     public int ExistingAllocationCount { get; set; }
     public IReadOnlyList<LoomFabricRequirementDto> FabricLines { get; set; } = Array.Empty<LoomFabricRequirementDto>();
+    public IReadOnlyList<LoomFabricRequirementDto> LoomEligibleLines { get; set; } = Array.Empty<LoomFabricRequirementDto>();
+    public IReadOnlyList<LoomFabricRequirementDto> AccessoryLines { get; set; } = Array.Empty<LoomFabricRequirementDto>();
+}
+
+public sealed class LoomComponentBatchRequest
+{
+    public string OrderNo { get; set; } = "";
+    public string? CompanyName { get; set; }
+    public string? PartyName { get; set; }
+    public DateTime? FabricRequirementDate { get; set; }
+}
+
+public sealed class LoomComponentBatchResult
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = "";
+    public string OrderNo { get; set; } = "";
+    public int LoomEligibleCount { get; set; }
+    public int FullyAllottedCount { get; set; }
+    public IReadOnlyList<string> Warnings { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<LoomAllotmentResult> Components { get; set; } = Array.Empty<LoomAllotmentResult>();
+    public int SavedCount { get; set; }
+    public int RowsInserted { get; set; }
+    public bool Confirmed { get; set; }
 }
 
 public sealed class LoomPpmSpecDto

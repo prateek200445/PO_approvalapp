@@ -14,6 +14,7 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
     private readonly IFibcQuotationHoldRepository _holdRepository;
     private readonly PlanningRuntimeContextLoader _runtimeLoader;
     private readonly FibcPlanningEmailNotifier _emailNotifier;
+    private readonly OrderPlanningRouteService _routeService;
     private readonly FibcPlanningOptions _options;
 
     public FibcPlanningEngine(
@@ -21,12 +22,14 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
         IFibcQuotationHoldRepository holdRepository,
         PlanningRuntimeContextLoader runtimeLoader,
         FibcPlanningEmailNotifier emailNotifier,
+        OrderPlanningRouteService routeService,
         IOptions<FibcPlanningOptions> options)
     {
         _repository = repository;
         _holdRepository = holdRepository;
         _runtimeLoader = runtimeLoader;
         _emailNotifier = emailNotifier;
+        _routeService = routeService;
         _options = options.Value;
     }
 
@@ -34,9 +37,7 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
     {
         ct.ThrowIfCancellationRequested();
         var orderNo = request.OrderNo.Trim();
-        var company = string.IsNullOrWhiteSpace(request.CompanyName)
-            ? _options.DefaultCompanyName
-            : request.CompanyName.Trim();
+        var company = await ResolveFibcCompanyAsync(request, ct);
 
         var context = await _repository.GetOrderAllotmentContextAsync(orderNo, ct);
         var dispatchDate = ResolveDispatchDate(request.DispatchDate, context?.DispatchDate);
@@ -177,9 +178,7 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
             }
         }
 
-        var company = string.IsNullOrWhiteSpace(request.CompanyName)
-            ? _options.DefaultCompanyName
-            : request.CompanyName.Trim();
+        var company = await ResolveFibcCompanyAsync(request, ct);
 
         var minDate = preview.ProposedSlots.Min(s => s.PlanDate);
         var maxDate = preview.ProposedSlots.Max(s => s.PlanDate);
@@ -329,6 +328,21 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
         Message = message,
         OrderNo = orderNo,
     };
+
+    private async Task<string> ResolveFibcCompanyAsync(FibcAllotmentRequest request, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(request.CompanyName))
+            return request.CompanyName.Trim();
+
+        var orderNo = request.OrderNo?.Trim() ?? "";
+        if (string.IsNullOrEmpty(orderNo))
+            return _options.DefaultCompanyName;
+
+        var route = await _routeService.ResolveAsync(orderNo, ct);
+        return string.IsNullOrWhiteSpace(route.FibcCompanyName)
+            ? _options.DefaultCompanyName
+            : route.FibcCompanyName;
+    }
 
     private static string? FirstNonEmpty(string? primary, string? fallback)
     {

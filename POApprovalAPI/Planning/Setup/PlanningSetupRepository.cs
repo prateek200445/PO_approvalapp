@@ -1,5 +1,6 @@
 using Dapper;
 using Microsoft.Extensions.Options;
+using POApprovalAPI.Planning.Bom;
 using POApprovalAPI.Planning.Fibc;
 using POApprovalAPI.Planning.Loom;
 using POApprovalAPI.Planning.Setup.Models;
@@ -237,6 +238,23 @@ END;", commandTimeout: CommandTimeoutSeconds);
             await connection.ExecuteAsync(@"
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_PlanningOrderRoute_Order' AND object_id = OBJECT_ID('dbo.PlanningOrderRoute'))
     CREATE UNIQUE INDEX UX_PlanningOrderRoute_Order ON dbo.PlanningOrderRoute(OrderNo);", commandTimeout: CommandTimeoutSeconds);
+
+            await connection.ExecuteAsync(@"
+IF NOT EXISTS (SELECT 1 FROM sys.tables WHERE name = 'PlanningOrderComponentRoute' AND schema_id = SCHEMA_ID('dbo'))
+BEGIN
+    CREATE TABLE dbo.PlanningOrderComponentRoute (
+        ComponentRouteId INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        OrderNo NVARCHAR(200) NOT NULL,
+        Heading NVARCHAR(200) NOT NULL,
+        SupplyCompanyName NVARCHAR(200) NOT NULL,
+        TransferBufferDays INT NOT NULL CONSTRAINT DF_PlanningOrderCompRoute_Transfer DEFAULT (3),
+        UpdatedAt DATETIME NOT NULL CONSTRAINT DF_PlanningOrderCompRoute_Updated DEFAULT (GETDATE())
+    );
+END;", commandTimeout: CommandTimeoutSeconds);
+
+            await connection.ExecuteAsync(@"
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_PlanningOrderCompRoute_OrderHeading' AND object_id = OBJECT_ID('dbo.PlanningOrderComponentRoute'))
+    CREATE UNIQUE INDEX UX_PlanningOrderCompRoute_OrderHeading ON dbo.PlanningOrderComponentRoute(OrderNo, Heading);", commandTimeout: CommandTimeoutSeconds);
 
             _schemaEnsured = true;
         }
@@ -991,6 +1009,145 @@ DELETE FROM PlanningOrderRoute WHERE OrderNo = @OrderNo", new { OrderNo = order 
         return rows > 0;
     }
 
+    public async Task<IReadOnlyList<PlanningBomComponentLineDto>> GetBomComponentLinesAsync(
+        string orderNo,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(orderNo))
+            return Array.Empty<PlanningBomComponentLineDto>();
+
+        using var connection = _database.CreateConnection();
+        var rows = await connection.QueryAsync<BomComponentLineRow>(@"
+SELECT Heading, GSM, FabricSize, TotalMtr, Totalkg, Targetdate
+FROM production.dbo.Vw_Bom_PPC WITH (NOLOCK)
+WHERE FilePONo = @OrderNo", new { OrderNo = orderNo.Trim() }, commandTimeout: CommandTimeoutSeconds);
+
+        return rows
+            .Select(row =>
+            {
+                var heading = row.Heading ?? "";
+                var size = ParseNullableDouble(row.FabricSize);
+                var classified = BomComponentClassifier.Classify(heading, row.GSM, size, row.TotalMtr, row.Totalkg);
+                return new PlanningBomComponentLineDto
+                {
+                    Heading = heading,
+                    Gsm = row.GSM ?? "",
+                    FabricSize = size,
+                    TotalMtr = row.TotalMtr,
+                    TotalKg = row.Totalkg,
+                    TargetDate = NormalizeComponentDate(row.Targetdate),
+                    Category = classified.Category,
+                    PlanningKind = classified.PlanningKind,
+                    IsLoomEligible = classified.IsLoomEligible,
+                };
+            })
+            .Where(row => row.PlanningKind != BomComponentClassifier.KindAdjustment && !string.IsNullOrWhiteSpace(row.Heading))
+            .OrderBy(row => BomComponentClassifier.SortRank(row.Category))
+            .ThenBy(row => row.Heading, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public async Task<DateTime?> GetMarketingDispatchDateAsync(string orderNo, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(orderNo))
+            return null;
+
+        using var connection = _database.CreateConnection();
+        var date = await connection.ExecuteScalarAsync<DateTime?>(@"
+SELECT TOP 1 DespatchDate
+FROM Despatch.dbo.MarketingInvoice WITH (NOLOCK)
+WHERE BuyerOrderNo = @OrderNo
+ORDER BY DespatchDate DESC", new { OrderNo = orderNo.Trim() }, commandTimeout: CommandTimeoutSeconds);
+        return NormalizeComponentDate(date);
+    }
+
+    public async Task<IReadOnlyList<PlanningOrderComponentRouteDto>> GetSavedComponentRoutesAsync(
+        string orderNo,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        await EnsureSchemaAsync(ct);
+        if (string.IsNullOrWhiteSpace(orderNo))
+            return Array.Empty<PlanningOrderComponentRouteDto>();
+
+        using var connection = _database.CreateConnection();
+        var rows = await connection.QueryAsync<ComponentRouteRow>(@"
+SELECT ComponentRouteId, OrderNo, Heading, SupplyCompanyName, TransferBufferDays, UpdatedAt
+FROM dbo.PlanningOrderComponentRoute WITH (NOLOCK)
+WHERE OrderNo = @OrderNo
+ORDER BY Heading", new { OrderNo = orderNo.Trim() }, commandTimeout: CommandTimeoutSeconds);
+
+        return rows.Select(row => new PlanningOrderComponentRouteDto
+        {
+            ComponentRouteId = row.ComponentRouteId,
+            OrderNo = row.OrderNo ?? "",
+            Heading = row.Heading ?? "",
+            SupplyCompanyName = row.SupplyCompanyName ?? "",
+            TransferBufferDays = row.TransferBufferDays,
+            RouteSource = "SavedComponent",
+        }).ToList();
+    }
+
+    public async Task SaveComponentRoutesAsync(SavePlanningOrderComponentRoutesRequest request, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        await EnsureSchemaAsync(ct);
+        var order = request.OrderNo.Trim();
+        if (string.IsNullOrEmpty(order))
+            throw new InvalidOperationException("OrderNo is required.");
+
+        using var connection = _database.CreateConnection();
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            await connection.ExecuteAsync(
+                "DELETE FROM dbo.PlanningOrderComponentRoute WHERE OrderNo = @OrderNo",
+                new { OrderNo = order },
+                transaction,
+                commandTimeout: CommandTimeoutSeconds);
+
+            foreach (var row in request.Components)
+            {
+                var heading = (row.Heading ?? "").Trim();
+                var supply = (row.SupplyCompanyName ?? "").Trim();
+                if (string.IsNullOrEmpty(heading) || string.IsNullOrEmpty(supply))
+                    continue;
+
+                await connection.ExecuteAsync(@"
+INSERT INTO dbo.PlanningOrderComponentRoute (OrderNo, Heading, SupplyCompanyName, TransferBufferDays)
+VALUES (@OrderNo, @Heading, @SupplyCompanyName, @TransferBufferDays)",
+                    new
+                    {
+                        OrderNo = order,
+                        Heading = heading.Length <= 200 ? heading : heading[..200],
+                        SupplyCompanyName = supply,
+                        TransferBufferDays = Math.Max(0, row.TransferBufferDays ?? 3),
+                    },
+                    transaction,
+                    commandTimeout: CommandTimeoutSeconds);
+            }
+
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
+    private static DateTime? NormalizeComponentDate(DateTime? value) =>
+        value is { } date && date.Year >= 2000 ? date.Date : null;
+
+    private static double? ParseNullableDouble(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+        return double.TryParse(raw, out var value) ? value : null;
+    }
+
     public async Task<IReadOnlyList<string>> DetectBomInterUnitSignalsAsync(string orderNo, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
@@ -1573,5 +1730,25 @@ ORDER BY LoomNo", new { CompanyName = company }, commandTimeout: CommandTimeoutS
     {
         public string? FabColor { get; set; }
         public string? BagType { get; set; }
+    }
+
+    private sealed class BomComponentLineRow
+    {
+        public string? Heading { get; set; }
+        public string? GSM { get; set; }
+        public string? FabricSize { get; set; }
+        public double? TotalMtr { get; set; }
+        public double? Totalkg { get; set; }
+        public DateTime? Targetdate { get; set; }
+    }
+
+    private sealed class ComponentRouteRow
+    {
+        public int ComponentRouteId { get; set; }
+        public string? OrderNo { get; set; }
+        public string? Heading { get; set; }
+        public string? SupplyCompanyName { get; set; }
+        public int TransferBufferDays { get; set; }
+        public DateTime? UpdatedAt { get; set; }
     }
 }

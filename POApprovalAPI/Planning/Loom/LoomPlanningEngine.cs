@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using POApprovalAPI.Planning.Bom;
 using POApprovalAPI.Planning.Loom.Models;
 using POApprovalAPI.Planning.Setup;
 using POApprovalAPI.Planning.Setup.Models;
@@ -82,7 +83,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         }
 
         var existing = await _repository.GetExistingAllocationCountAsync(orderNo, ct);
-        if (existing > 0 && (!request.ReplaceExisting || !_options.AllowReplaceExistingPlan))
+        if (existing > 0 && request.ReplaceExisting && !_options.AllowReplaceExistingPlan)
         {
             result.Success = false;
             result.Message =
@@ -90,10 +91,10 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             return result;
         }
 
-        var route = await _routeService.ResolveAsync(orderNo, ct);
-        var company = string.IsNullOrWhiteSpace(request.CompanyName)
-            ? route.FabricSupplyCompanyName
-            : ResolveCompany(request.CompanyName);
+        var heading = string.IsNullOrWhiteSpace(request.Heading) ? preview.Heading : request.Heading;
+        var company = !string.IsNullOrWhiteSpace(preview.CompanyName)
+            ? preview.CompanyName
+            : await ResolveWeaveCompanyAsync(request, orderNo, ct);
         var partyName = request.PartyName;
         if (string.IsNullOrWhiteSpace(partyName))
         {
@@ -116,6 +117,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
                     preview.ProposedSegments,
                     distinctDisplacements,
                     request.ReplaceExisting && existing > 0,
+                    heading,
                     ct);
 
                 result.Saved = true;
@@ -123,8 +125,10 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
                 result.RowsDeleted = request.ReplaceExisting && existing > 0 ? existing : 0;
                 result.OrdersShifted = distinctDisplacements.Select(d => d.OrderNo).Distinct(StringComparer.OrdinalIgnoreCase).Count();
                 result.Success = true;
-                result.Message =
-                    $"Saved loom plan for {orderNo}: shifted {result.OrdersShifted} order(s), inserted {inserted} row(s).";
+                result.Heading = heading;
+                result.Message = request.ReplaceExisting && existing > 0
+                    ? $"Saved loom plan for {orderNo}: shifted {result.OrdersShifted} order(s), inserted {inserted} row(s)."
+                    : $"Appended loom plan for {heading ?? orderNo}: shifted {result.OrdersShifted} order(s), inserted {inserted} row(s).";
                 return result;
             }
 
@@ -134,6 +138,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
                 partyName,
                 preview.ProposedSegments,
                 request.ReplaceExisting && existing > 0,
+                heading,
                 ct);
 
             result.Saved = true;
@@ -141,7 +146,10 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             result.RowsDeleted = request.ReplaceExisting && existing > 0 ? existing : 0;
             result.OrdersShifted = 0;
             result.Success = true;
-            result.Message = $"Saved loom plan for {orderNo}: inserted {rowsInserted} row(s) into Prod_LoomAlocationMaster.";
+            result.Heading = heading;
+            result.Message = request.ReplaceExisting && existing > 0
+                ? $"Saved loom plan for {orderNo}: inserted {rowsInserted} row(s) into Prod_LoomAlocationMaster."
+                : $"Appended {rowsInserted} loom row(s) for {heading ?? orderNo} into Prod_LoomAlocationMaster.";
             return result;
         }
         catch (Exception ex)
@@ -158,11 +166,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         ct.ThrowIfCancellationRequested();
         var warnings = new List<string>();
         var orderNo = request.OrderNo.Trim();
-        var route = await _routeService.ResolveAsync(orderNo, ct);
-        var fibcCompany = route.FibcCompanyName;
-        var company = string.IsNullOrWhiteSpace(request.CompanyName)
-            ? route.FabricSupplyCompanyName
-            : ResolveCompany(request.CompanyName);
+        var (fibcCompany, company, transferDays, route) = await ResolveWeaveTargetAsync(request, orderNo, ct);
 
         if (string.IsNullOrWhiteSpace(orderNo))
             return Fail(orderNo, "Order number is required.");
@@ -181,13 +185,16 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             return Fail(orderNo, "Fabric requirement date is required (FIBC fabric-ready date).");
 
         var isInterUnitWeave = !string.Equals(company, fibcCompany, StringComparison.OrdinalIgnoreCase);
-        var transferDays = isInterUnitWeave ? Math.Max(0, route.TransferBufferDays) : 0;
+        if (!isInterUnitWeave)
+            transferDays = 0;
         if (isInterUnitWeave)
         {
             warnings.Add(
                 $"Inter-unit: weaving at {company}, FIBC at {fibcCompany} (+{transferDays} day transfer buffer).");
             if (!string.IsNullOrWhiteSpace(route.AutoDetectedReason))
                 warnings.Add(route.AutoDetectedReason);
+            if (!string.IsNullOrWhiteSpace(request.Heading))
+                warnings.Add($"Component '{request.Heading.Trim()}' uses supply factory {company}.");
         }
 
         var fabricCompletion = fabricRequirementDate.Value.Date
@@ -218,11 +225,31 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         if (looms.Count == 0)
             return Fail(orderNo, $"No active looms in planning pool for company '{company}'. Configure Loom Pool in Planning Setup.");
 
-        var allocations = await allocationsTask;
+        var allocations = (await allocationsTask).ToList();
+        if (request.OccupancyOverlay is { Count: > 0 })
+        {
+            var overlayIndex = 0;
+            foreach (var block in request.OccupancyOverlay)
+            {
+                allocations.Add(new LoomAllocationGridItemDto
+                {
+                    AllocationId = -1 - overlayIndex++,
+                    LoomNo = block.LoomNo,
+                    OrderNo = $"__overlay:{block.Heading ?? overlayIndex.ToString()}",
+                    AllocationDate = block.FromDate.Date,
+                    ToDate = block.ToDate.Date,
+                    ReqGsm = block.ReqGsm,
+                    Size = block.Size,
+                    Remarks = block.Heading,
+                    IsActive = true,
+                });
+            }
+        }
+
         var ppmSpecs = await ppmTask;
         var formulas = await formulasTask;
 
-        var timelines = BuildTimelines(looms, allocations, orderNo, planningEarliestStart, fabricCompletion);
+        var timelines = BuildTimelines(looms, allocations, orderNo, request.Heading, planningEarliestStart, fabricCompletion);
         var candidates = new List<SegmentCandidate>();
 
         foreach (var loom in looms)
@@ -257,6 +284,8 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
                 Success = false,
                 Message = "No loom capacity found for the requested fabric in the planning window.",
                 OrderNo = orderNo,
+                CompanyName = company,
+                Heading = request.Heading,
                 ReqGsm = request.ReqGsm,
                 Size = request.Size,
                 RequiredMeters = request.RequiredMeters,
@@ -327,6 +356,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
                 FormulaId = candidate.FormulaId,
                 ReqGsm = request.ReqGsm,
                 Size = request.Size,
+                Heading = request.Heading,
             });
 
             remainingMeters = Math.Round(remainingMeters - actualMeters, 2);
@@ -366,6 +396,8 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
             FullyAllotted = fullyAllotted,
             Message = message,
             OrderNo = orderNo,
+            CompanyName = company,
+            Heading = request.Heading,
             ReqGsm = request.ReqGsm,
             Size = request.Size,
             RequiredMeters = request.RequiredMeters,
@@ -778,15 +810,17 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         IReadOnlyList<LoomMasterDto> looms,
         IReadOnlyList<LoomAllocationGridItemDto> allocations,
         string excludeOrderNo,
+        string? excludeHeading,
         DateTime planningEarliestStart,
         DateTime fabricCompletion)
     {
         var result = looms.ToDictionary(l => l.LoomNo, l => new LoomTimeline { LoomNo = l.LoomNo });
         var gapHorizonEnd = fabricCompletion.AddDays(Math.Max(14, (fabricCompletion - planningEarliestStart).Days));
+        var heading = BomComponentClassifier.NormalizeHeading(excludeHeading);
 
         foreach (var group in allocations
                      .Where(a => a.IsActive)
-                     .Where(a => !string.Equals(a.OrderNo, excludeOrderNo, StringComparison.OrdinalIgnoreCase))
+                     .Where(a => !IsExcludedSameOrderAllocation(a, excludeOrderNo, heading))
                      .GroupBy(a => a.LoomNo))
         {
             if (!result.ContainsKey(group.Key))
@@ -820,6 +854,53 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         return result;
     }
 
+    private static bool IsExcludedSameOrderAllocation(
+        LoomAllocationGridItemDto allocation,
+        string orderNo,
+        string normalizedHeading)
+    {
+        if (!string.Equals(allocation.OrderNo, orderNo, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (string.IsNullOrEmpty(normalizedHeading))
+            return true;
+
+        return BomComponentClassifier.HeadingsMatch(allocation.Remarks, normalizedHeading);
+    }
+
+    private async Task<string> ResolveWeaveCompanyAsync(LoomAllotmentRequest request, string orderNo, CancellationToken ct)
+    {
+        var (_, company, _, _) = await ResolveWeaveTargetAsync(request, orderNo, ct);
+        return company;
+    }
+
+    private async Task<(string FibcCompany, string WeaveCompany, int TransferDays, PlanningOrderRouteDto Route)>
+        ResolveWeaveTargetAsync(LoomAllotmentRequest request, string orderNo, CancellationToken ct)
+    {
+        var route = await _routeService.ResolveAsync(orderNo, ct);
+        var fibcCompany = string.IsNullOrWhiteSpace(route.FibcCompanyName)
+            ? _options.DefaultCompanyName
+            : route.FibcCompanyName;
+
+        PlanningOrderComponentRouteDto? component = null;
+        if (!string.IsNullOrWhiteSpace(request.Heading))
+            component = await _routeService.ResolveComponentAsync(orderNo, request.Heading, ct);
+
+        if (component is not null && component.RouteSource == "SavedComponent"
+            && !string.IsNullOrWhiteSpace(component.SupplyCompanyName))
+        {
+            return (fibcCompany, component.SupplyCompanyName.Trim(), Math.Max(0, component.TransferBufferDays), route);
+        }
+
+        var weaveCompany = string.IsNullOrWhiteSpace(request.CompanyName)
+            ? (string.IsNullOrWhiteSpace(route.FabricSupplyCompanyName)
+                ? _options.DefaultCompanyName
+                : route.FabricSupplyCompanyName)
+            : ResolveCompany(request.CompanyName);
+
+        return (fibcCompany, weaveCompany, Math.Max(0, route.TransferBufferDays), route);
+    }
+
     private string ResolveCompany(string? companyName) =>
         string.IsNullOrWhiteSpace(companyName) ? _options.DefaultCompanyName : companyName.Trim();
 
@@ -836,6 +917,7 @@ public sealed class LoomPlanningEngine : ILoomPlanningEngine
         FullyAllotted = preview.FullyAllotted,
         Message = preview.Message,
         OrderNo = preview.OrderNo,
+        Heading = preview.Heading,
         ReqGsm = preview.ReqGsm,
         Size = preview.Size,
         RequiredMeters = preview.RequiredMeters,

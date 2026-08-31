@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using POApprovalAPI.Planning.Bom;
 using POApprovalAPI.Planning.Execution;
 using POApprovalAPI.Planning.Fibc;
 using POApprovalAPI.Planning.Fibc.Models;
@@ -20,6 +21,7 @@ public sealed class IntegratedPlanningService
     private readonly PlanningRuntimeContextLoader _runtimeLoader;
     private readonly OrderPlanningRouteService _routeService;
     private readonly LoomPlanningOptions _loomOptions;
+    private readonly FibcPlanningOptions _fibcOptions;
 
     public IntegratedPlanningService(
         FibcPlanningService fibc,
@@ -27,7 +29,8 @@ public sealed class IntegratedPlanningService
         ExecutionPlanningService execution,
         PlanningRuntimeContextLoader runtimeLoader,
         OrderPlanningRouteService routeService,
-        IOptions<LoomPlanningOptions> loomOptions)
+        IOptions<LoomPlanningOptions> loomOptions,
+        IOptions<FibcPlanningOptions> fibcOptions)
     {
         _fibc = fibc;
         _loom = loom;
@@ -35,6 +38,7 @@ public sealed class IntegratedPlanningService
         _runtimeLoader = runtimeLoader;
         _routeService = routeService;
         _loomOptions = loomOptions.Value;
+        _fibcOptions = fibcOptions.Value;
     }
 
     public async Task<IntegratedOrderTimelineDto?> GetOrderTimelineAsync(string orderNo, CancellationToken ct = default)
@@ -65,6 +69,8 @@ public sealed class IntegratedPlanningService
         if (!hasLoom && !hasFibc && !hasFabric && !hasContext)
             return null;
 
+        var accessoryBoard = await _execution.GetAccessoryMaterialsAsync(trimmed, ct);
+
         var loomAllocations = loomPlan?.Allocations ?? Array.Empty<LoomOrderAllocationLineDto>();
         var effectiveRoute = route;
         if (hasLoom)
@@ -76,6 +82,7 @@ public sealed class IntegratedPlanningService
 
         var warnings = new List<string>();
         var fabricRequirements = MergeFabricRequirements(fibcPlan, loomPlan);
+        var componentPlan = await _routeService.ResolvePlanAsync(trimmed, ct);
 
         var dispatchDate = FirstValidDate(fibcCtx?.DispatchDate, loomCtx?.DispatchDate);
         var fabricRequirementDate = FirstValidDate(
@@ -212,8 +219,225 @@ public sealed class IntegratedPlanningService
             LoomAllocations = loomAllocations,
             FabricRequirements = fabricRequirements,
             FibcPlanLines = fibcLines,
+            BomComponents = BuildBomComponents(fabricRequirements, loomAllocations, componentPlan.Components, accessoryBoard.Items),
             Warnings = warnings,
         };
+    }
+
+    public Task<FullOrderPlanResult> PreviewFullOrderAsync(string orderNo, CancellationToken ct = default) =>
+        RunFullOrderAsync(orderNo, confirm: false, replaceExistingFibc: false, ct);
+
+    public Task<FullOrderPlanResult> ConfirmFullOrderAsync(FullOrderPlanRequest request, CancellationToken ct = default) =>
+        RunFullOrderAsync(request.OrderNo, confirm: true, replaceExistingFibc: request.ReplaceExistingFibc, ct);
+
+    private async Task<FullOrderPlanResult> RunFullOrderAsync(
+        string orderNo,
+        bool confirm,
+        bool replaceExistingFibc,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var trimmed = (orderNo ?? "").Trim();
+        var blockers = new List<string>();
+        var warnings = new List<string>();
+
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return new FullOrderPlanResult
+            {
+                Success = false,
+                Message = "Order number is required.",
+                Blockers = ["Order number is required."],
+            };
+        }
+
+        var route = await _routeService.ResolveAsync(trimmed, ct);
+        var fibcCtx = await _fibc.GetOrderAllotmentContextAsync(trimmed, ct);
+        var accessories = await _execution.GetAccessoryMaterialsAsync(trimmed, ct);
+
+        if (fibcCtx is null)
+        {
+            return new FullOrderPlanResult
+            {
+                Success = false,
+                OrderNo = trimmed,
+                Route = route,
+                Accessories = accessories,
+                Message = "No marketing invoice or BOM found for this order.",
+                Blockers = ["No marketing invoice or BOM found for this order."],
+            };
+        }
+
+        var dispatch = fibcCtx.DispatchDate;
+        var fibcPreview = await _fibc.PreviewAllotmentAsync(new FibcAllotmentRequest
+        {
+            OrderNo = trimmed,
+            CompanyName = route.FibcCompanyName,
+            DispatchDate = dispatch,
+            Quantity = fibcCtx.Quantity ?? 0,
+            BagType = fibcCtx.BagType,
+            PartyName = fibcCtx.PartyName,
+            MarketingNo = fibcCtx.MarketingNo,
+        }, ct);
+
+        foreach (var w in fibcPreview.Warnings)
+            warnings.Add(w);
+
+        var fibcStart = fibcPreview.ProposedSlots.Count > 0
+            ? fibcPreview.ProposedSlots.Min(s => s.PlanDate.Date)
+            : (DateTime?)null;
+        var fibcEnd = fibcPreview.ProposedSlots.Count > 0
+            ? fibcPreview.ProposedSlots.Max(s => s.PlanDate.Date)
+            : (DateTime?)null;
+
+        var allottedPcs = fibcPreview.ProposedSlots.Sum(s => s.Allotted);
+        var fibcComplete = fibcPreview.Success
+            && fibcPreview.ProposedSlots.Count > 0
+            && allottedPcs + 0.5 >= Math.Max(1, fibcPreview.Quantity);
+
+        if (!fibcComplete)
+            blockers.Add(string.IsNullOrWhiteSpace(fibcPreview.Message)
+                ? "FIBC line slots could not cover the full bag quantity before dispatch."
+                : $"FIBC: {fibcPreview.Message}");
+
+        var buffer = fibcPreview.BufferDays > 0 ? fibcPreview.BufferDays : _fibcOptions.DispatchBufferDays;
+        var fabricRequirement = fibcStart
+            ?? (dispatch is { } d && d.Year >= 2000 ? d.Date.AddDays(-buffer) : (DateTime?)null);
+
+        if (fabricRequirement is null)
+            blockers.Add("No dispatch date or FIBC start date — cannot time loom fabric.");
+
+        LoomComponentBatchResult? loomBatch = null;
+        DateTime? loomEnd = null;
+        if (fabricRequirement is not null)
+        {
+            loomBatch = await _loom.PreviewAllLoomComponentsAsync(new LoomComponentBatchRequest
+            {
+                OrderNo = trimmed,
+                PartyName = fibcCtx.PartyName,
+                FabricRequirementDate = fabricRequirement,
+            }, ct);
+
+            foreach (var w in loomBatch.Warnings)
+                warnings.Add(w);
+
+            var segmentEnds = loomBatch.Components
+                .SelectMany(c => c.ProposedSegments)
+                .Select(s => s.ToDate.Date)
+                .ToList();
+            if (segmentEnds.Count > 0)
+                loomEnd = segmentEnds.Max();
+            else
+            {
+                var completions = loomBatch.Components
+                    .Select(c => c.FabricCompletionDate)
+                    .Where(d => d is { Year: >= 2000 })
+                    .Select(d => d!.Value.Date)
+                    .ToList();
+                if (completions.Count > 0)
+                    loomEnd = completions.Max();
+            }
+
+            if (loomBatch.LoomEligibleCount > 0 && loomBatch.FullyAllottedCount < loomBatch.LoomEligibleCount)
+            {
+                blockers.Add(
+                    $"Loom: {loomBatch.FullyAllottedCount}/{loomBatch.LoomEligibleCount} fabric heading(s) fully allotted. {loomBatch.Message}");
+            }
+            else if (loomBatch.LoomEligibleCount == 0)
+            {
+                warnings.Add("No loom-eligible BOM fabrics (Body/Side/Top/Bottom/Baffle/Spout with meters). FIBC-only plan.");
+            }
+        }
+
+        var transferDays = route.IsInterUnit ? Math.Max(0, route.TransferBufferDays) : 0;
+        DateTime? fabricAtFibc = loomEnd is not null ? loomEnd.Value.AddDays(transferDays) : null;
+        var sequenceOk = fabricAtFibc is null || fibcStart is null || fabricAtFibc.Value <= fibcStart.Value;
+        if (!sequenceOk)
+        {
+            blockers.Add(
+                $"Sequence: fabric arrives {fabricAtFibc:yyyy-MM-dd} but FIBC sewing starts {fibcStart:yyyy-MM-dd}. " +
+                "Need earlier weaving, more looms, or a later dispatch.");
+        }
+
+        foreach (var acc in accessories.Items.Where(a =>
+                     a.Status is "NotFound" or "Partial"))
+        {
+            warnings.Add($"Accessory {acc.Heading}: {acc.Status}" + (string.IsNullOrWhiteSpace(acc.Detail) ? "" : $" — {acc.Detail}"));
+        }
+
+        var ready = blockers.Count == 0;
+        var result = new FullOrderPlanResult
+        {
+            Success = ready,
+            ReadyToConfirm = ready,
+            OrderNo = trimmed,
+            Route = route,
+            DispatchDate = dispatch ?? fibcPreview.DispatchDate,
+            FibcStartDate = fibcStart,
+            FibcEndDate = fibcEnd,
+            FabricRequirementDate = fabricRequirement,
+            LoomEndDate = loomEnd,
+            FabricAtFibcDate = fabricAtFibc,
+            SequenceOk = sequenceOk,
+            Fibc = fibcPreview,
+            Loom = loomBatch,
+            Accessories = accessories,
+            Blockers = blockers,
+            Warnings = warnings,
+            Message = ready
+                ? $"Full order plan is feasible: fabric at FIBC by {fabricAtFibc:yyyy-MM-dd}, sewing {fibcStart:yyyy-MM-dd}–{fibcEnd:yyyy-MM-dd}, dispatch {dispatch:yyyy-MM-dd}."
+                : string.Join(" ", blockers),
+        };
+
+        if (!confirm)
+            return result;
+
+        if (!ready)
+        {
+            result.Saved = false;
+            result.Message = "Cannot save: fix blockers first. " + result.Message;
+            return result;
+        }
+
+        if (loomBatch is { LoomEligibleCount: > 0 })
+        {
+            var loomSaved = await _loom.ConfirmAllLoomComponentsAsync(new LoomComponentBatchRequest
+            {
+                OrderNo = trimmed,
+                PartyName = fibcCtx.PartyName,
+                FabricRequirementDate = fabricRequirement,
+            }, ct);
+            result.Loom = loomSaved;
+            result.LoomRowsInserted = loomSaved.RowsInserted;
+            if (loomSaved.FullyAllottedCount < loomSaved.LoomEligibleCount && loomSaved.SavedCount == 0)
+            {
+                result.Success = false;
+                result.Saved = false;
+                result.ReadyToConfirm = false;
+                result.Message = "Loom confirm did not save a complete fabric plan. FIBC was not written.";
+                return result;
+            }
+        }
+
+        var fibcSaved = await _fibc.ConfirmAllotmentAsync(new FibcAllotmentRequest
+        {
+            OrderNo = trimmed,
+            CompanyName = route.FibcCompanyName,
+            DispatchDate = dispatch,
+            Quantity = fibcCtx.Quantity ?? 0,
+            BagType = fibcCtx.BagType,
+            PartyName = fibcCtx.PartyName,
+            MarketingNo = fibcCtx.MarketingNo,
+            ReplaceExisting = replaceExistingFibc,
+        }, ct);
+        result.Fibc = fibcSaved;
+        result.FibcRowsInserted = fibcSaved.RowsInserted;
+        result.Saved = fibcSaved.Saved || result.LoomRowsInserted > 0;
+        result.Success = fibcSaved.Saved;
+        result.Message = fibcSaved.Saved
+            ? $"Saved full order plan: {result.LoomRowsInserted} loom row(s), {fibcSaved.RowsInserted} FIBC slot(s)."
+            : fibcSaved.Message;
+        return result;
     }
 
     private static IReadOnlyList<FibcFabricRequirementDto> MergeFabricRequirements(
@@ -238,6 +462,9 @@ public sealed class IntegratedPlanningService
                 FabricSize = f.FabricSize,
                 TotalMtr = f.TotalMtr,
                 TotalKg = f.TotalKg,
+                Category = f.Category,
+                PlanningKind = f.PlanningKind,
+                IsLoomEligible = f.IsLoomEligible,
             }).ToList();
         }
 
@@ -365,6 +592,130 @@ public sealed class IntegratedPlanningService
         }
 
         return milestones;
+    }
+
+    private static IReadOnlyList<IntegratedBomComponentDto> BuildBomComponents(
+        IReadOnlyList<FibcFabricRequirementDto> fabricRequirements,
+        IReadOnlyList<LoomOrderAllocationLineDto> loomAllocations,
+        IReadOnlyList<PlanningOrderComponentRouteDto> componentRoutes,
+        IReadOnlyList<POApprovalAPI.Planning.Execution.Models.AccessoryMaterialStatusDto> materials)
+    {
+        if (fabricRequirements.Count == 0)
+            return Array.Empty<IntegratedBomComponentDto>();
+
+        var routesByHeading = componentRoutes
+            .GroupBy(row => BomComponentClassifier.NormalizeHeading(row.Heading), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        var materialsByHeading = materials
+            .GroupBy(row => BomComponentClassifier.NormalizeHeading(row.Heading), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        return fabricRequirements.Select(row =>
+        {
+            var classified = string.IsNullOrWhiteSpace(row.Category) || row.Category == "Other"
+                ? BomComponentClassifier.Classify(row.Heading, row.Gsm, row.FabricSize, row.TotalMtr, row.TotalKg)
+                : new BomComponentClassifier.Classification(row.Category, row.PlanningKind, row.IsLoomEligible);
+
+            routesByHeading.TryGetValue(BomComponentClassifier.NormalizeHeading(row.Heading), out var route);
+            materialsByHeading.TryGetValue(BomComponentClassifier.NormalizeHeading(row.Heading), out var material);
+
+            string readiness;
+            string? detail;
+            if (classified.PlanningKind == BomComponentClassifier.KindAdjustment)
+            {
+                readiness = "Ignored";
+                detail = "BOM adjustment row (less/excess/wastage)";
+            }
+            else if (classified.PlanningKind == BomComponentClassifier.KindAccessory)
+            {
+                readiness = material?.Status switch
+                {
+                    "Received" => "Ready",
+                    "Partial" => "Partial",
+                    "Indented" => "Indented",
+                    _ => "Accessory",
+                };
+                var due = route?.DueDate ?? row.TargetDate;
+                var factory = route?.SupplyCompanyName;
+                var baseDetail = string.IsNullOrWhiteSpace(factory)
+                    ? "Needed at FIBC sewing — not scheduled on looms"
+                    : due is not null
+                        ? $"Needed at FIBC by {due:yyyy-MM-dd} from {factory}"
+                        : $"Needed at FIBC sewing from {factory}";
+                detail = string.IsNullOrWhiteSpace(material?.Detail) ? baseDetail : $"{baseDetail}. {material.Detail}";
+            }
+            else if (classified.IsLoomEligible)
+            {
+                var planned = IsLoomComponentPlanned(row, classified, loomAllocations);
+                readiness = planned ? "Planned" : "Unplanned";
+                detail = planned
+                    ? route is not null
+                        ? $"Matching loom allocation at {route.SupplyCompanyName}"
+                        : "Matching loom allocation found"
+                    : route is not null
+                        ? $"Loom fabric not yet allotted at {route.SupplyCompanyName}"
+                        : "Loom fabric not yet allotted";
+            }
+            else
+            {
+                readiness = "NotApplicable";
+                detail = classified.PlanningKind == BomComponentClassifier.KindLoomFabric
+                    ? "Fabric heading without meters/width"
+                    : null;
+            }
+
+            return new IntegratedBomComponentDto
+            {
+                Heading = row.Heading,
+                Category = classified.Category,
+                PlanningKind = classified.PlanningKind,
+                IsLoomEligible = classified.IsLoomEligible,
+                Gsm = row.Gsm,
+                FabricSize = row.FabricSize,
+                TotalMtr = row.TotalMtr,
+                TotalKg = row.TotalKg,
+                TargetDate = row.TargetDate,
+                SupplyCompanyName = route?.SupplyCompanyName,
+                DueDate = route?.DueDate ?? row.TargetDate,
+                IsInterUnit = route?.IsInterUnit ?? false,
+                TransferBufferDays = route?.TransferBufferDays ?? 0,
+                Readiness = readiness,
+                Detail = detail,
+                MaterialStatus = material?.Status,
+                IndentNo = material?.IndentNo,
+                ReceivedQty = material?.ReceivedQty ?? 0,
+            };
+        }).ToList();
+    }
+
+    private static bool IsLoomComponentPlanned(
+        FibcFabricRequirementDto row,
+        BomComponentClassifier.Classification classified,
+        IReadOnlyList<LoomOrderAllocationLineDto> loomAllocations)
+    {
+        if (loomAllocations.Count == 0)
+            return false;
+
+        var heading = BomComponentClassifier.NormalizeHeading(row.Heading);
+        if (!string.IsNullOrEmpty(heading)
+            && loomAllocations.Any(a =>
+                !string.IsNullOrWhiteSpace(a.Remarks)
+                && BomComponentClassifier.NormalizeHeading(a.Remarks)
+                    .Equals(heading, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var gsm = BomComponentClassifier.ParseGsm(row.Gsm);
+        if (gsm <= 0 || row.FabricSize is not > 0)
+            return classified.IsLoomEligible && loomAllocations.Count > 0 && classified.Category == "Body";
+
+        return loomAllocations.Any(a =>
+            a.ReqGsm is > 0
+            && a.Size is > 0
+            && Math.Abs(a.ReqGsm.Value - gsm) <= 2
+            && Math.Abs(a.Size.Value - row.FabricSize.Value) <= 1.5);
     }
 
     private static PlanningOrderRouteDto WithWeavingCompany(PlanningOrderRouteDto route, string weavingCompany)

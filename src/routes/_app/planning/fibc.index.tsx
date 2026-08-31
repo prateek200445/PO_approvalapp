@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Save, Search, Sparkles, Timer, TriangleAlert, X } from "lucide-react";
 import { toast } from "sonner";
@@ -35,6 +35,7 @@ import {
   previewFibcAllotment,
   previewFibcCriticalShift,
 } from "@/lib/planning/fibc-api";
+import { searchPlanningFactories, resolveOrderPlanningRoute } from "@/lib/planning/setup-api";
 import {
   defaultPlanningDateFrom,
   formatPlanDate,
@@ -65,6 +66,9 @@ function FibcPlanningPage() {
   const debouncedOrderSearch = useDebounce(orderSearch, 250);
   const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
   const [occupancyFilter, setOccupancyFilter] = useState<"all" | "free" | "partial" | "full">("all");
+  const [factoryQuery, setFactoryQuery] = useState("");
+  const debouncedFactoryQuery = useDebounce(factoryQuery, 300);
+  const [fibcCompany, setFibcCompany] = useState("");
 
   const { data: config } = useQuery({
     queryKey: ["fibc-planning-config"],
@@ -72,7 +76,19 @@ function FibcPlanningPage() {
     staleTime: 1000 * 60 * 30,
   });
 
-  const company = config?.defaultCompanyName;
+  const company = fibcCompany || config?.defaultCompanyName;
+
+  useEffect(() => {
+    if (config?.defaultCompanyName && !fibcCompany) {
+      setFibcCompany(config.defaultCompanyName);
+    }
+  }, [config?.defaultCompanyName, fibcCompany]);
+
+  const { data: factoryOptions = [] } = useQuery({
+    queryKey: ["fibc-factory-search", debouncedFactoryQuery],
+    queryFn: () => searchPlanningFactories(debouncedFactoryQuery),
+    enabled: debouncedFactoryQuery.length >= 0,
+  });
 
   const {
     data: lines = [],
@@ -136,6 +152,21 @@ function FibcPlanningPage() {
     setSelectedOrder(trimmed);
   }, [orderSearch]);
 
+  const { data: lookupRoute } = useQuery({
+    queryKey: ["planning-order-route", selectedOrder],
+    queryFn: () => resolveOrderPlanningRoute(selectedOrder!),
+    enabled: Boolean(selectedOrder),
+    retry: false,
+  });
+
+  const autoFibcOrderRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!lookupRoute?.fibcCompanyName || !selectedOrder) return;
+    if (autoFibcOrderRef.current === selectedOrder) return;
+    autoFibcOrderRef.current = selectedOrder;
+    setFibcCompany(lookupRoute.fibcCompanyName);
+  }, [lookupRoute, selectedOrder]);
+
   return (
     <PlanningPageShell>
       <PlanningPageHeader
@@ -154,7 +185,7 @@ function FibcPlanningPage() {
         }
       />
 
-      <div className="mb-6 grid gap-4 lg:grid-cols-3">
+      <div className="mb-6 grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
         <PlanningPanel title="Date range" subtitle="Loads vw_fibclineplanning_NEW from ERP">
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="space-y-1.5">
@@ -203,6 +234,42 @@ function FibcPlanningPage() {
           )}
         </PlanningPanel>
 
+        <PlanningPanel title="FIBC factory" subtitle="Line capacity for this grid & allotment">
+          <label className="block space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Search factory</span>
+            <Input
+              value={factoryQuery}
+              onChange={(e) => setFactoryQuery(e.target.value)}
+              placeholder="Unit-II, sister unit…"
+            />
+          </label>
+          <div className="mt-2 max-h-36 overflow-auto rounded-md border border-border">
+            {factoryOptions.filter((opt) => opt.hasLineMaster).length === 0 ? (
+              <p className="p-2 text-xs text-muted-foreground">Type to search factories with FIBC lines.</p>
+            ) : (
+              factoryOptions
+                .filter((opt) => opt.hasLineMaster)
+                .map((opt) => (
+                  <button
+                    key={opt.companyName}
+                    type="button"
+                    className={cn(
+                      "flex w-full items-center justify-between gap-2 border-b border-border/60 px-2 py-2 text-left text-sm last:border-0 hover:bg-muted/50",
+                      opt.companyName === company && "bg-primary/5",
+                    )}
+                    onClick={() => {
+                      setFibcCompany(opt.companyName);
+                      setFactoryQuery("");
+                    }}
+                  >
+                    <span className="font-medium">{opt.companyName}</span>
+                    {opt.companyName === company ? <Badge variant="secondary">Active</Badge> : null}
+                  </button>
+                ))
+            )}
+          </div>
+        </PlanningPanel>
+
         <PlanningPanel title="Order lookup" subtitle="Plan lines + BOM fabric (read-only)">
           <div className="flex gap-2">
             <Input
@@ -221,6 +288,7 @@ function FibcPlanningPage() {
 
       <PlanOrderPanel
         company={company}
+        setCompany={setFibcCompany}
         config={config}
         displayShifts={displayShifts}
         onGridRefresh={refetchGrid}
@@ -283,11 +351,13 @@ function filterSlotItems(
 
 function PlanOrderPanel({
   company,
+  setCompany,
   config,
   displayShifts,
   onGridRefresh,
 }: {
   company?: string;
+  setCompany: (company: string) => void;
   config?: FibcPlanningConfig;
   displayShifts: string[];
   onGridRefresh: () => void;
@@ -315,6 +385,21 @@ function PlanOrderPanel({
     enabled: Boolean(contextOrderNo),
     retry: false,
   });
+
+  const { data: planRoute } = useQuery({
+    queryKey: ["planning-order-route", contextOrderNo],
+    queryFn: () => resolveOrderPlanningRoute(contextOrderNo!),
+    enabled: Boolean(contextOrderNo),
+    retry: false,
+  });
+
+  const autoPlanRouteRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!planRoute?.fibcCompanyName || !contextOrderNo) return;
+    if (autoPlanRouteRef.current === contextOrderNo) return;
+    autoPlanRouteRef.current = contextOrderNo;
+    setCompany(planRoute.fibcCompanyName);
+  }, [planRoute, contextOrderNo, setCompany]);
 
   useEffect(() => {
     if (!planContextError || !planContextErr) return;
@@ -1767,6 +1852,7 @@ function OrderDetailPanel({
                       <thead>
                         <tr className="border-b text-muted-foreground">
                           <th className="py-1.5 pr-2">Heading</th>
+                          <th className="py-1.5 pr-2">Kind</th>
                           <th className="py-1.5 pr-2">GSM</th>
                           <th className="py-1.5 pr-2">Width</th>
                           <th className="py-1.5 pr-2">Meters</th>
@@ -1776,6 +1862,7 @@ function OrderDetailPanel({
                         {detail.fabricRequirements.map((row, i) => (
                           <tr key={i} className="border-b border-border/50">
                             <td className="py-2 pr-2">{row.heading || "—"}</td>
+                            <td className="py-2 pr-2">{row.isLoomEligible ? "Loom" : row.planningKind || "—"}</td>
                             <td className="py-2 pr-2">{row.gsm || "—"}</td>
                             <td className="py-2 pr-2">{row.fabricSize ?? "—"}</td>
                             <td className="py-2 pr-2">{row.totalMtr?.toLocaleString() ?? "—"}</td>

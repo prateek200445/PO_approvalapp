@@ -19,6 +19,30 @@ export type IntegratedFabricRequirement = {
   fabricSize: number | null;
   totalMtr: number | null;
   totalKg: number | null;
+  category?: string;
+  planningKind?: string;
+  isLoomEligible?: boolean;
+};
+
+export type IntegratedBomComponent = {
+  heading: string;
+  category: string;
+  planningKind: string;
+  isLoomEligible: boolean;
+  gsm: string;
+  fabricSize: number | null;
+  totalMtr: number | null;
+  totalKg: number | null;
+  targetDate: string | null;
+  supplyCompanyName: string | null;
+  dueDate: string | null;
+  isInterUnit: boolean;
+  transferBufferDays: number;
+  readiness: string;
+  detail: string | null;
+  materialStatus: string | null;
+  indentNo: string | null;
+  receivedQty: number;
 };
 
 export type IntegratedLoomAllocation = {
@@ -71,6 +95,7 @@ export type IntegratedOrderTimeline = {
   loomAllocations: IntegratedLoomAllocation[];
   fabricRequirements: IntegratedFabricRequirement[];
   fibcPlanLines: IntegratedFibcPlanLine[];
+  bomComponents: IntegratedBomComponent[];
   warnings: string[];
 };
 
@@ -144,6 +169,7 @@ export function normalizeIntegratedOrderTimeline(data: Record<string, unknown>):
   const loomAllocations = (data.loomAllocations ?? data.LoomAllocations ?? []) as Array<Record<string, unknown>>;
   const fabricRequirements = (data.fabricRequirements ?? data.FabricRequirements ?? []) as Array<Record<string, unknown>>;
   const fibcPlanLines = (data.fibcPlanLines ?? data.FibcPlanLines ?? []) as Array<Record<string, unknown>>;
+  const bomComponents = (data.bomComponents ?? data.BomComponents ?? []) as Array<Record<string, unknown>>;
 
   return {
     orderNo: strField(data, "orderNo", "OrderNo"),
@@ -197,6 +223,29 @@ export function normalizeIntegratedOrderTimeline(data: Record<string, unknown>):
       fabricSize: optNum(f, "fabricSize", "FabricSize"),
       totalMtr: optNum(f, "totalMtr", "TotalMtr"),
       totalKg: optNum(f, "totalKg", "TotalKg"),
+      category: optStr(f, "category", "Category") ?? undefined,
+      planningKind: optStr(f, "planningKind", "PlanningKind") ?? undefined,
+      isLoomEligible: boolField(f, "isLoomEligible", "IsLoomEligible"),
+    })),
+    bomComponents: bomComponents.map((c) => ({
+      heading: strField(c, "heading", "Heading"),
+      category: strField(c, "category", "Category") || "Other",
+      planningKind: strField(c, "planningKind", "PlanningKind") || "Other",
+      isLoomEligible: boolField(c, "isLoomEligible", "IsLoomEligible"),
+      gsm: strField(c, "gsm", "Gsm"),
+      fabricSize: optNum(c, "fabricSize", "FabricSize"),
+      totalMtr: optNum(c, "totalMtr", "TotalMtr"),
+      totalKg: optNum(c, "totalKg", "TotalKg"),
+      targetDate: optDate(c, "targetDate", "TargetDate"),
+      supplyCompanyName: optStr(c, "supplyCompanyName", "SupplyCompanyName"),
+      dueDate: optDate(c, "dueDate", "DueDate"),
+      isInterUnit: boolField(c, "isInterUnit", "IsInterUnit"),
+      transferBufferDays: numField(c, "transferBufferDays", "TransferBufferDays"),
+      readiness: strField(c, "readiness", "Readiness") || "Unplanned",
+      detail: optStr(c, "detail", "Detail"),
+      materialStatus: optStr(c, "materialStatus", "MaterialStatus"),
+      indentNo: optStr(c, "indentNo", "IndentNo"),
+      receivedQty: numField(c, "receivedQty", "ReceivedQty"),
     })),
     fibcPlanLines: fibcPlanLines.map((l) => ({
       companyName: strField(l, "companyName", "CompanyName"),
@@ -211,5 +260,56 @@ export function normalizeIntegratedOrderTimeline(data: Record<string, unknown>):
       shift: strField(l, "shift", "Shift"),
       qty: numField(l, "qty", "Qty"),
     })),
+  };
+}
+
+export type FullOrderPlan = {
+  success: boolean;
+  readyToConfirm: boolean;
+  saved: boolean;
+  message: string;
+  orderNo: string;
+  dispatchDate: string | null;
+  fibcStartDate: string | null;
+  fibcEndDate: string | null;
+  fabricRequirementDate: string | null;
+  loomEndDate: string | null;
+  fabricAtFibcDate: string | null;
+  sequenceOk: boolean;
+  blockers: string[];
+  warnings: string[];
+  loomRowsInserted: number;
+  fibcRowsInserted: number;
+  loomFullyAllotted: number;
+  loomEligible: number;
+  fibcSlots: number;
+};
+
+export function normalizeFullOrderPlan(data: Record<string, unknown>): FullOrderPlan {
+  const loom = (data.loom ?? data.Loom ?? {}) as Record<string, unknown>;
+  const fibc = (data.fibc ?? data.Fibc ?? {}) as Record<string, unknown>;
+  const blockers = (data.blockers ?? data.Blockers ?? []) as unknown;
+  const warnings = (data.warnings ?? data.Warnings ?? []) as unknown;
+  const slots = (fibc.proposedSlots ?? fibc.ProposedSlots ?? []) as unknown[];
+  return {
+    success: Boolean(data.success ?? data.Success),
+    readyToConfirm: Boolean(data.readyToConfirm ?? data.ReadyToConfirm),
+    saved: Boolean(data.saved ?? data.Saved),
+    message: strField(data, "message", "Message"),
+    orderNo: strField(data, "orderNo", "OrderNo"),
+    dispatchDate: optDate(data, "dispatchDate", "DispatchDate"),
+    fibcStartDate: optDate(data, "fibcStartDate", "FibcStartDate"),
+    fibcEndDate: optDate(data, "fibcEndDate", "FibcEndDate"),
+    fabricRequirementDate: optDate(data, "fabricRequirementDate", "FabricRequirementDate"),
+    loomEndDate: optDate(data, "loomEndDate", "LoomEndDate"),
+    fabricAtFibcDate: optDate(data, "fabricAtFibcDate", "FabricAtFibcDate"),
+    sequenceOk: boolField(data, "sequenceOk", "SequenceOk"),
+    blockers: Array.isArray(blockers) ? blockers.map(String) : [],
+    warnings: Array.isArray(warnings) ? warnings.map(String) : [],
+    loomRowsInserted: numField(data, "loomRowsInserted", "LoomRowsInserted"),
+    fibcRowsInserted: numField(data, "fibcRowsInserted", "FibcRowsInserted"),
+    loomFullyAllotted: numField(loom, "fullyAllottedCount", "FullyAllottedCount"),
+    loomEligible: numField(loom, "loomEligibleCount", "LoomEligibleCount"),
+    fibcSlots: Array.isArray(slots) ? slots.length : 0,
   };
 }

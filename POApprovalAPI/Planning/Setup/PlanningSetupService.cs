@@ -109,4 +109,7 @@ public sealed class PlanningSetupService
 
     public Task<bool> DeleteOrderRouteAsync(string orderNo, CancellationToken ct = default) =>
         _repository.DeleteOrderRouteAsync(orderNo, ct);
+
+    public Task SaveComponentRoutesAsync(SavePlanningOrderComponentRoutesRequest request, CancellationToken ct = default) =>
+        _repository.SaveComponentRoutesAsync(request, ct);
 }

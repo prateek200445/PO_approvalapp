@@ -190,6 +190,9 @@ export type FibcFabricRequirement = {
   fabricSize: number | null;
   totalMtr: number | null;
   totalKg: number | null;
+  category?: string;
+  planningKind?: string;
+  isLoomEligible?: boolean;
 };
 
 export type FibcOrderPlanDetail = {

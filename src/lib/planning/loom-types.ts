@@ -64,6 +64,9 @@ export type LoomFabricRequirement = {
   fabricSize: number | null;
   totalMtr: number | null;
   totalKg: number | null;
+  category: string;
+  planningKind: string;
+  isLoomEligible: boolean;
 };
 
 export type LoomOrderAllocationLine = {
@@ -100,6 +103,8 @@ export type LoomOrderContext = {
 export type LoomOrderAllotmentContext = LoomOrderContext & {
   fabricRequirementDate: string | null;
   fabricLines: LoomFabricRequirement[];
+  loomEligibleLines: LoomFabricRequirement[];
+  accessoryLines: LoomFabricRequirement[];
 };
 
 export type LoomAllotmentRequest = {
@@ -130,6 +135,7 @@ export type LoomProposedSegment = {
   formulaId: number | null;
   reqGsm: number;
   size: number;
+  heading?: string | null;
 };
 
 export type LoomOrderShiftDisplacement = {
@@ -149,6 +155,7 @@ export type LoomAllotmentResult = {
   fullyAllotted: boolean;
   message: string;
   orderNo: string;
+  heading?: string | null;
   reqGsm: number;
   size: number;
   requiredMeters: number;
@@ -168,6 +175,19 @@ export type LoomAllotmentConfirmResult = LoomAllotmentResult & {
   rowsInserted: number;
   rowsDeleted: number;
   ordersShifted: number;
+};
+
+export type LoomComponentBatchResult = {
+  success: boolean;
+  message: string;
+  orderNo: string;
+  loomEligibleCount: number;
+  fullyAllottedCount: number;
+  warnings: string[];
+  components: LoomAllotmentResult[];
+  savedCount?: number;
+  rowsInserted?: number;
+  confirmed?: boolean;
 };
 
 export type LoomProductionMeter = {
@@ -352,16 +372,24 @@ function mapFabricLine(data: Record<string, unknown>): LoomFabricRequirement {
     fabricSize: optNum(data, "fabricSize", "FabricSize"),
     totalMtr: optNum(data, "totalMtr", "TotalMtr"),
     totalKg: optNum(data, "totalKg", "TotalKg"),
+    category: strField(data, "category", "Category") || "Other",
+    planningKind: strField(data, "planningKind", "PlanningKind") || "Other",
+    isLoomEligible: Boolean(data.isLoomEligible ?? data.IsLoomEligible),
   };
 }
 
 export function normalizeLoomAllotmentContext(data: Record<string, unknown>): LoomOrderAllotmentContext {
   const fabricLines = (data.fabricLines ?? data.FabricLines ?? []) as Array<Record<string, unknown>>;
+  const loomEligible = (data.loomEligibleLines ?? data.LoomEligibleLines ?? []) as Array<Record<string, unknown>>;
+  const accessories = (data.accessoryLines ?? data.AccessoryLines ?? []) as Array<Record<string, unknown>>;
   const base = normalizeLoomOrderContext(data);
+  const mappedLines = fabricLines.map(mapFabricLine);
   return {
     ...base,
     fabricRequirementDate: optDate(data, "fabricRequirementDate", "FabricRequirementDate"),
-    fabricLines: fabricLines.map(mapFabricLine),
+    fabricLines: mappedLines,
+    loomEligibleLines: loomEligible.length > 0 ? loomEligible.map(mapFabricLine) : mappedLines.filter((l) => l.isLoomEligible),
+    accessoryLines: accessories.length > 0 ? accessories.map(mapFabricLine) : mappedLines.filter((l) => l.planningKind === "Accessory"),
   };
 }
 
@@ -373,6 +401,7 @@ export function normalizeLoomAllotmentResult(data: Record<string, unknown>): Loo
     fullyAllotted: Boolean(data.fullyAllotted ?? data.FullyAllotted),
     message: strField(data, "message", "Message"),
     orderNo: strField(data, "orderNo", "OrderNo"),
+    heading: optStr(data, "heading", "Heading"),
     reqGsm: numField(data, "reqGsm", "ReqGsm"),
     size: numField(data, "size", "Size"),
     requiredMeters: numField(data, "requiredMeters", "RequiredMeters"),
@@ -397,6 +426,7 @@ export function normalizeLoomAllotmentResult(data: Record<string, unknown>): Loo
       formulaId: optNum(s, "formulaId", "FormulaId"),
       reqGsm: numField(s, "reqGsm", "ReqGsm"),
       size: numField(s, "size", "Size"),
+      heading: optStr(s, "heading", "Heading"),
     })),
     displacements: displacements.map((d) => ({
       allocationId: optNum(d, "allocationId", "AllocationId"),
@@ -420,5 +450,22 @@ export function normalizeLoomAllotmentConfirmResult(data: Record<string, unknown
     rowsInserted: numField(data, "rowsInserted", "RowsInserted"),
     rowsDeleted: numField(data, "rowsDeleted", "RowsDeleted"),
     ordersShifted: numField(data, "ordersShifted", "OrdersShifted"),
+  };
+}
+
+export function normalizeLoomComponentBatchResult(data: Record<string, unknown>): LoomComponentBatchResult {
+  const components = (data.components ?? data.Components ?? []) as Array<Record<string, unknown>>;
+  const warnings = (data.warnings ?? data.Warnings ?? []) as unknown;
+  return {
+    success: Boolean(data.success ?? data.Success),
+    message: strField(data, "message", "Message"),
+    orderNo: strField(data, "orderNo", "OrderNo"),
+    loomEligibleCount: numField(data, "loomEligibleCount", "LoomEligibleCount"),
+    fullyAllottedCount: numField(data, "fullyAllottedCount", "FullyAllottedCount"),
+    warnings: Array.isArray(warnings) ? warnings.map(String) : [],
+    components: components.map(normalizeLoomAllotmentResult),
+    savedCount: numField(data, "savedCount", "SavedCount"),
+    rowsInserted: numField(data, "rowsInserted", "RowsInserted"),
+    confirmed: Boolean(data.confirmed ?? data.Confirmed),
   };
 }

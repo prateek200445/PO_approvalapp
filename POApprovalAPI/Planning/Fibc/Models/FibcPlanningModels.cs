@@ -91,6 +91,9 @@ public sealed class FibcFabricRequirementDto
     public double? FabricSize { get; set; }
     public double? TotalMtr { get; set; }
     public double? TotalKg { get; set; }
+    public string Category { get; set; } = "Other";
+    public string PlanningKind { get; set; } = "Other";
+    public bool IsLoomEligible { get; set; }
 }
 
 public sealed class FibcOrderPlanDetailDto

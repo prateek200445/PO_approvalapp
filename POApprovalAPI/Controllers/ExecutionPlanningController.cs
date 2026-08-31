@@ -50,6 +50,22 @@ public class ExecutionPlanningController : ControllerBase
         }
     }
 
+    [HttpGet("orders/accessories")]
+    public async Task<IActionResult> GetAccessoryMaterials([FromQuery] string orderNo, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(orderNo))
+                return BadRequest(new { message = "orderNo query parameter is required." });
+
+            return Ok(await _execution.GetAccessoryMaterialsAsync(orderNo, ct));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
     [HttpGet("board")]
     public async Task<IActionResult> GetFactoryBoard(
         [FromQuery] string company,
