@@ -24,6 +24,7 @@ import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summa
 import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
+import { Route as AppExportCurrencyAuditRouteImport } from './routes/_app/export-currency-audit'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppDailyProductionRouteImport } from './routes/_app/daily-production'
@@ -113,6 +114,11 @@ const AppIndentsRoute = AppIndentsRouteImport.update({
 const AppHistoryRoute = AppHistoryRouteImport.update({
   id: '/history',
   path: '/history',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppExportCurrencyAuditRoute = AppExportCurrencyAuditRouteImport.update({
+  id: '/export-currency-audit',
+  path: '/export-currency-audit',
   getParentRoute: () => AppRoute,
 } as any)
 const AppExportBillOverdueRoute = AppExportBillOverdueRouteImport.update({
@@ -206,6 +212,7 @@ export interface FileRoutesByFullPath {
   '/daily-production': typeof AppDailyProductionRoute
   '/dashboard': typeof AppDashboardRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
+  '/export-currency-audit': typeof AppExportCurrencyAuditRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/intercompany': typeof AppIntercompanyRouteWithChildren
@@ -237,6 +244,7 @@ export interface FileRoutesByTo {
   '/daily-production': typeof AppDailyProductionRoute
   '/dashboard': typeof AppDashboardRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
+  '/export-currency-audit': typeof AppExportCurrencyAuditRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/intercompany': typeof AppIntercompanyRouteWithChildren
@@ -271,6 +279,7 @@ export interface FileRoutesById {
   '/_app/daily-production': typeof AppDailyProductionRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
+  '/_app/export-currency-audit': typeof AppExportCurrencyAuditRoute
   '/_app/history': typeof AppHistoryRoute
   '/_app/indents': typeof AppIndentsRoute
   '/_app/intercompany': typeof AppIntercompanyRouteWithChildren
@@ -305,6 +314,7 @@ export interface FileRouteTypes {
     | '/daily-production'
     | '/dashboard'
     | '/export-bill-overdue'
+    | '/export-currency-audit'
     | '/history'
     | '/indents'
     | '/intercompany'
@@ -336,6 +346,7 @@ export interface FileRouteTypes {
     | '/daily-production'
     | '/dashboard'
     | '/export-bill-overdue'
+    | '/export-currency-audit'
     | '/history'
     | '/indents'
     | '/intercompany'
@@ -369,6 +380,7 @@ export interface FileRouteTypes {
     | '/_app/daily-production'
     | '/_app/dashboard'
     | '/_app/export-bill-overdue'
+    | '/_app/export-currency-audit'
     | '/_app/history'
     | '/_app/indents'
     | '/_app/intercompany'
@@ -504,6 +516,13 @@ declare module '@tanstack/react-router' {
       path: '/history'
       fullPath: '/history'
       preLoaderRoute: typeof AppHistoryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/export-currency-audit': {
+      id: '/_app/export-currency-audit'
+      path: '/export-currency-audit'
+      fullPath: '/export-currency-audit'
+      preLoaderRoute: typeof AppExportCurrencyAuditRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/export-bill-overdue': {
@@ -657,6 +676,7 @@ interface AppRouteChildren {
   AppDailyProductionRoute: typeof AppDailyProductionRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
+  AppExportCurrencyAuditRoute: typeof AppExportCurrencyAuditRoute
   AppHistoryRoute: typeof AppHistoryRoute
   AppIndentsRoute: typeof AppIndentsRoute
   AppIntercompanyRoute: typeof AppIntercompanyRouteWithChildren
@@ -684,6 +704,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDailyProductionRoute: AppDailyProductionRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
+  AppExportCurrencyAuditRoute: AppExportCurrencyAuditRoute,
   AppHistoryRoute: AppHistoryRoute,
   AppIndentsRoute: AppIndentsRoute,
   AppIntercompanyRoute: AppIntercompanyRouteWithChildren,

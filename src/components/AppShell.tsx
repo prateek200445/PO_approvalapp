@@ -11,6 +11,7 @@ import {
   BookOpen,
   BarChart3,
   FileWarning,
+  BadgeAlert,
   Layers,
   Factory,
   PanelLeftClose,
@@ -37,6 +38,7 @@ type AppPath =
   | "/sales-dashboard"
   | "/ledgers"
   | "/export-bill-overdue"
+  | "/export-currency-audit"
   | "/daily-production"
   | "/bom"
   | "/profile"
@@ -191,6 +193,12 @@ export function AppShell() {
       icon: FileWarning,
       label: "Export Bill Overdue",
       match: (p) => p.startsWith("/export-bill-overdue"),
+    },
+    {
+      to: "/export-currency-audit",
+      icon: BadgeAlert,
+      label: "Export Currency Audit",
+      match: (p) => p.startsWith("/export-currency-audit"),
     },
     {
       to: "/daily-production",

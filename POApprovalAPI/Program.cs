@@ -72,6 +72,7 @@ builder.Services.AddScoped<DmsAttachmentService>();
 builder.Services.AddScoped<DmsRemoteFileService>();
 builder.Services.AddScoped<SalesDashboardService>();
 builder.Services.AddScoped<ExportBillOverdueService>();
+builder.Services.AddScoped<ExportCurrencyAuditService>();
 builder.Services.AddScoped<ExcelLedgerService>();
 builder.Services.AddScoped<BillWiseTransactionService>();
 builder.Services.AddScoped<LedgerSummaryService>();
