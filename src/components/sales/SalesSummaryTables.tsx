@@ -142,7 +142,7 @@ export function SalesSummaryTables({
       <div className={cn("grid grid-cols-1 gap-3 sm:gap-4", isPurchase ? "lg:grid-cols-1" : "lg:grid-cols-3")}>
         {!isPurchase && (
           <RankingTable
-            title="Top 5 Export Customers"
+            title="Top 10 Export Customers"
             subtitle="Excl. India and intercompany"
             nameHeader="Customer"
             items={exportCustomers}
@@ -153,7 +153,7 @@ export function SalesSummaryTables({
         {!isPurchase && (
           <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-soft">
             <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
-              <h2 className="text-sm font-semibold">Top 5 Countries by Sales</h2>
+              <h2 className="text-sm font-semibold">Top 10 Countries by Sales</h2>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
                 {countryPeriodLabel
                   ? `Excl. India and intercompany · ${countryPeriodLabel}`
@@ -225,7 +225,7 @@ export function SalesSummaryTables({
         )}
 
         <RankingTable
-          title="Top 5 Suppliers"
+          title="Top 10 Suppliers"
           subtitle="Excl. intercompany"
           nameHeader="Supplier"
           items={suppliers}

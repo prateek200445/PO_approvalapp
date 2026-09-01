@@ -205,9 +205,9 @@ public class SalesDashboardService
         {
             Totals = totals,
             Trend = trend,
-            ByCountry = AggregateCountries(universe.Countries, slice, 5),
+            ByCountry = AggregateCountries(universe.Countries, slice, 10),
             CountryPeriodLabel = universe.CountryPeriodLabel,
-            ExportCustomers = AggregateParties(universe.ExportCustomers, slice, 5),
+            ExportCustomers = AggregateParties(universe.ExportCustomers, slice, 10),
         };
     }
 
@@ -461,11 +461,11 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
         string company,
         DateTime dateFrom,
         DateTime dateTo,
-        int top = 5,
+        int top = 10,
         bool refresh = false)
     {
         if (top <= 0)
-            top = 5;
+            top = 10;
         top = Math.Clamp(top, 1, 100);
         var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh);
         var slice = await ResolveSliceCompaniesAsync(company);
@@ -1676,7 +1676,7 @@ WHERE {companyFilter}
             .Where(g => g.Key.Length > 0)
             .Select(g => new { Name = g.Key, Amount = g.Sum(x => x.Amount) })
             .OrderByDescending(g => g.Amount)
-            .Take(5)
+            .Take(10)
             .Select((g, i) => new TopCustomerDto
             {
                 Rank = i + 1,

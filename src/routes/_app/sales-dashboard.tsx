@@ -130,9 +130,10 @@ function SalesDashboardPage() {
         company: companyFilter,
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
+        top: 10,
         refresh: bypassCacheRef.current,
       }),
-    enabled: isPurchase,
+    enabled: true,
     ...queryOptions,
   });
 
@@ -247,15 +248,11 @@ function SalesDashboardPage() {
 
       <SalesSummaryTables
         exportCustomers={tablesQuery.data?.exportCustomers ?? []}
-        suppliers={isPurchase ? (suppliersQuery.data ?? []) : []}
+        suppliers={suppliersQuery.data ?? []}
         byCountry={tablesQuery.data?.byCountry ?? []}
         countryPeriodLabel={tablesQuery.data?.countryPeriodLabel}
         isPurchase={isPurchase}
-        suppliersLoading={
-          isPurchase
-            ? suppliersQuery.isFetching && !suppliersQuery.data
-            : tablesQuery.isFetching && !tablesQuery.data
-        }
+        suppliersLoading={suppliersQuery.isFetching && !suppliersQuery.data}
         totalSales={kpis?.totalSales ?? 0}
       />
     </div>

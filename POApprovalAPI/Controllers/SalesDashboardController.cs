@@ -223,7 +223,7 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] string company = "All Companies",
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
-        [FromQuery] int top = 5,
+        [FromQuery] int top = 10,
         [FromQuery] bool refresh = false)
     {
         try
@@ -255,14 +255,14 @@ public class SalesDashboardController : ControllerBase
     }
 
     /// <summary>
-    /// Top 5 export customers (non-India), excl. intercompany.
+    /// Top 10 export customers (non-India), excl. intercompany.
     /// </summary>
     [HttpGet("top-export-customers")]
     public async Task<IActionResult> GetTopExportCustomers(
         [FromQuery] string company = "All Companies",
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
-        [FromQuery] int top = 5,
+        [FromQuery] int top = 10,
         [FromQuery] bool refresh = false)
     {
         try
@@ -288,14 +288,14 @@ public class SalesDashboardController : ControllerBase
     }
 
     /// <summary>
-    /// Top 5 suppliers from vw_Purchase_EBIDTA, excl. InterGroup='Intergroup'.
+    /// Top 10 suppliers from vw_Purchase_EBIDTA, excl. InterGroup='Intergroup'.
     /// </summary>
     [HttpGet("top-suppliers")]
     public async Task<IActionResult> GetTopSuppliers(
         [FromQuery] string company = "All Companies",
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
-        [FromQuery] int top = 5,
+        [FromQuery] int top = 10,
         [FromQuery] bool refresh = false)
     {
         try

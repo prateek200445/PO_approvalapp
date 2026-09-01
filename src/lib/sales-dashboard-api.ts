@@ -195,16 +195,23 @@ export async function getSalesTables(filters: {
   countryPeriodLabel: string;
   exportCustomers: RankedPartyItem[];
 }> {
-  const params = new URLSearchParams({
+  const countryParams = new URLSearchParams({
     company: filters.company,
     dateFrom: filters.dateFrom,
     dateTo: filters.dateTo,
-    top: "5",
+    top: "10",
+    refresh: filters.refresh ? "true" : "false",
+  });
+  const customerParams = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    top: "10",
     refresh: filters.refresh ? "true" : "false",
   });
   const [countryRes, customersRes] = await Promise.all([
-    fetch(getSalesApiUrl(`/api/SalesDashboard/by-country?${params}`)),
-    fetch(getSalesApiUrl(`/api/SalesDashboard/top-export-customers?${params}`)),
+    fetch(getSalesApiUrl(`/api/SalesDashboard/by-country?${countryParams}`)),
+    fetch(getSalesApiUrl(`/api/SalesDashboard/top-export-customers?${customerParams}`)),
   ]);
   const countryPayload = (await countryRes.json()) as Record<string, unknown> & { message?: string };
   const customersPayload = (await customersRes.json()) as Record<string, unknown> & { message?: string };
@@ -317,7 +324,7 @@ export async function getTopSuppliers(filters: {
     company: filters.company,
     dateFrom: filters.dateFrom,
     dateTo: filters.dateTo,
-    top: String(filters.top ?? 5),
+    top: String(filters.top ?? 10),
     refresh: filters.refresh ? "true" : "false",
   });
   const response = await fetch(
