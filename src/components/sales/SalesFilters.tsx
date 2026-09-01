@@ -57,7 +57,7 @@ export function SalesFilters({
     >
       <div className="flex flex-col gap-3">
         <div className="min-w-0 space-y-1.5">
-          <Label htmlFor="sales-company">Company group</Label>
+          <Label htmlFor="sales-company">Company</Label>
           <select
             id="sales-company"
             value={filters.company || "All Companies"}
@@ -74,13 +74,28 @@ export function SalesFilters({
             <option value="All Companies">
               {companiesLoading ? "Loading…" : "All Companies"}
             </option>
-            {companyOptions
-              .filter((o) => o.kind === "group")
-              .map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
+            {companyOptions.some((o) => o.kind === "group") ? (
+              <optgroup label="Groups">
+                {companyOptions
+                  .filter((o) => o.kind === "group")
+                  .map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+              </optgroup>
+            ) : null}
+            {companyOptions.some((o) => o.kind === "company") ? (
+              <optgroup label="Companies">
+                {companyOptions
+                  .filter((o) => o.kind === "company")
+                  .map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+              </optgroup>
+            ) : null}
           </select>
         </div>
 

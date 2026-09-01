@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Data;
+using System.Text.RegularExpressions;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
@@ -109,6 +110,7 @@ public class SalesDashboardService
     private async Task<List<SalesCompanyOptionDto>> BuildCompanyOptionsCoreAsync()
     {
         var factories = await GetFactoryRowsAsync();
+        var salesNames = await GetSalesCompanyNamesAsync();
         var options = new List<SalesCompanyOptionDto>();
 
         var groups = factories
@@ -128,12 +130,25 @@ public class SalesDashboardService
             });
         }
 
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var factory in factories.OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
         {
+            if (!seen.Add(factory.Name)) continue;
             options.Add(new SalesCompanyOptionDto
             {
                 Value = factory.Name,
                 Label = factory.Name,
+                Kind = "company",
+            });
+        }
+
+        foreach (var name in salesNames.OrderBy(n => n, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!seen.Add(name)) continue;
+            options.Add(new SalesCompanyOptionDto
+            {
+                Value = name,
+                Label = name,
                 Kind = "company",
             });
         }
@@ -231,7 +246,7 @@ public class SalesDashboardService
         DateTime dateTo,
         bool refresh)
     {
-        var key = $"sales-geo-v1:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        var key = $"sales-geo-v2-fibco:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
         return CachedAsync(key, refresh, async () =>
         {
             var invYears = GetInvYearsOverlapping(dateFrom, dateTo).ToList();
@@ -520,12 +535,15 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
         END";
         var icFilter = icCol == null
             ? ""
-            : $"AND {InterCompanyNotYes($"cm.{Bracket(icCol)}")}";
+            : $"AND {OrFibcoParty($"pv.{partySql}", InterCompanyNotYes($"cm.{Bracket(icCol)}"))}";
         var sisterFilter = $@"
-  AND NOT EXISTS (
-        SELECT 1
-        FROM dbo.FactoryInfo fi WITH (NOLOCK)
-        WHERE fi.Name = pv.{partySql}
+  AND (
+        {PartyIsFibco($"pv.{partySql}")}
+        OR NOT EXISTS (
+            SELECT 1
+            FROM dbo.FactoryInfo fi WITH (NOLOCK)
+            WHERE fi.Name = pv.{partySql}
+        )
   )";
 
         var sql = $@"
@@ -541,7 +559,7 @@ WHERE pv.{dateSql} BETWEEN @DateFrom AND @DateTo
   AND pv.{partySql} IS NOT NULL
   AND pv.{partySql} <> N''
   AND LTRIM(RTRIM(ISNULL(cm.{countrySql}, N''))) <> N''
-  AND {ExportCountryPredicate($"cm.{countrySql}")}
+  AND {OrFibcoParty($"pv.{partySql}", ExportCountryPredicate($"cm.{countrySql}"))}
   {icFilter}
   {sisterFilter}
 GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), LTRIM(RTRIM(pv.{partySql}))";
@@ -592,7 +610,7 @@ GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), LTRIM(RTRIM(pv.{partySql}))
             END";
             extraIc += $@"
   AND LTRIM(RTRIM(ISNULL(v.{Bracket(ebidtaCountry)}, N''))) <> N''
-  AND {ExportCountryPredicate("v." + Bracket(ebidtaCountry))}";
+  AND {OrFibcoParty($"v.{partySql}", ExportCountryPredicate("v." + Bracket(ebidtaCountry)))}";
         }
         else if (ledgerCountry != null)
         {
@@ -606,8 +624,8 @@ GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), LTRIM(RTRIM(pv.{partySql}))
 INNER JOIN CommonLedgerMaster m WITH (NOLOCK)
     ON m.LedgerName = v.{partySql}";
             extraIc = icCol == null
-                ? $@"AND {ExportCountryPredicate($"m.{Bracket(ledgerCountry)}")}"
-                : $"AND {InterCompanyNotYes($"m.{Bracket(icCol)}")} AND {ExportCountryPredicate($"m.{Bracket(ledgerCountry)}")}";
+                ? $@"AND {OrFibcoParty($"v.{partySql}", ExportCountryPredicate($"m.{Bracket(ledgerCountry)}"))}"
+                : $"AND {OrFibcoParty($"v.{partySql}", InterCompanyNotYes($"m.{Bracket(icCol)}"))} AND {OrFibcoParty($"v.{partySql}", ExportCountryPredicate($"m.{Bracket(ledgerCountry)}"))}";
         }
         else
         {
@@ -615,9 +633,12 @@ INNER JOIN CommonLedgerMaster m WITH (NOLOCK)
         }
 
         var sisterFilter = $@"
-  AND NOT EXISTS (
-        SELECT 1 FROM dbo.FactoryInfo fi WITH (NOLOCK)
-        WHERE fi.Name = v.{partySql}
+  AND (
+        {PartyIsFibco($"v.{partySql}")}
+        OR NOT EXISTS (
+            SELECT 1 FROM dbo.FactoryInfo fi WITH (NOLOCK)
+            WHERE fi.Name = v.{partySql}
+        )
   )";
 
         var sql = $@"
@@ -629,7 +650,7 @@ SELECT
 FROM dbo.vw_Sales_EBIDTA v WITH (NOLOCK)
 {joinLedger}
 WHERE v.invdate BETWEEN @DateFrom AND @DateTo
-  AND v.InterGroup <> N'Intergroup'
+  AND (v.InterGroup <> N'Intergroup' OR {PartyIsFibco($"v.{partySql}")})
   AND v.{partySql} IS NOT NULL
   AND v.{partySql} <> N''
   {extraIc}
@@ -820,7 +841,16 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), v.{partySql}";
             return rows;
         if (companies.Count == 0)
             return Array.Empty<T>();
-        return rows.Where(r => companies.Contains(companyOf(r)));
+        return rows.Where(r =>
+        {
+            var name = companyOf(r) ?? "";
+            if (companies.Contains(name)) return true;
+            foreach (var selected in companies)
+            {
+                if (CompanyKeysMatch(selected, name)) return true;
+            }
+            return false;
+        });
     }
 
     private static SalesTotalsDto AggregateTotals(
@@ -1802,15 +1832,17 @@ ORDER BY fi.Name")).ToList();
     private async Task<List<string>> ResolveSelectedCompaniesAsync(string company)
     {
         var factories = await GetFactoryRowsAsync();
-        var allNames = factories
+        var salesNames = await GetSalesCompanyNamesAsync();
+        var universe = factories
             .Select(f => f.Name)
+            .Concat(salesNames)
             .Where(n => n.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         var tokens = SplitCompanyTokens(company);
         if (tokens.Count == 0 || tokens.Any(IsAllToken))
-            return allNames;
+            return universe;
 
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var token in tokens)
@@ -1820,14 +1852,52 @@ ORDER BY fi.Name")).ToList();
                 var group = token[2..].Trim();
                 foreach (var factory in factories.Where(f => f.GroupName.Equals(group, StringComparison.OrdinalIgnoreCase)))
                     names.Add(factory.Name);
+                foreach (var name in universe.Where(n => CompanyKeysMatch(n, group)))
+                    names.Add(name);
             }
             else
             {
                 names.Add(token);
+                foreach (var name in universe.Where(n => CompanyKeysMatch(n, token)))
+                    names.Add(name);
             }
         }
 
         return names.ToList();
+    }
+
+    private async Task<IReadOnlyList<string>> GetSalesCompanyNamesAsync()
+    {
+        if (_cache.TryGetValue("sales-ebidta-companies", out List<string>? cached) && cached != null)
+            return cached;
+
+        using var connection = _database.CreateConnection();
+        var rows = (await connection.QueryAsync<string>(
+            @"SELECT DISTINCT LTRIM(RTRIM(CompanyName))
+              FROM dbo.vw_Sales_EBIDTA WITH (NOLOCK)
+              WHERE ISNULL(LTRIM(RTRIM(CompanyName)), N'') <> N''",
+            commandTimeout: QueryTimeoutSeconds)).ToList();
+        _cache.Set("sales-ebidta-companies", rows, MetaCacheTtl);
+        return rows;
+    }
+
+    private static string CompanyKey(string name)
+    {
+        var s = (name ?? "").Trim().ToLowerInvariant();
+        s = Regex.Replace(s, @"[^a-z0-9]+", " ");
+        s = Regex.Replace(s, @"\b(pvt|private|ltd|limited|llp|india)\b", " ");
+        return Regex.Replace(s, @"\s+", " ").Trim();
+    }
+
+    private static bool CompanyKeysMatch(string left, string right)
+    {
+        var a = CompanyKey(left);
+        var b = CompanyKey(right);
+        if (a.Length == 0 || b.Length == 0) return false;
+        if (a.Equals(b, StringComparison.Ordinal)) return true;
+        if (a.Length >= 4 && b.StartsWith(a + " ", StringComparison.Ordinal)) return true;
+        if (b.Length >= 4 && a.StartsWith(b + " ", StringComparison.Ordinal)) return true;
+        return false;
     }
 
     private static async Task<List<string>> GetGroupNamesForCompaniesAsync(
@@ -1997,6 +2067,12 @@ ORDER BY fi.Name")).ToList();
     }
 
     private static string Bracket(string column) => "[" + column.Replace("]", "]]") + "]";
+
+    private static string PartyIsFibco(string partyExpr) =>
+        $"LOWER(LTRIM(RTRIM(ISNULL({partyExpr}, N'')))) LIKE N'%fibco%'";
+
+    private static string OrFibcoParty(string partyExpr, string predicate) =>
+        $"(({predicate}) OR {PartyIsFibco(partyExpr)})";
 
     private static string InterCompanyNotYes(string icExpr) =>
         $@"LOWER(LTRIM(RTRIM(ISNULL({icExpr}, N'no')))) NOT IN (N'yes', N'y', N'true', N'1')";
