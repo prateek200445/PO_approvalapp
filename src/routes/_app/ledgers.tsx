@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeftRight, BookOpen, Building2, ChevronRight, LineChart } from "lucide-react";
+import { ArrowLeftRight, BookOpen, ChevronRight, LineChart } from "lucide-react";
 
 export const Route = createFileRoute("/_app/ledgers")({
   head: () => ({ meta: [{ title: "Ledgers — PO Portal" }] }),
@@ -12,7 +12,7 @@ function LedgersHubPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Ledgers</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          View company P&amp;L, ledger summaries, intercompany balances, or reconcile two Excel ledgers.
+          View company P&amp;L, ledger summaries, or reconcile two Excel ledgers.
         </p>
       </div>
 
@@ -34,12 +34,6 @@ function LedgersHubPage() {
           icon={BookOpen}
           title="Ledger Summary"
           description="Filter by company, ledger, and date range to view voucher-wise ledger balances from ERP."
-        />
-        <HubCard
-          to="/intercompany"
-          icon={Building2}
-          title="Intercompany"
-          description="Group-company outstanding, balance matrix, and a settlement prediction for plus/minus nets."
         />
         <HubCard
           to="/reconciliation"

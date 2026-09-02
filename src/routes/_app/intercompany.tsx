@@ -4,15 +4,19 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
   ArrowDown,
-  ArrowLeft,
   ArrowUp,
   Building2,
+  Download,
+  FileText,
   Inbox,
   Loader2,
   RefreshCw,
   Search,
 } from "lucide-react";
+import { toast } from "sonner";
 import {
+  downloadIntercompanyExcel,
+  downloadIntercompanyPdf,
   formatAsOn,
   formatCrore,
   formatInr,
@@ -283,6 +287,7 @@ function IntercompanyPage() {
   const [balanceSort, setBalanceSort] = useState<"asc" | "desc">("asc");
   const [selectedCompany, setSelectedCompany] = useState("");
   const [refreshToken, setRefreshToken] = useState(0);
+  const [exporting, setExporting] = useState<"excel" | "pdf" | null>(null);
   const bypassCacheRef = useRef(false);
 
   const query = useQuery({
@@ -331,16 +336,23 @@ function IntercompanyPage() {
     return ordered.sort((a, b) => (matrix.amounts[a] ?? 0) - (matrix.amounts[b] ?? 0));
   }, [matrix, counterparties]);
 
+  async function exportFile(kind: "excel" | "pdf") {
+    if (!report || exporting) return;
+    setExporting(kind);
+    try {
+      if (kind === "excel") await downloadIntercompanyExcel(asOf);
+      else await downloadIntercompanyPdf(asOf);
+      toast.success(kind === "excel" ? "Excel downloaded" : "PDF downloaded");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Download failed");
+    } finally {
+      setExporting(null);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div>
-        <Link
-          to="/ledgers"
-          className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Ledgers
-        </Link>
         <div className="mt-1 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -400,20 +412,46 @@ function IntercompanyPage() {
               className="h-9 bg-background"
             />
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-9 gap-1.5"
-            disabled={query.isFetching}
-            onClick={() => {
-              bypassCacheRef.current = true;
-              setRefreshToken((n) => n + 1);
-            }}
-          >
-            <RefreshCw className={cn("h-4 w-4", query.isFetching && "animate-spin")} />
-            Refresh
-          </Button>
+          <div className="flex flex-wrap items-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5"
+              disabled={query.isFetching}
+              onClick={() => {
+                bypassCacheRef.current = true;
+                setRefreshToken((n) => n + 1);
+              }}
+            >
+              <RefreshCw className={cn("h-4 w-4", query.isFetching && "animate-spin")} />
+              Refresh
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5"
+              disabled={!report || Boolean(exporting) || query.isFetching}
+              onClick={() => void exportFile("excel")}
+              aria-label="Download Excel"
+            >
+              {exporting === "excel" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Excel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 gap-1.5"
+              disabled={!report || Boolean(exporting) || query.isFetching}
+              onClick={() => void exportFile("pdf")}
+              aria-label="Download PDF"
+            >
+              {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              PDF
+            </Button>
+          </div>
         </div>
       </div>
 

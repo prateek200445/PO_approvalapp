@@ -13,6 +13,7 @@ import {
   FileWarning,
   Layers,
   Factory,
+  Building2,
   PanelLeftClose,
   PanelLeftOpen,
   Hammer,
@@ -35,6 +36,7 @@ type AppPath =
   | "/advance-payments"
   | "/indents"
   | "/sales-dashboard"
+  | "/intercompany"
   | "/ledgers"
   | "/export-bill-overdue"
   | "/daily-production"
@@ -176,6 +178,12 @@ export function AppShell() {
       match: (p) => p.startsWith("/sales-dashboard"),
     },
     {
+      to: "/intercompany",
+      icon: Building2,
+      label: "Intercompany",
+      match: (p) => p.startsWith("/intercompany"),
+    },
+    {
       to: "/ledgers",
       icon: BookOpen,
       label: "Ledgers",
@@ -183,7 +191,6 @@ export function AppShell() {
         p.startsWith("/ledgers") ||
         p.startsWith("/ledger-summary") ||
         p.startsWith("/reconciliation") ||
-        p.startsWith("/intercompany") ||
         p.startsWith("/pnl"),
     },
     {

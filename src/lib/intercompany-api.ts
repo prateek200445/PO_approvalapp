@@ -60,6 +60,53 @@ export async function getIntercompanyDashboard(asOf: string, refresh = false): P
   };
 }
 
+async function downloadIntercompanyFile(
+  path: string,
+  fallbackName: string,
+  failMessage: string,
+): Promise<string> {
+  const response = await fetch(getApiUrl(path));
+  if (!response.ok) {
+    let message = failMessage;
+    try {
+      const payload = (await response.json()) as { message?: string };
+      if (payload.message) message = payload.message;
+    } catch {
+      // keep default
+    }
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  const fileName =
+    response.headers.get("content-disposition")?.match(/filename="?([^"]+)"?/i)?.[1] || fallbackName;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  URL.revokeObjectURL(url);
+  return fileName;
+}
+
+export async function downloadIntercompanyExcel(asOf: string): Promise<string> {
+  const params = new URLSearchParams({ asOf });
+  return downloadIntercompanyFile(
+    `/api/Intercompany/excel?${params}`,
+    `intercompany-balances-${asOf}.xlsx`,
+    "Failed to download Excel",
+  );
+}
+
+export async function downloadIntercompanyPdf(asOf: string): Promise<string> {
+  const params = new URLSearchParams({ asOf });
+  return downloadIntercompanyFile(
+    `/api/Intercompany/pdf?${params}`,
+    `intercompany-balances-${asOf}.pdf`,
+    "Failed to download PDF",
+  );
+}
+
 export function formatInr(n: number): string {
   return new Intl.NumberFormat("en-IN", {
     minimumFractionDigits: 2,
