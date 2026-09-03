@@ -125,7 +125,7 @@ function ReconciliationPage() {
   const [ledgerB, setLedgerB] = useState("");
   const [dateFrom, setDateFrom] = useState(financialYearStart());
   const [dateTo, setDateTo] = useState(toInputDate(new Date()));
-  const [dateRangeField, setDateRangeField] = useState<DateRangeField>("voucher");
+  const [dateRangeField, setDateRangeField] = useState<DateRangeField>("bill");
   const [comparing, setComparing] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<ComparisonResult | null>(null);
@@ -902,8 +902,8 @@ function ReconciliationPage() {
                     <div className="mt-2 flex flex-wrap gap-2">
                       {(
                         [
-                          { value: "voucher", label: "Voucher Date" },
                           { value: "bill", label: "Bill Date" },
+                          { value: "voucher", label: "Voucher Date" },
                         ] as const
                       ).map((opt) => (
                         <button
@@ -2585,9 +2585,8 @@ function DetailSheet({
   const isBillGroup = pair.matchKind === "bill-group";
   const entriesA = pair.entriesA?.length ? pair.entriesA : pair.entryA ? [pair.entryA] : [];
   const entriesB = pair.entriesB?.length ? pair.entriesB : pair.entryB ? [pair.entryB] : [];
-  const hasBothSides = Boolean(pair.entryA && pair.entryB);
-  const displayEntriesA = hasBothSides ? entriesB : entriesA;
-  const displayEntriesB = hasBothSides ? entriesA : entriesB;
+  const displayEntriesA = entriesA;
+  const displayEntriesB = entriesB;
   const [selectedA, setSelectedA] = useState<number[]>([]);
   const [selectedB, setSelectedB] = useState<number[]>([]);
   const canManual = pair.status === "PotentialMatch" || pair.status === "AmountMismatch";
@@ -2595,21 +2594,12 @@ function DetailSheet({
   useEffect(() => {
     const bookA = pair.entriesA?.length ? pair.entriesA : pair.entryA ? [pair.entryA] : [];
     const bookB = pair.entriesB?.length ? pair.entriesB : pair.entryB ? [pair.entryB] : [];
-    const both = Boolean(pair.entryA && pair.entryB);
-    setSelectedA((both ? bookB : bookA).map((e) => e.rowIndex));
-    setSelectedB((both ? bookA : bookB).map((e) => e.rowIndex));
+    setSelectedA(bookA.map((e) => e.rowIndex));
+    setSelectedB(bookB.map((e) => e.rowIndex));
   }, [pair.id, pair.entriesA, pair.entriesB, pair.entryA, pair.entryB]);
 
-  const bookSelectedA = entriesA.filter((e) =>
-    (hasBothSides ? selectedB : selectedA).includes(e.rowIndex),
-  );
-  const bookSelectedB = entriesB.filter((e) =>
-    (hasBothSides ? selectedA : selectedB).includes(e.rowIndex),
-  );
-  const selectedTotalA = sumSignedAmount(bookSelectedA);
-  const selectedTotalB = sumSignedAmount(bookSelectedB);
-  const selectedTotalDisplayA = sumSignedAmount(displayEntriesA.filter((e) => selectedA.includes(e.rowIndex)));
-  const selectedTotalDisplayB = sumSignedAmount(displayEntriesB.filter((e) => selectedB.includes(e.rowIndex)));
+  const selectedTotalA = sumSignedAmount(entriesA.filter((e) => selectedA.includes(e.rowIndex)));
+  const selectedTotalB = sumSignedAmount(entriesB.filter((e) => selectedB.includes(e.rowIndex)));
   const diff = Math.abs(Math.abs(selectedTotalA) - Math.abs(selectedTotalB));
   const canConfirm =
     canManual && selectedA.length > 0 && selectedB.length > 0 && canManualMatchTotals(selectedTotalA, selectedTotalB);
@@ -2793,10 +2783,10 @@ function DetailSheet({
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm tabular-nums">
                 <span>
-                  {companyNameA} selected: <b>{formatSigned(selectedTotalDisplayA)}</b>
+                  {companyNameA} selected: <b>{formatSigned(selectedTotalA)}</b>
                 </span>
                 <span>
-                  {companyNameB} selected: <b>{formatSigned(selectedTotalDisplayB)}</b>
+                  {companyNameB} selected: <b>{formatSigned(selectedTotalB)}</b>
                 </span>
                 <span>
                   Diff:{" "}
@@ -2812,8 +2802,8 @@ function DetailSheet({
                   onClick={() =>
                     onManualMatch(
                       pair.id,
-                      bookSelectedA.map((e) => e.rowIndex),
-                      bookSelectedB.map((e) => e.rowIndex),
+                      selectedA,
+                      selectedB,
                     )
                   }
                   className="inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
@@ -2900,7 +2890,7 @@ function LineList({
               )}
               <div className="truncate font-medium">{e.particulars || "—"}</div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
-                {formatDate(e.date)}
+                {formatEntryDateLabels(e)}
                 {e.voucherNo ? ` · ${e.voucherNo}` : ""}
               </div>
             </div>
@@ -2930,23 +2920,18 @@ function pairListTitle(row: ComparisonPair) {
 function pairDisplayEntries(row: ComparisonPair, column: "A" | "B"): LedgerEntry[] {
   const entriesA = row.entriesA?.length ? row.entriesA : row.entryA ? [row.entryA] : [];
   const entriesB = row.entriesB?.length ? row.entriesB : row.entryB ? [row.entryB] : [];
-  const hasBoth = row.entryA && row.entryB;
-  if (column === "A") return hasBoth ? entriesB : entriesA;
-  return hasBoth ? entriesA : entriesB;
+  return column === "A" ? entriesA : entriesB;
 }
 
-/** Each column shows that company's ledger name + amount (swap book-side entries when both exist). */
+/** Company A column = Side A books; Company B column = Side B books. */
 function pairDisplayEntry(row: ComparisonPair, column: "A" | "B"): LedgerEntry | null | undefined {
-  const hasBoth = row.entryA && row.entryB;
-  if (column === "A") return hasBoth ? row.entryB : row.entryA;
-  return hasBoth ? row.entryA : row.entryB;
+  return column === "A" ? row.entryA : row.entryB;
 }
 
 function pairDisplayLineCount(row: ComparisonPair, column: "A" | "B"): number {
   if (row.matchKind !== "bill-group") return 0;
-  const hasBoth = row.entryA && row.entryB;
-  if (column === "A") return hasBoth ? row.entriesB?.length ?? 0 : row.entriesA?.length ?? 0;
-  return hasBoth ? row.entriesA?.length ?? 0 : row.entriesB?.length ?? 0;
+  if (column === "A") return row.entriesA?.length ?? (row.entryA ? 1 : 0);
+  return row.entriesB?.length ?? (row.entryB ? 1 : 0);
 }
 
 function pairSideLabel(row: ComparisonPair, side: "A" | "B") {
@@ -3040,6 +3025,15 @@ function formatDate(value?: string | null) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function formatEntryDateLabels(entry: LedgerEntry) {
+  const bill = formatDate(entry.billDate);
+  const voucher = formatDate(entry.date);
+  const parts: string[] = [];
+  if (bill !== "—") parts.push(`Bill ${bill}`);
+  if (voucher !== "—") parts.push(`Voucher ${voucher}`);
+  return parts.length ? parts.join(" · ") : "—";
 }
 
 function keepOrSuggest(current: string | null | undefined, headers: string[], suggested?: string | null) {
