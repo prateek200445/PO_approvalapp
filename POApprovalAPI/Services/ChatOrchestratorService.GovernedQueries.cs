@@ -40,6 +40,7 @@ public partial class ChatOrchestratorService
         if (TryBuildFibcBagProductionSql(message, out sql, out warning)) return true;
         if (TryBuildDepartmentWastageSql(message, out sql, out warning)) return true;
         if (TryBuildStitcherAttendanceSql(message, out sql, out warning)) return true;
+        if (TryBuildLoomRollsSql(message, out sql, out warning)) return true;
         if (TryBuildTapePlantEarlySql(message, out sql, out warning)) return true;
         if (TryBuildFactoryProductionEarlySql(message, out sql, out warning)) return true;
         if (TryBuildWipReportEarlySql(message, out sql, out warning)) return true;
@@ -770,32 +771,157 @@ public partial class ChatOrchestratorService
         return true;
     }
 
-    private static bool TryBuildLoomProductionByQualitySql(string message, out string sql, out string warning)
+    private static bool LooksLikeLoomRollsQuestion(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (!m.Contains("loom")) return false;
+        if (m.Contains("loom dept") || m.Contains("loom department")) return false;
+        if (m.Contains("despatch") || m.Contains("dispatch")) return false;
+        if (LooksLikeTapePlantQuestion(message)) return false;
+        return m.Contains("roll")
+               || m.Contains("production")
+               || m.Contains("produced")
+               || m.Contains("output");
+    }
+
+    private static bool TryBuildLoomRollsSql(string message, out string sql, out string warning)
     {
         sql = "";
         warning = "";
-        var m = message.ToLowerInvariant();
-        if (!m.Contains("loom")) return false;
-        if (!m.Contains("production")) return false;
-        if (!m.Contains("quality") && !m.Contains("group")) return false;
+        if (!LooksLikeLoomRollsQuestion(message)) return false;
 
         var company = ResolveCompanyForChat(message);
         if (string.IsNullOrWhiteSpace(company)) return false;
 
+        var (start, endExclusive, periodLabel) = ResolveLoomRollsPeriod(message);
+        var companyLit = EscapeSqlLiteral(company);
+        var m = message.ToLowerInvariant();
+        var wantDetail = m.Contains("roll no") || m.Contains("rollno") || m.Contains("list")
+                         || Regex.IsMatch(m, @"\bloom\s*(no|number|#)\s*\d");
+        var wantDaily = m.Contains("daily") || m.Contains("day-wise") || m.Contains("day wise")
+                        || m.Contains("per day") || m.Contains("by date");
+
+        if (wantDetail)
+        {
+            sql = $"""
+                SELECT TOP {MaxReturnRows}
+                    Sysdate,
+                    LoomNo,
+                    RollNo,
+                    Quality,
+                    NetWt,
+                    Metre,
+                    Partyname,
+                    Shift
+                FROM vw_LoomProductionENtry WITH (NOLOCK)
+                WHERE CompanyName = '{companyLit}'
+                  AND Sysdate >= '{start:yyyy-MM-dd}'
+                  AND Sysdate < '{endExclusive:yyyy-MM-dd}'
+                ORDER BY Sysdate DESC, RollNo DESC
+                """;
+            warning =
+                $"Governed loom roll entries for {company} ({periodLabel}) on vw_LoomProductionENtry (not vw_FactoryProduction.Loom).";
+            return true;
+        }
+
+        if (wantDaily)
+        {
+            sql = $"""
+                SELECT TOP {MaxReturnRows}
+                    CAST(Sysdate AS date) AS ProdDate,
+                    COUNT(*) AS RollCount,
+                    ROUND(SUM(ISNULL(NetWt, 0)), 2) AS TotalNetWtKg,
+                    ROUND(SUM(ISNULL(Metre, 0)), 2) AS TotalMetre
+                FROM vw_LoomProductionENtry WITH (NOLOCK)
+                WHERE CompanyName = '{companyLit}'
+                  AND Sysdate >= '{start:yyyy-MM-dd}'
+                  AND Sysdate < '{endExclusive:yyyy-MM-dd}'
+                GROUP BY CAST(Sysdate AS date)
+                ORDER BY ProdDate DESC
+                """;
+            warning =
+                $"Governed daily loom rolls for {company} ({periodLabel}) on vw_LoomProductionENtry.";
+            return true;
+        }
+
         sql = $"""
-            SELECT TOP 50
+            SELECT TOP {MaxReturnRows}
                 Quality,
-                SUM(ISNULL(NetWt, 0)) AS TotalNetWt,
-                SUM(ISNULL(Metre, 0)) AS TotalMetre,
-                COUNT(*) AS RollCount
-            FROM vw_LoomProductionENtry
-            WHERE CompanyName = '{EscapeSqlLiteral(company)}'
+                COUNT(*) AS RollCount,
+                ROUND(SUM(ISNULL(NetWt, 0)), 2) AS TotalNetWtKg,
+                ROUND(SUM(ISNULL(Metre, 0)), 2) AS TotalMetre
+            FROM vw_LoomProductionENtry WITH (NOLOCK)
+            WHERE CompanyName = '{companyLit}'
+              AND Sysdate >= '{start:yyyy-MM-dd}'
+              AND Sysdate < '{endExclusive:yyyy-MM-dd}'
             GROUP BY Quality
             ORDER BY SUM(ISNULL(NetWt, 0)) DESC
             """;
-        warning = $"Governed loom production grouped by Quality on vw_LoomProductionENtry for {company}.";
+        warning =
+            $"Governed loom rolls by quality for {company} ({periodLabel}) on vw_LoomProductionENtry. Factory daily Loom column is unused; this is actual roll entries.";
         return true;
     }
+
+    private static (DateTime Start, DateTime EndExclusive, string Label) ResolveLoomRollsPeriod(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (m.Contains("last month"))
+        {
+            var start = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(-1);
+            return (start, start.AddMonths(1), "last month");
+        }
+
+        if (Regex.IsMatch(m, @"\bfy\b|financial\s+year|\d{2}\s*[-–/]\s*\d{2}"))
+        {
+            var (fyStart, fyEndEx, fyLabel) = ParseIndianFinancialYear(message);
+            return (fyStart, fyEndEx, $"FY {fyLabel}");
+        }
+
+        var monthsMatch = Regex.Match(m, @"last\s+(\d{1,2})\s+months?");
+        if (monthsMatch.Success && int.TryParse(monthsMatch.Groups[1].Value, out var months))
+        {
+            months = Math.Clamp(months, 1, 24);
+            var end = DateTime.Today.AddDays(1);
+            var start = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(-(months - 1));
+            return (start, end, $"last {months} months");
+        }
+
+        var daysMatch = Regex.Match(m, @"last\s+(\d{1,3})\s+days?");
+        if (daysMatch.Success && int.TryParse(daysMatch.Groups[1].Value, out var days))
+        {
+            days = Math.Clamp(days, 1, 366);
+            return (DateTime.Today.AddDays(-days), DateTime.Today.AddDays(1), $"last {days} days");
+        }
+
+        if (m.Contains("yesterday"))
+            return (DateTime.Today.AddDays(-1), DateTime.Today, "yesterday");
+        if (m.Contains("today"))
+            return (DateTime.Today, DateTime.Today.AddDays(1), "today");
+
+        if (MessageHasExplicitPeriod(message))
+        {
+            var (start, end, label) = TryParseRelativePeriod(message);
+            return (start, end, label);
+        }
+
+        var lastMonthStart = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(-1);
+        return (lastMonthStart, lastMonthStart.AddMonths(1), "last month");
+    }
+
+    private static bool MessageHasExplicitPeriod(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (m.Contains("this month") || m.Contains("last month") || m.Contains("today") || m.Contains("yesterday"))
+            return true;
+        if (m.Contains("last 30") || m.Contains("ytd") || m.Contains("this year"))
+            return true;
+        if (Regex.IsMatch(m, @"\blast\s+\d{1,3}\s+(days?|months?)\b"))
+            return true;
+        return TryParseMonthYear(message) is not null;
+    }
+
+    private static bool TryBuildLoomProductionByQualitySql(string message, out string sql, out string warning)
+        => TryBuildLoomRollsSql(message, out sql, out warning);
 
     private static bool TryBuildDailyInwardOutwardSql(string message, out string sql, out string warning)
     {
@@ -1062,6 +1188,11 @@ public partial class ChatOrchestratorService
     private static (DateTime Start, DateTime End, string Label) TryParseRelativePeriod(string message)
     {
         var m = message.ToLowerInvariant();
+        if (m.Contains("last month"))
+        {
+            var start = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddMonths(-1);
+            return (start, start.AddMonths(1), "last month");
+        }
         if (m.Contains("this month"))
         {
             var start = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);

@@ -33,7 +33,7 @@ public partial class ChatOrchestratorService
         if (!m.Contains("production") && !m.Contains("factory") && !m.Contains("produced")) return false;
         if (m.Contains("despatch") || m.Contains("dispatch")) return false;
         if (m.Contains("fibc") && m.Contains("bag")) return false;
-        if (m.Contains("loom") && m.Contains("quality")) return false;
+        if (LooksLikeLoomRollsQuestion(message)) return false;
         if (m.Contains("small bag") && m.Contains("cutting")) return false;
 
         var company = ResolveCompanyForChat(message);

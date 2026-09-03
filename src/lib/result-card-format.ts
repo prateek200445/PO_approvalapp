@@ -55,7 +55,11 @@ const COLUMN_LABELS: Record<string, string> = {
   GatePassNo: "Gate pass",
   RollNo: "Roll no.",
   RollNO: "Roll no.",
-  NetWt: "Net weight",
+  NetWt: "Net weight (kg)",
+  TotalNetWt: "Net weight (kg)",
+  TotalNetWtKg: "Net weight (kg)",
+  TotalMetre: "Metres",
+  RollCount: "Rolls",
   Quality: "Quality",
   PendingQty: "Pending qty",
   PurchasedQty: "Purchased qty",
@@ -95,10 +99,10 @@ const COLUMN_LABELS: Record<string, string> = {
 /** Count/quantity columns — never format as currency even if name contains "pending" or "total". */
 const COUNT_COLS = /count|cnt|numrecords|rowcount|howmany/i;
 const CURRENCY_COLS =
-  /amount|bill|payment|rate|balance|total|debit|credit|opening|pending|price|charges|utr/i;
+  /amount|bill|payment|rate|balance|debit|credit|opening|pending|price|charges|utr/i;
 const DATE_COLS = /date|sysdate|sysDate|timestamp|created|modified/i;
 const DOC_COLS = /^(po|indent|payment|inv|mr|issue|gate|roll|code|no|number)/i;
-const NUMERIC_COLS = /qty|quantity|stock|stk|weight|wt|pcs|count|level|metre|consum/i;
+const NUMERIC_COLS = /qty|quantity|stock|stk|weight|wt|pcs|count|level|metre|meter|kg|ton|gsm|gpm|consum/i;
 
 export function humanizeColumn(col: string): string {
   if (COLUMN_LABELS[col]) return COLUMN_LABELS[col];
@@ -172,8 +176,15 @@ export function formatCellValue(column: string, value: unknown): FormattedCell {
 
   if (isNum && NUMERIC_COLS.test(column)) {
     const decimals = Number.isInteger(num) ? 0 : 2;
+    const text = formatIndianNumber(num, decimals);
+    if (/wt|weight|\bkg\b/i.test(column) && !/perkg|per_kg|per kg/i.test(column)) {
+      return { text: `${text} kg`, kind: "number", raw: value };
+    }
+    if (/metre|meter/i.test(column)) {
+      return { text: `${text} m`, kind: "number", raw: value };
+    }
     return {
-      text: formatIndianNumber(num, decimals),
+      text,
       kind: "number",
       raw: value,
     };

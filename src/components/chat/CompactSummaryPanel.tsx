@@ -13,10 +13,10 @@ export interface ParsedCompactSummary {
 }
 
 const BREAKDOWN_LABEL =
-  /^(Fabric|Webbing|Filler|Tape|Yarn|Other|[A-Z][A-Za-z0-9 .&/-]{1,40})\s+([\d,.₹]+(?:\.\d+)?(?:\s*(?:Cr|L|K))?)$/;
+  /^(Fabric|Webbing|Filler|Tape|Yarn|Other|[A-Z][A-Za-z0-9 .&/-]{1,40})\s+([\d,.₹]+(?:\.\d+)?(?:\s*(?:Cr|L|K|kg|m))?)$/;
 
 const TOTAL_SEGMENT =
-  /^([\d,.₹]+(?:\.\d+)?)\s+total(?:\s+(.+))?$/i;
+  /^([\d,.₹]+(?:\.\d+)?(?:\s*(?:kg|m|mt|t))?)\s+total(?:\s+(.+))?$/i;
 
 const COUNT_SEGMENT = /^(\d[\d,]*)\s+(lines|rows|depts|matching records?|stock line\(s\)|items?)/i;
 

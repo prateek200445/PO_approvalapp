@@ -16,23 +16,30 @@ function humanizeColumn(col: string): string {
 
 function formatSummaryValue(col: string, value: number): string {
   const lower = col.toLowerCase();
-  const isQty = /qty|quantity|stk|stock|pcs|count/i.test(lower);
-  if (
-    !isQty
-    && (/amount|bill|debit|credit|balance|outstanding|opening|closing|value|net/i.test(
+  const isQty =
+    /qty|quantity|stk|stock|pcs|count|weight|wt|metre|meter|kg|ton|gsm|gpm|roll/i.test(
       lower,
-    )
-      || (/\bpending/i.test(lower) && !/pendingqty|pending qty|pendingpo/i.test(lower)))
-  ) {
+    );
+  const isMoney =
+    !isQty &&
+    (/amount|bill|debit|credit|balance|outstanding|opening|closing|value|price|inr/i.test(
+      lower,
+    ) ||
+      (/net/i.test(lower) && /amount|amt|value/i.test(lower)) ||
+      (/\bpending/i.test(lower) && !/pendingqty|pending qty|pendingpo/i.test(lower)));
+  if (isMoney) {
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
       currency: "INR",
       maximumFractionDigits: 2,
     }).format(value);
   }
-  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(
+  const formatted = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(
     value,
   );
+  if (/wt|weight|kg/i.test(lower)) return `${formatted} kg`;
+  if (/metre|meter/i.test(lower)) return `${formatted} m`;
+  return formatted;
 }
 
 function rowVal(row: Record<string, unknown>, col: string): unknown {

@@ -584,6 +584,12 @@ public partial class ChatOrchestratorService
             sql = stitcherAttSql;
             warning = stitcherAttWarn;
         }
+        else if (useLlm && TryBuildLoomRollsSql(request.Message, out var loomRollsSql, out var loomRollsWarn))
+        {
+            _logger.LogInformation("Using governed loom rolls SQL (early path)");
+            sql = loomRollsSql;
+            warning = loomRollsWarn;
+        }
         else if (useLlm && TryBuildTapePlantEarlySql(request.Message, out var tapePlantSql, out var tapePlantWarn))
         {
             _logger.LogInformation("Using governed tape plant production SQL (early path)");
