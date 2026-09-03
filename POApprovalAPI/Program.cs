@@ -71,6 +71,7 @@ builder.Services.AddHttpClient(nameof(DmsRemoteFileService), client =>
 builder.Services.AddScoped<DmsAttachmentService>();
 builder.Services.AddScoped<DmsRemoteFileService>();
 builder.Services.AddScoped<SalesDashboardService>();
+builder.Services.AddScoped<BankRequirementsService>();
 builder.Services.AddScoped<ExportBillOverdueService>();
 builder.Services.AddScoped<ExcelLedgerService>();
 builder.Services.AddScoped<BillWiseTransactionService>();

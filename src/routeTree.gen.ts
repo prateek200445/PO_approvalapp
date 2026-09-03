@@ -28,6 +28,7 @@ import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-b
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppDailyProductionRouteImport } from './routes/_app/daily-production'
 import { Route as AppBomRouteImport } from './routes/_app/bom'
+import { Route as AppBankRequirementsRouteImport } from './routes/_app/bank-requirements'
 import { Route as AppAssistantRouteImport } from './routes/_app/assistant'
 import { Route as AppAdvancePaymentsRouteImport } from './routes/_app/advance-payments'
 import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
@@ -135,6 +136,11 @@ const AppBomRoute = AppBomRouteImport.update({
   path: '/bom',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBankRequirementsRoute = AppBankRequirementsRouteImport.update({
+  id: '/bank-requirements',
+  path: '/bank-requirements',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAssistantRoute = AppAssistantRouteImport.update({
   id: '/assistant',
   path: '/assistant',
@@ -202,6 +208,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/advance-payments': typeof AppAdvancePaymentsRoute
   '/assistant': typeof AppAssistantRoute
+  '/bank-requirements': typeof AppBankRequirementsRoute
   '/bom': typeof AppBomRouteWithChildren
   '/daily-production': typeof AppDailyProductionRoute
   '/dashboard': typeof AppDashboardRoute
@@ -234,6 +241,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/advance-payments': typeof AppAdvancePaymentsRoute
   '/assistant': typeof AppAssistantRoute
+  '/bank-requirements': typeof AppBankRequirementsRoute
   '/daily-production': typeof AppDailyProductionRoute
   '/dashboard': typeof AppDashboardRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
@@ -267,6 +275,7 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/_app/advance-payments': typeof AppAdvancePaymentsRoute
   '/_app/assistant': typeof AppAssistantRoute
+  '/_app/bank-requirements': typeof AppBankRequirementsRoute
   '/_app/bom': typeof AppBomRouteWithChildren
   '/_app/daily-production': typeof AppDailyProductionRoute
   '/_app/dashboard': typeof AppDashboardRoute
@@ -301,6 +310,7 @@ export interface FileRouteTypes {
     | '/'
     | '/advance-payments'
     | '/assistant'
+    | '/bank-requirements'
     | '/bom'
     | '/daily-production'
     | '/dashboard'
@@ -333,6 +343,7 @@ export interface FileRouteTypes {
     | '/'
     | '/advance-payments'
     | '/assistant'
+    | '/bank-requirements'
     | '/daily-production'
     | '/dashboard'
     | '/export-bill-overdue'
@@ -365,6 +376,7 @@ export interface FileRouteTypes {
     | '/_app'
     | '/_app/advance-payments'
     | '/_app/assistant'
+    | '/_app/bank-requirements'
     | '/_app/bom'
     | '/_app/daily-production'
     | '/_app/dashboard'
@@ -534,6 +546,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBomRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/bank-requirements': {
+      id: '/_app/bank-requirements'
+      path: '/bank-requirements'
+      fullPath: '/bank-requirements'
+      preLoaderRoute: typeof AppBankRequirementsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/assistant': {
       id: '/_app/assistant'
       path: '/assistant'
@@ -653,6 +672,7 @@ const AppIntercompanyRouteWithChildren = AppIntercompanyRoute._addFileChildren(
 interface AppRouteChildren {
   AppAdvancePaymentsRoute: typeof AppAdvancePaymentsRoute
   AppAssistantRoute: typeof AppAssistantRoute
+  AppBankRequirementsRoute: typeof AppBankRequirementsRoute
   AppBomRoute: typeof AppBomRouteWithChildren
   AppDailyProductionRoute: typeof AppDailyProductionRoute
   AppDashboardRoute: typeof AppDashboardRoute
@@ -680,6 +700,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAdvancePaymentsRoute: AppAdvancePaymentsRoute,
   AppAssistantRoute: AppAssistantRoute,
+  AppBankRequirementsRoute: AppBankRequirementsRoute,
   AppBomRoute: AppBomRouteWithChildren,
   AppDailyProductionRoute: AppDailyProductionRoute,
   AppDashboardRoute: AppDashboardRoute,
