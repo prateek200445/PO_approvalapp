@@ -14,6 +14,7 @@ import {
   Layers,
   Factory,
   Building2,
+  Landmark,
   PanelLeftClose,
   PanelLeftOpen,
   Hammer,
@@ -36,6 +37,7 @@ type AppPath =
   | "/advance-payments"
   | "/indents"
   | "/sales-dashboard"
+  | "/bank-requirements"
   | "/intercompany"
   | "/ledgers"
   | "/export-bill-overdue"
@@ -176,6 +178,12 @@ export function AppShell() {
       icon: BarChart3,
       label: "Sales Dashboard",
       match: (p) => p.startsWith("/sales-dashboard"),
+    },
+    {
+      to: "/bank-requirements",
+      icon: Landmark,
+      label: "Bank Requirements",
+      match: (p) => p.startsWith("/bank-requirements"),
     },
     {
       to: "/intercompany",

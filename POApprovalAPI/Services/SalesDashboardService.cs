@@ -329,6 +329,346 @@ public class SalesDashboardService
     }
 
     /// <summary>
+    /// Bank Profile of Sales from portal country-wise MIS
+    /// (vw_Countrywise_sales Amount; GroupName = legal company / FactoryInfo.Name).
+    /// </summary>
+    public async Task<SalesExportSplitDto> GetBankSalesSplitAsync(
+        string company,
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool refresh = false)
+    {
+        var voucher = await LoadBankVoucherSplitAsync(company, dateFrom, dateTo);
+        if (voucher != null && voucher.TotalSales > 0)
+            return voucher;
+
+        foreach (var view in new[] { "vw_Countrywise_sales", "vw_Countrywise_sales_dashboard" })
+        {
+            var loaded = await LoadCountrywiseBankSplitAsync(
+                view,
+                new[] { "Amount", "Value" },
+                company,
+                dateFrom,
+                dateTo);
+            if (loaded != null && loaded.TotalSales > 0)
+                return loaded;
+        }
+
+        var split = await GetSalesExportSplitAsync(company, dateFrom, dateTo, refresh);
+        var export = Math.Max(0, split.ExportSales);
+        var domestic = Math.Max(0, split.DomesticSales) + Math.Max(0, split.IntercompanySales);
+        return new SalesExportSplitDto
+        {
+            TotalSales = export + domestic,
+            ExportSales = export,
+            DomesticSales = domestic,
+            IntercompanySales = split.IntercompanySales,
+            Source = split.Source,
+        };
+    }
+
+    private static bool IsIndiaCountry(string? country)
+    {
+        var value = (country ?? "").Trim().ToLowerInvariant();
+        return value.Length == 0 || value is "india" or "in" or "ind" or "bharat" || value.Contains("india");
+    }
+
+    /// <summary>
+    /// Bank totals from sales invoices: exclude InterUnit (stock/sister transfers),
+    /// keep third-party domestic and export. Company slice is FactoryInfo group members.
+    /// </summary>
+    private async Task<SalesExportSplitDto?> LoadBankVoucherSplitAsync(
+        string company,
+        DateTime dateFrom,
+        DateTime dateTo)
+    {
+        foreach (var viewName in new[] { "vw_Salesvoucher", "SalesVoucher" })
+        {
+            var loaded = await TryLoadBankVoucherSplitFromViewAsync(
+                viewName, company, dateFrom, dateTo);
+            if (loaded != null && loaded.TotalSales > 0)
+                return loaded;
+        }
+
+        return null;
+    }
+
+    private async Task<SalesExportSplitDto?> TryLoadBankVoucherSplitFromViewAsync(
+        string viewName,
+        string company,
+        DateTime dateFrom,
+        DateTime dateTo)
+    {
+        using var connection = _database.CreateConnection();
+        if (connection.State != ConnectionState.Open)
+            connection.Open();
+
+        var cols = await GetViewColumnsAsync(connection, viewName);
+        if (cols.Count == 0)
+            return null;
+
+        var dateCol = FirstExisting(cols, DateColumnCandidates);
+        var amountCol = FirstExisting(cols, new[]
+        {
+            "TaxableAmount", "AccessableValue", "NetAmount", "BillAMount", "BillAmount", "Amount", "InvoiceAmount",
+        });
+        var companyCol = FirstExisting(cols, CompanyColumnCandidates);
+        var partyCol = FirstExisting(cols, PurchasePartyColumnCandidates)
+            ?? FirstExisting(cols, PartyColumnCandidates);
+        var invTypeCol = FirstExisting(cols, new[] { "InvType", "InvoiceType", "VoucherType" });
+        if (dateCol == null || amountCol == null || companyCol == null)
+            return null;
+
+        var masterCols = await GetViewColumnsAsync(connection, "CommonLedgerMaster");
+        var countryCol = FirstExisting(masterCols, CountryColumnCandidates);
+
+        var companySql = "";
+        List<string> companyNames = [];
+        if (!IsAllCompaniesSelection(company))
+        {
+            companyNames = NonEmptyInList(await ResolveSelectedCompaniesAsync(company));
+            if (companyNames.Count == 0)
+                return null;
+            companySql = $"AND LTRIM(RTRIM(ISNULL(v.{Bracket(companyCol)}, N''))) IN @CompanyNames";
+        }
+
+        var interUnitSql = invTypeCol == null
+            ? ""
+            : $@"AND LOWER(ISNULL(v.{Bracket(invTypeCol)}, N'')) NOT LIKE N'%interunit%'
+  AND LOWER(ISNULL(v.{Bracket(invTypeCol)}, N'')) NOT LIKE N'%inter unit%'
+  AND LOWER(ISNULL(v.{Bracket(invTypeCol)}, N'')) NOT LIKE N'%inter-unit%'
+  AND LOWER(ISNULL(v.{Bracket(invTypeCol)}, N'')) NOT LIKE N'%job%'
+  AND LOWER(ISNULL(v.{Bracket(invTypeCol)}, N'')) NOT LIKE N'%other sales%'";
+
+        var sisterSql = partyCol == null
+            ? ""
+            : $@"
+  AND (
+        {PartyIsFibco($"v.{Bracket(partyCol)}")}
+        OR NOT EXISTS (
+            SELECT 1
+            FROM dbo.FactoryInfo fi WITH (NOLOCK)
+            WHERE fi.Name = v.{Bracket(partyCol)}
+        )
+  )";
+
+        var joinLedger = "";
+        var streamExpr = "N'Domestic'";
+        if (partyCol != null && countryCol != null)
+        {
+            joinLedger = $@"
+LEFT JOIN dbo.CommonLedgerMaster cm WITH (NOLOCK)
+    ON cm.LedgerName = v.{Bracket(partyCol)}";
+            var exportInv = invTypeCol == null
+                ? "1 = 0"
+                : $"LOWER(ISNULL(v.{Bracket(invTypeCol)}, N'')) LIKE N'%export%'";
+            streamExpr = $@"CASE
+            WHEN {exportInv}
+              OR (
+                    LTRIM(RTRIM(ISNULL(cm.{Bracket(countryCol)}, N''))) <> N''
+                    AND LOWER(LTRIM(RTRIM(cm.{Bracket(countryCol)}))) NOT IN (N'india', N'in', N'ind', N'bharat')
+                    AND LOWER(LTRIM(RTRIM(cm.{Bracket(countryCol)}))) NOT LIKE N'%india%'
+                 )
+                THEN N'Export'
+            ELSE N'Domestic'
+        END";
+        }
+        else if (invTypeCol != null)
+        {
+            streamExpr = $@"CASE
+            WHEN LOWER(ISNULL(v.{Bracket(invTypeCol)}, N'')) LIKE N'%export%' THEN N'Export'
+            ELSE N'Domestic'
+        END";
+        }
+
+        var sql = $@"
+SELECT
+    {streamExpr} AS Country,
+    SUM(CAST(v.{Bracket(amountCol)} AS float)) AS Amount
+FROM dbo.{viewName} v WITH (NOLOCK)
+{joinLedger}
+WHERE v.{Bracket(dateCol)} BETWEEN @DateFrom AND @DateTo
+  {companySql}
+  {interUnitSql}
+  {sisterSql}
+GROUP BY {streamExpr}";
+
+        try
+        {
+            var rows = (await connection.QueryAsync<CountryAmountRow>(
+                sql,
+                new
+                {
+                    DateFrom = dateFrom.Date,
+                    DateTo = dateTo.Date,
+                    CompanyNames = companyNames.Count == 0 ? new List<string> { "__none__" } : companyNames,
+                },
+                commandTimeout: QueryTimeoutSeconds)).ToList();
+
+            var export = rows.Where(r => !IsIndiaCountry(r.Country) &&
+                                         !r.Country.Equals("Domestic", StringComparison.OrdinalIgnoreCase))
+                .Sum(r => r.Amount);
+            var domestic = rows.Where(r => IsIndiaCountry(r.Country) ||
+                                           r.Country.Equals("Domestic", StringComparison.OrdinalIgnoreCase))
+                .Sum(r => r.Amount);
+            if (export <= 0 && domestic <= 0)
+                return null;
+
+            return new SalesExportSplitDto
+            {
+                TotalSales = export + domestic,
+                ExportSales = Math.Max(0, export),
+                DomesticSales = Math.Max(0, domestic),
+                IntercompanySales = 0,
+                Source = $"{viewName} taxable excl InterUnit",
+            };
+        }
+        catch (SqlException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<SalesExportSplitDto?> LoadCountrywiseBankSplitAsync(
+        string viewName,
+        IReadOnlyList<string> amountCandidates,
+        string company,
+        DateTime dateFrom,
+        DateTime dateTo)
+    {
+        using var connection = _database.CreateConnection();
+        if (connection.State != ConnectionState.Open)
+            connection.Open();
+
+        var cols = await GetViewColumnsAsync(connection, viewName);
+        if (cols.Count == 0)
+            return null;
+
+        var countryCol = FirstExisting(cols, CountryColumnCandidates);
+        var valueCol = FirstExisting(cols, amountCandidates);
+        var dateCol = FirstExisting(cols, new[] { "invdate", "InvDate", "InvoiceDate", "BillDate", "VoucherDate" });
+        var invYearCol = FirstExisting(cols, new[] { "InvYear" });
+        if (countryCol == null || valueCol == null)
+            return null;
+
+        var invYears = GetInvYearsOverlapping(dateFrom, dateTo).ToList();
+        string periodSql;
+        if (invYearCol != null && CanUseInvYearRange(dateFrom, dateTo))
+        {
+            periodSql = $"v.{Bracket(invYearCol)} IN @InvYears";
+        }
+        else if (dateCol != null)
+        {
+            periodSql = $"v.{Bracket(dateCol)} BETWEEN @DateFrom AND @DateTo";
+        }
+        else
+        {
+            return null;
+        }
+
+        var companySql = "";
+        List<string> legalNames = [];
+        if (!IsAllCompaniesSelection(company))
+        {
+            legalNames = NonEmptyInList(ResolveBankCountrywiseNames(company));
+            if (legalNames.Count == 0)
+                return null;
+            // vw_Countrywise_sales.GroupName is the legal company name (e.g. Plastene India Limited),
+            // not FactoryInfo.GroupName and not every unit suffix.
+            companySql = "AND LTRIM(RTRIM(ISNULL(v.GroupName, N''))) IN @CompanyNames";
+        }
+
+        var sql = $@"
+SELECT
+    LTRIM(RTRIM(ISNULL(v.{Bracket(countryCol)}, N''))) AS Country,
+    SUM(CAST(v.{Bracket(valueCol)} AS float)) AS Amount
+FROM dbo.{viewName} v WITH (NOLOCK)
+WHERE {periodSql}
+  {companySql}
+GROUP BY LTRIM(RTRIM(ISNULL(v.{Bracket(countryCol)}, N'')))";
+
+        try
+        {
+            var rows = (await connection.QueryAsync<CountryAmountRow>(
+                sql,
+                new
+                {
+                    DateFrom = dateFrom.Date,
+                    DateTo = dateTo.Date,
+                    InvYears = invYears,
+                    GroupNames = legalNames.Count == 0 ? new List<string> { "__none__" } : legalNames,
+                    CompanyNames = legalNames.Count == 0 ? new List<string> { "__none__" } : legalNames,
+                },
+                commandTimeout: QueryTimeoutSeconds)).ToList();
+
+            var export = rows.Where(r => !IsIndiaCountry(r.Country)).Sum(r => r.Amount);
+            var domestic = rows.Where(r => IsIndiaCountry(r.Country)).Sum(r => r.Amount);
+            if (export <= 0 && domestic <= 0)
+                return null;
+
+            return new SalesExportSplitDto
+            {
+                TotalSales = export + domestic,
+                ExportSales = Math.Max(0, export),
+                DomesticSales = Math.Max(0, domestic),
+                IntercompanySales = 0,
+                Source = viewName,
+            };
+        }
+        catch (SqlException)
+        {
+            return null;
+        }
+    }
+
+    private static bool CanUseInvYearRange(DateTime dateFrom, DateTime dateTo)
+    {
+        if (dateFrom.Month != 4 || dateFrom.Day != 1)
+            return false;
+        var fyEnd = new DateTime(dateFrom.Year + 1, 3, 31);
+        if (dateTo.Date == fyEnd)
+            return true;
+        var today = DateTime.Today;
+        var fyStart = today.Month >= 4 ? new DateTime(today.Year, 4, 1) : new DateTime(today.Year - 1, 4, 1);
+        return dateFrom.Date == fyStart.Date && dateTo.Date <= fyEnd && dateTo.Date >= today.AddDays(-3);
+    }
+
+    private sealed class CountryAmountRow
+    {
+        public string Country { get; set; } = "";
+        public double Amount { get; set; }
+    }
+
+    public async Task<SalesExportSplitDto> GetSalesExportSplitAsync(
+        string company,
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool refresh = false)
+    {
+        var totalsTask = GetSalesTotalsAsync(company, dateFrom, dateTo, refresh);
+        var geoTask = GetOrLoadGeoAsync(dateFrom, dateTo, refresh);
+        var icTask = GetOrLoadIntercompanyLeavesAsync(dateFrom, dateTo, refresh);
+        await Task.WhenAll(totalsTask, geoTask, icTask);
+        var totals = await totalsTask;
+        var geo = await geoTask;
+        var icLeaves = await icTask;
+        var slice = await ResolveSliceCompaniesAsync(company);
+        var export = FilterByCompany(geo.ExportCustomers, slice, r => r.CompanyName).Sum(p => p.Amount);
+        var intercompany = FilterByCompany(icLeaves, slice, r => r.CompanyName).Sum(r => r.Amount);
+        if (export < 0) export = 0;
+        if (export > totals.TotalSales) export = totals.TotalSales;
+        if (intercompany < 0) intercompany = 0;
+        return new SalesExportSplitDto
+        {
+            TotalSales = totals.TotalSales,
+            ExportSales = export,
+            DomesticSales = Math.Max(0, totals.TotalSales - export),
+            IntercompanySales = intercompany,
+            Source = string.IsNullOrWhiteSpace(geo.Source) ? "vw_Sales_EBIDTA" : geo.Source,
+        };
+    }
+
+    /// <summary>
     /// Total Purchase + Quantity + Average Rate + byGroup/bySubGroup.
     /// Mirrors ERP SP_Purchase_EBIDTA (aggregates vw_Purchase_EBIDTA with the same GROUPING SETS),
     /// but excludes intercompany: InterGroup &lt;&gt; 'Intergroup'
@@ -377,6 +717,36 @@ GROUP BY GROUPING SETS (
 
         var rows = await connection.QueryAsync<EbidtaLeaf>(
             sql,
+            new { DateFrom = dateFrom.Date, DateTo = dateTo.Date },
+            commandTimeout: QueryTimeoutSeconds);
+        return rows.ToList();
+    }
+
+    private Task<List<EbidtaLeaf>> GetOrLoadIntercompanyLeavesAsync(
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool refresh)
+    {
+        var key = $"sales-ic-leaves-v1:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        return CachedAsync(key, refresh, () => LoadIntercompanyLeavesAsync(dateFrom, dateTo));
+    }
+
+    private async Task<List<EbidtaLeaf>> LoadIntercompanyLeavesAsync(DateTime dateFrom, DateTime dateTo)
+    {
+        using var connection = _database.CreateConnection();
+        var rows = await connection.QueryAsync<EbidtaLeaf>(
+            @"
+SELECT
+    LTRIM(RTRIM(ISNULL(CompanyName, N''))) AS CompanyName,
+    N'Intergroup' AS InterGroup,
+    N'' AS Groupname,
+    N'' AS SubGroupName,
+    ROUND(SUM(Amount), 0) AS Amount,
+    ROUND(SUM(netwt), 0) AS Netwt
+FROM dbo.vw_Sales_EBIDTA WITH (NOLOCK)
+WHERE invdate BETWEEN @DateFrom AND @DateTo
+  AND InterGroup = N'Intergroup'
+GROUP BY LTRIM(RTRIM(ISNULL(CompanyName, N'')))",
             new { DateFrom = dateFrom.Date, DateTo = dateTo.Date },
             commandTimeout: QueryTimeoutSeconds);
         return rows.ToList();
@@ -819,6 +1189,22 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), v.{partySql}";
             new { DateFrom = dateFrom.Date, DateTo = dateTo.Date },
             commandTimeout: PartyQueryTimeoutSeconds);
         return rows.ToList();
+    }
+
+    public Task<HashSet<string>?> ResolveCompanySliceAsync(string company) =>
+        ResolveSliceCompaniesAsync(company);
+
+    public bool CompanyBelongsToSlice(string companyName, HashSet<string>? slice)
+    {
+        if (slice == null) return true;
+        if (slice.Count == 0) return false;
+        var name = companyName ?? "";
+        if (slice.Contains(name)) return true;
+        foreach (var selected in slice)
+        {
+            if (CompanyKeysMatch(selected, name)) return true;
+        }
+        return false;
     }
 
     private async Task<HashSet<string>?> ResolveSliceCompaniesAsync(string company)
@@ -1829,6 +2215,24 @@ ORDER BY fi.Name")).ToList();
         }
     }
 
+    /// <summary>
+    /// Country-wise MIS GroupName is the legal company (e.g. Plastene India Limited),
+    /// not every factory unit. G-Plastene India Limited → that legal name only.
+    /// </summary>
+    private static List<string> ResolveBankCountrywiseNames(string company)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in SplitCompanyTokens(company))
+        {
+            if (IsAllToken(token))
+                continue;
+            names.Add(token.StartsWith("G-", StringComparison.OrdinalIgnoreCase)
+                ? token[2..].Trim()
+                : token.Trim());
+        }
+        return names.ToList();
+    }
+
     private async Task<List<string>> ResolveSelectedCompaniesAsync(string company)
     {
         var factories = await GetFactoryRowsAsync();
@@ -1850,10 +2254,10 @@ ORDER BY fi.Name")).ToList();
             if (token.StartsWith("G-", StringComparison.OrdinalIgnoreCase))
             {
                 var group = token[2..].Trim();
-                foreach (var factory in factories.Where(f => f.GroupName.Equals(group, StringComparison.OrdinalIgnoreCase)))
+                foreach (var factory in factories.Where(f =>
+                             f.GroupName.Equals(group, StringComparison.OrdinalIgnoreCase)
+                             || f.Name.StartsWith(group, StringComparison.OrdinalIgnoreCase)))
                     names.Add(factory.Name);
-                foreach (var name in universe.Where(n => CompanyKeysMatch(n, group)))
-                    names.Add(name);
             }
             else
             {
@@ -1885,7 +2289,7 @@ ORDER BY fi.Name")).ToList();
     {
         var s = (name ?? "").Trim().ToLowerInvariant();
         s = Regex.Replace(s, @"[^a-z0-9]+", " ");
-        s = Regex.Replace(s, @"\b(pvt|private|ltd|limited|llp|india)\b", " ");
+        s = Regex.Replace(s, @"\b(pvt|private|ltd|limited|llp)\b", " ");
         return Regex.Replace(s, @"\s+", " ").Trim();
     }
 
@@ -2315,6 +2719,15 @@ public class RankedPartyResultDto
     public string PartyColumn { get; set; } = "";
     public string CountryColumn { get; set; } = "";
     public List<string> Columns { get; set; } = new();
+}
+
+public class SalesExportSplitDto
+{
+    public double TotalSales { get; set; }
+    public double ExportSales { get; set; }
+    public double DomesticSales { get; set; }
+    public double IntercompanySales { get; set; }
+    public string Source { get; set; } = "";
 }
 
 public class SalesTotalsDto
