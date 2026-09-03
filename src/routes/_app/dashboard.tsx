@@ -55,9 +55,9 @@ const KIND_META: Record<
     icon: CreditCard,
   },
   advancePayment: {
-    label: "Advance Payments",
-    shortLabel: "Adv Pay",
-    listLabel: "Adv",
+    label: "Bill Payment Entry",
+    shortLabel: "Bill Pay",
+    listLabel: "Bill Pay",
     tone: "bg-cyan-500/15 text-cyan-600 border-cyan-500/25",
     bar: "bg-cyan-500",
     icon: Wallet,

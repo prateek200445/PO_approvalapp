@@ -13,27 +13,31 @@ import { setApprovalListNav } from "@/lib/approval-list-nav";
 import { formatINR, type POStatus } from "@/lib/mock-data";
 import { formatShortDate } from "@/lib/utils";
 
-type AdvancePaymentRow = {
+type BillPaymentEntryRow = {
   paymentNo: string;
+  PaymentNo?: string;
   companyName: string;
-  paymentType: string;
-  paymentTypeNo: string;
+  VendorName?: string;
+  vendorName?: string;
+  billNo?: string;
+  BillNo?: string;
   paymentAmount: number;
   paymentDate: string;
   remarks: string;
-  approvalStatus: number;
 };
 
+function vendorName(row: BillPaymentEntryRow): string {
+  return row.vendorName || row.VendorName || row.companyName || "";
+}
+
+function billNo(row: BillPaymentEntryRow): string {
+  return row.billNo || row.BillNo || "";
+}
+
 export const Route = createFileRoute("/_app/advance-payments")({
-  head: () => ({ meta: [{ title: "Advance Payments — Approval Portal" }] }),
+  head: () => ({ meta: [{ title: "Bill Payment Entry — Approval Portal" }] }),
   component: AdvancePaymentsList,
 });
-
-function approvalStatusLabel(status: number | null | undefined): POStatus {
-  if (status === 1) return "Approved";
-  if (status === 2) return "Rejected";
-  return "Pending";
-}
 
 function AdvancePaymentsList() {
   const { user } = useAuth();
@@ -69,7 +73,7 @@ function AdvancePaymentsList() {
           `/api/AdvancePayment/pending/${user.username}?amount=${debouncedAmount}&filterType=${filterType}`,
         ),
       );
-      if (!response.ok) throw new Error("Failed to fetch advance payments");
+      if (!response.ok) throw new Error("Failed to fetch bill payment entries");
       return response.json();
     },
     staleTime: 0,
@@ -77,18 +81,19 @@ function AdvancePaymentsList() {
     enabled: !!user?.username && typeof window !== "undefined",
   });
 
-  const pendingPayments = Array.isArray(pendingPaymentsData) ? (pendingPaymentsData as AdvancePaymentRow[]) : [];
+  const pendingPayments = Array.isArray(pendingPaymentsData) ? (pendingPaymentsData as BillPaymentEntryRow[]) : [];
 
   const filtered = pendingPayments
     .filter((p) => {
       const search = q.toLowerCase();
       const matchesSearch =
         p.paymentNo?.toLowerCase().includes(search) ||
+        vendorName(p).toLowerCase().includes(search) ||
+        billNo(p).toLowerCase().includes(search) ||
         p.companyName?.toLowerCase().includes(search) ||
-        p.paymentTypeNo?.toLowerCase().includes(search) ||
         p.remarks?.toLowerCase().includes(search);
 
-      const matchesStatus = status === "All" || approvalStatusLabel(p.approvalStatus) === status;
+      const matchesStatus = status === "All" || status === "Pending";
       const paymentAmount = Number(p.paymentAmount || 0);
       const enteredAmount = Number(amount || 0);
       const matchesAmount =
@@ -469,7 +474,7 @@ function AdvancePaymentsList() {
       const failCount = Array.isArray(result.failed) ? result.failed.length : 0;
 
       if (okCount > 0 && failCount === 0) {
-        toast.success(`Approved ${okCount} advance payment${okCount === 1 ? "" : "s"}`);
+        toast.success(`Approved ${okCount} bill payment${okCount === 1 ? "" : "s"}`);
       } else if (okCount > 0 && failCount > 0) {
         toast.warning(`Approved ${okCount}, failed ${failCount}`);
       } else {
@@ -493,7 +498,7 @@ function AdvancePaymentsList() {
     <div className={`w-full min-w-0 max-w-full overflow-x-hidden space-y-6 ${selectMode && selected.size > 0 ? "pb-24 md:pb-0" : ""}`}>
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="card-3d min-w-0 w-full flex-1 rounded-2xl px-4 py-3">
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Advance Payment Approvals</h1>
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Bill Payment Entry Approval</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {filtered.length} result{filtered.length !== 1 ? "s" : ""}{" "}
             {totalPages > 1 && `(Page ${currentPage} of ${totalPages})`}
@@ -539,7 +544,7 @@ function AdvancePaymentsList() {
             type="text"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search payment number, company, type, remarks…"
+            placeholder="Search payment number, vendor, bill no…"
             className="h-10 w-full rounded-md border border-input bg-surface pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
           />
         </div>
@@ -589,7 +594,7 @@ function AdvancePaymentsList() {
             type="text"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search advance payment…"
+            placeholder="Search bill payment entry…"
             className="h-10 w-full rounded-md border border-input bg-surface pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
           />
         </div>
@@ -622,14 +627,14 @@ function AdvancePaymentsList() {
           <SkeletonPendingList />
         ) : filtered.length === 0 ? (
           <div className="rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground">
-            No advance payments found.
+            No bill payment entries found.
           </div>
         ) : (
           paginatedData.map((p) => {
             const paymentNo = String(p.paymentNo ?? "");
             const canSelect = selectMode && !!paymentNo;
             const isChecked = canSelect && selected.has(paymentNo);
-            const status = approvalStatusLabel(p.approvalStatus);
+            const status = "Pending" as const;
 
             if (selectMode) {
               return (
@@ -663,13 +668,13 @@ function AdvancePaymentsList() {
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-semibold">{p.paymentNo}</div>
                           <div className="mt-0.5 truncate text-sm text-muted-foreground">
-                            {p.companyName}
+                            {vendorName(p)}
                           </div>
                         </div>
                         <StatusBadge status={status} />
                       </div>
                       <div className="mt-2 truncate text-xs text-muted-foreground">
-                        {p.paymentTypeNo || p.paymentType || "Advance"}
+                        {billNo(p) || vendorName(p)}
                       </div>
                       <div className="mt-3 flex min-w-0 items-end justify-between gap-2">
                         <div className="min-w-0 truncate text-xs text-muted-foreground">
@@ -701,12 +706,12 @@ function AdvancePaymentsList() {
                 <div className="flex min-w-0 items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold">{p.paymentNo}</div>
-                    <div className="mt-0.5 truncate text-sm text-muted-foreground">{p.companyName}</div>
+                    <div className="mt-0.5 truncate text-sm text-muted-foreground">{vendorName(p)}</div>
                   </div>
                   <StatusBadge status={status} />
                 </div>
                 <div className="mt-2 truncate text-xs text-muted-foreground">
-                  {p.paymentTypeNo || p.paymentType || "Advance"}
+                  {billNo(p) || "—"}
                 </div>
                 <div className="mt-3 flex min-w-0 items-end justify-between gap-2">
                   <div className="min-w-0 truncate text-xs text-muted-foreground">
@@ -728,7 +733,7 @@ function AdvancePaymentsList() {
             <SkeletonPendingList />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="p-6 text-sm text-muted-foreground">No advance payments found.</div>
+          <div className="p-6 text-sm text-muted-foreground">No bill payment entries found.</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -744,8 +749,8 @@ function AdvancePaymentsList() {
                   </th>
                 )}
                 <th className="px-4 py-3 font-medium">Payment No</th>
-                <th className="px-4 py-3 font-medium">Company</th>
-                <th className="px-4 py-3 font-medium">Type</th>
+                <th className="px-4 py-3 font-medium">Vendor</th>
+                <th className="px-4 py-3 font-medium">Bill No</th>
                 <th className="px-4 py-3 font-medium">Payment Date</th>
                 <th className="px-4 py-3 text-right font-medium">Amount</th>
                 <th className="px-4 py-3 font-medium">Status</th>
@@ -756,7 +761,7 @@ function AdvancePaymentsList() {
                 const paymentNo = String(p.paymentNo ?? "");
                 const canSelect = selectMode && !!paymentNo;
                 const isChecked = canSelect && selected.has(paymentNo);
-                const statusLabel = approvalStatusLabel(p.approvalStatus);
+                const statusLabel = "Pending" as const;
                 return (
                   <tr key={paymentNo} className={`hover:bg-secondary/40 ${isChecked ? "bg-primary/5" : ""}`}>
                     {selectMode && (
@@ -789,9 +794,9 @@ function AdvancePaymentsList() {
                         </Link>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{p.companyName}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{vendorName(p)}</td>
                     <td className="px-4 py-3 text-muted-foreground">
-                      {p.paymentTypeNo || p.paymentType || "Advance"}
+                      {billNo(p) || "—"}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {new Date(p.paymentDate).toLocaleDateString()}
@@ -900,7 +905,7 @@ function AdvancePaymentsList() {
       {showBulkConfirm && selected.size > 0 && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center" onClick={() => setShowBulkConfirm(false)}>
           <div className="w-full max-w-md rounded-xl bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold">Approve selected advance payments?</h3>
+            <h3 className="text-base font-semibold">Approve selected bill payment entries?</h3>
             <p className="mt-1 text-sm text-muted-foreground">
               You are about to approve {selected.size} item{selected.size === 1 ? "" : "s"}.
             </p>

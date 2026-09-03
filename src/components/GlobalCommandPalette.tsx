@@ -11,7 +11,7 @@ const KIND_LABEL: Record<InboxKind, string> = {
   po: "PO",
   workorder: "WO",
   payment: "Pay",
-  advancePayment: "Adv Pay",
+  advancePayment: "Bill Pay",
   indent: "Indent",
 };
 

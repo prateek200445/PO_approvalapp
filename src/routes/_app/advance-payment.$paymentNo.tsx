@@ -4,13 +4,11 @@ import { useEffect, useState } from "react";
 import {
   Building2,
   Calendar,
-  CheckCircle2,
   Hash,
   IndianRupee,
   Landmark,
   Loader2,
   User as UserIcon,
-  Wallet,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -24,54 +22,52 @@ import { formatINR } from "@/lib/mock-data";
 import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
 import { invalidateApprovalCaches, resolveNextAfterApproval } from "@/lib/approval-after-action";
 
-type AdvancePaymentDetail = {
+type BillPaymentEntryDetail = {
   paymentNo: string;
   companyName: string;
-  paymentType: string;
-  paymentTypeNo: string;
+  vendorName: string;
+  billNo: string;
+  billDate: string;
+  mrnNo: string;
+  mrnDate: string;
+  billAmount: number;
   paymentAmount: number;
   paymentDate: string;
+  requestedBy: string;
   remarks: string;
-  paymentRef: string;
-  bankCashPayment: string;
+  paymentTerms: string;
+  priorityLevel: string;
   currency: string;
-  exchangeRate: number;
-  paymentReqNo: string;
-  ledgerFrom: string;
-  ledgerTo: string;
-  vendorCode: string;
-  approvalStatus: number;
-  chequeBankName: string;
-  bankBranch: string;
-  instrumentDate: string;
-  amountWords: string;
-  recordLogId: number | null;
-  companyId: number | null;
-  ledgerFromId: number | null;
-  ledgerToId: number | null;
+  currencyRate: number;
+  tds: number;
+  debitNoteAmnt: number;
+  lc: string;
+  utrNo: string;
+  paymentBankName: string;
+  paymentBankAccNo: string;
+  speReq: string;
 };
 
-type AdvancePaymentHistory = {
-  approvalName: string;
-  status: string;
-  approvalDate: string | null;
-  comment: string;
-  loginName: string;
+type BillPaymentHistory = {
+  approvalName?: string;
+  ApprovalName?: string;
+  status?: string;
+  Status?: string;
+  approvalDate?: string | null;
+  ApprovalDate?: string | null;
+  comment?: string;
+  Comment?: string;
+  loginName?: string;
+  LoginName?: string;
 };
 
 export const Route = createFileRoute("/_app/advance-payment/$paymentNo")({
   head: ({ params }) => ({
-    meta: [{ title: `${params.paymentNo} - Advance Payment Details` }],
+    meta: [{ title: `${params.paymentNo} - Bill Payment Entry` }],
   }),
   component: AdvancePaymentDetails,
-  notFoundComponent: () => <div className="p-8 text-center">Advance payment not found.</div>,
+  notFoundComponent: () => <div className="p-8 text-center">Bill payment entry not found.</div>,
 });
-
-function statusLabel(status: number | null | undefined) {
-  if (status === 1) return "Approved";
-  if (status === 2) return "Rejected";
-  return "Pending";
-}
 
 function AdvancePaymentDetails() {
   const { paymentNo } = Route.useParams();
@@ -105,7 +101,7 @@ function AdvancePaymentDetails() {
       const response = await fetch(
         getApiUrl(`/api/AdvancePayment/details?paymentNo=${encodeURIComponent(paymentNo)}`),
       );
-      if (!response.ok) throw new Error("Failed to fetch advance payment details");
+      if (!response.ok) throw new Error("Failed to fetch bill payment entry details");
       return response.json();
     },
     staleTime: Infinity,
@@ -117,14 +113,14 @@ function AdvancePaymentDetails() {
       const response = await fetch(
         getApiUrl(`/api/AdvancePayment/history?paymentNo=${encodeURIComponent(paymentNo)}`),
       );
-      if (!response.ok) throw new Error("Failed to fetch advance payment workflow");
+      if (!response.ok) throw new Error("Failed to fetch bill payment workflow");
       return response.json();
     },
     staleTime: Infinity,
   });
 
-  const payment = paymentData as AdvancePaymentDetail | undefined;
-  const workflow = Array.isArray(historyData) ? (historyData as AdvancePaymentHistory[]) : [];
+  const payment = paymentData as BillPaymentEntryDetail | undefined;
+  const workflow = Array.isArray(historyData) ? (historyData as BillPaymentHistory[]) : [];
 
   if (paymentLoading) {
     return (
@@ -132,7 +128,7 @@ function AdvancePaymentDetails() {
         <SkeletonCard />
         <div className="grid gap-5 lg:grid-cols-3">
           <div className="space-y-5 lg:col-span-2">
-            <SkeletonSection title="Advance Payment Details" />
+            <SkeletonSection title="Bill Payment Entry Details" />
             <SkeletonSection title="Remarks" />
           </div>
           <div>
@@ -146,7 +142,7 @@ function AdvancePaymentDetails() {
   if (!payment) {
     return (
       <div className="rounded-xl border border-border bg-card p-8 text-center">
-        <p>Advance payment not found.</p>
+        <p>Bill payment entry not found.</p>
         <Link to="/advance-payments" className="mt-3 inline-block text-sm font-medium text-primary hover:underline">
           Back to list
         </Link>
@@ -171,7 +167,7 @@ function AdvancePaymentDetails() {
 
       if (!response.ok) throw new Error(await response.text());
 
-      toast.success("Advance payment approved successfully");
+      toast.success("Bill payment entry approved successfully");
 
       const nextPaymentNo = resolveNextAfterApproval(paymentNo, queryClient, {
         kind: "advancePayment",
@@ -218,7 +214,7 @@ function AdvancePaymentDetails() {
 
       if (!response.ok) throw new Error(await response.text());
 
-      toast.success("Advance payment rejected successfully");
+      toast.success("Bill payment entry rejected successfully");
       setConfirm(null);
 
       const nextPaymentNo = resolveNextAfterApproval(paymentNo, queryClient, {
@@ -244,11 +240,11 @@ function AdvancePaymentDetails() {
 
   const headerItems = [
     { icon: Hash, label: "Payment No", value: payment.paymentNo },
-    { icon: Building2, label: "Company", value: payment.companyName },
+    { icon: Building2, label: "Vendor", value: payment.vendorName || "—" },
     { icon: Calendar, label: "Payment Date", value: payment.paymentDate },
-    { icon: Wallet, label: "Payment Type", value: payment.paymentTypeNo || payment.paymentType || "Advance" },
-    { icon: IndianRupee, label: "Payment Amount", value: formatINR(payment.paymentAmount || 0), strong: true },
-    { icon: Landmark, label: "Currency", value: payment.currency || "—" },
+    { icon: UserIcon, label: "Requested By", value: payment.requestedBy || "—" },
+    { icon: IndianRupee, label: "Bill Amount", value: formatINR(payment.billAmount || 0), strong: true },
+    { icon: Landmark, label: "Payment Amount", value: formatINR(payment.paymentAmount || 0), strong: true },
   ];
 
   const grandTotal = Number(payment?.paymentAmount || 0);
@@ -272,15 +268,15 @@ function AdvancePaymentDetails() {
             params: { paymentNo: paymentNavigation.next },
           })
         }
-        trailing={<StatusBadge status={statusLabel(payment.approvalStatus)} />}
+        trailing={<StatusBadge status="Pending" />}
       />
 
       <div className="rounded-xl border border-border bg-card p-5">
         <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Advance Payment Approval
+          Bill Payment Entry Approval
         </div>
         <h1 className="text-xl font-semibold tracking-tight md:text-2xl">{payment.paymentNo}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{payment.companyName}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{payment.vendorName || payment.companyName}</p>
         <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 md:grid-cols-3">
           {headerItems.map((h) => (
             <div key={h.label} className="flex items-start gap-2.5">
@@ -298,24 +294,18 @@ function AdvancePaymentDetails() {
 
       <div className="grid gap-5 lg:grid-cols-3 min-w-0 w-full">
         <div className="space-y-5 lg:col-span-2 min-w-0 w-full">
-          <Section title="Advance Payment Details">
+          <Section title="Bill Payment Entry Details">
             <div className="grid grid-cols-2 gap-4 text-sm">
-              <Field label="Company" value={payment.companyName} />
-              <Field label="Payment Type" value={payment.paymentType || "—"} />
-              <Field label="Payment Type No" value={payment.paymentTypeNo || "—"} />
-              <Field label="Payment Ref" value={payment.paymentRef || "—"} />
-              <Field label="Payment Req No" value={payment.paymentReqNo || "—"} />
+              <Field label="Company" value={payment.companyName || "—"} />
+              <Field label="Vendor" value={payment.vendorName || "—"} />
+              <Field label="Bill No" value={payment.billNo || "—"} />
+              <Field label="MRN No" value={payment.mrnNo || "—"} />
+              <Field label="Bill Date" value={payment.billDate || "—"} />
               <Field label="Payment Date" value={payment.paymentDate || "—"} />
-              <Field label="Ledger From" value={payment.ledgerFrom || "—"} />
-              <Field label="Ledger To" value={payment.ledgerTo || "—"} />
-              <Field label="Bank / Cash" value={payment.bankCashPayment || "—"} />
-              <Field label="Vendor Code" value={payment.vendorCode || "—"} />
+              <Field label="Payment Terms" value={payment.paymentTerms || "—"} />
               <Field label="Currency" value={payment.currency || "—"} />
-              <Field label="Exchange Rate" value={String(payment.exchangeRate ?? 0)} />
-              <Field label="Cheque Bank" value={payment.chequeBankName || "—"} />
-              <Field label="Bank Branch" value={payment.bankBranch || "—"} />
-              <Field label="Instrument Date" value={payment.instrumentDate || "—"} />
-              <Field label="Approval Status" value={statusLabel(payment.approvalStatus)} />
+              <Field label="Bank" value={payment.paymentBankName || "—"} />
+              <Field label="Requested By" value={payment.requestedBy || "—"} />
               <div className="col-span-2">
                 <strong>Remarks</strong>
                 <div>{payment.remarks || "—"}</div>
@@ -331,27 +321,34 @@ function AdvancePaymentDetails() {
         <div className="lg:col-span-1 min-w-0 w-full">
           <Section title="Approval Workflow">
             <div className="space-y-3">
-              {workflow.map((step, index) => (
-                <div key={`${step.approvalName}-${index}`} className="rounded-lg border border-border p-3">
-                  <div className="font-medium">{step.approvalName}</div>
+              {workflow.map((step, index) => {
+                const name = step.approvalName || step.ApprovalName || "Approver";
+                const status = step.status || step.Status || "Pending";
+                const date = step.approvalDate || step.ApprovalDate;
+                const comment = step.comment || step.Comment;
+                return (
+                <div key={`${name}-${index}`} className="rounded-lg border border-border p-3">
+                  <div className="font-medium">{name}</div>
                   <div
                     className={`inline-block rounded px-2 py-1 text-xs font-semibold mt-2 ${
-                      step.status === "Approved"
+                      status === "Approved"
                         ? "bg-green-500/20 text-green-400"
-                        : step.status === "Rejected"
+                        : status === "Rejected"
                           ? "bg-red-500/20 text-red-400"
                           : "bg-yellow-500/20 text-yellow-400"
                     }`}
                   >
-                    {step.status}
+                    {status}
                   </div>
                   <div className="text-sm text-muted-foreground mt-2">
-                    Approval Date: {step.approvalDate || "Pending"}
+                    Approval Date: {date || "Pending"}
                   </div>
-                  <div className="text-sm text-muted-foreground">Comment: {step.comment || "—"}</div>
-                  <div className="text-sm text-muted-foreground">Source: {step.loginName || "—"}</div>
+                  {comment ? (
+                    <div className="text-sm text-muted-foreground">Comment: {comment}</div>
+                  ) : null}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </Section>
         </div>
@@ -377,9 +374,9 @@ function AdvancePaymentDetails() {
             <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-full bg-destructive/15 text-destructive">
               <XCircle className="h-5 w-5" />
             </div>
-            <h3 className="text-base font-semibold">Reject this advance payment?</h3>
+            <h3 className="text-base font-semibold">Reject this bill payment entry?</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              This action will reject the advance payment and move to the next item in queue.
+              This action will reject the bill payment entry and move to the next item in queue.
             </p>
             {!remarks.trim() && (
               <p className="mt-2 text-xs font-medium text-destructive">Remarks are required to reject.</p>

@@ -40,7 +40,7 @@ public class AdvancePaymentController : ControllerBase
         var data = await _advancePaymentService.GetPaymentDetails(paymentNo);
 
         if (data == null)
-            return NotFound("Advance payment not found.");
+            return NotFound("Bill payment entry not found.");
 
         return Ok(data);
     }
@@ -62,7 +62,7 @@ public class AdvancePaymentController : ControllerBase
             if (!result)
                 return BadRequest("Approval failed.");
 
-            return Ok("Advance payment approved successfully.");
+            return Ok("Bill payment entry approved successfully.");
         }
         catch (Exception ex)
         {
@@ -79,7 +79,7 @@ public class AdvancePaymentController : ControllerBase
             if (!result)
                 return BadRequest("Rejection failed.");
 
-            return Ok("Advance payment rejected successfully.");
+            return Ok("Bill payment entry rejected successfully.");
         }
         catch (Exception ex)
         {

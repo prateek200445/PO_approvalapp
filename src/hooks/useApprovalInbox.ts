@@ -103,25 +103,19 @@ function mapPayments(rows: Record<string, unknown>[]): InboxItem[] {
 function mapAdvancePayments(rows: Record<string, unknown>[]): InboxItem[] {
   return rows
     .map((row) => {
-      const id = pick(row, "PaymentNo", "paymentNo");
+      const id = pick(row, "paymentNo", "PaymentNo");
       if (!id) return null;
-      const date = pick(row, "PaymentDate", "paymentDate");
-      const statusRaw = pick(row, "ApprovalStatus", "approvalStatus");
-      const status =
-        statusRaw === "1" ? "Approved" : statusRaw === "2" ? "Rejected" : "Pending";
+      const date = pick(row, "paymentDate", "PaymentDate");
       return {
         kind: "advancePayment" as const,
         id,
         title: id,
-        subtitle:
-          pick(row, "CompanyName", "companyName") ||
-          pick(row, "PaymentTypeNo", "paymentTypeNo") ||
-          "—",
-        amount: pickAmount(row, "PaymentAmount", "paymentAmount", "PaymentAmt", "paymentAmt"),
-        extra: pick(row, "PaymentTypeNo", "paymentTypeNo", "Remarks", "remarks"),
+        subtitle: pick(row, "VendorName", "vendorName", "CompanyName", "companyName") || "—",
+        amount: pickAmount(row, "paymentAmount", "PaymentAmount", "Total", "total"),
+        extra: pick(row, "BillNo", "billNo"),
         date,
         days: daysWaiting(date),
-        status,
+        status: pick(row, "Status", "status") || "Pending",
       } satisfies InboxItem;
     })
     .filter((row): row is InboxItem => row != null);

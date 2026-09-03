@@ -155,8 +155,8 @@ export function AppShell() {
     {
       to: "/advance-payments",
       icon: CreditCard,
-      label: "Advance Payments",
-      shortLabel: "Adv Pay",
+      label: "Bill Payment Entry",
+      shortLabel: "Bill Pay",
       match: (p) => p.startsWith("/advance-payment") || p.startsWith("/advance-payments"),
       badge: "advancePayment",
     },
