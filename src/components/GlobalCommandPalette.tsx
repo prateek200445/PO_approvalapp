@@ -6,6 +6,7 @@ import { useApprovalInbox, type InboxItem, type InboxKind } from "@/hooks/useApp
 import { formatINR } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 import { setApprovalListNav } from "@/lib/approval-list-nav";
+import { BILL_PAYMENT_ENTRY_ENABLED } from "@/lib/feature-flags";
 
 const KIND_LABEL: Record<InboxKind, string> = {
   po: "PO",
@@ -53,7 +54,9 @@ export function GlobalCommandPalette() {
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const items = inbox.allItems;
+    const items = inbox.allItems.filter(
+      (item) => BILL_PAYMENT_ENTRY_ENABLED || item.kind !== "advancePayment",
+    );
     if (!q) return items.slice(0, 12);
     return items
       .filter(

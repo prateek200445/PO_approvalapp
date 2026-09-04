@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getApiUrl } from "@/lib/api-config";
 import type { ApprovalListKind } from "@/lib/approval-list-nav";
+import { BILL_PAYMENT_ENTRY_ENABLED } from "@/lib/feature-flags";
 
 export type InboxKind = ApprovalListKind;
 
@@ -177,7 +178,7 @@ export function useApprovalInbox(username?: string) {
     queryFn: () =>
       fetchPendingList(`/api/AdvancePayment/pending/${username}?amount=&filterType=gte`),
     ...inboxQueryOptions,
-    enabled,
+    enabled: enabled && BILL_PAYMENT_ENTRY_ENABLED,
   });
 
   const indentQuery = useQuery({

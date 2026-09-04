@@ -15,6 +15,7 @@ import {
   Factory,
   Building2,
   Landmark,
+  FileBarChart,
   PanelLeftClose,
   PanelLeftOpen,
   Hammer,
@@ -28,6 +29,7 @@ import { formatBadgeCount, useApprovalInbox, type InboxKind } from "@/hooks/useA
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { GlobalCommandPalette, SearchTrigger } from "@/components/GlobalCommandPalette";
 import { AssistantShellSkeleton } from "@/components/chat/AssistantShellSkeleton";
+import { BILL_PAYMENT_ENTRY_ENABLED } from "@/lib/feature-flags";
 
 type AppPath =
   | "/dashboard"
@@ -42,6 +44,7 @@ type AppPath =
   | "/ledgers"
   | "/export-bill-overdue"
   | "/daily-production"
+  | "/daily-reports"
   | "/bom"
   | "/profile"
   | "/assistant";
@@ -154,14 +157,18 @@ export function AppShell() {
       match: (p) => p.startsWith("/payment"),
       badge: "payment",
     },
-    {
-      to: "/advance-payments",
-      icon: CreditCard,
-      label: "Bill Payment Entry",
-      shortLabel: "Bill Pay",
-      match: (p) => p.startsWith("/advance-payment") || p.startsWith("/advance-payments"),
-      badge: "advancePayment",
-    },
+    ...(BILL_PAYMENT_ENTRY_ENABLED
+      ? [
+          {
+            to: "/advance-payments" as const,
+            icon: CreditCard,
+            label: "Bill Payment Entry",
+            shortLabel: "Bill Pay",
+            match: (p: string) => p.startsWith("/advance-payment") || p.startsWith("/advance-payments"),
+            badge: "advancePayment" as const,
+          },
+        ]
+      : []),
     {
       to: "/indents",
       icon: FileText,
@@ -184,6 +191,12 @@ export function AppShell() {
       icon: Landmark,
       label: "Bank Requirements",
       match: (p) => p.startsWith("/bank-requirements"),
+    },
+    {
+      to: "/cma",
+      icon: FileBarChart,
+      label: "CMA",
+      match: (p) => p.startsWith("/cma"),
     },
     {
       to: "/intercompany",
@@ -212,6 +225,12 @@ export function AppShell() {
       icon: Factory,
       label: "Daily Production",
       match: (p) => p.startsWith("/daily-production"),
+    },
+    {
+      to: "/daily-reports",
+      icon: ClipboardList,
+      label: "Daily Reports",
+      match: (p) => p.startsWith("/daily-reports"),
     },
     { to: "/bom", icon: Layers, label: "BOM Report", match: (p) => p.startsWith("/bom") },
   ];
