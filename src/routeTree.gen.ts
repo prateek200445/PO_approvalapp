@@ -26,7 +26,9 @@ import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
+import { Route as AppDailyReportsRouteImport } from './routes/_app/daily-reports'
 import { Route as AppDailyProductionRouteImport } from './routes/_app/daily-production'
+import { Route as AppCmaRouteImport } from './routes/_app/cma'
 import { Route as AppBomRouteImport } from './routes/_app/bom'
 import { Route as AppBankRequirementsRouteImport } from './routes/_app/bank-requirements'
 import { Route as AppAssistantRouteImport } from './routes/_app/assistant'
@@ -126,9 +128,19 @@ const AppDashboardRoute = AppDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDailyReportsRoute = AppDailyReportsRouteImport.update({
+  id: '/daily-reports',
+  path: '/daily-reports',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDailyProductionRoute = AppDailyProductionRouteImport.update({
   id: '/daily-production',
   path: '/daily-production',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCmaRoute = AppCmaRouteImport.update({
+  id: '/cma',
+  path: '/cma',
   getParentRoute: () => AppRoute,
 } as any)
 const AppBomRoute = AppBomRouteImport.update({
@@ -210,7 +222,9 @@ export interface FileRoutesByFullPath {
   '/assistant': typeof AppAssistantRoute
   '/bank-requirements': typeof AppBankRequirementsRoute
   '/bom': typeof AppBomRouteWithChildren
+  '/cma': typeof AppCmaRoute
   '/daily-production': typeof AppDailyProductionRoute
+  '/daily-reports': typeof AppDailyReportsRoute
   '/dashboard': typeof AppDashboardRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
@@ -242,7 +256,9 @@ export interface FileRoutesByTo {
   '/advance-payments': typeof AppAdvancePaymentsRoute
   '/assistant': typeof AppAssistantRoute
   '/bank-requirements': typeof AppBankRequirementsRoute
+  '/cma': typeof AppCmaRoute
   '/daily-production': typeof AppDailyProductionRoute
+  '/daily-reports': typeof AppDailyReportsRoute
   '/dashboard': typeof AppDashboardRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/history': typeof AppHistoryRoute
@@ -277,7 +293,9 @@ export interface FileRoutesById {
   '/_app/assistant': typeof AppAssistantRoute
   '/_app/bank-requirements': typeof AppBankRequirementsRoute
   '/_app/bom': typeof AppBomRouteWithChildren
+  '/_app/cma': typeof AppCmaRoute
   '/_app/daily-production': typeof AppDailyProductionRoute
+  '/_app/daily-reports': typeof AppDailyReportsRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/_app/history': typeof AppHistoryRoute
@@ -312,7 +330,9 @@ export interface FileRouteTypes {
     | '/assistant'
     | '/bank-requirements'
     | '/bom'
+    | '/cma'
     | '/daily-production'
+    | '/daily-reports'
     | '/dashboard'
     | '/export-bill-overdue'
     | '/history'
@@ -344,7 +364,9 @@ export interface FileRouteTypes {
     | '/advance-payments'
     | '/assistant'
     | '/bank-requirements'
+    | '/cma'
     | '/daily-production'
+    | '/daily-reports'
     | '/dashboard'
     | '/export-bill-overdue'
     | '/history'
@@ -378,7 +400,9 @@ export interface FileRouteTypes {
     | '/_app/assistant'
     | '/_app/bank-requirements'
     | '/_app/bom'
+    | '/_app/cma'
     | '/_app/daily-production'
+    | '/_app/daily-reports'
     | '/_app/dashboard'
     | '/_app/export-bill-overdue'
     | '/_app/history'
@@ -532,11 +556,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/daily-reports': {
+      id: '/_app/daily-reports'
+      path: '/daily-reports'
+      fullPath: '/daily-reports'
+      preLoaderRoute: typeof AppDailyReportsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/daily-production': {
       id: '/_app/daily-production'
       path: '/daily-production'
       fullPath: '/daily-production'
       preLoaderRoute: typeof AppDailyProductionRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/cma': {
+      id: '/_app/cma'
+      path: '/cma'
+      fullPath: '/cma'
+      preLoaderRoute: typeof AppCmaRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/bom': {
@@ -674,7 +712,9 @@ interface AppRouteChildren {
   AppAssistantRoute: typeof AppAssistantRoute
   AppBankRequirementsRoute: typeof AppBankRequirementsRoute
   AppBomRoute: typeof AppBomRouteWithChildren
+  AppCmaRoute: typeof AppCmaRoute
   AppDailyProductionRoute: typeof AppDailyProductionRoute
+  AppDailyReportsRoute: typeof AppDailyReportsRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
   AppHistoryRoute: typeof AppHistoryRoute
@@ -702,7 +742,9 @@ const AppRouteChildren: AppRouteChildren = {
   AppAssistantRoute: AppAssistantRoute,
   AppBankRequirementsRoute: AppBankRequirementsRoute,
   AppBomRoute: AppBomRouteWithChildren,
+  AppCmaRoute: AppCmaRoute,
   AppDailyProductionRoute: AppDailyProductionRoute,
+  AppDailyReportsRoute: AppDailyReportsRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
   AppHistoryRoute: AppHistoryRoute,

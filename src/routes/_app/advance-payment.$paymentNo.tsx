@@ -21,6 +21,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { formatINR } from "@/lib/mock-data";
 import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
 import { invalidateApprovalCaches, resolveNextAfterApproval } from "@/lib/approval-after-action";
+import { BILL_PAYMENT_ENTRY_ENABLED } from "@/lib/feature-flags";
+import { BillPaymentEntryUnavailable } from "@/components/BillPaymentEntryUnavailable";
 
 type BillPaymentEntryDetail = {
   paymentNo: string;
@@ -65,7 +67,7 @@ export const Route = createFileRoute("/_app/advance-payment/$paymentNo")({
   head: ({ params }) => ({
     meta: [{ title: `${params.paymentNo} - Bill Payment Entry` }],
   }),
-  component: AdvancePaymentDetails,
+  component: BILL_PAYMENT_ENTRY_ENABLED ? AdvancePaymentDetails : BillPaymentEntryUnavailable,
   notFoundComponent: () => <div className="p-8 text-center">Bill payment entry not found.</div>,
 });
 
@@ -303,6 +305,11 @@ function AdvancePaymentDetails() {
               <Field label="Bill Date" value={payment.billDate || "—"} />
               <Field label="Payment Date" value={payment.paymentDate || "—"} />
               <Field label="Payment Terms" value={payment.paymentTerms || "—"} />
+              <Field label="Priority" value={payment.priorityLevel || "—"} />
+              <Field label="LC" value={payment.lc || "—"} />
+              <Field label="TDS" value={formatINR(payment.tds || 0)} />
+              <Field label="Debit Note" value={formatINR(payment.debitNoteAmnt || 0)} />
+              <Field label="Special Request" value={payment.speReq || "—"} />
               <Field label="Currency" value={payment.currency || "—"} />
               <Field label="Bank" value={payment.paymentBankName || "—"} />
               <Field label="Requested By" value={payment.requestedBy || "—"} />

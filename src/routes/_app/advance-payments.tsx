@@ -12,6 +12,8 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { setApprovalListNav } from "@/lib/approval-list-nav";
 import { formatINR, type POStatus } from "@/lib/mock-data";
 import { formatShortDate } from "@/lib/utils";
+import { BILL_PAYMENT_ENTRY_ENABLED } from "@/lib/feature-flags";
+import { BillPaymentEntryUnavailable } from "@/components/BillPaymentEntryUnavailable";
 
 type BillPaymentEntryRow = {
   paymentNo: string;
@@ -36,7 +38,7 @@ function billNo(row: BillPaymentEntryRow): string {
 
 export const Route = createFileRoute("/_app/advance-payments")({
   head: () => ({ meta: [{ title: "Bill Payment Entry — Approval Portal" }] }),
-  component: AdvancePaymentsList,
+  component: BILL_PAYMENT_ENTRY_ENABLED ? AdvancePaymentsList : BillPaymentEntryUnavailable,
 });
 
 function AdvancePaymentsList() {
@@ -749,6 +751,7 @@ function AdvancePaymentsList() {
                   </th>
                 )}
                 <th className="px-4 py-3 font-medium">Payment No</th>
+                <th className="px-4 py-3 font-medium">Company</th>
                 <th className="px-4 py-3 font-medium">Vendor</th>
                 <th className="px-4 py-3 font-medium">Bill No</th>
                 <th className="px-4 py-3 font-medium">Payment Date</th>
@@ -794,6 +797,7 @@ function AdvancePaymentsList() {
                         </Link>
                       )}
                     </td>
+                    <td className="px-4 py-3 text-muted-foreground">{p.companyName || "—"}</td>
                     <td className="px-4 py-3 text-muted-foreground">{vendorName(p)}</td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {billNo(p) || "—"}

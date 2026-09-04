@@ -36,6 +36,7 @@ interface SalesChartsProps {
   trend?: SalesTrendItem[];
   trendLoading?: boolean;
   groupsLoading?: boolean;
+  includeIntercompany?: boolean;
 }
 
 export function SalesCharts({
@@ -44,7 +45,9 @@ export function SalesCharts({
   trend = [],
   trendLoading = false,
   groupsLoading = false,
+  includeIntercompany = false,
 }: SalesChartsProps) {
+  const icNote = includeIntercompany ? "Incl. intercompany" : "Excl. intercompany";
   const groupConfig = Object.fromEntries(
     byGroup.map((g, i) => [
       g.groupName,
@@ -95,7 +98,7 @@ export function SalesCharts({
         <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales Trend (₹)</h2>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Year by year (Indian FY) · Excl. intercompany
+            Year by year (Indian FY) · {icNote}
           </p>
         </header>
         <div className="p-2 sm:p-4">
@@ -155,7 +158,7 @@ export function SalesCharts({
       <section className="rounded-2xl border border-border bg-card shadow-soft">
         <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales by Group</h2>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Excl. intercompany</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{icNote}</p>
         </header>
         <div className="p-3 sm:p-4">
           {groupsLoading && byGroup.length === 0 ? (
@@ -225,7 +228,7 @@ export function SalesCharts({
       <section className="rounded-2xl border border-border bg-card shadow-soft overflow-hidden">
         <header className="border-b border-border px-3 py-2.5 sm:px-4 sm:py-3">
           <h2 className="text-sm font-semibold">Sales by Sub Group (₹)</h2>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Excl. intercompany</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{icNote}</p>
         </header>
         <div className="overflow-x-auto p-2 sm:p-4">
           {groupsLoading && subGroupChartData.length === 0 ? (

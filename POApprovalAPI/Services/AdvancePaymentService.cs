@@ -4,8 +4,10 @@ using POApprovalAPI.Models;
 namespace POApprovalAPI.Services;
 
 /// <summary>
-/// Bill Payment Entry approval queue from dbo.BillPaymentEntry
-/// (not BillPaymentHODApproval).
+/// Bill Payment Entry Approval queue — same source as ERP
+/// FrmBillPaymentEntry.AllocateBillEntryApproval / FrmBillPaymentEntryApprovalAC:
+/// dbo.BillPaymentEntryApproval assigned to the current user.
+/// Payment Approval (HOD) stays on PaymentService + BillPaymentHODApproval.
 /// </summary>
 public class AdvancePaymentService
 {
@@ -21,22 +23,32 @@ public class AdvancePaymentService
     public const int MaxBulkSize = PaymentService.MaxBulkSize;
     private const int BulkParallelism = 8;
 
-    private const string PendingEntryFilter = @"
-    e.status = 'Pending'
-    AND ISNULL(e.IsCancel, 'no') IN ('no', 'No', '0', '')
-    AND ISNULL(e.isPaid, 'no') IN ('no', 'No', '0', '')
-    AND (
-            EXISTS (
-                SELECT 1
-                FROM BillPaymentApprovalAllocation a
-                WHERE a.ApprovalName = @UserName
-            )
-         OR EXISTS (
-                SELECT 1
-                FROM BillPaymentHODApproval h
-                WHERE h.ApprovalName = @UserName
-            )
-        )";
+    private const string PendingApprovalFilter = @"
+    a.status = 'Pending'
+    AND a.ApprovalName = @UserName
+    AND ISNULL(a.IsCancel, 'no') IN ('no', 'No', '0', '')";
+
+    private const string EntrySelect = @"
+    a.PaymentNo,
+    ISNULL(a.CompanyName, '') AS CompanyName,
+    ISNULL(a.VendorName, '') AS VendorName,
+    ISNULL(a.BillNo, '') AS BillNo,
+    ISNULL(a.MRNno, '') AS MRNNo,
+    a.BillDate,
+    a.MRNDate,
+    a.PaymentDate,
+    ISNULL(a.BillAmount, 0) AS BillAmount,
+    ISNULL(a.PaymentAmount, 0) AS PaymentAmount,
+    ISNULL(a.PaymentTerms, '') AS PaymentTerms,
+    ISNULL(a.PriorityLevel, '') AS PriorityLevel,
+    ISNULL(a.Currency, '') AS Currency,
+    ISNULL(a.CurrencyRate, 0) AS CurrencyRate,
+    ISNULL(a.TDS, 0) AS TDS,
+    ISNULL(a.DebitNoteAmnt, 0) AS DebitNoteAmnt,
+    ISNULL(a.Outstanding, 0) AS Outstanding,
+    ISNULL(a.LedgerOSTAmt, 0) AS LedgerOSTAmt,
+    ISNULL(a.Remarks, '') AS Remarks,
+    ISNULL(a.Loginname, '') AS RequestedBy";
 
     public async Task<IEnumerable<PaymentRequestModel>> GetPendingPayments(
         string username,
@@ -46,44 +58,25 @@ public class AdvancePaymentService
         using var connection = _database.CreateConnection();
 
         var sql = $@"
-SELECT TOP (20)
-    e.PaymentNo,
-    ISNULL(e.CompanyName, '') AS CompanyName,
-    ISNULL(e.VendorName, '') AS VendorName,
-    ISNULL(e.BillNo, '') AS BillNo,
-    ISNULL(e.MRNno, '') AS MRNNo,
-    e.BillDate,
-    e.MRNDate,
-    e.PaymentDate,
-    ISNULL(e.BillAmount, 0) AS BillAmount,
-    ISNULL(e.PaymentAmount, 0) AS PaymentAmount,
-    ISNULL(e.PaymentTerms, '') AS PaymentTerms,
-    ISNULL(e.PriorityLevel, '') AS PriorityLevel,
-    ISNULL(e.Currency, '') AS Currency,
-    ISNULL(e.CurrencyRate, 0) AS CurrencyRate,
-    ISNULL(e.TDS, 0) AS TDS,
-    ISNULL(e.DebitNoteAmnt, 0) AS DebitNoteAmnt,
-    ISNULL(e.Remarks, '') AS Remarks,
-    ISNULL(e.Loginname, '') AS RequestedBy,
-    CAST(0 AS DECIMAL(18,2)) AS Outstanding,
-    CAST(0 AS DECIMAL(18,2)) AS LedgerOSTAmt
-FROM BillPaymentEntry e
-WHERE {PendingEntryFilter}";
+SELECT
+    {EntrySelect}
+FROM BillPaymentEntryApproval a
+WHERE {PendingApprovalFilter}";
 
         if (amount != null)
         {
             sql += filterType switch
             {
-                "lt" => " AND e.PaymentAmount < @Amount",
-                "gt" => " AND e.PaymentAmount > @Amount",
-                "eq" => " AND e.PaymentAmount = @Amount",
-                "lte" => " AND e.PaymentAmount <= @Amount",
-                "gte" => " AND e.PaymentAmount >= @Amount",
+                "lt" => " AND a.PaymentAmount < @Amount",
+                "gt" => " AND a.PaymentAmount > @Amount",
+                "eq" => " AND a.PaymentAmount = @Amount",
+                "lte" => " AND a.PaymentAmount <= @Amount",
+                "gte" => " AND a.PaymentAmount >= @Amount",
                 _ => ""
             };
         }
 
-        sql += " ORDER BY e.Sysdate DESC, e.PaymentNo DESC";
+        sql += " ORDER BY a.PaymentDate DESC, a.Sysdate DESC, a.PaymentNo DESC";
 
         return await connection.QueryAsync<PaymentRequestModel>(
             sql,
@@ -96,33 +89,41 @@ WHERE {PendingEntryFilter}";
 
         const string sql = @"
 SELECT TOP (1)
-    e.PaymentNo,
-    ISNULL(e.CompanyName, '') AS CompanyName,
-    ISNULL(e.VendorName, '') AS VendorName,
-    ISNULL(e.BillNo, '') AS BillNo,
-    e.BillDate,
-    ISNULL(e.MRNno, '') AS MRNNo,
-    e.MRNDate,
-    ISNULL(e.BillAmount, 0) AS BillAmount,
-    ISNULL(e.PaymentTerms, '') AS PaymentTerms,
-    ISNULL(e.PaymentAmount, 0) AS PaymentAmount,
-    e.PaymentDate,
-    ISNULL(e.Loginname, '') AS RequestedBy,
-    ISNULL(e.Remarks, '') AS Remarks,
-    ISNULL(e.PriorityLevel, '') AS PriorityLevel,
-    ISNULL(e.LC, '') AS LC,
-    ISNULL(e.UTRno, '') AS UTRNo,
-    ISNULL(e.Currency, '') AS Currency,
-    ISNULL(e.CurrencyRate, 0) AS CurrencyRate,
-    ISNULL(e.TDS, 0) AS TDS,
-    ISNULL(e.DebitNoteAmnt, 0) AS DebitNoteAmnt,
+    a.PaymentNo,
+    ISNULL(a.CompanyName, '') AS CompanyName,
+    ISNULL(a.VendorName, '') AS VendorName,
+    ISNULL(a.BillNo, '') AS BillNo,
+    a.BillDate,
+    ISNULL(a.MRNno, '') AS MRNNo,
+    a.MRNDate,
+    ISNULL(a.BillAmount, 0) AS BillAmount,
+    ISNULL(a.PaymentTerms, '') AS PaymentTerms,
+    ISNULL(a.PaymentAmount, 0) AS PaymentAmount,
+    a.PaymentDate,
+    ISNULL(a.Loginname, '') AS RequestedBy,
+    ISNULL(a.Remarks, '') AS Remarks,
+    ISNULL(a.PriorityLevel, '') AS PriorityLevel,
+    ISNULL(a.LC, '') AS LC,
+    ISNULL(a.UTRno, '') AS UTRNo,
+    ISNULL(a.Currency, '') AS Currency,
+    ISNULL(a.CurrencyRate, 0) AS CurrencyRate,
+    ISNULL(a.TDS, 0) AS TDS,
+    ISNULL(a.DebitNoteAmnt, 0) AS DebitNoteAmnt,
     ISNULL(e.PaymentBankName, '') AS PaymentBankName,
     ISNULL(e.PaymentBankAccNo, '') AS PaymentBankAccNo,
     ISNULL(e.SpeReq, 0) AS SpeReq,
-    CAST(0 AS DECIMAL(18,2)) AS LedgerBalance,
+    ISNULL(a.Outstanding, 0) AS Outstanding,
+    ISNULL(a.LedgerOSTAmt, 0) AS LedgerOSTAmt,
+    CAST(ISNULL(a.LedgerOSTAmt, 0) AS DECIMAL(18,2)) AS LedgerBalance,
     CAST(0 AS DECIMAL(18,2)) AS GroupBalance
-FROM BillPaymentEntry e
-WHERE e.PaymentNo = @PaymentNo";
+FROM BillPaymentEntryApproval a
+LEFT JOIN BillPaymentEntry e
+    ON e.VendorName = a.VendorName
+   AND e.BillNo = a.BillNo
+   AND ISNULL(e.MRNno, '') = ISNULL(a.MRNno, '')
+   AND ISNULL(e.IsCancel, 'no') IN ('no', 'No', '0', '')
+WHERE a.PaymentNo = @PaymentNo
+ORDER BY CASE WHEN a.status = 'Pending' THEN 0 ELSE 1 END, a.Sysdate DESC";
 
         return await connection.QueryFirstOrDefaultAsync<PaymentDetailsModel>(
             sql,
@@ -142,7 +143,7 @@ SELECT
     ISNULL(Loginname, '') AS LoginName
 FROM BillPaymentEntryApproval
 WHERE PaymentNo = @PaymentNo
-ORDER BY ApprovalDate";
+ORDER BY Sysdate, ApprovalDate";
 
         return await connection.QueryAsync<PaymentHistoryModel>(
             sql,
@@ -151,151 +152,12 @@ ORDER BY ApprovalDate";
 
     public async Task<bool> ApprovePayment(PaymentApprovalRequest request)
     {
-        using var connection = _database.CreateConnection();
-        using var transaction = connection.BeginTransaction();
-
-        try
-        {
-            var approvalData = await connection.QueryFirstOrDefaultAsync<ApprovalData>(
-                $@"
-SELECT
-    e.PaymentNo,
-    @UserName AS ApprovalName,
-    lr.email AS Email,
-    ISNULL(alloc.authority, 0) AS Authority
-FROM BillPaymentEntry e
-LEFT JOIN loginentry..loginrights lr ON lr.NAME = e.Loginname
-LEFT JOIN BillPaymentApprovalAllocation alloc
-    ON alloc.ApprovalName = @UserName
-WHERE e.PaymentNo = @PaymentNo
-  AND {PendingEntryFilter}",
-                new { request.PaymentNo, UserName = request.UserName },
-                transaction);
-
-            if (approvalData == null)
-            {
-                transaction.Rollback();
-                return false;
-            }
-
-            await InsertHistoryAsync(connection, transaction, request, "Approved");
-
-            if (approvalData.Authority == 1)
-            {
-                await connection.ExecuteAsync(
-                    @"UPDATE BillPaymentEntry
-                      SET status = 'Approved'
-                      WHERE PaymentNo = @PaymentNo
-                        AND status = 'Pending'",
-                    new { request.PaymentNo },
-                    transaction);
-
-                await connection.ExecuteAsync(
-                    @"UPDATE BillPaymentHODApproval
-                      SET Status = 'Approved',
-                          ApprovalDate = GETDATE()
-                      WHERE PaymentNo = @PaymentNo
-                        AND ApprovalName = @UserName
-                        AND Status = 'Pending'",
-                    new { request.PaymentNo, UserName = request.UserName },
-                    transaction);
-
-                if (!string.IsNullOrWhiteSpace(approvalData.Email))
-                {
-                    await _emailService.SendMail(
-                        approvalData.Email,
-                        $"Bill payment {request.PaymentNo} Approved",
-                        $"Dear Sir,\n\n" +
-                        $"Payment No: {request.PaymentNo}\n" +
-                        $"Approved By: {request.UserName}\n" +
-                        $"Remarks: {request.Comment}\n\n" +
-                        $"Regards,\n" +
-                        $"{request.UserName}");
-                }
-            }
-
-            transaction.Commit();
-            return true;
-        }
-        catch
-        {
-            transaction.Rollback();
-            throw;
-        }
+        return await SetApprovalStatus(request, "Approved");
     }
 
     public async Task<bool> RejectPayment(PaymentApprovalRequest request)
     {
-        using var connection = _database.CreateConnection();
-        using var transaction = connection.BeginTransaction();
-
-        try
-        {
-            var rejectionData = await connection.QueryFirstOrDefaultAsync<ApprovalData>(
-                $@"
-SELECT
-    e.PaymentNo,
-    lr.email AS Email
-FROM BillPaymentEntry e
-LEFT JOIN loginentry..loginrights lr ON lr.NAME = e.Loginname
-WHERE e.PaymentNo = @PaymentNo
-  AND {PendingEntryFilter}",
-                new { request.PaymentNo, UserName = request.UserName },
-                transaction);
-
-            if (rejectionData == null)
-            {
-                transaction.Rollback();
-                return false;
-            }
-
-            await InsertHistoryAsync(connection, transaction, request, "Rejected");
-
-            await connection.ExecuteAsync(
-                @"UPDATE BillPaymentEntry
-                  SET status = 'Rejected'
-                  WHERE PaymentNo = @PaymentNo
-                    AND status = 'Pending'",
-                new { request.PaymentNo },
-                transaction);
-
-            await connection.ExecuteAsync(
-                @"UPDATE BillPaymentHODApproval
-                  SET Status = 'Rejected',
-                      ApprovalDate = GETDATE(),
-                      Comment = @Comment
-                  WHERE PaymentNo = @PaymentNo
-                    AND ApprovalName = @UserName
-                    AND Status = 'Pending'",
-                new
-                {
-                    request.PaymentNo,
-                    request.UserName,
-                    request.Comment
-                },
-                transaction);
-
-            if (!string.IsNullOrWhiteSpace(rejectionData.Email))
-            {
-                await _emailService.SendMail(
-                    rejectionData.Email,
-                    $"Bill payment {request.PaymentNo} Rejected",
-                    $"Dear Sir,\n\n" +
-                    $"Payment No: {request.PaymentNo}\n" +
-                    $"Rejected By: {request.UserName}\n" +
-                    $"Remarks: {request.Comment}\n\n" +
-                    $"Regards,\n" +
-                    $"{request.UserName}");
-            }
-
-            transaction.Commit();
-            return true;
-        }
-        catch
-        {
-            transaction.Rollback();
-            throw;
-        }
+        return await SetApprovalStatus(request, "Rejected");
     }
 
     public async Task<PaymentBulkApproveResponse> ApproveBulkAsync(PaymentBulkApproveRequest request)
@@ -388,41 +250,77 @@ WHERE e.PaymentNo = @PaymentNo
         return response;
     }
 
-    private static async Task InsertHistoryAsync(
-        System.Data.IDbConnection connection,
-        System.Data.IDbTransaction transaction,
-        PaymentApprovalRequest request,
-        string status)
+    private async Task<bool> SetApprovalStatus(PaymentApprovalRequest request, string status)
     {
-        await connection.ExecuteAsync(
-            @"
-INSERT INTO BillPaymentEntryApproval
-(
-    PaymentNo, ApprovalName, ApprovalDate, comment, status,
-    CompanyName, VendorName, BillNo, MRNno, PaymentAmount, Loginname, Remarks
-)
+        using var connection = _database.CreateConnection();
+        using var transaction = connection.BeginTransaction();
+
+        try
+        {
+            var approvalData = await connection.QueryFirstOrDefaultAsync<ApprovalData>(
+                $@"
 SELECT
-    e.PaymentNo,
-    @UserName,
-    GETDATE(),
-    @Comment,
-    @Status,
-    e.CompanyName,
-    e.VendorName,
-    e.BillNo,
-    e.MRNno,
-    e.PaymentAmount,
-    e.Loginname,
-    e.Remarks
-FROM BillPaymentEntry e
-WHERE e.PaymentNo = @PaymentNo",
-            new
+    a.PaymentNo,
+    a.ApprovalName,
+    lr.email AS Email
+FROM BillPaymentEntryApproval a
+LEFT JOIN loginentry..loginrights lr
+    ON lr.NAME = a.Loginname OR lr.fullname = a.Loginname
+WHERE a.PaymentNo = @PaymentNo
+  AND {PendingApprovalFilter}",
+                new { request.PaymentNo, UserName = request.UserName },
+                transaction);
+
+            if (approvalData == null)
             {
-                request.PaymentNo,
-                UserName = request.UserName,
-                Comment = request.Comment ?? "",
-                Status = status
-            },
-            transaction);
+                transaction.Rollback();
+                return false;
+            }
+
+            var updated = await connection.ExecuteAsync(
+                @"
+UPDATE BillPaymentEntryApproval
+SET status = @Status,
+    ApprovalDate = GETDATE(),
+    comment = @Comment
+WHERE PaymentNo = @PaymentNo
+  AND ApprovalName = @UserName
+  AND status = 'Pending'",
+                new
+                {
+                    request.PaymentNo,
+                    UserName = request.UserName,
+                    Comment = request.Comment ?? "",
+                    Status = status
+                },
+                transaction);
+
+            if (updated == 0)
+            {
+                transaction.Rollback();
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(approvalData.Email))
+            {
+                await _emailService.SendMail(
+                    approvalData.Email,
+                    $"Bill Payment Entry {request.PaymentNo} {status}",
+                    $"Dear Sir,\n\n" +
+                    $"Payment No: {request.PaymentNo}\n" +
+                    $"{status} By: {request.UserName}\n" +
+                    $"Remarks: {request.Comment}\n\n" +
+                    $"Regards,\n" +
+                    $"{request.UserName}");
+            }
+
+            transaction.Commit();
+            return true;
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
     }
 }

@@ -184,12 +184,13 @@ public class SalesDashboardService
         string company,
         DateTime dateFrom,
         DateTime dateTo,
-        bool refresh = false)
+        bool refresh = false,
+        bool includeIntercompany = false)
     {
         var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
-        var universe = await GetOrLoadUniverseAsync(category, dateFrom, dateTo, refresh);
+        var universe = await GetOrLoadUniverseAsync(category, dateFrom, dateTo, refresh, includeIntercompany);
         var slice = await ResolveSliceCompaniesAsync(company);
-        var totals = AggregateTotals(universe.Leaves, category, slice, universe.ElapsedSeconds);
+        var totals = AggregateTotals(universe.Leaves, category, slice, universe.ElapsedSeconds, includeIntercompany);
         var trend = AggregateTrend(universe.Trend, universe.TrendRanges, slice);
 
         if (isPurchase)
@@ -229,14 +230,16 @@ public class SalesDashboardService
         string category,
         DateTime asOf,
         int years,
-        bool refresh)
+        bool refresh,
+        bool includeIntercompany = false)
     {
         years = Math.Clamp(years, 1, 8);
         var selected = NormalizeCategory(category);
-        var key = $"sales-trend-v1:{selected}:{asOf:yyyy-MM-dd}:{years}";
+        var icKey = includeIntercompany ? "ic" : "xic";
+        var key = $"sales-trend-v1:{icKey}:{selected}:{asOf:yyyy-MM-dd}:{years}";
         return CachedAsync(key, refresh, async () =>
         {
-            var (rows, ranges) = await LoadTrendLeavesAsync(selected, asOf, years);
+            var (rows, ranges) = await LoadTrendLeavesAsync(selected, asOf, years, includeIntercompany);
             return new TrendBundle { Rows = rows, Ranges = ranges };
         });
     }
@@ -244,13 +247,16 @@ public class SalesDashboardService
     private Task<GeoBundle> GetOrLoadGeoAsync(
         DateTime dateFrom,
         DateTime dateTo,
-        bool refresh)
+        bool refresh,
+        bool includeIntercompany = false)
     {
-        var key = $"sales-geo-v2-fibco:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        var icKey = includeIntercompany ? "ic" : "xic";
+        var key = $"sales-geo-v2-fibco:{icKey}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
         return CachedAsync(key, refresh, async () =>
         {
             var invYears = GetInvYearsOverlapping(dateFrom, dateTo).ToList();
-            var (countries, exportCustomers, geoSource) = await LoadSalesGeoUniverseAsync(dateFrom, dateTo);
+            var (countries, exportCustomers, geoSource) = await LoadSalesGeoUniverseAsync(
+                dateFrom, dateTo, includeIntercompany);
             return new GeoBundle
             {
                 Countries = countries,
@@ -266,12 +272,13 @@ public class SalesDashboardService
         string category,
         DateTime dateFrom,
         DateTime dateTo,
-        bool refresh)
+        bool refresh,
+        bool includeIntercompany = false)
     {
         var selectedCategory = NormalizeCategory(category);
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var leavesTask = GetOrLoadLeavesAsync(selectedCategory, dateFrom, dateTo, refresh);
-        var trendTask = GetOrLoadTrendAsync(selectedCategory, dateTo, 5, refresh);
+        var leavesTask = GetLeavesForModeAsync(selectedCategory, dateFrom, dateTo, refresh, includeIntercompany);
+        var trendTask = GetOrLoadTrendAsync(selectedCategory, dateTo, 5, refresh, includeIntercompany);
 
         if (selectedCategory == "Purchase")
         {
@@ -287,7 +294,7 @@ public class SalesDashboardService
             };
         }
 
-        var geoTask = GetOrLoadGeoAsync(dateFrom, dateTo, refresh);
+        var geoTask = GetOrLoadGeoAsync(dateFrom, dateTo, refresh, includeIntercompany);
         await Task.WhenAll(leavesTask, trendTask, geoTask);
         var salesTrend = await trendTask;
         var geo = await geoTask;
@@ -319,13 +326,14 @@ public class SalesDashboardService
         string company,
         DateTime dateFrom,
         DateTime dateTo,
-        bool refresh = false)
+        bool refresh = false,
+        bool includeIntercompany = false)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var leaves = await GetOrLoadLeavesAsync("Sales", dateFrom, dateTo, refresh);
+        var leaves = await GetLeavesForModeAsync("Sales", dateFrom, dateTo, refresh, includeIntercompany);
         sw.Stop();
         var slice = await ResolveSliceCompaniesAsync(company);
-        return AggregateTotals(leaves, "Sales", slice, sw.Elapsed.TotalSeconds);
+        return AggregateTotals(leaves, "Sales", slice, sw.Elapsed.TotalSeconds, includeIntercompany);
     }
 
     /// <summary>
@@ -678,13 +686,14 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.{Bracket(countryCol)}, N'')))";
         string company,
         DateTime dateFrom,
         DateTime dateTo,
-        bool refresh = false)
+        bool refresh = false,
+        bool includeIntercompany = false)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var leaves = await GetOrLoadLeavesAsync("Purchase", dateFrom, dateTo, refresh);
+        var leaves = await GetLeavesForModeAsync("Purchase", dateFrom, dateTo, refresh, includeIntercompany);
         sw.Stop();
         var slice = await ResolveSliceCompaniesAsync(company);
-        return AggregateTotals(leaves, "Purchase", slice, sw.Elapsed.TotalSeconds);
+        return AggregateTotals(leaves, "Purchase", slice, sw.Elapsed.TotalSeconds, includeIntercompany);
     }
 
     /// <summary>
@@ -722,31 +731,66 @@ GROUP BY GROUPING SETS (
         return rows.ToList();
     }
 
+    private async Task<List<EbidtaLeaf>> GetLeavesForModeAsync(
+        string category,
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool refresh,
+        bool includeIntercompany)
+    {
+        var leaves = await GetOrLoadLeavesAsync(category, dateFrom, dateTo, refresh);
+        if (!includeIntercompany)
+            return leaves;
+
+        var ic = await GetOrLoadIntercompanyLeavesAsync(category, dateFrom, dateTo, refresh);
+        var combined = new List<EbidtaLeaf>(leaves.Count + ic.Count);
+        combined.AddRange(leaves);
+        combined.AddRange(ic);
+        return combined;
+    }
+
     private Task<List<EbidtaLeaf>> GetOrLoadIntercompanyLeavesAsync(
         DateTime dateFrom,
         DateTime dateTo,
         bool refresh)
     {
-        var key = $"sales-ic-leaves-v1:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
-        return CachedAsync(key, refresh, () => LoadIntercompanyLeavesAsync(dateFrom, dateTo));
+        return GetOrLoadIntercompanyLeavesAsync("Sales", dateFrom, dateTo, refresh);
     }
 
-    private async Task<List<EbidtaLeaf>> LoadIntercompanyLeavesAsync(DateTime dateFrom, DateTime dateTo)
+    private Task<List<EbidtaLeaf>> GetOrLoadIntercompanyLeavesAsync(
+        string category,
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool refresh)
     {
+        var selected = NormalizeCategory(category);
+        var key = $"sales-ic-leaves-v2:{selected}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        return CachedAsync(key, refresh, () => LoadIntercompanyLeavesAsync(selected, dateFrom, dateTo));
+    }
+
+    private async Task<List<EbidtaLeaf>> LoadIntercompanyLeavesAsync(
+        string category,
+        DateTime dateFrom,
+        DateTime dateTo)
+    {
+        var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
+        var viewName = isPurchase ? "vw_Purchase_EBIDTA" : "vw_Sales_EBIDTA";
         using var connection = _database.CreateConnection();
         var rows = await connection.QueryAsync<EbidtaLeaf>(
-            @"
+            $@"
 SELECT
     LTRIM(RTRIM(ISNULL(CompanyName, N''))) AS CompanyName,
-    N'Intergroup' AS InterGroup,
-    N'' AS Groupname,
-    N'' AS SubGroupName,
+    InterGroup,
+    Groupname,
+    SubGroupName,
     ROUND(SUM(Amount), 0) AS Amount,
     ROUND(SUM(netwt), 0) AS Netwt
-FROM dbo.vw_Sales_EBIDTA WITH (NOLOCK)
+FROM dbo.{viewName} WITH (NOLOCK)
 WHERE invdate BETWEEN @DateFrom AND @DateTo
   AND InterGroup = N'Intergroup'
-GROUP BY LTRIM(RTRIM(ISNULL(CompanyName, N'')))",
+GROUP BY GROUPING SETS (
+  (CompanyName, InterGroup, Groupname, SubGroupName)
+)",
             new { DateFrom = dateFrom.Date, DateTo = dateTo.Date },
             commandTimeout: QueryTimeoutSeconds);
         return rows.ToList();
@@ -771,23 +815,25 @@ GROUP BY LTRIM(RTRIM(ISNULL(CompanyName, N'')))",
         string company,
         DateTime asOf,
         int years = 5,
-        bool refresh = false)
+        bool refresh = false,
+        bool includeIntercompany = false)
     {
-        var bundle = await GetOrLoadTrendAsync("Sales", asOf, years, refresh);
+        var bundle = await GetOrLoadTrendAsync("Sales", asOf, years, refresh, includeIntercompany);
         var slice = await ResolveSliceCompaniesAsync(company);
         return TakeTrendYears(AggregateTrend(bundle.Rows, bundle.Ranges, slice), years);
     }
 
     /// <summary>
-    /// Year-by-year Total Purchase for trend chart (vw_Purchase_EBIDTA, excl. IC).
+    /// Year-by-year Total Purchase for trend chart (vw_Purchase_EBIDTA).
     /// </summary>
     public async Task<List<SalesTrendDto>> GetPurchaseYearlyTrendAsync(
         string company,
         DateTime asOf,
         int years = 5,
-        bool refresh = false)
+        bool refresh = false,
+        bool includeIntercompany = false)
     {
-        var bundle = await GetOrLoadTrendAsync("Purchase", asOf, years, refresh);
+        var bundle = await GetOrLoadTrendAsync("Purchase", asOf, years, refresh, includeIntercompany);
         var slice = await ResolveSliceCompaniesAsync(company);
         return TakeTrendYears(AggregateTrend(bundle.Rows, bundle.Ranges, slice), years);
     }
@@ -795,7 +841,8 @@ GROUP BY LTRIM(RTRIM(ISNULL(CompanyName, N'')))",
     private async Task<(List<TrendLeaf> Rows, List<TrendRange> Ranges)> LoadTrendLeavesAsync(
         string category,
         DateTime asOf,
-        int years)
+        int years,
+        bool includeIntercompany = false)
     {
         years = Math.Clamp(years, 1, 8);
         var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
@@ -812,7 +859,7 @@ SELECT
     ROUND(SUM(v.Amount), 0) AS Amount
 FROM dbo.{viewName} v WITH (NOLOCK)
 WHERE v.invdate BETWEEN @DateFrom AND @DateTo
-  AND v.InterGroup <> N'Intergroup'
+  {(includeIntercompany ? "" : "AND v.InterGroup <> N'Intergroup'")}
 GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
     CASE WHEN DATEPART(MONTH, v.invdate) >= 4 THEN YEAR(v.invdate) ELSE YEAR(v.invdate) - 1 END";
 
@@ -832,12 +879,13 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
         DateTime dateFrom,
         DateTime dateTo,
         int top = 10,
-        bool refresh = false)
+        bool refresh = false,
+        bool includeIntercompany = false)
     {
         if (top <= 0)
             top = 10;
         top = Math.Clamp(top, 1, 100);
-        var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh);
+        var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh, includeIntercompany);
         var slice = await ResolveSliceCompaniesAsync(company);
         return new SalesByCountryResultDto
         {
@@ -854,11 +902,12 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
     /// </summary>
     private async Task<(List<CountryLeaf> Countries, List<PartyLeaf> ExportCustomers, string Source)> LoadSalesGeoUniverseAsync(
         DateTime dateFrom,
-        DateTime dateTo)
+        DateTime dateTo,
+        bool includeIntercompany = false)
     {
-        var fromVoucher = await TryLoadExportPartyLeavesFromVoucherAsync(dateFrom, dateTo);
+        var fromVoucher = await TryLoadExportPartyLeavesFromVoucherAsync(dateFrom, dateTo, includeIntercompany);
         var source = fromVoucher != null ? "SalesVoucher" : "vw_Sales_EBIDTA";
-        var parties = fromVoucher ?? await LoadExportPartyLeavesFromEbidtaAsync(dateFrom, dateTo);
+        var parties = fromVoucher ?? await LoadExportPartyLeavesFromEbidtaAsync(dateFrom, dateTo, includeIntercompany);
         var countries = parties
             .GroupBy(
                 p => (Company: p.CompanyName, Country: string.IsNullOrWhiteSpace(p.Country) ? "Unknown" : p.Country.Trim()),
@@ -875,7 +924,8 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
 
     private async Task<List<PartyLeaf>?> TryLoadExportPartyLeavesFromVoucherAsync(
         DateTime dateFrom,
-        DateTime dateTo)
+        DateTime dateTo,
+        bool includeIntercompany = false)
     {
         using var connection = _database.CreateConnection();
         if (connection.State != ConnectionState.Open)
@@ -903,10 +953,12 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
                 THEN N'India'
             ELSE UPPER(LTRIM(RTRIM(cm.{countrySql})))
         END";
-        var icFilter = icCol == null
+        var icFilter = includeIntercompany || icCol == null
             ? ""
             : $"AND {OrFibcoParty($"pv.{partySql}", InterCompanyNotYes($"cm.{Bracket(icCol)}"))}";
-        var sisterFilter = $@"
+        var sisterFilter = includeIntercompany
+            ? ""
+            : $@"
   AND (
         {PartyIsFibco($"pv.{partySql}")}
         OR NOT EXISTS (
@@ -950,7 +1002,8 @@ GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), LTRIM(RTRIM(pv.{partySql}))
 
     private async Task<List<PartyLeaf>> LoadExportPartyLeavesFromEbidtaAsync(
         DateTime dateFrom,
-        DateTime dateTo)
+        DateTime dateTo,
+        bool includeIntercompany = false)
     {
         using var connection = _database.CreateConnection();
         if (connection.State != ConnectionState.Open)
@@ -993,7 +1046,7 @@ GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), LTRIM(RTRIM(pv.{partySql}))
             joinLedger = $@"
 INNER JOIN CommonLedgerMaster m WITH (NOLOCK)
     ON m.LedgerName = v.{partySql}";
-            extraIc = icCol == null
+            extraIc = icCol == null || includeIntercompany
                 ? $@"AND {OrFibcoParty($"v.{partySql}", ExportCountryPredicate($"m.{Bracket(ledgerCountry)}"))}"
                 : $"AND {OrFibcoParty($"v.{partySql}", InterCompanyNotYes($"m.{Bracket(icCol)}"))} AND {OrFibcoParty($"v.{partySql}", ExportCountryPredicate($"m.{Bracket(ledgerCountry)}"))}";
         }
@@ -1002,7 +1055,9 @@ INNER JOIN CommonLedgerMaster m WITH (NOLOCK)
             return new List<PartyLeaf>();
         }
 
-        var sisterFilter = $@"
+        var sisterFilter = includeIntercompany
+            ? ""
+            : $@"
   AND (
         {PartyIsFibco($"v.{partySql}")}
         OR NOT EXISTS (
@@ -1020,7 +1075,7 @@ SELECT
 FROM dbo.vw_Sales_EBIDTA v WITH (NOLOCK)
 {joinLedger}
 WHERE v.invdate BETWEEN @DateFrom AND @DateTo
-  AND (v.InterGroup <> N'Intergroup' OR {PartyIsFibco($"v.{partySql}")})
+  {(includeIntercompany ? "" : $"AND (v.InterGroup <> N'Intergroup' OR {PartyIsFibco($"v.{partySql}")})")}
   AND v.{partySql} IS NOT NULL
   AND v.{partySql} <> N''
   {extraIc}
@@ -1042,26 +1097,28 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), LTRIM(RTRIM(v.{partySql}))";
         DateTime dateFrom,
         DateTime dateTo,
         int top = 5,
-        bool refresh = false)
+        bool refresh = false,
+        bool includeIntercompany = false)
     {
         top = ClampTop(top);
-        var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh);
+        var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh, includeIntercompany);
         var slice = await ResolveSliceCompaniesAsync(company);
         return ToRankedResult(AggregateParties(geo.ExportCustomers, slice, top), geo.Source, "", "");
     }
 
     /// <summary>
-    /// Top suppliers from PurchaseVoucher (fast), excl. intercompany. Falls back to vw_Purchase_EBIDTA.
+    /// Top suppliers from PurchaseVoucher (fast). Falls back to vw_Purchase_EBIDTA.
     /// </summary>
     public async Task<RankedPartyResultDto> GetTopSuppliersAsync(
         string company,
         DateTime dateFrom,
         DateTime dateTo,
         int top = 5,
-        bool refresh = false)
+        bool refresh = false,
+        bool includeIntercompany = false)
     {
         top = ClampTop(top);
-        var leaves = await GetOrLoadSupplierUniverseAsync(dateFrom, dateTo, refresh);
+        var leaves = await GetOrLoadSupplierUniverseAsync(dateFrom, dateTo, refresh, includeIntercompany);
         var slice = await ResolveSliceCompaniesAsync(company);
         return ToRankedResult(AggregateParties(leaves, slice, top), "PurchaseVoucher", "", null);
     }
@@ -1069,23 +1126,29 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), LTRIM(RTRIM(v.{partySql}))";
     private Task<List<PartyLeaf>> GetOrLoadSupplierUniverseAsync(
         DateTime dateFrom,
         DateTime dateTo,
-        bool refresh)
+        bool refresh,
+        bool includeIntercompany = false)
     {
-        var key = $"sales-suppliers-universe-v1:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
-        return CachedAsync(key, refresh, () => LoadSupplierLeavesAsync(dateFrom, dateTo), SupplierCacheTtl);
+        var icKey = includeIntercompany ? "ic" : "xic";
+        var key = $"sales-suppliers-universe-v1:{icKey}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        return CachedAsync(key, refresh, () => LoadSupplierLeavesAsync(dateFrom, dateTo, includeIntercompany), SupplierCacheTtl);
     }
 
-    private async Task<List<PartyLeaf>> LoadSupplierLeavesAsync(DateTime dateFrom, DateTime dateTo)
+    private async Task<List<PartyLeaf>> LoadSupplierLeavesAsync(
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool includeIntercompany)
     {
-        var fromVoucher = await TryLoadSupplierLeavesFromVoucherAsync(dateFrom, dateTo);
+        var fromVoucher = await TryLoadSupplierLeavesFromVoucherAsync(dateFrom, dateTo, includeIntercompany);
         if (fromVoucher != null)
             return fromVoucher;
-        return await LoadSupplierLeavesFromEbidtaAsync(dateFrom, dateTo);
+        return await LoadSupplierLeavesFromEbidtaAsync(dateFrom, dateTo, includeIntercompany);
     }
 
     private async Task<List<PartyLeaf>?> TryLoadSupplierLeavesFromVoucherAsync(
         DateTime dateFrom,
-        DateTime dateTo)
+        DateTime dateTo,
+        bool includeIntercompany = false)
     {
         using var connection = _database.CreateConnection();
         if (connection.State != ConnectionState.Open)
@@ -1129,6 +1192,9 @@ INNER JOIN dbo.CommonLedgerMaster cm WITH (NOLOCK)
             icFilter = "";
         }
 
+        if (includeIntercompany)
+            icFilter = "";
+
         var sql = $@"
 SELECT
     LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))) AS CompanyName,
@@ -1159,7 +1225,8 @@ GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), pv.{partySql}";
 
     private async Task<List<PartyLeaf>> LoadSupplierLeavesFromEbidtaAsync(
         DateTime dateFrom,
-        DateTime dateTo)
+        DateTime dateTo,
+        bool includeIntercompany = false)
     {
         using var connection = _database.CreateConnection();
         if (connection.State != ConnectionState.Open)
@@ -1179,7 +1246,7 @@ SELECT
     ROUND(SUM(v.Amount), 0) AS Amount
 FROM dbo.vw_Purchase_EBIDTA v WITH (NOLOCK)
 WHERE v.invdate BETWEEN @DateFrom AND @DateTo
-  AND v.InterGroup <> N'Intergroup'
+  {(includeIntercompany ? "" : "AND v.InterGroup <> N'Intergroup'")}
   AND v.{partySql} IS NOT NULL
   AND v.{partySql} <> N''
 GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), v.{partySql}";
@@ -1243,12 +1310,14 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), v.{partySql}";
         IReadOnlyList<EbidtaLeaf> leaves,
         string category,
         HashSet<string>? companies,
-        double elapsedSeconds)
+        double elapsedSeconds,
+        bool includeIntercompany = false)
     {
         var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
-        var rows = FilterByCompany(leaves, companies, r => r.CompanyName)
-            .Where(r => !r.InterGroup.Equals("Intergroup", StringComparison.OrdinalIgnoreCase))
-            .ToList();
+        var filtered = FilterByCompany(leaves, companies, r => r.CompanyName);
+        var rows = includeIntercompany
+            ? filtered.ToList()
+            : filtered.Where(r => !r.InterGroup.Equals("Intergroup", StringComparison.OrdinalIgnoreCase)).ToList();
 
         var amount = rows.Sum(r => r.Amount);
         var qty = rows.Sum(r => r.Netwt);
@@ -1282,7 +1351,9 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), v.{partySql}";
             SalesColumn = "Amount",
             QuantityColumn = "Netwt",
             RateColumn = "PerKg",
-            Method = $"{category}_UniverseSlice_ExclIntercompany",
+            Method = includeIntercompany
+                ? $"{category}_UniverseSlice_InclIntercompany"
+                : $"{category}_UniverseSlice_ExclIntercompany",
             RowCount = rows.Count,
             Columns = new List<string> { "CompanyName", "InterGroup", "Groupname", "SubGroupName", "Amount", "Netwt" },
             ElapsedSeconds = elapsedSeconds,

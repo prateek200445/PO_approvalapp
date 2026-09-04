@@ -20,6 +20,7 @@ import { setApprovalListNav, type ApprovalListKind } from "@/lib/approval-list-n
 import { formatShortDate } from "@/lib/utils";
 import { useApprovalInbox, type InboxItem, type InboxKind } from "@/hooks/useApprovalInbox";
 import type { POStatus } from "@/lib/mock-data";
+import { BILL_PAYMENT_ENTRY_ENABLED } from "@/lib/feature-flags";
 
 export const Route = createFileRoute("/_app/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — PO Approval Portal" }] }),
@@ -195,7 +196,7 @@ function Dashboard() {
     { kind: "po", to: "/pending" },
     { kind: "workorder", to: "/workorders" },
     { kind: "payment", to: "/payments" },
-    { kind: "advancePayment", to: "/advance-payments" },
+    ...(BILL_PAYMENT_ENTRY_ENABLED ? [{ kind: "advancePayment" as const, to: "/advance-payments" as const }] : []),
     { kind: "indent", to: "/indents" },
   ];
 

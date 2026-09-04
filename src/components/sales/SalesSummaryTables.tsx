@@ -39,6 +39,7 @@ interface SalesSummaryTablesProps {
   isPurchase?: boolean;
   suppliersLoading?: boolean;
   totalSales?: number;
+  includeIntercompany?: boolean;
 }
 
 function EmptyRow({ colSpan, message = "No data available" }: { colSpan: number; message?: string }) {
@@ -115,7 +116,9 @@ export function SalesSummaryTables({
   isPurchase = false,
   suppliersLoading = false,
   totalSales = 0,
+  includeIntercompany = false,
 }: SalesSummaryTablesProps) {
+  const icNote = includeIntercompany ? "Incl. intercompany" : "Excl. intercompany";
   const countryBase = totalSales > 0
     ? totalSales
     : byCountry.reduce((sum, c) => sum + (Number(c.salesAmount) || 0), 0);
@@ -143,7 +146,7 @@ export function SalesSummaryTables({
         {!isPurchase && (
           <RankingTable
             title="Top 10 Export Customers"
-            subtitle="Excl. India and intercompany"
+            subtitle={includeIntercompany ? "Excl. India, including intercompany" : "Excl. India and intercompany"}
             nameHeader="Customer"
             items={exportCustomers}
             loading={suppliersLoading}
@@ -156,8 +159,10 @@ export function SalesSummaryTables({
               <h2 className="text-sm font-semibold">Top 10 Countries by Sales</h2>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
                 {countryPeriodLabel
-                  ? `Excl. India and intercompany · ${countryPeriodLabel}`
-                  : "Excl. India and intercompany"}
+                  ? `${includeIntercompany ? "Excl. India, including intercompany" : "Excl. India and intercompany"} · ${countryPeriodLabel}`
+                  : includeIntercompany
+                    ? "Excl. India, including intercompany"
+                    : "Excl. India and intercompany"}
               </p>
             </header>
             <div className="p-3 sm:p-4">
@@ -226,7 +231,7 @@ export function SalesSummaryTables({
 
         <RankingTable
           title="Top 10 Suppliers"
-          subtitle="Excl. intercompany"
+          subtitle={icNote}
           nameHeader="Supplier"
           items={suppliers}
           loading={suppliersLoading}

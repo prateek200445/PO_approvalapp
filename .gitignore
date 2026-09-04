@@ -45,6 +45,11 @@ obj/
 
 .vercel/
 
+# CMA source workbooks (large; extracts live in src/lib/cma-data.ts)
+docs/cma-source/*.xlsx
+docs/cma-source/*.xls
+docs/cma-source/*.txt
+
 # Environment files
 .env
 .env.*
