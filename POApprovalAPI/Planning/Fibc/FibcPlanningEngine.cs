@@ -305,6 +305,7 @@ public sealed class FibcPlanningEngine : IFibcPlanningEngine
         SavedAllocationsApplied = preview.SavedAllocationsApplied,
         Warnings = preview.Warnings,
         ProposedSlots = preview.ProposedSlots,
+        StitchSpec = preview.StitchSpec,
         Saved = false,
         RowsInserted = 0,
     };

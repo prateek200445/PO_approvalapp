@@ -224,6 +224,36 @@ FROM production.dbo.Vw_Bom_PPC WITH (NOLOCK)
 WHERE FilePONo = @OrderNo
 ORDER BY Targetdate DESC", new { OrderNo = trimmed }, commandTimeout: CommandTimeoutSeconds);
 
+        string? sizeHRaw = null;
+        try
+        {
+            sizeHRaw = await connection.QueryFirstOrDefaultAsync<string>(@"
+SELECT TOP 1 CAST(SizeH AS nvarchar(50))
+FROM production.dbo.BOM1 WITH (NOLOCK)
+WHERE FilePONo = @OrderNo", new { OrderNo = trimmed }, commandTimeout: CommandTimeoutSeconds);
+        }
+        catch
+        {
+            // SizeH is optional; allotment still works from line capacity.
+        }
+
+        IReadOnlyList<string> headings = Array.Empty<string>();
+        try
+        {
+            var headingRows = await connection.QueryAsync<string>(@"
+SELECT DISTINCT Heading
+FROM production.dbo.Vw_Bom_PPC WITH (NOLOCK)
+WHERE FilePONo = @OrderNo
+  AND NULLIF(LTRIM(RTRIM(Heading)), '') IS NOT NULL", new { OrderNo = trimmed }, commandTimeout: CommandTimeoutSeconds);
+            headings = headingRows.Where(h => !string.IsNullOrWhiteSpace(h)).Select(h => h.Trim()).ToList();
+        }
+        catch
+        {
+            headings = Array.Empty<string>();
+        }
+
+        var sizeHCm = FibcStitchSpecResolver.ParseSizeHCm(sizeHRaw);
+
         if (marketing is null && bom is null)
         {
             var savedOnly = await GetSavedAllocationLinesAsync(trimmed, ct);
@@ -241,6 +271,8 @@ ORDER BY Targetdate DESC", new { OrderNo = trimmed }, commandTimeout: CommandTim
                 BagType = first.BagType,
                 BagTypeLabel = first.BagTypeLabel,
                 ExistingAllocationCount = savedOnly.Count,
+                SizeHCm = sizeHCm,
+                BomHeadings = headings,
             };
         }
 
@@ -261,6 +293,8 @@ ORDER BY Targetdate DESC", new { OrderNo = trimmed }, commandTimeout: CommandTim
             BagType = bagType,
             BagTypeLabel = BagTypeMapper.ToDisplayLabel(bagType),
             ExistingAllocationCount = existingCount,
+            SizeHCm = sizeHCm,
+            BomHeadings = headings,
         };
     }
 

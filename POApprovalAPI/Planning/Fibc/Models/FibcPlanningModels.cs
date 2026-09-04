@@ -130,6 +130,33 @@ public sealed class FibcOrderAllotmentContextDto
     public string? BagType { get; set; }
     public string BagTypeLabel { get; set; } = "";
     public int ExistingAllocationCount { get; set; }
+    public double? SizeHCm { get; set; }
+    public IReadOnlyList<string> BomHeadings { get; set; } = Array.Empty<string>();
+}
+
+public sealed class FibcStitchJobRateDto
+{
+    public string ActivityKey { get; set; } = "";
+    public string ActivityLabel { get; set; } = "";
+    public int PcsPerShift { get; set; }
+    public int PiecesPerBag { get; set; } = 1;
+    public int BagsPerShift { get; set; }
+    public bool AffectsBottleneck { get; set; }
+}
+
+public sealed class FibcStitchSpecDto
+{
+    public string FactoryKey { get; set; } = "";
+    public string FactoryLabel { get; set; } = "";
+    public string HeightBand { get; set; } = "";
+    public double? SizeHCm { get; set; }
+    public string DustColumn { get; set; } = "n";
+    public int BottleneckBagsPerShift { get; set; }
+    public int AssignmentLotPcs { get; set; }
+    public string? BottleneckActivity { get; set; }
+    public bool UsedExcelTargets { get; set; }
+    public IReadOnlyList<FibcStitchJobRateDto> Jobs { get; set; } = Array.Empty<FibcStitchJobRateDto>();
+    public IReadOnlyList<string> Warnings { get; set; } = Array.Empty<string>();
 }
 
 public class FibcAllotmentResult
@@ -152,6 +179,7 @@ public class FibcAllotmentResult
     public int SavedAllocationsApplied { get; set; }
     public IReadOnlyList<string> Warnings { get; set; } = Array.Empty<string>();
     public IReadOnlyList<FibcSlotGridItemDto> ProposedSlots { get; set; } = Array.Empty<FibcSlotGridItemDto>();
+    public FibcStitchSpecDto? StitchSpec { get; set; }
 }
 
 public sealed class FibcAllotmentConfirmResult : FibcAllotmentResult

@@ -57,6 +57,30 @@ export type FibcAllotmentResult = {
   savedAllocationsApplied?: number;
   warnings: string[];
   proposedSlots: FibcSlotGridItem[];
+  stitchSpec?: FibcStitchSpec | null;
+};
+
+export type FibcStitchJobRate = {
+  activityKey: string;
+  activityLabel: string;
+  pcsPerShift: number;
+  piecesPerBag: number;
+  bagsPerShift: number;
+  affectsBottleneck: boolean;
+};
+
+export type FibcStitchSpec = {
+  factoryKey: string;
+  factoryLabel: string;
+  heightBand: string;
+  sizeHCm: number | null;
+  dustColumn: string;
+  bottleneckBagsPerShift: number;
+  assignmentLotPcs: number;
+  bottleneckActivity: string | null;
+  usedExcelTargets: boolean;
+  jobs: FibcStitchJobRate[];
+  warnings: string[];
 };
 
 export type FibcAllotmentConfirmResult = FibcAllotmentResult & {
@@ -321,6 +345,33 @@ function optStr(row: Record<string, unknown>, camel: string, pascal: string): st
   return s || null;
 }
 
+function normalizeStitchSpec(raw: unknown): FibcStitchSpec | null {
+  if (!raw || typeof raw !== "object") return null;
+  const data = raw as Record<string, unknown>;
+  const jobsRaw = (data.jobs ?? data.Jobs ?? []) as Array<Record<string, unknown>>;
+  const warnings = (data.warnings ?? data.Warnings ?? []) as unknown;
+  return {
+    factoryKey: strField(data, "factoryKey", "FactoryKey"),
+    factoryLabel: strField(data, "factoryLabel", "FactoryLabel"),
+    heightBand: strField(data, "heightBand", "HeightBand"),
+    sizeHCm: optNum(data, "sizeHCm", "SizeHCm"),
+    dustColumn: strField(data, "dustColumn", "DustColumn"),
+    bottleneckBagsPerShift: numField(data, "bottleneckBagsPerShift", "BottleneckBagsPerShift"),
+    assignmentLotPcs: numField(data, "assignmentLotPcs", "AssignmentLotPcs"),
+    bottleneckActivity: optStr(data, "bottleneckActivity", "BottleneckActivity"),
+    usedExcelTargets: Boolean(data.usedExcelTargets ?? data.UsedExcelTargets),
+    jobs: jobsRaw.map((row) => ({
+      activityKey: strField(row, "activityKey", "ActivityKey"),
+      activityLabel: strField(row, "activityLabel", "ActivityLabel"),
+      pcsPerShift: numField(row, "pcsPerShift", "PcsPerShift"),
+      piecesPerBag: numField(row, "piecesPerBag", "PiecesPerBag") || 1,
+      bagsPerShift: numField(row, "bagsPerShift", "BagsPerShift"),
+      affectsBottleneck: Boolean(row.affectsBottleneck ?? row.AffectsBottleneck),
+    })),
+    warnings: Array.isArray(warnings) ? warnings.map(String) : [],
+  };
+}
+
 export function normalizeLineConfig(row: Record<string, unknown>): FibcLineConfig {
   return {
     lineNo: numField(row, "lineNo", "LineNo"),
@@ -425,6 +476,7 @@ export function normalizeAllotmentResult(data: Record<string, unknown>): FibcAll
     savedAllocationsApplied: numField(data, "savedAllocationsApplied", "SavedAllocationsApplied"),
     warnings: Array.isArray(warnings) ? warnings.map(String) : [],
     proposedSlots: proposed.map(normalizeSlotGridItem),
+    stitchSpec: normalizeStitchSpec(data.stitchSpec ?? data.StitchSpec),
   };
 }
 

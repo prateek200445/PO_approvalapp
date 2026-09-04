@@ -1669,7 +1669,25 @@ function AllotmentPreviewSummary({ result }: { result: FibcAllotmentResult }) {
         <dt className="text-muted-foreground">Proposed total</dt>
         <dd>{allottedTotal.toLocaleString()} pcs</dd>
         <dt className="text-muted-foreground">Capacity / shift</dt>
-        <dd>{result.capacityPerShift.toLocaleString()} (from grid)</dd>
+        <dd>
+          {result.capacityPerShift.toLocaleString()}
+          {result.stitchSpec?.usedExcelTargets
+            ? ` (${result.stitchSpec.factoryLabel} Excel, bottleneck ${result.stitchSpec.bottleneckActivity})`
+            : " (line Bagcapacity)"}
+        </dd>
+        {result.stitchSpec?.usedExcelTargets ? (
+          <>
+            <dt className="text-muted-foreground">Assignment lot (LCM)</dt>
+            <dd>{result.stitchSpec.assignmentLotPcs.toLocaleString()} pcs — batch size, not bags/shift</dd>
+            <dt className="text-muted-foreground">Stitch jobs</dt>
+            <dd>
+              {result.stitchSpec.jobs
+                .filter((j) => j.affectsBottleneck)
+                .map((j) => `${j.activityLabel} ${j.bagsPerShift}/shift`)
+                .join(" · ") || "—"}
+            </dd>
+          </>
+        ) : null}
         <dt className="text-muted-foreground">Slots required</dt>
         <dd>{result.slotsRequired}</dd>
         <dt className="text-muted-foreground">Dispatch</dt>

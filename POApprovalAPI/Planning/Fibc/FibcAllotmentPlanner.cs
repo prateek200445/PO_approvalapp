@@ -59,7 +59,11 @@ internal static class FibcAllotmentPlanner
         if (preferredLineNos.Count == 0)
             preferredLineNos = eligiblePortalLines.Select(l => l.LineNo).Distinct().OrderBy(n => n).ToList();
 
-        var capacityPerShift = ResolveCapacityPerShift(grid.Items, erpFamily, eligiblePortalLines, preferredLineNos, runtime, dustLevel, rejectionFactor);
+        var stitchSpec = FibcStitchSpecResolver.Resolve(runtime.CompanyName, erpFamily, dustLevel, context);
+        warnings.AddRange(stitchSpec.Warnings);
+
+        var capacityPerShift = ResolveCapacityPerShift(
+            grid.Items, erpFamily, eligiblePortalLines, preferredLineNos, runtime, dustLevel, rejectionFactor, stitchSpec);
         if (capacityPerShift <= 0)
             return Fail(orderNo, "Could not determine shift capacity from planning grid or line setup.");
 
@@ -75,10 +79,10 @@ internal static class FibcAllotmentPlanner
         var proposed = mode == "SlotWise"
             ? AllotSlotWise(orderNo, context, erpFamily, quantity, targetDate, lookbackFrom, grid.Items, activeShifts,
                 shiftPreference, heldBySlot, eligiblePortalLines, preferredLineNos, runtime, dustLevel, rejectionFactor,
-                backlogRemaining)
+                backlogRemaining, stitchSpec)
             : AllotOrderWise(orderNo, context, erpFamily, quantity, targetDate, lookbackFrom, grid.Items, activeShifts,
                 shiftPreference, heldBySlot, eligiblePortalLines, preferredLineNos, runtime, dustLevel, rejectionFactor,
-                backlogRemaining);
+                backlogRemaining, stitchSpec);
 
         var remainingQty = Math.Round(quantity - proposed.Sum(p => p.Allotted), 2);
         if (remainingQty > SlotEpsilon && heldBySlot.Count > 0)
@@ -93,10 +97,14 @@ internal static class FibcAllotmentPlanner
         var success = proposed.Count > 0;
         var fullyAllotted = remainingQty <= SlotEpsilon;
         var modeLabel = mode == "OrderWise" ? "order-wise" : "slot-wise";
+        var specNote = stitchSpec.UsedExcelTargets
+            ? $" Spec rate {stitchSpec.BottleneckBagsPerShift:N0} bags/shift ({stitchSpec.FactoryLabel}, bottleneck {stitchSpec.BottleneckActivity}); assignment lot {stitchSpec.AssignmentLotPcs:N0} pcs (LCM of stitch jobs — not per-shift capacity)."
+            : "";
+
         var message = success
             ? fullyAllotted
-                ? $"Preview ({modeLabel}): {proposed.Count} slot(s) proposed ({quantity:N0} pcs) ending by {targetDate:yyyy-MM-dd} ({bufferDays}-day buffer before dispatch)."
-                : $"Partial preview ({modeLabel}): {proposed.Count} slot(s) proposed but {remainingQty:N0} pcs still unallocated."
+                ? $"Preview ({modeLabel}): {proposed.Count} slot(s) proposed ({quantity:N0} pcs) ending by {targetDate:yyyy-MM-dd} ({bufferDays}-day buffer before dispatch).{specNote}"
+                : $"Partial preview ({modeLabel}): {proposed.Count} slot(s) proposed but {remainingQty:N0} pcs still unallocated.{specNote}"
             : "No free slots found in the lookback window for this bag type.";
 
         return new FibcAllotmentResult
@@ -117,6 +125,7 @@ internal static class FibcAllotmentPlanner
             RejectionPercentApplied = runtime.Factory.DefaultRejectionPercent,
             Warnings = warnings,
             ProposedSlots = proposed,
+            StitchSpec = stitchSpec,
         };
     }
 
@@ -136,7 +145,8 @@ internal static class FibcAllotmentPlanner
         PlanningRuntimeContext runtime,
         string dustLevel,
         double rejectionFactor,
-        Dictionary<string, double> backlogRemaining)
+        Dictionary<string, double> backlogRemaining,
+        FibcStitchSpecDto stitchSpec)
     {
         var proposed = new List<FibcSlotGridItemDto>();
         var usedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -167,7 +177,7 @@ internal static class FibcAllotmentPlanner
                         break;
 
                     var allotQty = TryAllotSlot(slot, lineNo, eligibleLines, runtime, dustLevel, rejectionFactor,
-                        heldBySlot, backlogRemaining, remainingQty, out var item);
+                        heldBySlot, backlogRemaining, remainingQty, stitchSpec, out var item);
                     if (allotQty <= SlotEpsilon)
                         continue;
 
@@ -200,7 +210,8 @@ internal static class FibcAllotmentPlanner
         PlanningRuntimeContext runtime,
         string dustLevel,
         double rejectionFactor,
-        Dictionary<string, double> backlogRemaining)
+        Dictionary<string, double> backlogRemaining,
+        FibcStitchSpecDto stitchSpec)
     {
         var proposed = new List<FibcSlotGridItemDto>();
         var usedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -226,7 +237,7 @@ internal static class FibcAllotmentPlanner
 
                 var lineNo = ParseLineNo(slot.LineNo);
                 var allotQty = TryAllotSlot(slot, lineNo, eligibleLines, runtime, dustLevel, rejectionFactor,
-                    heldBySlot, backlogRemaining, remainingQty, out var item);
+                    heldBySlot, backlogRemaining, remainingQty, stitchSpec, out var item);
                 if (allotQty <= SlotEpsilon)
                     continue;
 
@@ -253,15 +264,17 @@ internal static class FibcAllotmentPlanner
         IReadOnlyDictionary<string, double> heldBySlot,
         Dictionary<string, double> backlogRemaining,
         double remainingQty,
+        FibcStitchSpecDto stitchSpec,
         out FibcSlotGridItemDto result)
     {
         result = slot;
         var portalLine = eligibleLines.FirstOrDefault(l => l.LineNo == lineNo);
-        var baseCap = portalLine is not null
+        var lineCap = portalLine is not null
             ? runtime.GetLineCapacity(portalLine, dustLevel)
             : (int)slot.Capacity;
-        if (baseCap <= 0)
-            baseCap = (int)slot.Capacity;
+        if (lineCap <= 0)
+            lineCap = (int)slot.Capacity;
+        var baseCap = FibcStitchSpecResolver.EffectiveShiftCapacity(lineCap, stitchSpec);
 
         var teamFactor = runtime.GetTeamFactor(lineNo, slot.Shift, portalLine?.TeamNo);
         var downtimeFactor = runtime.GetDowntimeFactor(slot.PlanDate, lineNo, slot.Shift);
@@ -315,7 +328,8 @@ internal static class FibcAllotmentPlanner
         IReadOnlyList<int> preferredLineNos,
         PlanningRuntimeContext runtime,
         string dustLevel,
-        double rejectionFactor)
+        double rejectionFactor,
+        FibcStitchSpecDto stitchSpec)
     {
         var samples = new List<double>();
         foreach (var slot in gridItems.Where(s =>
@@ -326,9 +340,10 @@ internal static class FibcAllotmentPlanner
                 continue;
 
             var portalLine = eligibleLines.First(l => l.LineNo == lineNo);
-            var baseCap = runtime.GetLineCapacity(portalLine, dustLevel);
-            if (baseCap <= 0)
-                baseCap = (int)slot.Capacity;
+            var slotLineCap = runtime.GetLineCapacity(portalLine, dustLevel);
+            if (slotLineCap <= 0)
+                slotLineCap = (int)slot.Capacity;
+            var baseCap = FibcStitchSpecResolver.EffectiveShiftCapacity(slotLineCap, stitchSpec);
 
             var teamFactor = runtime.GetTeamFactor(lineNo, slot.Shift, portalLine.TeamNo);
             var downtimeFactor = runtime.GetDowntimeFactor(slot.PlanDate, lineNo, slot.Shift);
@@ -342,10 +357,14 @@ internal static class FibcAllotmentPlanner
 
         var lineCap = eligibleLines
             .Where(l => preferredLineNos.Contains(l.LineNo))
-            .Select(l => (double)runtime.GetLineCapacity(l, dustLevel))
+            .Select(l => (double)FibcStitchSpecResolver.EffectiveShiftCapacity(runtime.GetLineCapacity(l, dustLevel), stitchSpec))
             .FirstOrDefault(c => c > 0);
 
-        return lineCap > 0 ? lineCap : eligibleLines.Max(l => (double)runtime.GetLineCapacity(l, dustLevel));
+        if (lineCap > 0)
+            return lineCap;
+
+        return eligibleLines.Max(l =>
+            (double)FibcStitchSpecResolver.EffectiveShiftCapacity(runtime.GetLineCapacity(l, dustLevel), stitchSpec));
     }
 
     private static string NormalizeAllotmentMode(string? mode)

@@ -26,6 +26,8 @@
     <None Update="Assets\hcp_logo.jpeg">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <Content Remove="Planning\Fibc\Data\FibcStitchTargetCatalog.json" />
+    <EmbeddedResource Include="Planning\Fibc\Data\FibcStitchTargetCatalog.json" />
   </ItemGroup>
 
   <!-- Nested tools under Scripts/ (e.g. DemoDataCheck) have their own obj/AssemblyInfo; keep them out of this compile. -->
