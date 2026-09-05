@@ -63,6 +63,8 @@ public class PnlService
         ["conveyance, vehicle running and traveling expenses"] = "Conveyance, vehicle running and traveling expenses",
         ["freight outward and c & f charges"] = "Freight Outward and C & F Charges",
         ["freight outward expense"] = "Freight Outward and C & F Charges",
+        ["add: purchase of traded goods"] = "Add: Purchase of traded goods",
+        ["purchase of traded goods"] = "Add: Purchase of traded goods",
         ["insurance"] = "Insurance",
         ["insurance expenses"] = "Insurance",
         ["miscellaneous expense"] = "Miscellaneous Expense",
@@ -74,6 +76,14 @@ public class PnlService
         ["interest expense - other"] = "Interest Expense - Other",
         ["interest on working capital & term loan"] = "Interest on Working Capital & Term Loan",
         ["income tax"] = "Income Tax",
+    };
+
+    // Same grouping as the group EBITDA TB (PCFC FX sits under bank charges, not admin FX).
+    private static readonly Dictionary<string, string> LedgerHeadOverrides = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Exchange Rate Difference - Pcfc"] = "Bank Charges & Commission",
+        ["Exchange Rate Difference - PCFC"] = "Bank Charges & Commission",
+        ["Exchange Rate Difference - Finance"] = "Bank Charges & Commission",
     };
 
     private readonly DatabaseService _database;
@@ -133,7 +143,7 @@ ORDER BY Name")).ToList();
         var rows = await LoadBooksPlusProvisionAsync(companies, dateFrom, dateTo);
 
         var heads = rows
-            .GroupBy(r => (Category: r.Category, Head: CanonHead(r.Head)))
+            .GroupBy(r => (Category: r.Category, Head: CanonHead(r.Head, r.LedgerName)))
             .Select(g => new PnlHeadGroup
             {
                 Category = g.Key.Category,
@@ -235,18 +245,37 @@ WHERE LTRIM(RTRIM(companyname)) = @Company
             new { Company = companyName, From = monthStart, To = monthEnd },
             tx);
 
+        var entryTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in await connection.QueryAsync<(string Ledger, string Category)>(@"
+SELECT LTRIM(RTRIM(LedgerName)) AS Ledger, LTRIM(RTRIM(ISNULL(Category, N'Expense'))) AS Category
+FROM LedgerMaster WITH (NOLOCK)
+WHERE CompanyName = @Company
+  AND ISNULL(LedgerName, N'') <> N''",
+            new { Company = companyName },
+            tx))
+        {
+            if (!entryTypes.ContainsKey(item.Ledger))
+                entryTypes[item.Ledger] = item.Category;
+        }
+
         foreach (var row in rows)
         {
+            var entryType = entryTypes.TryGetValue(row.Ledger, out var category) &&
+                            category.Equals("Income", StringComparison.OrdinalIgnoreCase)
+                ? "Income"
+                : "Expense";
+
             await connection.ExecuteAsync(@"
-INSERT INTO Provisioning (companyname, sysdate, Ledgername, Amount, remarks)
-VALUES (@Company, @Date, @Ledger, @Amount, @Remarks)",
+INSERT INTO Provisioning (companyname, sysdate, Ledgername, Amount, remarks, EntryType)
+VALUES (@Company, @Date, @Ledger, @Amount, @Remarks, @EntryType)",
                 new
                 {
                     Company = companyName,
                     Date = monthStart,
-                    Ledger = row.Ledger,
+                    Ledger = row.Ledger.Length > 100 ? row.Ledger[..100] : row.Ledger,
                     Amount = row.Amount,
                     Remarks = "App P&L provision",
+                    EntryType = entryType,
                 },
                 tx);
         }
@@ -470,7 +499,111 @@ ORDER BY UploadedAt DESC, Id DESC",
         var type = NormalizeUploadType(uploadType);
         await EnsureUploadTableAsync();
         await ImportUploadAsync(companyName, monthStart.Date, type, fileBytes);
+        await PersistUploadInboxAsync(companyName, monthStart.Date, type, fileName, contentType, fileBytes, remarks);
+    }
 
+    public async Task<PnlWorkbookImportResult> SaveWorkbookUploadAsync(
+        string company,
+        string fileName,
+        string contentType,
+        byte[] fileBytes,
+        bool zeroCommonHo)
+    {
+        if (IsAggregate(company))
+            throw new ArgumentException("Pick a single company to upload a workbook.");
+
+        var companyName = (await ResolveCompaniesAsync(company)).First();
+        await EnsureUploadTableAsync();
+
+        using var workbook = new XLWorkbook(new MemoryStream(fileBytes));
+        var result = new PnlWorkbookImportResult { Company = companyName };
+        var months = new SortedSet<DateTime>();
+
+        foreach (var sheet in workbook.Worksheets)
+        {
+            var sheetResult = new PnlWorkbookSheetResult { Sheet = sheet.Name };
+            try
+            {
+                var type = DetectSheetUploadType(sheet);
+                var monthStart = ReadSheetMonth(sheet);
+                if (type is null || monthStart is null)
+                {
+                    sheetResult.Status = "skipped";
+                    sheetResult.Detail = "Could not read upload type (B4) or month (B3).";
+                    result.Sheets.Add(sheetResult);
+                    continue;
+                }
+
+                sheetResult.UploadType = type;
+                sheetResult.Month = monthStart.Value.ToString("yyyy-MM");
+                var imported = await ImportSheetAsync(companyName, monthStart.Value, type, sheet);
+                if (!imported)
+                {
+                    sheetResult.Status = "skipped";
+                    sheetResult.Detail = "No data rows in this sheet.";
+                    result.Sheets.Add(sheetResult);
+                    continue;
+                }
+
+                await PersistUploadInboxAsync(
+                    companyName,
+                    monthStart.Value,
+                    type,
+                    fileName,
+                    contentType,
+                    fileBytes,
+                    $"Dev workbook sheet '{sheet.Name}'");
+                months.Add(monthStart.Value);
+                sheetResult.Status = "imported";
+                result.Sheets.Add(sheetResult);
+            }
+            catch (Exception ex)
+            {
+                sheetResult.Status = "error";
+                sheetResult.Detail = ex.Message;
+                result.Sheets.Add(sheetResult);
+            }
+        }
+
+        if (zeroCommonHo && months.Count > 0)
+        {
+            foreach (var monthStart in months)
+            {
+                await SaveOverheadAsync(new PnlOverheadSaveRequest
+                {
+                    Company = companyName,
+                    Month = monthStart.ToString("yyyy-MM"),
+                    CommonLacs = 0,
+                    HoLacs = 0,
+                });
+            }
+
+            result.ZeroedCommonHo = true;
+        }
+
+        result.Months = months.Select(m => m.ToString("yyyy-MM")).ToList();
+        if (result.Sheets.All(s => s.Status != "imported"))
+        {
+            var details = string.Join(" ", result.Sheets.Select(s =>
+                $"{s.Sheet}: {s.Status}{(string.IsNullOrWhiteSpace(s.Detail) ? "" : $" ({s.Detail})")}."));
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(details)
+                    ? "No stock or provision sheets were imported from the workbook."
+                    : $"No stock or provision sheets were imported. {details}");
+        }
+
+        return result;
+    }
+
+    private async Task PersistUploadInboxAsync(
+        string companyName,
+        DateTime monthStart,
+        string type,
+        string fileName,
+        string contentType,
+        byte[] fileBytes,
+        string? remarks)
+    {
         using var connection = _database.CreateConnection();
         await connection.ExecuteAsync(@"
 MERGE PnlUploadInbox AS tgt
@@ -556,25 +689,29 @@ WHEN NOT MATCHED THEN
     private async Task ImportUploadAsync(string companyName, DateTime monthStart, string type, byte[] fileBytes)
     {
         using var workbook = new XLWorkbook(new MemoryStream(fileBytes));
-        switch (type)
+        var sheet = type switch
         {
-            case "Stock":
-                await ImportStockTemplateAsync(companyName, monthStart, workbook);
-                break;
-            case "Provision":
-                await ImportProvisionTemplateAsync(companyName, monthStart, workbook);
-                break;
-            case "CommonExpense":
-                await ImportCommonHoTemplateAsync(companyName, monthStart, workbook);
-                break;
-            default:
-                throw new ArgumentException("Unsupported upload type.");
-        }
+            "Stock" => FindWorksheet(workbook, "Stock Upload", "Stock"),
+            "Provision" => FindWorksheet(workbook, "Provision Upload", "Provision"),
+            "CommonExpense" => FindWorksheet(workbook, "Common HO Upload", "Common HO", "Common & HO"),
+            _ => workbook.Worksheets.First(),
+        };
+        var imported = await ImportSheetAsync(companyName, monthStart, type, sheet);
+        if (!imported)
+            throw new InvalidOperationException($"No {type.ToLowerInvariant()} rows were found in the template.");
     }
 
-    private async Task ImportStockTemplateAsync(string companyName, DateTime monthStart, XLWorkbook workbook)
+    private async Task<bool> ImportSheetAsync(string companyName, DateTime monthStart, string type, IXLWorksheet sheet) =>
+        type switch
+        {
+            "Stock" => await ImportStockTemplateAsync(companyName, monthStart, sheet),
+            "Provision" => await ImportProvisionTemplateAsync(companyName, monthStart, sheet),
+            "CommonExpense" => await ImportCommonHoTemplateAsync(companyName, monthStart, sheet),
+            _ => throw new ArgumentException("Unsupported upload type."),
+        };
+
+    private async Task<bool> ImportStockTemplateAsync(string companyName, DateTime monthStart, IXLWorksheet sheet)
     {
-        var sheet = FindWorksheet(workbook, "Stock Upload", "Stock");
         var headerRow = FindHeaderRow(sheet, "Category", "Amount Lacs");
         var lastRow = sheet.LastRowUsed()?.RowNumber() ?? headerRow;
         var rows = new List<(string Category, double AmountLacs)>();
@@ -593,14 +730,14 @@ WHEN NOT MATCHED THEN
         }
 
         if (rows.Count == 0)
-            throw new InvalidOperationException("No stock rows were found in the template.");
+            return false;
 
         await SaveStockMonthAsync(companyName, monthStart, rows);
+        return true;
     }
 
-    private async Task ImportProvisionTemplateAsync(string companyName, DateTime monthStart, XLWorkbook workbook)
+    private async Task<bool> ImportProvisionTemplateAsync(string companyName, DateTime monthStart, IXLWorksheet sheet)
     {
-        var sheet = FindWorksheet(workbook, "Provision Upload", "Provision");
         var headerRow = FindHeaderRow(sheet, "Ledger Name", "Amount Lacs");
         var lastRow = sheet.LastRowUsed()?.RowNumber() ?? headerRow;
         var rows = new List<PnlProvisionRow>();
@@ -626,7 +763,7 @@ WHEN NOT MATCHED THEN
         }
 
         if (rows.Count == 0)
-            throw new InvalidOperationException("No provision rows were found in the template.");
+            return false;
 
         await SaveProvisionsAsync(new PnlProvisionSaveRequest
         {
@@ -634,11 +771,11 @@ WHEN NOT MATCHED THEN
             Month = monthStart.ToString("yyyy-MM"),
             Rows = rows,
         });
+        return true;
     }
 
-    private async Task ImportCommonHoTemplateAsync(string companyName, DateTime monthStart, XLWorkbook workbook)
+    private async Task<bool> ImportCommonHoTemplateAsync(string companyName, DateTime monthStart, IXLWorksheet sheet)
     {
-        var sheet = FindWorksheet(workbook, "Common HO Upload", "Common HO", "Common & HO");
         var headerRow = FindHeaderRow(sheet, "Particular", "Amount Lacs");
         var lastRow = sheet.LastRowUsed()?.RowNumber() ?? headerRow;
         double common = 0;
@@ -673,7 +810,7 @@ WHEN NOT MATCHED THEN
         }
 
         if (seen == 0)
-            throw new InvalidOperationException("No Common / HO rows were found in the template.");
+            return false;
 
         await SaveOverheadAsync(new PnlOverheadSaveRequest
         {
@@ -682,6 +819,7 @@ WHEN NOT MATCHED THEN
             CommonLacs = common,
             HoLacs = ho,
         });
+        return true;
     }
 
     private async Task SaveStockMonthAsync(string companyName, DateTime monthStart, IReadOnlyList<(string Category, double AmountLacs)> rows)
@@ -791,6 +929,57 @@ ORDER BY 1",
         }
 
         return workbook.Worksheets.First();
+    }
+
+    private static string? DetectSheetUploadType(IXLWorksheet sheet)
+    {
+        var marked = sheet.Cell("B4").GetString().Trim();
+        if (!string.IsNullOrWhiteSpace(marked))
+        {
+            try
+            {
+                return NormalizeUploadType(marked);
+            }
+            catch (ArgumentException)
+            {
+                // fall through to the sheet name
+            }
+        }
+
+        var name = sheet.Name;
+        if (name.Contains("stock", StringComparison.OrdinalIgnoreCase))
+            return "Stock";
+        if (name.Contains("provision", StringComparison.OrdinalIgnoreCase))
+            return "Provision";
+        if (name.Contains("common", StringComparison.OrdinalIgnoreCase) ||
+            name.Contains("ho", StringComparison.OrdinalIgnoreCase))
+            return "CommonExpense";
+        return null;
+    }
+
+    private static DateTime? ReadSheetMonth(IXLWorksheet sheet)
+    {
+        var raw = sheet.Cell("B3").GetFormattedString().Trim();
+        if (string.IsNullOrWhiteSpace(raw))
+            raw = sheet.Cell("B3").GetString().Trim();
+
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            if (DateTime.TryParseExact(raw, "yyyy-MM", CultureInfo.InvariantCulture, DateTimeStyles.None, out var ym))
+                return new DateTime(ym.Year, ym.Month, 1);
+            if (DateTime.TryParseExact(raw + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+                return d;
+            if (DateTime.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+                return new DateTime(parsed.Year, parsed.Month, 1);
+        }
+
+        var match = Regex.Match(sheet.Name, @"(January|February|March|April|May|June|July|August|September|October|November|December)[^\d]*(\d{2})", RegexOptions.IgnoreCase);
+        if (!match.Success)
+            return null;
+        if (!DateTime.TryParseExact(match.Groups[1].Value, "MMMM", CultureInfo.InvariantCulture, DateTimeStyles.None, out var month))
+            return null;
+        var year = 2000 + int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+        return new DateTime(year, month.Month, 1);
     }
 
     private static int FindHeaderRow(IXLWorksheet sheet, params string[] expectedHeaders)
@@ -1022,13 +1211,586 @@ END");
         };
     }
 
+    public async Task<(byte[] Bytes, string FileName)> ExportStatementExcelAsync(string company, DateTime monthStart)
+    {
+        var statement = await GetStatementAsync(company, monthStart);
+        using var workbook = new XLWorkbook();
+        var sheet = workbook.Worksheets.Add("P&L Result");
+        sheet.Style.Font.FontName = "Calibri";
+        sheet.Style.Font.FontSize = 11;
+        sheet.ShowGridLines = false;
+
+        var navy = XLColor.FromHtml("#1B4F72");
+        var header = XLColor.FromHtml("#1F4E79");
+        var teal = XLColor.FromHtml("#0E7C66");
+        var gold = XLColor.FromHtml("#B7950B");
+        var lineBg = XLColor.FromHtml("#F8FBFD");
+        var totalBg = XLColor.FromHtml("#D6EAF8");
+        var resultBg = XLColor.FromHtml("#D5F5E3");
+        var kpiEbitda = XLColor.FromHtml("#E8F8F5");
+        var kpiPbt = XLColor.FromHtml("#FEF9E7");
+
+        sheet.Range(1, 1, 1, 5).Merge();
+        sheet.Cell(1, 1).Value = "P&L / EBITDA Result";
+        sheet.Cell(1, 1).Style.Font.Bold = true;
+        sheet.Cell(1, 1).Style.Font.FontSize = 18;
+        sheet.Cell(1, 1).Style.Font.FontColor = XLColor.White;
+        sheet.Range(1, 1, 1, 5).Style.Fill.BackgroundColor = navy;
+        sheet.Range(1, 1, 1, 5).Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+        sheet.Row(1).Height = 28;
+
+        sheet.Range(2, 1, 2, 5).Merge();
+        sheet.Cell(2, 1).Value =
+            $"{statement.Company}  •  {monthStart:MMM yyyy}  •  Month {statement.DateFrom} to {statement.DateTo}  •  YTD from {statement.YtdFrom}  •  Amounts in lacs";
+        sheet.Cell(2, 1).Style.Font.FontColor = XLColor.FromHtml("#1B4F72");
+        sheet.Range(2, 1, 2, 5).Style.Fill.BackgroundColor = XLColor.FromHtml("#D4E6F1");
+        sheet.Row(2).Height = 20;
+
+        var ytdEbitda = statement.Rows.FirstOrDefault(r => r.Id == "ebitda")?.YtdLacs ?? 0;
+        var ytdPbt = statement.Rows.FirstOrDefault(r => r.Id == "pbt")?.YtdLacs ?? 0;
+        WriteKpi(sheet, 4, 1, "Month EBITDA", statement.EbitdaLacs, kpiEbitda, teal);
+        WriteKpi(sheet, 4, 2, "YTD EBITDA", ytdEbitda, kpiEbitda, teal);
+        WriteKpi(sheet, 4, 4, "Month PBT", statement.PbtLacs, kpiPbt, gold);
+        WriteKpi(sheet, 4, 5, "YTD PBT", ytdPbt, kpiPbt, gold);
+
+        const int tableHeader = 7;
+        string[] cols = ["Particulars", "Month", "% of turnover", "YTD", "YTD % of turnover"];
+        for (var c = 0; c < cols.Length; c++)
+        {
+            var cell = sheet.Cell(tableHeader, c + 1);
+            cell.Value = cols[c];
+            cell.Style.Font.Bold = true;
+            cell.Style.Font.FontColor = XLColor.White;
+            cell.Style.Fill.BackgroundColor = header;
+            cell.Style.Alignment.Horizontal = c == 0
+                ? XLAlignmentHorizontalValues.Left
+                : XLAlignmentHorizontalValues.Right;
+        }
+
+        var row = tableHeader + 1;
+        foreach (var item in statement.Rows)
+        {
+            var isHeader = item.Kind == "header";
+            sheet.Cell(row, 1).Value = item.Label;
+            if (!isHeader)
+            {
+                SetLacs(sheet.Cell(row, 2), item.MonthLacs);
+                SetPct(sheet.Cell(row, 3), item.PctToSales);
+                SetLacs(sheet.Cell(row, 4), item.YtdLacs);
+                SetPct(sheet.Cell(row, 5), item.YtdPctToSales);
+            }
+
+            var fill = item.Kind switch
+            {
+                "header" => header,
+                "total" => totalBg,
+                "result" => resultBg,
+                _ => row % 2 == 0 ? lineBg : XLColor.White,
+            };
+            sheet.Range(row, 1, row, 5).Style.Fill.BackgroundColor = fill;
+            if (item.Kind is "header" or "total" or "result")
+                sheet.Range(row, 1, row, 5).Style.Font.Bold = true;
+            if (item.Kind == "header")
+                sheet.Range(row, 1, row, 5).Style.Font.FontColor = XLColor.White;
+            if (item.Kind == "line")
+                sheet.Cell(row, 1).Style.Alignment.Indent = 1;
+            if (item.Kind == "result")
+                sheet.Range(row, 1, row, 5).Style.Font.FontColor = teal;
+            sheet.Range(row, 1, row, 5).Style.Border.BottomBorder = XLBorderStyleValues.Hair;
+            sheet.Range(row, 1, row, 5).Style.Border.BottomBorderColor = XLColor.FromHtml("#D5D8DC");
+            row++;
+        }
+
+        var lastRow = Math.Max(tableHeader, row - 1);
+        var table = sheet.Range(tableHeader, 1, lastRow, 5);
+        table.Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        table.Style.Border.OutsideBorderColor = navy;
+        sheet.Range(tableHeader, 1, lastRow, 5).SetAutoFilter();
+        sheet.SheetView.FreezeRows(tableHeader);
+        sheet.Column(1).Width = 58;
+        sheet.Column(2).Width = 16;
+        sheet.Column(3).Width = 16;
+        sheet.Column(4).Width = 16;
+        sheet.Column(5).Width = 20;
+        sheet.SheetView.FreezeColumns(1);
+
+        if (statement.Unmapped.Count > 0)
+        {
+            var unmapped = workbook.Worksheets.Add("Unmapped TB heads");
+            unmapped.Style.Font.FontName = "Calibri";
+            unmapped.Cell(1, 1).Value = "Head";
+            unmapped.Cell(1, 2).Value = "Month amount (lacs)";
+            unmapped.Range(1, 1, 1, 2).Style.Font.Bold = true;
+            unmapped.Range(1, 1, 1, 2).Style.Font.FontColor = XLColor.White;
+            unmapped.Range(1, 1, 1, 2).Style.Fill.BackgroundColor = XLColor.FromHtml("#922B21");
+            var u = 2;
+            foreach (var head in statement.Unmapped)
+            {
+                unmapped.Cell(u, 1).Value = head.Head;
+                SetLacs(unmapped.Cell(u, 2), head.AmountLacs);
+                u++;
+            }
+
+            unmapped.Range(1, 1, Math.Max(1, u - 1), 2).SetAutoFilter();
+            unmapped.SheetView.FreezeRows(1);
+            unmapped.Column(1).Width = 48;
+            unmapped.Column(2).Width = 22;
+        }
+
+        using var ms = new MemoryStream();
+        workbook.SaveAs(ms);
+        var file = $"pnl-{SafeFilePart(statement.Company)}-{monthStart:yyyy-MM}.xlsx";
+        return (ms.ToArray(), file);
+    }
+
+    public async Task<(byte[] Bytes, string FileName)> ExportSummaryExcelAsync(DateTime monthStart)
+    {
+        var companies = await ResolveExportCompaniesAsync();
+        var fyStart = monthStart.Month >= 4
+            ? new DateTime(monthStart.Year, 4, 1)
+            : new DateTime(monthStart.Year - 1, 4, 1);
+        var months = new List<DateTime>();
+        for (var m = fyStart; m <= monthStart; m = m.AddMonths(1))
+            months.Add(m);
+
+        var grid = new Dictionary<string, Dictionary<DateTime, (double Ebitda, double EbitdaYtd, double Pbt, double PbtYtd)>>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var company in companies)
+        {
+            var byMonth = new Dictionary<DateTime, (double, double, double, double)>();
+            foreach (var month in months)
+            {
+                var stmt = await GetStatementAsync(company, month);
+                var ebitdaYtd = stmt.Rows.FirstOrDefault(r => r.Id == "ebitda")?.YtdLacs ?? 0;
+                var pbtYtd = stmt.Rows.FirstOrDefault(r => r.Id == "pbt")?.YtdLacs ?? 0;
+                byMonth[month] = (stmt.EbitdaLacs, ebitdaYtd, stmt.PbtLacs, pbtYtd);
+            }
+
+            grid[company] = byMonth;
+        }
+
+        using var workbook = new XLWorkbook();
+        var sheet = workbook.Worksheets.Add("EBITDA Summary");
+        sheet.Style.Font.FontName = "Calibri";
+        sheet.Style.Font.FontSize = 11;
+        sheet.ShowGridLines = false;
+
+        var navy = XLColor.FromHtml("#1B4F72");
+        var ebitdaHdr = XLColor.FromHtml("#0E7C66");
+        var pbtHdr = XLColor.FromHtml("#B7950B");
+        var ebitdaBand = XLColor.FromHtml("#E8F8F5");
+        var pbtBand = XLColor.FromHtml("#FEF9E7");
+        var alt = XLColor.FromHtml("#F4F6F7");
+
+        var lastCol = 1 + months.Count * 4;
+        sheet.Range(1, 1, 1, lastCol).Merge();
+        sheet.Cell(1, 1).Value = "EBITDA – Summary";
+        sheet.Cell(1, 1).Style.Font.Bold = true;
+        sheet.Cell(1, 1).Style.Font.FontSize = 18;
+        sheet.Cell(1, 1).Style.Font.FontColor = XLColor.White;
+        sheet.Range(1, 1, 1, lastCol).Style.Fill.BackgroundColor = navy;
+        sheet.Row(1).Height = 28;
+
+        sheet.Range(2, 1, 2, lastCol).Merge();
+        sheet.Cell(2, 1).Value =
+            $"Live P&L (TB + stock + provision + Common/HO)  •  FY {fyStart:MMM yyyy} – {monthStart:MMM yyyy}  •  Amounts in lacs";
+        sheet.Range(2, 1, 2, lastCol).Style.Fill.BackgroundColor = XLColor.FromHtml("#D4E6F1");
+        sheet.Cell(2, 1).Style.Font.FontColor = navy;
+
+        sheet.Cell(4, 1).Value = "Plant";
+        sheet.Range(3, 1, 4, 1).Merge();
+        sheet.Range(3, 1, 4, 1).Style.Fill.BackgroundColor = navy;
+        sheet.Range(3, 1, 4, 1).Style.Font.FontColor = XLColor.White;
+        sheet.Range(3, 1, 4, 1).Style.Font.Bold = true;
+        sheet.Range(3, 1, 4, 1).Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+        for (var i = 0; i < months.Count; i++)
+        {
+            var start = 2 + i * 4;
+            sheet.Range(3, start, 3, start + 3).Merge();
+            sheet.Cell(3, start).Value = months[i].ToString("MMM yyyy");
+            sheet.Cell(3, start).Style.Font.Bold = true;
+            sheet.Cell(3, start).Style.Font.FontColor = XLColor.White;
+            sheet.Range(3, start, 3, start + 3).Style.Fill.BackgroundColor = i % 2 == 0 ? ebitdaHdr : XLColor.FromHtml("#1A5276");
+            sheet.Range(3, start, 3, start + 3).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+
+            string[] sub = ["EBITDA", "YTD", "PBT", "YTD"];
+            for (var s = 0; s < 4; s++)
+            {
+                var cell = sheet.Cell(4, start + s);
+                cell.Value = sub[s];
+                cell.Style.Font.Bold = true;
+                cell.Style.Font.FontColor = XLColor.White;
+                cell.Style.Fill.BackgroundColor = s < 2 ? ebitdaHdr : pbtHdr;
+                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            }
+        }
+
+        var dataRow = 5;
+        foreach (var company in companies)
+        {
+            sheet.Cell(dataRow, 1).Value = SummaryPlantLabel(company);
+            sheet.Cell(dataRow, 1).Style.Font.Bold = true;
+            for (var i = 0; i < months.Count; i++)
+            {
+                var start = 2 + i * 4;
+                var vals = grid[company][months[i]];
+                SetLacs(sheet.Cell(dataRow, start), vals.Ebitda);
+                SetLacs(sheet.Cell(dataRow, start + 1), vals.EbitdaYtd);
+                SetLacs(sheet.Cell(dataRow, start + 2), vals.Pbt);
+                SetLacs(sheet.Cell(dataRow, start + 3), vals.PbtYtd);
+                sheet.Range(dataRow, start, dataRow, start + 1).Style.Fill.BackgroundColor = ebitdaBand;
+                sheet.Range(dataRow, start + 2, dataRow, start + 3).Style.Fill.BackgroundColor = pbtBand;
+            }
+
+            if ((dataRow - 5) % 2 == 1)
+                sheet.Cell(dataRow, 1).Style.Fill.BackgroundColor = alt;
+            dataRow++;
+        }
+
+        sheet.Cell(dataRow, 1).Value = "Total Group";
+        sheet.Range(dataRow, 1, dataRow, lastCol).Style.Font.Bold = true;
+        sheet.Range(dataRow, 1, dataRow, lastCol).Style.Fill.BackgroundColor = navy;
+        sheet.Range(dataRow, 1, dataRow, lastCol).Style.Font.FontColor = XLColor.White;
+        for (var i = 0; i < months.Count; i++)
+        {
+            var start = 2 + i * 4;
+            var month = months[i];
+            SetLacs(sheet.Cell(dataRow, start), companies.Sum(c => grid[c][month].Ebitda));
+            SetLacs(sheet.Cell(dataRow, start + 1), companies.Sum(c => grid[c][month].EbitdaYtd));
+            SetLacs(sheet.Cell(dataRow, start + 2), companies.Sum(c => grid[c][month].Pbt));
+            SetLacs(sheet.Cell(dataRow, start + 3), companies.Sum(c => grid[c][month].PbtYtd));
+        }
+
+        var lastData = dataRow;
+        sheet.Range(4, 1, lastData, lastCol).SetAutoFilter();
+        sheet.SheetView.FreezeRows(4);
+        sheet.SheetView.FreezeColumns(1);
+        sheet.Column(1).Width = 38;
+        for (var c = 2; c <= lastCol; c++)
+            sheet.Column(c).Width = 13;
+        sheet.Range(3, 1, lastData, lastCol).Style.Border.InsideBorder = XLBorderStyleValues.Hair;
+        sheet.Range(3, 1, lastData, lastCol).Style.Border.InsideBorderColor = XLColor.FromHtml("#D5D8DC");
+        sheet.Range(3, 1, lastData, lastCol).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        sheet.Range(3, 1, lastData, lastCol).Style.Border.OutsideBorderColor = navy;
+        sheet.SheetView.ZoomScale = 90;
+
+        using var ms = new MemoryStream();
+        workbook.SaveAs(ms);
+        return (ms.ToArray(), $"pnl-summary-{monthStart:yyyy-MM}.xlsx");
+    }
+
+    public async Task<(byte[] Bytes, string FileName)> ExportMonthGridExcelAsync(DateTime monthStart)
+    {
+        var companies = await ResolveExportCompaniesAsync();
+        var statements = new List<(string Company, PnlStatementResult Statement)>();
+        foreach (var company in companies)
+            statements.Add((company, await GetStatementAsync(company, monthStart)));
+
+        var template = statements.FirstOrDefault().Statement?.Rows
+            ?? throw new InvalidOperationException("No companies found to export.");
+        var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+        var ytdFrom = monthStart.Month >= 4
+            ? new DateTime(monthStart.Year, 4, 1)
+            : new DateTime(monthStart.Year - 1, 4, 1);
+
+        using var workbook = new XLWorkbook();
+        var sheetName = monthStart.ToString("MMM-yy", CultureInfo.InvariantCulture);
+        var sheet = workbook.Worksheets.Add(sheetName);
+        sheet.Style.Font.FontName = "Calibri";
+        sheet.Style.Font.FontSize = 10;
+        sheet.ShowGridLines = false;
+
+        var navy = XLColor.FromHtml("#1B4F72");
+        var header = XLColor.FromHtml("#1F4E79");
+        var teal = XLColor.FromHtml("#0E7C66");
+        var gold = XLColor.FromHtml("#B7950B");
+        var totalBg = XLColor.FromHtml("#D6EAF8");
+        var resultBg = XLColor.FromHtml("#D5F5E3");
+        var lineBg = XLColor.FromHtml("#F8FBFD");
+        var bandA = XLColor.FromHtml("#EAF2F8");
+        var bandB = XLColor.FromHtml("#E8F8F5");
+
+        var lastCol = 1 + statements.Count * 4 + 4;
+        sheet.Range(1, 1, 1, lastCol).Merge();
+        sheet.Cell(1, 1).Value = $"GROUP EBITDA & PBT FOR THE MONTH OF {monthStart:MMM-yy}";
+        sheet.Cell(1, 1).Style.Font.Bold = true;
+        sheet.Cell(1, 1).Style.Font.FontSize = 18;
+        sheet.Cell(1, 1).Style.Font.FontColor = XLColor.White;
+        sheet.Range(1, 1, 1, lastCol).Style.Fill.BackgroundColor = navy;
+        sheet.Row(1).Height = 28;
+
+        sheet.Range(2, 1, 2, lastCol).Merge();
+        sheet.Cell(2, 1).Value =
+            $"Live P&L  •  Month {monthStart:yyyy-MM-dd} to {monthEnd:yyyy-MM-dd}  •  YTD from {ytdFrom:yyyy-MM-dd}  •  Amounts in lacs";
+        sheet.Range(2, 1, 2, lastCol).Style.Fill.BackgroundColor = XLColor.FromHtml("#D4E6F1");
+        sheet.Cell(2, 1).Style.Font.FontColor = navy;
+
+        sheet.Range(3, 1, 4, 1).Merge();
+        sheet.Cell(3, 1).Value = "Particulars";
+        sheet.Range(3, 1, 4, 1).Style.Fill.BackgroundColor = navy;
+        sheet.Range(3, 1, 4, 1).Style.Font.FontColor = XLColor.White;
+        sheet.Range(3, 1, 4, 1).Style.Font.Bold = true;
+        sheet.Range(3, 1, 4, 1).Style.Alignment.Vertical = XLAlignmentVerticalValues.Center;
+
+        string[] sub = [$"{monthStart:MMM-yy}", "% To Sales", "YTD", "% To Sales"];
+        for (var i = 0; i < statements.Count; i++)
+        {
+            var start = 2 + i * 4;
+            var band = i % 2 == 0 ? teal : XLColor.FromHtml("#1A5276");
+            sheet.Range(3, start, 3, start + 3).Merge();
+            sheet.Cell(3, start).Value = SummaryPlantNick(statements[i].Company);
+            sheet.Cell(3, start).Style.Font.Bold = true;
+            sheet.Cell(3, start).Style.Font.FontColor = XLColor.White;
+            sheet.Range(3, start, 3, start + 3).Style.Fill.BackgroundColor = band;
+            sheet.Range(3, start, 3, start + 3).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            sheet.Range(3, start, 3, start + 3).Style.Alignment.WrapText = true;
+            for (var s = 0; s < 4; s++)
+            {
+                var cell = sheet.Cell(4, start + s);
+                cell.Value = sub[s];
+                cell.Style.Font.Bold = true;
+                cell.Style.Font.FontColor = XLColor.White;
+                cell.Style.Fill.BackgroundColor = s is 0 or 2 ? teal : gold;
+                cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+            }
+        }
+
+        var groupStart = 2 + statements.Count * 4;
+        sheet.Range(3, groupStart, 3, groupStart + 3).Merge();
+        sheet.Cell(3, groupStart).Value = "Total Group";
+        sheet.Cell(3, groupStart).Style.Font.Bold = true;
+        sheet.Cell(3, groupStart).Style.Font.FontColor = XLColor.White;
+        sheet.Range(3, groupStart, 3, groupStart + 3).Style.Fill.BackgroundColor = navy;
+        sheet.Range(3, groupStart, 3, groupStart + 3).Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        for (var s = 0; s < 4; s++)
+        {
+            var cell = sheet.Cell(4, groupStart + s);
+            cell.Value = sub[s];
+            cell.Style.Font.Bold = true;
+            cell.Style.Font.FontColor = XLColor.White;
+            cell.Style.Fill.BackgroundColor = s is 0 or 2 ? teal : gold;
+            cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+        }
+
+        sheet.Row(3).Height = 32;
+
+        var dataRow = 5;
+        foreach (var item in template)
+        {
+            sheet.Cell(dataRow, 1).Value = item.Label;
+            var isHeader = item.Kind == "header";
+            double monthSum = 0;
+            double ytdSum = 0;
+            double turnM = 0;
+            double turnY = 0;
+
+            for (var i = 0; i < statements.Count; i++)
+            {
+                var start = 2 + i * 4;
+                var match = statements[i].Statement.Rows.FirstOrDefault(r => r.Id == item.Id);
+                var fill = i % 2 == 0 ? bandA : bandB;
+                sheet.Range(dataRow, start, dataRow, start + 3).Style.Fill.BackgroundColor = fill;
+                if (!isHeader && match is not null)
+                {
+                    SetLacs(sheet.Cell(dataRow, start), match.MonthLacs);
+                    SetPct(sheet.Cell(dataRow, start + 1), match.PctToSales);
+                    SetLacs(sheet.Cell(dataRow, start + 2), match.YtdLacs);
+                    SetPct(sheet.Cell(dataRow, start + 3), match.YtdPctToSales);
+                    monthSum += match.MonthLacs ?? 0;
+                    ytdSum += match.YtdLacs ?? 0;
+                }
+
+                var turn = statements[i].Statement.Rows.FirstOrDefault(r => r.Id == "turnover");
+                turnM += turn?.MonthLacs ?? 0;
+                turnY += turn?.YtdLacs ?? 0;
+            }
+
+            if (!isHeader)
+            {
+                SetLacs(sheet.Cell(dataRow, groupStart), monthSum);
+                SetPct(sheet.Cell(dataRow, groupStart + 1), turnM == 0 ? 0 : monthSum / turnM);
+                SetLacs(sheet.Cell(dataRow, groupStart + 2), ytdSum);
+                SetPct(sheet.Cell(dataRow, groupStart + 3), turnY == 0 ? 0 : ytdSum / turnY);
+            }
+
+            var rowFill = item.Kind switch
+            {
+                "header" => header,
+                "total" => totalBg,
+                "result" => resultBg,
+                _ => dataRow % 2 == 0 ? lineBg : XLColor.White,
+            };
+            sheet.Cell(dataRow, 1).Style.Fill.BackgroundColor = rowFill;
+            if (item.Kind is "header" or "total" or "result")
+                sheet.Range(dataRow, 1, dataRow, lastCol).Style.Font.Bold = true;
+            if (item.Kind == "header")
+            {
+                sheet.Range(dataRow, 1, dataRow, lastCol).Style.Fill.BackgroundColor = header;
+                sheet.Range(dataRow, 1, dataRow, lastCol).Style.Font.FontColor = XLColor.White;
+            }
+
+            if (item.Kind == "result")
+            {
+                sheet.Range(dataRow, 1, dataRow, lastCol).Style.Fill.BackgroundColor = resultBg;
+                sheet.Range(dataRow, 1, dataRow, lastCol).Style.Font.FontColor = teal;
+            }
+            else if (item.Kind == "total")
+            {
+                sheet.Range(dataRow, 1, dataRow, lastCol).Style.Fill.BackgroundColor = totalBg;
+            }
+            else if (item.Kind == "line")
+            {
+                sheet.Cell(dataRow, 1).Style.Alignment.Indent = 1;
+                sheet.Cell(dataRow, 1).Style.Fill.BackgroundColor = rowFill;
+            }
+
+            sheet.Range(dataRow, groupStart, dataRow, groupStart + 3).Style.Fill.BackgroundColor =
+                item.Kind == "header" ? header : XLColor.FromHtml("#F4F6F7");
+            if (item.Kind == "result")
+                sheet.Range(dataRow, groupStart, dataRow, groupStart + 3).Style.Fill.BackgroundColor = resultBg;
+            if (item.Kind == "total")
+                sheet.Range(dataRow, groupStart, dataRow, groupStart + 3).Style.Fill.BackgroundColor = totalBg;
+
+            dataRow++;
+        }
+
+        var lastData = Math.Max(4, dataRow - 1);
+        sheet.Range(4, 1, lastData, lastCol).SetAutoFilter();
+        sheet.SheetView.FreezeRows(4);
+        sheet.SheetView.FreezeColumns(1);
+        sheet.Column(1).Width = 48;
+        for (var c = 2; c <= lastCol; c++)
+            sheet.Column(c).Width = 12;
+        sheet.Range(3, 1, lastData, lastCol).Style.Border.InsideBorder = XLBorderStyleValues.Hair;
+        sheet.Range(3, 1, lastData, lastCol).Style.Border.InsideBorderColor = XLColor.FromHtml("#D5D8DC");
+        sheet.Range(3, 1, lastData, lastCol).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        sheet.Range(3, 1, lastData, lastCol).Style.Border.OutsideBorderColor = navy;
+        sheet.SheetView.ZoomScale = 80;
+
+        using var ms = new MemoryStream();
+        workbook.SaveAs(ms);
+        return (ms.ToArray(), $"pnl-month-{monthStart:yyyy-MM}.xlsx");
+    }
+
+    private async Task<List<string>> ResolveExportCompaniesAsync()
+    {
+        var summaryNames = new HashSet<string>(SummaryPlantNames(), StringComparer.OrdinalIgnoreCase);
+        var companies = (await GetCompaniesAsync())
+            .Where(c => c.Kind == "company")
+            .Select(c => c.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(name => summaryNames.Contains(name))
+            .ToList();
+        if (companies.Count > 0)
+            return companies;
+
+        return (await GetCompaniesAsync())
+            .Where(c => c.Kind == "company")
+            .Select(c => c.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static void WriteKpi(
+        IXLWorksheet sheet,
+        int row,
+        int col,
+        string label,
+        double value,
+        XLColor fill,
+        XLColor accent)
+    {
+        sheet.Cell(row, col).Value = label;
+        sheet.Cell(row, col).Style.Font.FontSize = 9;
+        sheet.Cell(row, col).Style.Font.FontColor = accent;
+        sheet.Cell(row, col).Style.Fill.BackgroundColor = fill;
+        sheet.Cell(row + 1, col).Value = value;
+        sheet.Cell(row + 1, col).Style.NumberFormat.Format = "#,##0.00;[Red](#,##0.00);-";
+        sheet.Cell(row + 1, col).Style.Font.Bold = true;
+        sheet.Cell(row + 1, col).Style.Font.FontSize = 14;
+        sheet.Cell(row + 1, col).Style.Font.FontColor = accent;
+        sheet.Cell(row + 1, col).Style.Fill.BackgroundColor = fill;
+        sheet.Range(row, col, row + 1, col).Style.Border.OutsideBorder = XLBorderStyleValues.Thin;
+        sheet.Range(row, col, row + 1, col).Style.Border.OutsideBorderColor = accent;
+    }
+
+    private static void SetLacs(IXLCell cell, double? value)
+    {
+        cell.Value = value ?? 0;
+        cell.Style.NumberFormat.Format = "#,##0.00;[Red](#,##0.00);-";
+        cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+    }
+
+    private static void SetPct(IXLCell cell, double? value)
+    {
+        cell.Value = value ?? 0;
+        cell.Style.NumberFormat.Format = "0.0%;[Red](0.0%);-";
+        cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
+    }
+
+    private static IEnumerable<string> SummaryPlantNames() =>
+        new[]
+        {
+            "Plastene India Limited",
+            "Plastene India Limited (Unit -II)",
+            "Plastene India Limited - HO",
+            "HCP Plastene Bulkpack Ltd (Unit - IV)",
+            "HCP Plastene Bulkpack Ltd",
+            "HCP Plastene Bulkpack Ltd (Unit - II)",
+            "HCP Plastene Bulkpack Ltd (Unit - III)",
+            "HCP Plastene Bulkpack ltd (Vadodara)",
+            "Plastene Polyfilms Limited",
+            "Oswal Extrusion Limited",
+            "K.P. WOVEN PRIVATE LIMITED",
+            "K.P. WOVEN PRIVATE LIMITED (UNIT-II)",
+            "K.P. WOVEN PRIVATE LIMITED (UNIT-III)",
+        };
+
+    private static string SummaryPlantLabel(string company)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Plastene India Limited"] = "PIL I",
+            ["Plastene India Limited (Unit -II)"] = "PIL II",
+            ["Plastene India Limited - HO"] = "PIL HO",
+            ["HCP Plastene Bulkpack Ltd (Unit - IV)"] = "HPBL4",
+            ["HCP Plastene Bulkpack Ltd"] = "HPBL I",
+            ["HCP Plastene Bulkpack Ltd (Unit - II)"] = "HPBL II",
+            ["HCP Plastene Bulkpack Ltd (Unit - III)"] = "HPBL III",
+            ["HCP Plastene Bulkpack ltd (Vadodara)"] = "HPBL VAD",
+            ["Plastene Polyfilms Limited"] = "PPL",
+            ["Oswal Extrusion Limited"] = "OEL I",
+            ["K.P. WOVEN PRIVATE LIMITED"] = "KP I",
+            ["K.P. WOVEN PRIVATE LIMITED (UNIT-II)"] = "KP II",
+            ["K.P. WOVEN PRIVATE LIMITED (UNIT-III)"] = "KP III",
+        };
+        return map.TryGetValue(company.Trim(), out var nick) ? $"{nick}  —  {company.Trim()}" : company.Trim();
+    }
+
+    private static string SummaryPlantNick(string company)
+    {
+        var label = SummaryPlantLabel(company);
+        var sep = label.IndexOf("  —  ", StringComparison.Ordinal);
+        return sep > 0 ? label[..sep] : label;
+    }
+
     private async Task<List<BookRow>> LoadBooksPlusProvisionAsync(
         IReadOnlyList<string> companies,
         DateTime dateFrom,
         DateTime dateTo)
     {
-        var prevEnd = dateFrom.AddDays(-1);
-        var prevStart = new DateTime(prevEnd.Year, prevEnd.Month, 1);
+        // TB for the requested range, plus closing-month provision, minus the month before the range
+        // when that month is still in the same FY. FY starts in April, so March is not reversed.
+        // Month Jun = TB Jun + Jun prov − May prov. YTD Apr–Jul = TB Apr–Jul + Jul prov only.
+        var closingMonth = new DateTime(dateTo.Year, dateTo.Month, 1);
+        var closingEnd = closingMonth.AddMonths(1).AddDays(-1);
+        var reverseMonth = new DateTime(dateFrom.Year, dateFrom.Month, 1).AddMonths(-1);
+        var reverseEnd = reverseMonth.AddMonths(1).AddDays(-1);
+        var fyStart = dateFrom.Month >= 4
+            ? new DateTime(dateFrom.Year, 4, 1)
+            : new DateTime(dateFrom.Year - 1, 4, 1);
+        var reverseInFy = reverseMonth >= fyStart;
         var allCompanies = companies.Count == 0;
         var companyFilter = allCompanies ? new List<string> { "__none__" } : companies.ToList();
 
@@ -1077,14 +1839,17 @@ GROUP BY LTRIM(RTRIM(ISNULL(L.Category, N'Expense'))),
          LTRIM(RTRIM(ISNULL(VL.Ledgername, N'')))",
             new
             {
-                DateFrom = dateFrom.Date,
-                DateTo = dateTo.Date,
+                DateFrom = closingMonth,
+                DateTo = closingEnd,
                 AllCompanies = allCompanies ? 1 : 0,
                 Companies = companyFilter,
             },
             commandTimeout: TimeoutSeconds)).ToList();
 
-        var provisionPrev = (await connection.QueryAsync<BookRow>(@"
+        List<BookRow> provisionPrev = new();
+        if (reverseInFy)
+        {
+            provisionPrev = (await connection.QueryAsync<BookRow>(@"
 SELECT
     LTRIM(RTRIM(ISNULL(L.Category, N'Expense'))) AS Category,
     LTRIM(RTRIM(ISNULL(L.Underschedule6, N''))) AS Head,
@@ -1100,14 +1865,15 @@ WHERE ISNULL(L.Underschedule6, N'') <> N''
 GROUP BY LTRIM(RTRIM(ISNULL(L.Category, N'Expense'))),
          LTRIM(RTRIM(ISNULL(L.Underschedule6, N''))),
          LTRIM(RTRIM(ISNULL(VL.Ledgername, N'')))",
-            new
-            {
-                DateFrom = prevStart.Date,
-                DateTo = prevEnd.Date,
-                AllCompanies = allCompanies ? 1 : 0,
-                Companies = companyFilter,
-            },
-            commandTimeout: TimeoutSeconds)).ToList();
+                new
+                {
+                    DateFrom = reverseMonth,
+                    DateTo = reverseEnd,
+                    AllCompanies = allCompanies ? 1 : 0,
+                    Companies = companyFilter,
+                },
+                commandTimeout: TimeoutSeconds)).ToList();
+        }
 
         books.AddRange(provisionNow);
         books.AddRange(provisionPrev);
@@ -1199,7 +1965,7 @@ ELSE
     private static Dictionary<string, double> SumHeads(IEnumerable<BookRow> rows)
     {
         return rows
-            .GroupBy(r => CanonHead(r.Head), StringComparer.OrdinalIgnoreCase)
+            .GroupBy(r => CanonHead(r.Head, r.LedgerName), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.Sum(PnlSignedAmount), StringComparer.OrdinalIgnoreCase);
     }
 
@@ -1455,8 +2221,12 @@ ELSE
         }
     }
 
-    private static string CanonHead(string? raw)
+    private static string CanonHead(string? raw, string? ledgerName = null)
     {
+        if (!string.IsNullOrWhiteSpace(ledgerName) &&
+            LedgerHeadOverrides.TryGetValue(ledgerName.Trim(), out var ledgerHead))
+            return ledgerHead;
+
         var s = Regex.Replace((raw ?? "").Trim(), @"\s+", " ");
         if (HeadAliases.TryGetValue(s, out var mapped))
             return mapped;

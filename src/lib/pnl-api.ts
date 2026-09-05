@@ -10,6 +10,7 @@ import type {
   PnlProvisionRow,
   PnlStockRow,
   PnlUploadItem,
+  PnlWorkbookImportResult,
 } from "@/lib/pnl-types";
 
 async function readJson<T>(res: Response): Promise<T> {
@@ -129,6 +130,18 @@ export async function savePnlUpload(
   return readJson<{ ok: boolean }>(res);
 }
 
+export async function savePnlWorkbook(company: string, file: File, zeroCommonHo: boolean) {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("company", company);
+  body.append("zeroCommonHo", zeroCommonHo ? "true" : "false");
+  const res = await fetch(getApiUrl("/api/pnl/dev/workbook"), {
+    method: "POST",
+    body,
+  });
+  return readJson<PnlWorkbookImportResult>(res);
+}
+
 export async function downloadPnlTemplate(
   uploadType: "stock" | "provision" | "common",
   company: string,
@@ -151,4 +164,41 @@ export async function downloadPnlTemplate(
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+async function downloadExcelResponse(res: Response, fallbackName: string) {
+  if (!res.ok) {
+    return readJson<{ message?: string }>(res).then((data) => {
+      throw new Error(data.message || res.statusText);
+    });
+  }
+  const bytes = await res.blob();
+  const url = URL.createObjectURL(bytes);
+  const link = document.createElement("a");
+  link.href = url;
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const match = /filename\*?=(?:UTF-8'')?["']?([^";]+)/i.exec(disposition);
+  link.download = match?.[1]?.trim() || fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+export async function downloadPnlStatement(company: string, month: string) {
+  const params = new URLSearchParams({ company, month });
+  const res = await fetch(getApiUrl(`/api/pnl/statement/export?${params}`));
+  await downloadExcelResponse(res, `pnl-${month}.xlsx`);
+}
+
+export async function downloadPnlSummary(month: string) {
+  const params = new URLSearchParams({ month });
+  const res = await fetch(getApiUrl(`/api/pnl/summary/export?${params}`));
+  await downloadExcelResponse(res, `pnl-summary-${month}.xlsx`);
+}
+
+export async function downloadPnlMonthGrid(month: string) {
+  const params = new URLSearchParams({ month });
+  const res = await fetch(getApiUrl(`/api/pnl/month-grid/export?${params}`));
+  await downloadExcelResponse(res, `pnl-month-${month}.xlsx`);
 }

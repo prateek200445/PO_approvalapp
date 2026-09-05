@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, CircleHelp, Loader2 } from "lucide-react";
+import { ArrowLeft, CircleHelp, Download, FileSpreadsheet, Loader2 } from "lucide-react";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { MonthPickerField } from "@/components/MonthPickerField";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { getPnlCompanies, getPnlStatement } from "@/lib/pnl-api";
+import { getPnlCompanies, getPnlStatement, downloadPnlStatement, downloadPnlSummary, downloadPnlMonthGrid } from "@/lib/pnl-api";
 import {
   currentMonthValue,
   formatLacs,
@@ -32,6 +32,8 @@ export const Route = createFileRoute("/_app/pnl-result")({
 function PnlResultPage() {
   const [company, setCompany] = useState("All Companies");
   const [month, setMonth] = useState(currentMonthValue());
+  const [exporting, setExporting] = useState<"statement" | "summary" | "month" | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const range = monthRange(month);
 
   const companiesQuery = useQuery({
@@ -45,6 +47,20 @@ function PnlResultPage() {
     queryFn: () => getPnlStatement(company, month),
     staleTime: 30_000,
   });
+
+  const runExport = async (kind: "statement" | "summary" | "month") => {
+    setExportError(null);
+    setExporting(kind);
+    try {
+      if (kind === "statement") await downloadPnlStatement(company, month);
+      else if (kind === "summary") await downloadPnlSummary(month);
+      else await downloadPnlMonthGrid(month);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "Export failed.");
+    } finally {
+      setExporting(null);
+    }
+  };
 
   const companyOptions = useMemo(
     () => (companiesQuery.data ?? []).map((c) => ({ value: c.value, label: c.label })),
@@ -92,7 +108,51 @@ function PnlResultPage() {
           Open input page
         </Link>
         <HelpDialog />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          disabled={exporting !== null}
+          onClick={() => void runExport("statement")}
+        >
+          {exporting === "statement" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          Export P&amp;L
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          disabled={exporting !== null}
+          onClick={() => void runExport("summary")}
+        >
+          {exporting === "summary" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+          Export Summary
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          disabled={exporting !== null}
+          onClick={() => void runExport("month")}
+        >
+          {exporting === "month" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+          Export month P&amp;L
+        </Button>
       </div>
+      {exporting === "summary" ? (
+        <p className="text-xs text-muted-foreground">
+          Building the plant summary from April through {month}. This can take a minute.
+        </p>
+      ) : null}
+      {exporting === "month" ? (
+        <p className="text-xs text-muted-foreground">
+          Building the {month} P&amp;L grid for all plants (Jun-26 workbook layout). This can take a minute.
+        </p>
+      ) : null}
+      {exportError ? <p className="text-sm text-destructive">{exportError}</p> : null}
 
       <StatementView query={statementQuery} />
     </div>
@@ -135,10 +195,21 @@ function StatementView({
           Stock values are empty. Enter opening/closing stock so materials consumed and inventory change are correct.
         </p>
       ) : null}
-      <div className="grid grid-cols-2 gap-3">
-        <Kpi label="EBITDA" value={data.ebitdaLacs} />
-        <Kpi label="PBT" value={data.pbtLacs} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Kpi label="Month EBITDA" value={data.ebitdaLacs} />
+        <Kpi
+          label="YTD EBITDA"
+          value={data.rows.find((r) => r.id === "ebitda")?.ytdLacs ?? null}
+        />
+        <Kpi label="Month PBT" value={data.pbtLacs} />
+        <Kpi
+          label="YTD PBT"
+          value={data.rows.find((r) => r.id === "pbt")?.ytdLacs ?? null}
+        />
       </div>
+      <p className="text-xs text-muted-foreground">
+        FY opening stock changes YTD only. July month EBITDA / PBT stay the same.
+      </p>
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full min-w-[28rem] text-sm">
           <thead className="bg-muted/60 text-left text-xs text-muted-foreground">
@@ -197,7 +268,7 @@ function StatementView({
   );
 }
 
-function Kpi({ label, value }: { label: string; value: number }) {
+function Kpi({ label, value }: { label: string; value: number | null | undefined }) {
   return (
     <div className="rounded-lg border bg-card p-3">
       <div className="text-xs text-muted-foreground">{label} (lacs)</div>
@@ -356,10 +427,9 @@ function HelpDialog() {
                   traded stock; inventory change uses WIP and finished goods; stores uses stores/spares.
                 </p>
                 <p>
-                  Provision uploads are month-wise. The report reads the selected month’s saved provision rows, and
-                  the engine handles the prior-month provision reversal internally so the result matches the workbook
-                  method without extra user action. Think of it as “provision accrual + automatic unwind,” not a manual
-                  step.
+                  Provision uploads are month-wise. The month column is this month’s provision minus last month,
+                  except April (FY start) which takes April provision only — March is not reversed. YTD is the
+                  selected month’s provision only, not the sum of every month.
                 </p>
                 <p>
                   Common / HO is added under Administrative Expenses as separate computed lines and is included in the

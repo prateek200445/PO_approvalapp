@@ -9,10 +9,12 @@ namespace POApprovalAPI.Controllers;
 public class PnlController : ControllerBase
 {
     private readonly PnlService _service;
+    private readonly IWebHostEnvironment _environment;
 
-    public PnlController(PnlService service)
+    public PnlController(PnlService service, IWebHostEnvironment environment)
     {
         _service = service;
+        _environment = environment;
     }
 
     [HttpGet("companies")]
@@ -219,12 +221,88 @@ public class PnlController : ControllerBase
         }
     }
 
+    [HttpPost("dev/workbook")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(25_000_000)]
+    public async Task<IActionResult> SaveWorkbook(
+        IFormFile file,
+        [FromForm] string company,
+        [FromForm] bool zeroCommonHo = true)
+    {
+        if (!_environment.IsDevelopment())
+            return NotFound();
+
+        try
+        {
+            ValidateExcel(file);
+            await using var stream = file.OpenReadStream();
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            ms.Position = 0;
+
+            var result = await _service.SaveWorkbookUploadAsync(
+                company,
+                file.FileName,
+                file.ContentType ?? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ms.ToArray(),
+                zeroCommonHo);
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("statement")]
     public async Task<IActionResult> Statement([FromQuery] string company, [FromQuery] string month)
     {
         try
         {
             return Ok(await _service.GetStatementAsync(company, PnlService.ParseMonth(month)));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("statement/export")]
+    public async Task<IActionResult> ExportStatement([FromQuery] string company, [FromQuery] string month)
+    {
+        try
+        {
+            var (bytes, fileName) = await _service.ExportStatementExcelAsync(company, PnlService.ParseMonth(month));
+            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("summary/export")]
+    public async Task<IActionResult> ExportSummary([FromQuery] string month)
+    {
+        try
+        {
+            var (bytes, fileName) = await _service.ExportSummaryExcelAsync(PnlService.ParseMonth(month));
+            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("month-grid/export")]
+    public async Task<IActionResult> ExportMonthGrid([FromQuery] string month)
+    {
+        try
+        {
+            var (bytes, fileName) = await _service.ExportMonthGridExcelAsync(PnlService.ParseMonth(month));
+            return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
         }
         catch (Exception ex)
         {

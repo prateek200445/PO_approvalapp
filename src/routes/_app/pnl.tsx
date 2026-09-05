@@ -18,6 +18,7 @@ import {
   savePnlOverhead,
   downloadPnlTemplate,
   savePnlUpload,
+  savePnlWorkbook,
 } from "@/lib/pnl-api";
 import {
   currentMonthValue,
@@ -28,6 +29,7 @@ import {
   type PnlStockYearRow,
   type PnlStockYearState,
   type PnlUploadItem,
+  type PnlWorkbookImportResult,
 } from "@/lib/pnl-types";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
@@ -96,13 +98,18 @@ function PnlPage() {
       </div>
 
       {single ? (
-        <UploadInboxPanel
-          company={company}
-          month={month}
-          uploads={uploadsQuery.data}
-          loading={uploadsQuery.isLoading}
-          onSaved={() => void uploadsQuery.refetch()}
-        />
+        <>
+          <UploadInboxPanel
+            company={company}
+            month={month}
+            uploads={uploadsQuery.data}
+            loading={uploadsQuery.isLoading}
+            onSaved={() => void uploadsQuery.refetch()}
+          />
+          {import.meta.env.DEV ? (
+            <DevWorkbookPanel company={company} onSaved={() => void uploadsQuery.refetch()} />
+          ) : null}
+        </>
       ) : (
         <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
           Pick a single company to upload the three Excel files.
@@ -264,6 +271,78 @@ function UploadInboxPanel({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function DevWorkbookPanel({ company, onSaved }: { company: string; onSaved: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [zeroCommonHo, setZeroCommonHo] = useState(true);
+  const [last, setLast] = useState<PnlWorkbookImportResult | null>(null);
+
+  const upload = useMutation({
+    mutationFn: () => {
+      if (!file) throw new Error("Choose a workbook first.");
+      return savePnlWorkbook(company, file, zeroCommonHo);
+    },
+    onSuccess: (data) => {
+      setLast(data);
+      const imported = data.sheets.filter((s) => s.status === "imported").length;
+      toast.success(`Imported ${imported} sheet(s) for ${data.months.join(", ") || "no months"}`);
+      setFile(null);
+      onSaved();
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  return (
+    <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50/60 p-4 shadow-sm dark:border-amber-800 dark:bg-amber-950/30">
+      <div>
+        <h2 className="text-sm font-semibold">Dev: all months in one workbook</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Development only. Upload <code>ppl_stock.xlsx</code> or <code>ppl_prov.xlsx</code> with one template sheet
+          per month. Month is read from cell B3. Common / HO can be set to 0 for every imported month (PPL).
+        </p>
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={zeroCommonHo}
+          onChange={(e) => setZeroCommonHo(e.target.checked)}
+        />
+        Set Common / HO to 0 for all months in this file
+      </label>
+      <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed px-3 py-6 text-center hover:bg-secondary/40">
+        <Upload className="h-5 w-5 text-muted-foreground" />
+        <span className="text-xs font-medium">{file?.name ?? "Choose multi-month .xlsx"}</span>
+        <input
+          type="file"
+          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          className="sr-only"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        />
+      </label>
+      <Button type="button" disabled={!file || upload.isPending} onClick={() => upload.mutate()}>
+        {upload.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+        Import all sheets
+      </Button>
+      {last ? (
+        <div className="rounded-md border bg-background p-3 text-xs">
+          <div>
+            {last.company} • months {last.months.join(", ") || "—"}
+            {last.zeroedCommonHo ? " • Common/HO zeroed" : ""}
+          </div>
+          <ul className="mt-2 space-y-1">
+            {last.sheets.map((sheet) => (
+              <li key={sheet.sheet}>
+                <span className="font-medium">{sheet.sheet}</span>
+                {sheet.month ? ` (${sheet.month} ${sheet.uploadType})` : ""} — {sheet.status}
+                {sheet.detail ? `: ${sheet.detail}` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }
