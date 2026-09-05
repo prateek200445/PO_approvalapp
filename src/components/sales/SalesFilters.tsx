@@ -1,9 +1,17 @@
 import type { SalesCompanyOption, SalesDashboardFilters, SalesReportCategory } from "@/lib/sales-dashboard-types";
 import { indianFyDateRange, indianFyStartYear } from "@/lib/sales-dashboard-api";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface SalesFiltersProps {
@@ -39,6 +47,34 @@ export function SalesFilters({
   onRefresh,
 }: SalesFiltersProps) {
   const fyPreset = detectFyPreset(filters.dateFrom, filters.dateTo);
+  const groupOptions = companyOptions.filter((o) => o.kind === "group");
+  const unitOptions = companyOptions.filter((o) => o.kind === "company");
+  const selected = new Set(filters.companyValues);
+  const allSelected = selected.size === 0;
+  const selectedLabels = companyOptions
+    .filter((o) => selected.has(o.value))
+    .map((o) => o.label);
+  const companyTriggerLabel = companiesLoading
+    ? "Loading…"
+    : allSelected
+      ? "All Companies"
+      : selectedLabels.length === 1
+        ? selectedLabels[0]
+        : `${selectedLabels.length} companies selected`;
+
+  function setCompanies(next: string[]) {
+    onChange({
+      companyValues: next,
+      company: next.length === 0 ? "All Companies" : next.join(","),
+    });
+  }
+
+  function toggleCompany(value: string) {
+    const next = new Set(selected);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    setCompanies([...next]);
+  }
 
   function applyFyPreset(preset: FyPreset) {
     if (preset === "custom") return;
@@ -56,47 +92,97 @@ export function SalesFilters({
       aria-label="Sales dashboard filters"
     >
       <div className="flex flex-col gap-3">
-        <div className="min-w-0 space-y-1.5">
-          <Label htmlFor="sales-company">Company</Label>
-          <select
-            id="sales-company"
-            value={filters.company || "All Companies"}
-            disabled={companiesLoading}
-            onChange={(e) => {
-              const company = e.target.value || "All Companies";
-              onChange({
-                company,
-                companyValues: company === "All Companies" ? [] : [company],
-              });
-            }}
-            className="h-11 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+        <fieldset className="space-y-1.5">
+          <legend className="text-sm font-medium leading-none">Figures</legend>
+          <div
+            className="flex w-full overflow-x-auto rounded-md border border-border p-0.5"
+            role="radiogroup"
+            aria-label="Intercompany inclusion"
           >
-            <option value="All Companies">
-              {companiesLoading ? "Loading…" : "All Companies"}
-            </option>
-            {companyOptions.some((o) => o.kind === "group") ? (
-              <optgroup label="Groups">
-                {companyOptions
-                  .filter((o) => o.kind === "group")
-                  .map((o) => (
-                    <option key={o.value} value={o.value}>
+            {(
+              [
+                { id: false, label: "Excl. intercompany" },
+                { id: true, label: "Incl. intercompany" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={String(opt.id)}
+                type="button"
+                role="radio"
+                aria-checked={filters.includeIntercompany === opt.id}
+                onClick={() => onChange({ includeIntercompany: opt.id })}
+                className={cn(
+                  "shrink-0 flex-1 rounded-sm px-2.5 py-2 text-xs font-medium transition-colors sm:text-sm",
+                  filters.includeIntercompany === opt.id
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+
+        <div className="min-w-0 space-y-1.5">
+          <Label>Company</Label>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                disabled={companiesLoading}
+                aria-label="Select companies"
+                className="flex h-11 w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-3 text-left text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+              >
+                <span className="min-w-0 truncate">{companyTriggerLabel}</span>
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="max-h-72 w-[var(--radix-dropdown-menu-trigger-width)] min-w-[16rem]"
+            >
+              <DropdownMenuCheckboxItem
+                checked={allSelected}
+                onCheckedChange={() => setCompanies([])}
+                onSelect={(e) => e.preventDefault()}
+              >
+                All Companies
+              </DropdownMenuCheckboxItem>
+              {groupOptions.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Groups</DropdownMenuLabel>
+                  {groupOptions.map((o) => (
+                    <DropdownMenuCheckboxItem
+                      key={o.value}
+                      checked={selected.has(o.value)}
+                      onCheckedChange={() => toggleCompany(o.value)}
+                      onSelect={(e) => e.preventDefault()}
+                    >
                       {o.label}
-                    </option>
+                    </DropdownMenuCheckboxItem>
                   ))}
-              </optgroup>
-            ) : null}
-            {companyOptions.some((o) => o.kind === "company") ? (
-              <optgroup label="Companies">
-                {companyOptions
-                  .filter((o) => o.kind === "company")
-                  .map((o) => (
-                    <option key={o.value} value={o.value}>
+                </>
+              )}
+              {unitOptions.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Units</DropdownMenuLabel>
+                  {unitOptions.map((o) => (
+                    <DropdownMenuCheckboxItem
+                      key={o.value}
+                      checked={selected.has(o.value)}
+                      onCheckedChange={() => toggleCompany(o.value)}
+                      onSelect={(e) => e.preventDefault()}
+                    >
                       {o.label}
-                    </option>
+                    </DropdownMenuCheckboxItem>
                   ))}
-              </optgroup>
-            ) : null}
-          </select>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <fieldset className="space-y-1.5">

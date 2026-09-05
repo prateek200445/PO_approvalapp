@@ -35,6 +35,7 @@ export const DEFAULT_SALES_FILTERS: SalesDashboardFilters = (() => {
     view: "Summary" as const,
     category: "Sales" as const,
     trendPeriod: "Last 6 Months" as const,
+    includeIntercompany: false,
   };
 })();
 
@@ -121,11 +122,21 @@ function mapTotalsBreakdown(payload: Record<string, unknown>): {
 }
 
 /** KPI cards + group charts. Does not wait for the 5-year trend or country tables. */
+function appendSalesParams(
+  params: URLSearchParams,
+  filters: { company: string; includeIntercompany?: boolean; refresh?: boolean },
+) {
+  params.set("company", filters.company);
+  params.set("includeIntercompany", filters.includeIntercompany ? "true" : "false");
+  params.set("refresh", filters.refresh ? "true" : "false");
+}
+
 export async function getSalesKpis(filters: {
   company: string;
   dateFrom: string;
   dateTo: string;
   category: "Sales" | "Purchase";
+  includeIntercompany?: boolean;
   refresh?: boolean;
 }): Promise<{
   totalSales: number;
@@ -136,11 +147,10 @@ export async function getSalesKpis(filters: {
   bySubGroup: SalesBySubGroupItem[];
 }> {
   const params = new URLSearchParams({
-    company: filters.company,
     dateFrom: filters.dateFrom,
     dateTo: filters.dateTo,
-    refresh: filters.refresh ? "true" : "false",
   });
+  appendSalesParams(params, filters);
   const path =
     filters.category === "Purchase"
       ? `/api/SalesDashboard/total-purchase?${params}`
@@ -164,15 +174,15 @@ export async function getSalesYearlyTrend(filters: {
   company: string;
   dateTo: string;
   category: "Sales" | "Purchase";
+  includeIntercompany?: boolean;
   refresh?: boolean;
 }): Promise<SalesTrendItem[]> {
   const params = new URLSearchParams({
-    company: filters.company,
     asOf: filters.dateTo,
     years: "5",
     category: filters.category,
-    refresh: filters.refresh ? "true" : "false",
   });
+  appendSalesParams(params, filters);
   const response = await fetch(getSalesApiUrl(`/api/SalesDashboard/yearly-trend?${params}`));
   const payload = (await response.json()) as Record<string, unknown> & { message?: string };
   if (!response.ok) {
@@ -189,6 +199,7 @@ export async function getSalesTables(filters: {
   company: string;
   dateFrom: string;
   dateTo: string;
+  includeIntercompany?: boolean;
   refresh?: boolean;
 }): Promise<{
   byCountry: SalesByCountryItem[];
@@ -196,19 +207,17 @@ export async function getSalesTables(filters: {
   exportCustomers: RankedPartyItem[];
 }> {
   const countryParams = new URLSearchParams({
-    company: filters.company,
     dateFrom: filters.dateFrom,
     dateTo: filters.dateTo,
     top: "10",
-    refresh: filters.refresh ? "true" : "false",
   });
+  appendSalesParams(countryParams, filters);
   const customerParams = new URLSearchParams({
-    company: filters.company,
     dateFrom: filters.dateFrom,
     dateTo: filters.dateTo,
     top: "10",
-    refresh: filters.refresh ? "true" : "false",
   });
+  appendSalesParams(customerParams, filters);
   const [countryRes, customersRes] = await Promise.all([
     fetch(getSalesApiUrl(`/api/SalesDashboard/by-country?${countryParams}`)),
     fetch(getSalesApiUrl(`/api/SalesDashboard/top-export-customers?${customerParams}`)),
@@ -243,6 +252,7 @@ export async function getSalesOverview(filters: {
   dateFrom: string;
   dateTo: string;
   category: "Sales" | "Purchase";
+  includeIntercompany?: boolean;
   refresh?: boolean;
 }): Promise<{
   totalSales: number;
@@ -258,12 +268,11 @@ export async function getSalesOverview(filters: {
   suppliers: RankedPartyItem[];
 }> {
   const params = new URLSearchParams({
-    company: filters.company,
     dateFrom: filters.dateFrom,
     dateTo: filters.dateTo,
     category: filters.category,
-    refresh: filters.refresh ? "true" : "false",
   });
+  appendSalesParams(params, filters);
 
   const response = await fetch(getSalesApiUrl(`/api/SalesDashboard/overview?${params}`));
   const payload = (await response.json()) as Record<string, unknown> & { message?: string };
@@ -312,21 +321,21 @@ function mapRankedParties(payload: {
   }));
 }
 
-/** Top suppliers from purchase EBIDTA, excl. intercompany. */
+/** Top suppliers from purchase EBIDTA. */
 export async function getTopSuppliers(filters: {
   company: string;
   dateFrom: string;
   dateTo: string;
   top?: number;
+  includeIntercompany?: boolean;
   refresh?: boolean;
 }): Promise<RankedPartyItem[]> {
   const params = new URLSearchParams({
-    company: filters.company,
     dateFrom: filters.dateFrom,
     dateTo: filters.dateTo,
     top: String(filters.top ?? 10),
-    refresh: filters.refresh ? "true" : "false",
   });
+  appendSalesParams(params, filters);
   const response = await fetch(
     getSalesApiUrl(`/api/SalesDashboard/top-suppliers?${params}`),
   );

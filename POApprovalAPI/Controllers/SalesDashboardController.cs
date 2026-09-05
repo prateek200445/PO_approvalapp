@@ -20,7 +20,8 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
         [FromQuery] string category = "Sales",
-        [FromQuery] bool refresh = false)
+        [FromQuery] bool refresh = false,
+        [FromQuery] bool includeIntercompany = false)
     {
         try
         {
@@ -32,7 +33,7 @@ public class SalesDashboardController : ControllerBase
 
             var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
             var to = dateTo ?? DateTime.Today;
-            var data = await _salesDashboard.GetOverviewAsync(category, company, from, to, refresh);
+            var data = await _salesDashboard.GetOverviewAsync(category, company, from, to, refresh, includeIntercompany);
             var totals = data.Totals;
             return Ok(new
             {
@@ -49,6 +50,7 @@ public class SalesDashboardController : ControllerBase
                 suppliers = data.Suppliers,
                 company,
                 category,
+                includeIntercompany,
                 dateFrom = from.ToString("yyyy-MM-dd"),
                 dateTo = to.ToString("yyyy-MM-dd"),
             });
@@ -82,13 +84,14 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] string company = "All Companies",
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
-        [FromQuery] bool refresh = false)
+        [FromQuery] bool refresh = false,
+        [FromQuery] bool includeIntercompany = false)
     {
         try
         {
             var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
             var to = dateTo ?? DateTime.Today;
-            var totals = await _salesDashboard.GetSalesTotalsAsync(company, from, to, refresh);
+            var totals = await _salesDashboard.GetSalesTotalsAsync(company, from, to, refresh, includeIntercompany);
 
             return Ok(new
             {
@@ -98,6 +101,7 @@ public class SalesDashboardController : ControllerBase
                 byGroup = totals.ByGroup,
                 bySubGroup = totals.BySubGroup,
                 company,
+                includeIntercompany,
                 dateFrom = from.ToString("yyyy-MM-dd"),
                 dateTo = to.ToString("yyyy-MM-dd"),
                 source = "vw_Sales_EBIDTA",
@@ -128,13 +132,14 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] string company = "All Companies",
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
-        [FromQuery] bool refresh = false)
+        [FromQuery] bool refresh = false,
+        [FromQuery] bool includeIntercompany = false)
     {
         try
         {
             var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
             var to = dateTo ?? DateTime.Today;
-            var totals = await _salesDashboard.GetPurchaseTotalsAsync(company, from, to, refresh);
+            var totals = await _salesDashboard.GetPurchaseTotalsAsync(company, from, to, refresh, includeIntercompany);
 
             return Ok(new
             {
@@ -144,6 +149,7 @@ public class SalesDashboardController : ControllerBase
                 byGroup = totals.ByGroup,
                 bySubGroup = totals.BySubGroup,
                 company,
+                includeIntercompany,
                 dateFrom = from.ToString("yyyy-MM-dd"),
                 dateTo = to.ToString("yyyy-MM-dd"),
                 source = "vw_Purchase_EBIDTA",
@@ -175,7 +181,8 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] DateTime? asOf = null,
         [FromQuery] int years = 5,
         [FromQuery] string category = "Sales",
-        [FromQuery] bool refresh = false)
+        [FromQuery] bool refresh = false,
+        [FromQuery] bool includeIntercompany = false)
     {
         try
         {
@@ -188,8 +195,8 @@ public class SalesDashboardController : ControllerBase
             var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
             var through = asOf ?? DateTime.Today;
             var trend = isPurchase
-                ? await _salesDashboard.GetPurchaseYearlyTrendAsync(company, through, years, refresh)
-                : await _salesDashboard.GetSalesYearlyTrendAsync(company, through, years, refresh);
+                ? await _salesDashboard.GetPurchaseYearlyTrendAsync(company, through, years, refresh, includeIntercompany)
+                : await _salesDashboard.GetSalesYearlyTrendAsync(company, through, years, refresh, includeIntercompany);
 
             var source = isPurchase ? "vw_Purchase_EBIDTA" : "vw_Sales_EBIDTA";
             var label = isPurchase ? "Purchase" : "Sales";
@@ -199,6 +206,7 @@ public class SalesDashboardController : ControllerBase
                 trend,
                 company,
                 category = label,
+                includeIntercompany,
                 asOf = through.ToString("yyyy-MM-dd"),
                 years,
                 source,
@@ -224,18 +232,20 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
         [FromQuery] int top = 10,
-        [FromQuery] bool refresh = false)
+        [FromQuery] bool refresh = false,
+        [FromQuery] bool includeIntercompany = false)
     {
         try
         {
             var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
             var to = dateTo ?? DateTime.Today;
-            var result = await _salesDashboard.GetSalesByCountryAsync(company, from, to, top, refresh);
+            var result = await _salesDashboard.GetSalesByCountryAsync(company, from, to, top, refresh, includeIntercompany);
 
             return Ok(new
             {
                 byCountry = result.ByCountry,
                 company,
+                includeIntercompany,
                 dateFrom = from.ToString("yyyy-MM-dd"),
                 dateTo = to.ToString("yyyy-MM-dd"),
                 invYears = result.InvYears,
@@ -263,22 +273,26 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
         [FromQuery] int top = 10,
-        [FromQuery] bool refresh = false)
+        [FromQuery] bool refresh = false,
+        [FromQuery] bool includeIntercompany = false)
     {
         try
         {
             var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
             var to = dateTo ?? DateTime.Today;
-            var result = await _salesDashboard.GetTopExportCustomersAsync(company, from, to, top, refresh);
+            var result = await _salesDashboard.GetTopExportCustomersAsync(company, from, to, top, refresh, includeIntercompany);
             return Ok(new
             {
                 items = result.Items,
                 company,
+                includeIntercompany,
                 dateFrom = from.ToString("yyyy-MM-dd"),
                 dateTo = to.ToString("yyyy-MM-dd"),
                 top,
                 source = result.Source,
-                note = "Top export customers excl. India and intercompany.",
+                note = includeIntercompany
+                    ? "Top export customers excl. India, including intercompany."
+                    : "Top export customers excl. India and intercompany.",
             });
         }
         catch (Exception ex)
@@ -296,22 +310,26 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] DateTime? dateFrom = null,
         [FromQuery] DateTime? dateTo = null,
         [FromQuery] int top = 10,
-        [FromQuery] bool refresh = false)
+        [FromQuery] bool refresh = false,
+        [FromQuery] bool includeIntercompany = false)
     {
         try
         {
             var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
             var to = dateTo ?? DateTime.Today;
-            var result = await _salesDashboard.GetTopSuppliersAsync(company, from, to, top, refresh);
+            var result = await _salesDashboard.GetTopSuppliersAsync(company, from, to, top, refresh, includeIntercompany);
             return Ok(new
             {
                 items = result.Items,
                 company,
+                includeIntercompany,
                 dateFrom = from.ToString("yyyy-MM-dd"),
                 dateTo = to.ToString("yyyy-MM-dd"),
                 top,
                 source = result.Source,
-                note = "Top suppliers excl. InterGroup='Intergroup'.",
+                note = includeIntercompany
+                    ? "Top suppliers including InterGroup='Intergroup'."
+                    : "Top suppliers excl. InterGroup='Intergroup'.",
             });
         }
         catch (Exception ex)

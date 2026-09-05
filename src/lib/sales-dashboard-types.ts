@@ -10,6 +10,8 @@ export interface SalesDashboardFilters {
   view: SalesReportView;
   category: SalesReportCategory;
   trendPeriod: SalesTrendPeriod;
+  /** When true, KPIs/charts/tables include InterGroup = Intergroup. */
+  includeIntercompany: boolean;
 }
 
 export interface SalesCompanyOption {

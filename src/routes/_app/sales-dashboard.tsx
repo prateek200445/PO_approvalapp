@@ -53,6 +53,7 @@ function SalesDashboardPage() {
   const bypassCacheRef = useRef(false);
   const isPurchase = filters.category === "Purchase";
   const companyFilter = filters.company?.trim() || "All Companies";
+  const includeIntercompany = filters.includeIntercompany;
 
   const { data: companyList, isLoading: companiesLoading } = useQuery({
     queryKey: ["sales-dashboard-companies"],
@@ -67,6 +68,7 @@ function SalesDashboardPage() {
       companyFilter,
       filters.dateFrom,
       filters.dateTo,
+      includeIntercompany,
       refreshToken,
     ],
     queryFn: () =>
@@ -75,6 +77,7 @@ function SalesDashboardPage() {
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
         category: filters.category,
+        includeIntercompany,
         refresh: bypassCacheRef.current,
       }),
     ...queryOptions,
@@ -86,6 +89,7 @@ function SalesDashboardPage() {
       filters.category,
       companyFilter,
       filters.dateTo,
+      includeIntercompany,
       refreshToken,
     ],
     queryFn: () =>
@@ -93,6 +97,7 @@ function SalesDashboardPage() {
         company: companyFilter,
         dateTo: filters.dateTo,
         category: filters.category,
+        includeIntercompany,
         refresh: bypassCacheRef.current,
       }),
     ...queryOptions,
@@ -104,6 +109,7 @@ function SalesDashboardPage() {
       companyFilter,
       filters.dateFrom,
       filters.dateTo,
+      includeIntercompany,
       refreshToken,
     ],
     queryFn: () =>
@@ -111,6 +117,7 @@ function SalesDashboardPage() {
         company: companyFilter,
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
+        includeIntercompany,
         refresh: bypassCacheRef.current,
       }),
     enabled: !isPurchase,
@@ -123,6 +130,7 @@ function SalesDashboardPage() {
       companyFilter,
       filters.dateFrom,
       filters.dateTo,
+      includeIntercompany,
       refreshToken,
     ],
     queryFn: () =>
@@ -131,6 +139,7 @@ function SalesDashboardPage() {
         dateFrom: filters.dateFrom,
         dateTo: filters.dateTo,
         top: 10,
+        includeIntercompany,
         refresh: bypassCacheRef.current,
       }),
     enabled: true,
@@ -192,7 +201,7 @@ function SalesDashboardPage() {
           Sales Dashboard
         </h1>
         <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-          Live ERP figures, excluding intercompany.
+          Live ERP figures. Switch to Incl. intercompany for the same KPIs with IC, and tick companies to combine units.
         </p>
       </div>
 
@@ -244,6 +253,7 @@ function SalesDashboardPage() {
         trend={trendQuery.data ?? []}
         trendLoading={trendQuery.isFetching && !trendQuery.data}
         groupsLoading={kpisQuery.isFetching && !kpis}
+        includeIntercompany={includeIntercompany}
       />
 
       <SalesSummaryTables
@@ -254,6 +264,7 @@ function SalesDashboardPage() {
         isPurchase={isPurchase}
         suppliersLoading={suppliersQuery.isFetching && !suppliersQuery.data}
         totalSales={kpis?.totalSales ?? 0}
+        includeIntercompany={includeIntercompany}
       />
     </div>
   );
