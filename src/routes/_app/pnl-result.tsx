@@ -68,91 +68,106 @@ function PnlResultPage() {
   );
 
   return (
-    <div className="space-y-4 pb-8">
-      <div className="flex items-start gap-3">
+    <div className="mx-auto max-w-6xl space-y-6 pb-10">
+      <div className="flex items-start gap-4">
         <Link
           to="/ledgers"
-          className="mt-1 rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border bg-card text-muted-foreground shadow-sm transition hover:border-primary/40 hover:bg-secondary hover:text-foreground"
         >
           <ArrowLeft className="h-5 w-5" />
         </Link>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">P&L Result</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Generate the monthly P&amp;L / EBITDA view from trial balance plus the saved stock, provision, and
-            Common / HO inputs.
+        <div className="min-w-0 flex-1 pt-0.5">
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">P&L Result</h1>
+          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            Monthly P&amp;L and EBITDA from trial balance, plus saved stock, provision, and Common / HO.
           </p>
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Company</span>
-          <SearchableSelect
-            options={companyOptions}
-            value={company}
-            onChange={setCompany}
-            placeholder={companiesQuery.isLoading ? "Loading…" : "Select company"}
-            disabled={companiesQuery.isLoading}
-          />
-        </label>
-        <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Month / Year</span>
-          <MonthPickerField value={month} onChange={setMonth} placeholder="Select month" />
-        </label>
-      </div>
+      <div className="rounded-2xl border bg-card p-4 shadow-sm sm:p-5">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="space-y-2 text-sm">
+            <span className="font-medium text-foreground">Company</span>
+            <SearchableSelect
+              options={companyOptions}
+              value={company}
+              onChange={setCompany}
+              placeholder={companiesQuery.isLoading ? "Loading…" : "Select company"}
+              disabled={companiesQuery.isLoading}
+            />
+          </label>
+          <label className="space-y-2 text-sm">
+            <span className="font-medium text-foreground">Month / Year</span>
+            <MonthPickerField value={month} onChange={setMonth} placeholder="Select month" />
+          </label>
+        </div>
 
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span>Range: {range.from} to {range.to}</span>
-        <Link to="/pnl" className="font-medium text-primary hover:underline">
-          Open input page
-        </Link>
-        <HelpDialog />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          disabled={exporting !== null}
-          onClick={() => void runExport("statement")}
-        >
-          {exporting === "statement" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-          Export P&amp;L
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          disabled={exporting !== null}
-          onClick={() => void runExport("summary")}
-        >
-          {exporting === "summary" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
-          Export Summary
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="gap-2"
-          disabled={exporting !== null}
-          onClick={() => void runExport("month")}
-        >
-          {exporting === "month" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
-          Export month P&amp;L
-        </Button>
+        <div className="mt-4 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span className="rounded-md bg-secondary px-2 py-1 font-medium text-foreground">
+              {range.from} → {range.to}
+            </span>
+            <Link to="/pnl" className="font-medium text-primary hover:underline">
+              Open input page
+            </Link>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <HelpDialog />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              disabled={exporting !== null}
+              onClick={() => void runExport("statement")}
+            >
+              {exporting === "statement" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Export P&amp;L
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              disabled={exporting !== null}
+              onClick={() => void runExport("summary")}
+            >
+              {exporting === "summary" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="h-4 w-4" />
+              )}
+              Export Summary
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              disabled={exporting !== null}
+              onClick={() => void runExport("month")}
+            >
+              {exporting === "month" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="h-4 w-4" />
+              )}
+              Export month P&amp;L
+            </Button>
+          </div>
+        </div>
+        {exporting === "summary" ? (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Building the plant summary from April through {month}. This can take a minute.
+          </p>
+        ) : null}
+        {exporting === "month" ? (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Building the {month} P&amp;L grid for all plants. This can take a minute.
+          </p>
+        ) : null}
+        {exportError ? <p className="mt-3 text-sm text-destructive">{exportError}</p> : null}
       </div>
-      {exporting === "summary" ? (
-        <p className="text-xs text-muted-foreground">
-          Building the plant summary from April through {month}. This can take a minute.
-        </p>
-      ) : null}
-      {exporting === "month" ? (
-        <p className="text-xs text-muted-foreground">
-          Building the {month} P&amp;L grid for all plants (Jun-26 workbook layout). This can take a minute.
-        </p>
-      ) : null}
-      {exportError ? <p className="text-sm text-destructive">{exportError}</p> : null}
 
       <StatementView query={statementQuery} />
     </div>
@@ -183,103 +198,155 @@ function StatementView({
     refetch: () => void;
   };
 }) {
-  if (query.isLoading) return <Busy label="Generating P&L…" />;
-  if (query.error) return <p className="text-sm text-destructive">{query.error.message}</p>;
+  if (query.isLoading) {
+    return (
+      <div className="rounded-2xl border bg-card px-6 py-16 shadow-sm">
+        <Busy label="Generating P&L…" />
+      </div>
+    );
+  }
+  if (query.error) {
+    return (
+      <p className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        {query.error.message}
+      </p>
+    );
+  }
   const data = query.data;
   if (!data) return null;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-5">
       {data.stockIncomplete ? (
-        <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+        <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
           Stock values are empty. Enter opening/closing stock so materials consumed and inventory change are correct.
         </p>
       ) : null}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Kpi label="Month EBITDA" value={data.ebitdaLacs} />
-        <Kpi
-          label="YTD EBITDA"
-          value={data.rows.find((r) => r.id === "ebitda")?.ytdLacs ?? null}
-        />
-        <Kpi label="Month PBT" value={data.pbtLacs} />
-        <Kpi
-          label="YTD PBT"
-          value={data.rows.find((r) => r.id === "pbt")?.ytdLacs ?? null}
-        />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi label="Month EBITDA" value={data.ebitdaLacs} tone="teal" />
+        <Kpi label="YTD EBITDA" value={data.rows.find((r) => r.id === "ebitda")?.ytdLacs ?? null} tone="teal" />
+        <Kpi label="Month PBT" value={data.pbtLacs} tone="gold" />
+        <Kpi label="YTD PBT" value={data.rows.find((r) => r.id === "pbt")?.ytdLacs ?? null} tone="gold" />
       </div>
       <p className="text-xs text-muted-foreground">
         FY opening stock changes YTD only. July month EBITDA / PBT stay the same.
       </p>
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[28rem] text-sm">
-          <thead className="bg-muted/60 text-left text-xs text-muted-foreground">
-            <tr>
-              <th className="px-2 py-2 font-medium">Particulars</th>
-              <th className="px-2 py-2 text-right font-medium">Month</th>
-              <th className="px-2 py-2 text-right font-medium">% of turnover</th>
-              <th className="px-2 py-2 text-right font-medium">YTD</th>
-              <th className="px-2 py-2 text-right font-medium">YTD % of turnover</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.rows.map((row) => (
-              <tr
-                key={row.id}
-                className={cn(
-                  "border-t",
-                  row.kind === "header" && "bg-muted/40 font-semibold",
-                  row.kind === "total" && "font-semibold",
-                  row.kind === "result" && "bg-primary/10 font-semibold",
-                )}
-              >
-                <td className={cn("px-2 py-1.5", row.kind === "line" && "pl-4")}>{row.label}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">
-                  {row.kind === "header" ? "" : formatLacs(row.monthLacs)}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
-                  {row.kind === "header" ? "" : formatPct(row.pctToSales)}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums">
-                  {row.kind === "header" ? "" : formatLacs(row.ytdLacs)}
-                </td>
-                <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
-                  {row.kind === "header" ? "" : formatPct(row.ytdPctToSales)}
-                </td>
+      <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[36rem] text-sm">
+            <thead className="sticky top-0 bg-muted/80 text-left text-xs text-muted-foreground backdrop-blur">
+              <tr>
+                <th className="px-4 py-3 font-medium">Particulars</th>
+                <th className="px-3 py-3 text-right font-medium">Month</th>
+                <th className="px-3 py-3 text-right font-medium">% of turnover</th>
+                <th className="px-3 py-3 text-right font-medium">YTD</th>
+                <th className="px-4 py-3 text-right font-medium">YTD % of turnover</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.rows.map((row) => (
+                <tr
+                  key={row.id}
+                  className={cn(
+                    "border-t border-border/70",
+                    row.kind === "header" && "bg-muted/50",
+                    row.kind === "total" && "bg-sky-500/5 font-semibold",
+                    row.kind === "result" && "bg-emerald-500/10 font-semibold",
+                  )}
+                >
+                  <td
+                    className={cn(
+                      "px-4 py-2.5",
+                      row.kind === "line" && "pl-7 text-muted-foreground",
+                      row.kind === "header" && "text-[11px] font-semibold uppercase tracking-wide text-foreground",
+                    )}
+                  >
+                    {row.label}
+                  </td>
+                  <td className={cn("px-3 py-2.5 text-right tabular-nums", amountClass(row.monthLacs, row.kind))}>
+                    {row.kind === "header" ? "" : formatLacs(row.monthLacs)}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
+                    {row.kind === "header" ? "" : formatPct(row.pctToSales)}
+                  </td>
+                  <td className={cn("px-3 py-2.5 text-right tabular-nums", amountClass(row.ytdLacs, row.kind))}>
+                    {row.kind === "header" ? "" : formatLacs(row.ytdLacs)}
+                  </td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">
+                    {row.kind === "header" ? "" : formatPct(row.ytdPctToSales)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex items-center justify-end border-t bg-muted/20 px-4 py-3">
+          <Button variant="outline" size="sm" onClick={() => query.refetch()}>
+            Refresh P&amp;L
+          </Button>
+        </div>
       </div>
       {data.unmapped.length > 0 ? (
-        <div>
-          <h3 className="mb-2 text-sm font-medium">Unmapped TB heads</h3>
-          {data.unmapped.map((h) => (
-            <div key={h.head} className="flex justify-between text-sm">
-              <span className="text-muted-foreground">{h.head}</span>
-              <span className="tabular-nums">{formatLacs(h.amountLacs)}</span>
-            </div>
-          ))}
+        <div className="rounded-2xl border bg-card p-4 shadow-sm sm:p-5">
+          <h3 className="text-sm font-semibold">Unmapped TB heads</h3>
+          <div className="mt-3 divide-y">
+            {data.unmapped.map((h) => (
+              <div key={h.head} className="flex justify-between gap-4 py-2 text-sm">
+                <span className="text-muted-foreground">{h.head}</span>
+                <span className={cn("tabular-nums", (h.amountLacs ?? 0) < 0 && "text-red-600 dark:text-red-400")}>
+                  {formatLacs(h.amountLacs)}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       ) : null}
-      <Button variant="outline" onClick={() => query.refetch()}>
-        Refresh P&amp;L
-      </Button>
     </div>
   );
 }
 
-function Kpi({ label, value }: { label: string; value: number | null | undefined }) {
+function amountClass(value: number | null | undefined, kind: string) {
+  if (kind === "header") return "";
+  if (value != null && value < 0) return "text-red-600 dark:text-red-400";
+  if (kind === "result") return "text-emerald-800 dark:text-emerald-300";
+  return "";
+}
+
+function Kpi({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number | null | undefined;
+  tone: "teal" | "gold";
+}) {
+  const negative = value != null && value < 0;
   return (
-    <div className="rounded-lg border bg-card p-3">
-      <div className="text-xs text-muted-foreground">{label} (lacs)</div>
-      <div className="mt-1 text-xl font-semibold tabular-nums">{formatLacs(value)}</div>
+    <div
+      className={cn(
+        "rounded-2xl border bg-card p-4 shadow-sm",
+        tone === "teal" && "border-l-4 border-l-emerald-600",
+        tone === "gold" && "border-l-4 border-l-amber-500",
+      )}
+    >
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          "mt-2 text-2xl font-semibold tabular-nums tracking-tight",
+          negative && "text-red-600 dark:text-red-400",
+        )}
+      >
+        {formatLacs(value)}
+      </div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground">lacs</div>
     </div>
   );
 }
 
 function Busy({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+    <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
       <Loader2 className="h-4 w-4 animate-spin" />
       {label}
     </div>

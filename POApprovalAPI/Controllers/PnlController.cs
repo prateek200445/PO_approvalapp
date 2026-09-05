@@ -9,12 +9,10 @@ namespace POApprovalAPI.Controllers;
 public class PnlController : ControllerBase
 {
     private readonly PnlService _service;
-    private readonly IWebHostEnvironment _environment;
 
-    public PnlController(PnlService service, IWebHostEnvironment environment)
+    public PnlController(PnlService service)
     {
         _service = service;
-        _environment = environment;
     }
 
     [HttpGet("companies")]
@@ -214,40 +212,6 @@ public class PnlController : ControllerBase
                 remarks);
 
             return Ok(new { ok = true });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
-
-    [HttpPost("dev/workbook")]
-    [Consumes("multipart/form-data")]
-    [RequestSizeLimit(25_000_000)]
-    public async Task<IActionResult> SaveWorkbook(
-        IFormFile file,
-        [FromForm] string company,
-        [FromForm] bool zeroCommonHo = true)
-    {
-        if (!_environment.IsDevelopment())
-            return NotFound();
-
-        try
-        {
-            ValidateExcel(file);
-            await using var stream = file.OpenReadStream();
-            using var ms = new MemoryStream();
-            await stream.CopyToAsync(ms);
-            ms.Position = 0;
-
-            var result = await _service.SaveWorkbookUploadAsync(
-                company,
-                file.FileName,
-                file.ContentType ?? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                ms.ToArray(),
-                zeroCommonHo);
-
-            return Ok(result);
         }
         catch (Exception ex)
         {

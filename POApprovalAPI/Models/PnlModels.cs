@@ -136,24 +136,6 @@ public class PnlUploadItem
     public DateTime UploadedAt { get; set; }
 }
 
-public class PnlWorkbookImportResult
-{
-    public bool Ok { get; set; } = true;
-    public string Company { get; set; } = "";
-    public List<string> Months { get; set; } = new();
-    public List<PnlWorkbookSheetResult> Sheets { get; set; } = new();
-    public bool ZeroedCommonHo { get; set; }
-}
-
-public class PnlWorkbookSheetResult
-{
-    public string Sheet { get; set; } = "";
-    public string Month { get; set; } = "";
-    public string UploadType { get; set; } = "";
-    public string Status { get; set; } = "";
-    public string? Detail { get; set; }
-}
-
 public class PnlStatementRow
 {
     public string Id { get; set; } = "";

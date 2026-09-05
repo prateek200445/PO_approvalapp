@@ -92,22 +92,6 @@ export type PnlUploadItem = {
   uploadedAt: string;
 };
 
-export type PnlWorkbookSheetResult = {
-  sheet: string;
-  month: string;
-  uploadType: string;
-  status: string;
-  detail?: string | null;
-};
-
-export type PnlWorkbookImportResult = {
-  ok: boolean;
-  company: string;
-  months: string[];
-  sheets: PnlWorkbookSheetResult[];
-  zeroedCommonHo: boolean;
-};
-
 export type PnlStatementRow = {
   id: string;
   label: string;

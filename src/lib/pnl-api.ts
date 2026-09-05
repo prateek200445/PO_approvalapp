@@ -10,7 +10,6 @@ import type {
   PnlProvisionRow,
   PnlStockRow,
   PnlUploadItem,
-  PnlWorkbookImportResult,
 } from "@/lib/pnl-types";
 
 async function readJson<T>(res: Response): Promise<T> {
@@ -128,18 +127,6 @@ export async function savePnlUpload(
     body,
   });
   return readJson<{ ok: boolean }>(res);
-}
-
-export async function savePnlWorkbook(company: string, file: File, zeroCommonHo: boolean) {
-  const body = new FormData();
-  body.append("file", file);
-  body.append("company", company);
-  body.append("zeroCommonHo", zeroCommonHo ? "true" : "false");
-  const res = await fetch(getApiUrl("/api/pnl/dev/workbook"), {
-    method: "POST",
-    body,
-  });
-  return readJson<PnlWorkbookImportResult>(res);
 }
 
 export async function downloadPnlTemplate(

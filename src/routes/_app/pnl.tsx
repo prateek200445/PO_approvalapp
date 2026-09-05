@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Download, FileSpreadsheet, Loader2, Plus, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, ClipboardList, Download, FileSpreadsheet, Loader2, Package, Plus, Trash2, Upload, Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,6 @@ import {
   savePnlOverhead,
   downloadPnlTemplate,
   savePnlUpload,
-  savePnlWorkbook,
 } from "@/lib/pnl-api";
 import {
   currentMonthValue,
@@ -29,7 +28,6 @@ import {
   type PnlStockYearRow,
   type PnlStockYearState,
   type PnlUploadItem,
-  type PnlWorkbookImportResult,
 } from "@/lib/pnl-types";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
@@ -63,57 +61,58 @@ function PnlPage() {
   );
 
   return (
-    <div className="space-y-4 pb-8">
-      <div className="flex items-start gap-3">
+    <div className="mx-auto max-w-6xl space-y-6 pb-10">
+      <div className="flex items-start gap-4">
         <Link
           to="/ledgers"
-          className="mt-1 rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border bg-card text-muted-foreground shadow-sm transition hover:border-primary/40 hover:bg-secondary hover:text-foreground"
         >
           <ArrowLeft className="h-5 w-5" />
         </Link>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">P&L Inputs</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Maintain the monthly inputs used by the P&amp;L result page: trial balance heads, provisions, stock,
-            and Common / HO allocations.
+        <div className="min-w-0 pt-0.5">
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">P&L Inputs</h1>
+          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            Upload monthly stock, provision, and Common / HO files. The result page uses these together with the trial
+            balance.
           </p>
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Company</span>
-          <SearchableSelect
-            options={companyOptions}
-            value={company}
-            onChange={setCompany}
-            placeholder={companiesQuery.isLoading ? "Loading…" : "Select company"}
-            disabled={companiesQuery.isLoading}
-          />
-        </label>
-        <label className="space-y-1 text-sm">
-          <span className="text-muted-foreground">Month / Year</span>
-          <MonthPickerField value={month} onChange={setMonth} placeholder="Select month" />
-        </label>
+      <div className="rounded-2xl border bg-card p-4 shadow-sm sm:p-5">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="space-y-2 text-sm">
+            <span className="font-medium text-foreground">Company</span>
+            <SearchableSelect
+              options={companyOptions}
+              value={company}
+              onChange={setCompany}
+              placeholder={companiesQuery.isLoading ? "Loading…" : "Select company"}
+              disabled={companiesQuery.isLoading}
+            />
+          </label>
+          <label className="space-y-2 text-sm">
+            <span className="font-medium text-foreground">Month / Year</span>
+            <MonthPickerField value={month} onChange={setMonth} placeholder="Select month" />
+          </label>
+        </div>
       </div>
 
       {single ? (
-        <>
-          <UploadInboxPanel
-            company={company}
-            month={month}
-            uploads={uploadsQuery.data}
-            loading={uploadsQuery.isLoading}
-            onSaved={() => void uploadsQuery.refetch()}
-          />
-          {import.meta.env.DEV ? (
-            <DevWorkbookPanel company={company} onSaved={() => void uploadsQuery.refetch()} />
-          ) : null}
-        </>
+        <UploadInboxPanel
+          company={company}
+          month={month}
+          uploads={uploadsQuery.data}
+          loading={uploadsQuery.isLoading}
+          onSaved={() => void uploadsQuery.refetch()}
+        />
       ) : (
-        <p className="rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground">
-          Pick a single company to upload the three Excel files.
-        </p>
+        <div className="rounded-2xl border border-dashed bg-muted/20 px-6 py-10 text-center">
+          <FileSpreadsheet className="mx-auto h-8 w-8 text-muted-foreground/70" />
+          <p className="mt-3 text-sm font-medium">Select one company</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+            Pick a single factory from the list above to download templates and upload Excel files for that month.
+          </p>
+        </div>
       )}
     </div>
   );
@@ -156,24 +155,33 @@ function UploadInboxPanel({
 
   const [downloading, setDownloading] = useState<"stock" | "provision" | "common" | null>(null);
 
-  const cards: { key: keyof typeof files; type: "stock" | "provision" | "common"; title: string; hint: string }[] = [
+  const cards: {
+    key: keyof typeof files;
+    type: "stock" | "provision" | "common";
+    title: string;
+    hint: string;
+    icon: typeof Package;
+  }[] = [
     {
       key: "stock",
       type: "stock",
       title: "Stock Excel",
-      hint: "Download the standard stock template, fill it, then upload it.",
+      hint: "Download the template, fill amounts in lacs, then upload.",
+      icon: Package,
     },
     {
       key: "provision",
       type: "provision",
       title: "Provision Excel",
-      hint: "Download the standard provision template, fill it, then upload it.",
+      hint: "Month-end provision ledgers for this company.",
+      icon: ClipboardList,
     },
     {
       key: "common",
       type: "common",
       title: "Common / HO Excel",
-      hint: "Download the standard Common / HO template, fill it, then upload it.",
+      hint: "Plant share of common and head-office costs.",
+      icon: Building2,
     },
   ];
 
@@ -190,159 +198,118 @@ function UploadInboxPanel({
   }
 
   return (
-    <div className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold">Excel Upload Inbox</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Upload each Excel as-is for this company and month. We will standardize the sheet format later.
-          </p>
-        </div>
-        <FileSpreadsheet className="h-5 w-5 text-muted-foreground" />
-      </div>
-
-      <div className="grid gap-3 md:grid-cols-3">
-        {cards.map((card) => (
-          <div key={card.key} className="rounded-lg border p-3">
-            <div className="text-sm font-medium">{card.title}</div>
-            <div className="mt-1 text-xs text-muted-foreground">{card.hint}</div>
-            <Button
-              type="button"
-              variant="outline"
-              className="mt-3 w-full"
-              disabled={downloading === card.type}
-              onClick={() => handleTemplateDownload(card.type)}
-            >
-              {downloading === card.type ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              Download template
-            </Button>
-            <label className="mt-3 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed px-3 py-6 text-center hover:bg-secondary/40">
-              <Upload className="h-5 w-5 text-muted-foreground" />
-              <span className="text-xs font-medium">
-                {files[card.key]?.name ?? "Choose .xlsx"}
-              </span>
-              <input
-                type="file"
-                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                className="sr-only"
-                onChange={(e) => {
-                  const next = e.target.files?.[0] ?? null;
-                  setFiles((prev) => ({ ...prev, [card.key]: next }));
-                }}
-              />
-            </label>
-            <Button
-              type="button"
-              className="mt-3 w-full"
-              disabled={!files[card.key] || upload.isPending}
-              onClick={() => {
-                const file = files[card.key];
-                if (!file) return;
-                upload.mutate({ type: card.type, file });
-              }}
-            >
-              {upload.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Upload
-            </Button>
+    <div className="space-y-6">
+      <div className="rounded-2xl border bg-card p-4 shadow-sm sm:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">Excel uploads</h2>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              One file per type for this company and month. Download the template first if you need the layout.
+            </p>
           </div>
-        ))}
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <FileSpreadsheet className="h-5 w-5" />
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-4 md:grid-cols-3">
+          {cards.map((card) => {
+            const Icon = card.icon;
+            const selected = files[card.key];
+            return (
+              <div key={card.key} className="flex flex-col rounded-xl border bg-background p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-foreground">
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold">{card.title}</div>
+                    <div className="mt-1 text-xs leading-relaxed text-muted-foreground">{card.hint}</div>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-4 w-full"
+                  disabled={downloading === card.type}
+                  onClick={() => handleTemplateDownload(card.type)}
+                >
+                  {downloading === card.type ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  Download template
+                </Button>
+                <label
+                  className={cn(
+                    "mt-3 flex min-h-[7.5rem] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-3 py-5 text-center transition",
+                    selected
+                      ? "border-primary/50 bg-primary/5"
+                      : "hover:border-primary/30 hover:bg-secondary/40",
+                  )}
+                >
+                  <Upload className="h-5 w-5 text-muted-foreground" />
+                  <span className="max-w-full truncate px-1 text-xs font-medium">
+                    {selected?.name ?? "Choose .xlsx"}
+                  </span>
+                  <input
+                    type="file"
+                    accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    className="sr-only"
+                    onChange={(e) => {
+                      const next = e.target.files?.[0] ?? null;
+                      setFiles((prev) => ({ ...prev, [card.key]: next }));
+                    }}
+                  />
+                </label>
+                <Button
+                  type="button"
+                  className="mt-3 w-full"
+                  disabled={!selected || upload.isPending}
+                  onClick={() => {
+                    if (!selected) return;
+                    upload.mutate({ type: card.type, file: selected });
+                  }}
+                >
+                  {upload.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Upload
+                </Button>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      <div className="rounded-lg border bg-muted/20 p-3">
-        <div className="text-sm font-medium">Latest uploads</div>
-        <div className="mt-2 space-y-2">
+      <div className="rounded-2xl border bg-card p-4 shadow-sm sm:p-6">
+        <h3 className="text-sm font-semibold tracking-tight">Latest uploads</h3>
+        <div className="mt-4 space-y-2">
           {loading ? (
             <Busy label="Loading uploaded files…" />
           ) : (uploads ?? []).length > 0 ? (
             uploads!.map((item) => (
-              <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <div>
-                  <span className="font-medium">{item.uploadType}</span>
-                  <span className="mx-2 text-muted-foreground">•</span>
-                  <span className="text-muted-foreground">{item.originalFileName}</span>
+              <div
+                key={item.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-background px-3 py-3 text-sm"
+              >
+                <div className="min-w-0">
+                  <span className="inline-flex rounded-md bg-secondary px-2 py-0.5 text-xs font-medium">
+                    {item.uploadType}
+                  </span>
+                  <span className="ml-2 text-muted-foreground">{item.originalFileName}</span>
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {item.fileSizeBytes.toLocaleString("en-IN")} bytes • {new Date(item.uploadedAt).toLocaleString()}
+                  {item.fileSizeBytes.toLocaleString("en-IN")} bytes · {new Date(item.uploadedAt).toLocaleString()}
                 </div>
               </div>
             ))
           ) : (
-            <p className="text-sm text-muted-foreground">No files uploaded yet for this company and month.</p>
+            <p className="rounded-xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+              No files uploaded yet for this company and month.
+            </p>
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function DevWorkbookPanel({ company, onSaved }: { company: string; onSaved: () => void }) {
-  const [file, setFile] = useState<File | null>(null);
-  const [zeroCommonHo, setZeroCommonHo] = useState(true);
-  const [last, setLast] = useState<PnlWorkbookImportResult | null>(null);
-
-  const upload = useMutation({
-    mutationFn: () => {
-      if (!file) throw new Error("Choose a workbook first.");
-      return savePnlWorkbook(company, file, zeroCommonHo);
-    },
-    onSuccess: (data) => {
-      setLast(data);
-      const imported = data.sheets.filter((s) => s.status === "imported").length;
-      toast.success(`Imported ${imported} sheet(s) for ${data.months.join(", ") || "no months"}`);
-      setFile(null);
-      onSaved();
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  return (
-    <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50/60 p-4 shadow-sm dark:border-amber-800 dark:bg-amber-950/30">
-      <div>
-        <h2 className="text-sm font-semibold">Dev: all months in one workbook</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Development only. Upload <code>ppl_stock.xlsx</code> or <code>ppl_prov.xlsx</code> with one template sheet
-          per month. Month is read from cell B3. Common / HO can be set to 0 for every imported month (PPL).
-        </p>
-      </div>
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={zeroCommonHo}
-          onChange={(e) => setZeroCommonHo(e.target.checked)}
-        />
-        Set Common / HO to 0 for all months in this file
-      </label>
-      <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed px-3 py-6 text-center hover:bg-secondary/40">
-        <Upload className="h-5 w-5 text-muted-foreground" />
-        <span className="text-xs font-medium">{file?.name ?? "Choose multi-month .xlsx"}</span>
-        <input
-          type="file"
-          accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-          className="sr-only"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-        />
-      </label>
-      <Button type="button" disabled={!file || upload.isPending} onClick={() => upload.mutate()}>
-        {upload.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-        Import all sheets
-      </Button>
-      {last ? (
-        <div className="rounded-md border bg-background p-3 text-xs">
-          <div>
-            {last.company} • months {last.months.join(", ") || "—"}
-            {last.zeroedCommonHo ? " • Common/HO zeroed" : ""}
-          </div>
-          <ul className="mt-2 space-y-1">
-            {last.sheets.map((sheet) => (
-              <li key={sheet.sheet}>
-                <span className="font-medium">{sheet.sheet}</span>
-                {sheet.month ? ` (${sheet.month} ${sheet.uploadType})` : ""} — {sheet.status}
-                {sheet.detail ? `: ${sheet.detail}` : ""}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -700,7 +667,7 @@ function Kpi({ label, value }: { label: string; value: number }) {
 
 function Busy({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+    <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
       <Loader2 className="h-4 w-4 animate-spin" />
       {label}
     </div>
