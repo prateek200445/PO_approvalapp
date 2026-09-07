@@ -209,6 +209,7 @@ public class SalesDashboardService
             ByCountry = AggregateCountries(universe.Countries, slice, 10),
             CountryPeriodLabel = universe.CountryPeriodLabel,
             ExportCustomers = AggregateParties(universe.ExportCustomers, slice, 10),
+            DomesticCustomers = AggregateParties(universe.DomesticCustomers, slice, 10),
         };
     }
 
@@ -251,16 +252,17 @@ public class SalesDashboardService
         bool includeIntercompany = false)
     {
         var icKey = includeIntercompany ? "ic" : "xic";
-        var key = $"sales-geo-v2-fibco:{icKey}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        var key = $"sales-geo-v3-domestic:{icKey}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
         return CachedAsync(key, refresh, async () =>
         {
             var invYears = GetInvYearsOverlapping(dateFrom, dateTo).ToList();
-            var (countries, exportCustomers, geoSource) = await LoadSalesGeoUniverseAsync(
+            var (countries, exportCustomers, domesticCustomers, geoSource) = await LoadSalesGeoUniverseAsync(
                 dateFrom, dateTo, includeIntercompany);
             return new GeoBundle
             {
                 Countries = countries,
                 ExportCustomers = exportCustomers,
+                DomesticCustomers = domesticCustomers,
                 Source = geoSource,
                 InvYears = invYears,
                 CountryPeriodLabel = FormatPeriodLabel(invYears),
@@ -306,6 +308,7 @@ public class SalesDashboardService
             TrendRanges = salesTrend.Ranges,
             Countries = geo.Countries,
             ExportCustomers = geo.ExportCustomers,
+            DomesticCustomers = geo.DomesticCustomers,
             CountryPeriodLabel = geo.CountryPeriodLabel,
             InvYears = geo.InvYears,
             CountrySource = geo.Source,
@@ -898,17 +901,21 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
 
     /// <summary>
     /// One All-Companies voucher/EBIDTA scan with CompanyName. Country pie and export
-    /// customers are both derived in memory after a group slice.
+    /// customers are both derived in memory after a group slice; domestic customers
+    /// use the India country filter on the same sources.
     /// </summary>
-    private async Task<(List<CountryLeaf> Countries, List<PartyLeaf> ExportCustomers, string Source)> LoadSalesGeoUniverseAsync(
+    private async Task<(List<CountryLeaf> Countries, List<PartyLeaf> ExportCustomers, List<PartyLeaf> DomesticCustomers, string Source)> LoadSalesGeoUniverseAsync(
         DateTime dateFrom,
         DateTime dateTo,
         bool includeIntercompany = false)
     {
-        var fromVoucher = await TryLoadExportPartyLeavesFromVoucherAsync(dateFrom, dateTo, includeIntercompany);
-        var source = fromVoucher != null ? "SalesVoucher" : "vw_Sales_EBIDTA";
-        var parties = fromVoucher ?? await LoadExportPartyLeavesFromEbidtaAsync(dateFrom, dateTo, includeIntercompany);
-        var countries = parties
+        var exportTask = LoadExportPartyLeavesAsync(dateFrom, dateTo, includeIntercompany);
+        var domesticTask = LoadDomesticPartyLeavesAsync(dateFrom, dateTo, includeIntercompany);
+        await Task.WhenAll(exportTask, domesticTask);
+        var exportParties = await exportTask;
+        var domesticParties = await domesticTask;
+        var source = exportParties.Source;
+        var countries = exportParties.Leaves
             .GroupBy(
                 p => (Company: p.CompanyName, Country: string.IsNullOrWhiteSpace(p.Country) ? "Unknown" : p.Country.Trim()),
                 t => t.Amount)
@@ -919,13 +926,32 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
                 SalesAmount = g.Sum(),
             })
             .ToList();
-        return (countries, parties, source);
+        return (countries, exportParties.Leaves, domesticParties.Leaves, source);
     }
 
-    private async Task<List<PartyLeaf>?> TryLoadExportPartyLeavesFromVoucherAsync(
+    private async Task<(List<PartyLeaf> Leaves, string Source)> LoadExportPartyLeavesAsync(
+        DateTime dateFrom, DateTime dateTo, bool includeIntercompany)
+    {
+        var fromVoucher = await TryLoadPartyLeavesFromVoucherAsync(dateFrom, dateTo, includeIntercompany, domestic: false);
+        if (fromVoucher != null)
+            return (fromVoucher, "SalesVoucher");
+        return (await LoadPartyLeavesFromEbidtaAsync(dateFrom, dateTo, includeIntercompany, domestic: false), "vw_Sales_EBIDTA");
+    }
+
+    private async Task<(List<PartyLeaf> Leaves, string Source)> LoadDomesticPartyLeavesAsync(
+        DateTime dateFrom, DateTime dateTo, bool includeIntercompany)
+    {
+        var fromVoucher = await TryLoadPartyLeavesFromVoucherAsync(dateFrom, dateTo, includeIntercompany, domestic: true);
+        if (fromVoucher != null)
+            return (fromVoucher, "SalesVoucher");
+        return (await LoadPartyLeavesFromEbidtaAsync(dateFrom, dateTo, includeIntercompany, domestic: true), "vw_Sales_EBIDTA");
+    }
+
+    private async Task<List<PartyLeaf>?> TryLoadPartyLeavesFromVoucherAsync(
         DateTime dateFrom,
         DateTime dateTo,
-        bool includeIntercompany = false)
+        bool includeIntercompany,
+        bool domestic)
     {
         using var connection = _database.CreateConnection();
         if (connection.State != ConnectionState.Open)
@@ -953,6 +979,9 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
                 THEN N'India'
             ELSE UPPER(LTRIM(RTRIM(cm.{countrySql})))
         END";
+        var countryFilter = domestic
+            ? IndiaCountryPredicate($"cm.{countrySql}")
+            : OrFibcoParty($"pv.{partySql}", ExportCountryPredicate($"cm.{countrySql}"));
         var icFilter = includeIntercompany || icCol == null
             ? ""
             : $"AND {OrFibcoParty($"pv.{partySql}", InterCompanyNotYes($"cm.{Bracket(icCol)}"))}";
@@ -981,7 +1010,7 @@ WHERE pv.{dateSql} BETWEEN @DateFrom AND @DateTo
   AND pv.{partySql} IS NOT NULL
   AND pv.{partySql} <> N''
   AND LTRIM(RTRIM(ISNULL(cm.{countrySql}, N''))) <> N''
-  AND {OrFibcoParty($"pv.{partySql}", ExportCountryPredicate($"cm.{countrySql}"))}
+  AND {countryFilter}
   {icFilter}
   {sisterFilter}
 GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), LTRIM(RTRIM(pv.{partySql}))";
@@ -1000,10 +1029,11 @@ GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), LTRIM(RTRIM(pv.{partySql}))
         }
     }
 
-    private async Task<List<PartyLeaf>> LoadExportPartyLeavesFromEbidtaAsync(
+    private async Task<List<PartyLeaf>> LoadPartyLeavesFromEbidtaAsync(
         DateTime dateFrom,
         DateTime dateTo,
-        bool includeIntercompany = false)
+        bool includeIntercompany,
+        bool domestic)
     {
         using var connection = _database.CreateConnection();
         if (connection.State != ConnectionState.Open)
@@ -1031,9 +1061,12 @@ GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), LTRIM(RTRIM(pv.{partySql}))
                     THEN N'India'
                 ELSE UPPER(LTRIM(RTRIM(v.{Bracket(ebidtaCountry)})))
             END";
+            var countryPred = domestic
+                ? IndiaCountryPredicate("v." + Bracket(ebidtaCountry))
+                : OrFibcoParty($"v.{partySql}", ExportCountryPredicate("v." + Bracket(ebidtaCountry)));
             extraIc += $@"
   AND LTRIM(RTRIM(ISNULL(v.{Bracket(ebidtaCountry)}, N''))) <> N''
-  AND {OrFibcoParty($"v.{partySql}", ExportCountryPredicate("v." + Bracket(ebidtaCountry)))}";
+  AND {countryPred}";
         }
         else if (ledgerCountry != null)
         {
@@ -1046,9 +1079,12 @@ GROUP BY LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))), LTRIM(RTRIM(pv.{partySql}))
             joinLedger = $@"
 INNER JOIN CommonLedgerMaster m WITH (NOLOCK)
     ON m.LedgerName = v.{partySql}";
+            var countryPred = domestic
+                ? IndiaCountryPredicate($"m.{Bracket(ledgerCountry)}")
+                : OrFibcoParty($"v.{partySql}", ExportCountryPredicate($"m.{Bracket(ledgerCountry)}"));
             extraIc = icCol == null || includeIntercompany
-                ? $@"AND {OrFibcoParty($"v.{partySql}", ExportCountryPredicate($"m.{Bracket(ledgerCountry)}"))}"
-                : $"AND {OrFibcoParty($"v.{partySql}", InterCompanyNotYes($"m.{Bracket(icCol)}"))} AND {OrFibcoParty($"v.{partySql}", ExportCountryPredicate($"m.{Bracket(ledgerCountry)}"))}";
+                ? $"AND {countryPred}"
+                : $"AND {OrFibcoParty($"v.{partySql}", InterCompanyNotYes($"m.{Bracket(icCol)}"))} AND {countryPred}";
         }
         else
         {
@@ -1104,6 +1140,23 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), LTRIM(RTRIM(v.{partySql}))";
         var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh, includeIntercompany);
         var slice = await ResolveSliceCompaniesAsync(company);
         return ToRankedResult(AggregateParties(geo.ExportCustomers, slice, top), geo.Source, "", "");
+    }
+
+    /// <summary>
+    /// Top domestic customers (India), excl. intercompany.
+    /// </summary>
+    public async Task<RankedPartyResultDto> GetTopDomesticCustomersAsync(
+        string company,
+        DateTime dateFrom,
+        DateTime dateTo,
+        int top = 5,
+        bool refresh = false,
+        bool includeIntercompany = false)
+    {
+        top = ClampTop(top);
+        var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh, includeIntercompany);
+        var slice = await ResolveSliceCompaniesAsync(company);
+        return ToRankedResult(AggregateParties(geo.DomesticCustomers, slice, top), geo.Source, "", "");
     }
 
     /// <summary>
@@ -2557,6 +2610,13 @@ ORDER BY fi.Name")).ToList();
   AND LOWER(LTRIM(RTRIM(ISNULL({countryExpr}, N'')))) NOT LIKE N'%india%'
   AND LTRIM(RTRIM(ISNULL({countryExpr}, N''))) <> N''";
 
+    private static string IndiaCountryPredicate(string countryExpr) =>
+        $@"(
+        LOWER(LTRIM(RTRIM(ISNULL({countryExpr}, N'')))) IN (N'india', N'in', N'ind', N'bharat')
+        OR LOWER(LTRIM(RTRIM(ISNULL({countryExpr}, N'')))) LIKE N'%india%'
+      )
+  AND LTRIM(RTRIM(ISNULL({countryExpr}, N''))) <> N''";
+
     private async Task<string> BuildExportLedgerJoinAsync(SqlConnection connection, string partySql)
     {
         var masterCols = await GetViewColumnsAsync(connection, "CommonLedgerMaster");
@@ -2708,6 +2768,7 @@ INNER JOIN (
     {
         public List<CountryLeaf> Countries { get; set; } = new();
         public List<PartyLeaf> ExportCustomers { get; set; } = new();
+        public List<PartyLeaf> DomesticCustomers { get; set; } = new();
         public string Source { get; set; } = "";
         public List<string> InvYears { get; set; } = new();
         public string CountryPeriodLabel { get; set; } = "";
@@ -2720,6 +2781,7 @@ INNER JOIN (
         public List<TrendRange> TrendRanges { get; set; } = new();
         public List<CountryLeaf> Countries { get; set; } = new();
         public List<PartyLeaf> ExportCustomers { get; set; } = new();
+        public List<PartyLeaf> DomesticCustomers { get; set; } = new();
         public string CountryPeriodLabel { get; set; } = "";
         public List<string> InvYears { get; set; } = new();
         public string CountrySource { get; set; } = "";
@@ -2925,6 +2987,7 @@ public class SalesOverviewDto
     public List<SalesByCountryDto> ByCountry { get; set; } = new();
     public string CountryPeriodLabel { get; set; } = "";
     public List<RankedPartyDto> ExportCustomers { get; set; } = new();
+    public List<RankedPartyDto> DomesticCustomers { get; set; } = new();
     public List<RankedPartyDto> Suppliers { get; set; } = new();
 }
 

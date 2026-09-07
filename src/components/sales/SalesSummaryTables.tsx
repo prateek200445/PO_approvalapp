@@ -33,6 +33,7 @@ const COUNTRY_COLORS = [
 
 interface SalesSummaryTablesProps {
   exportCustomers: RankedPartyItem[];
+  domesticCustomers: RankedPartyItem[];
   suppliers: RankedPartyItem[];
   byCountry: SalesByCountryItem[];
   countryPeriodLabel?: string;
@@ -71,7 +72,38 @@ function RankingTable({
         <h2 className="text-sm font-semibold">{title}</h2>
         <p className="mt-0.5 text-[11px] text-muted-foreground">{subtitle}</p>
       </header>
-      <div className="overflow-x-auto">
+
+      {/* Mobile: stacked cards (no horizontal scroll) */}
+      <div className="space-y-2 p-3 sm:hidden">
+        {loading && items.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : items.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">No data available</p>
+        ) : (
+          items.map((item) => (
+            <div
+              key={`${item.rank}-${item.name}`}
+              className="flex items-start gap-3 rounded-xl border border-border/70 bg-background px-3 py-2.5"
+            >
+              <span className="mt-0.5 w-6 shrink-0 text-xs tabular-nums text-muted-foreground">
+                #{item.rank}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="break-words text-sm font-medium leading-snug">{item.name}</div>
+                {item.country ? (
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">{item.country}</div>
+                ) : null}
+              </div>
+              <div className="shrink-0 text-right text-xs font-medium tabular-nums">
+                {formatSalesCurrency(item.amount)}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Desktop / tablet: table */}
+      <div className="hidden overflow-x-auto overscroll-x-contain sm:block">
         <Table>
           <TableHeader>
             <TableRow>
@@ -110,6 +142,7 @@ function RankingTable({
 
 export function SalesSummaryTables({
   exportCustomers,
+  domesticCustomers,
   suppliers,
   byCountry,
   countryPeriodLabel,
@@ -142,13 +175,23 @@ export function SalesSummaryTables({
 
   return (
     <div className="space-y-3 sm:space-y-4">
-      <div className={cn("grid grid-cols-1 gap-3 sm:gap-4", isPurchase ? "lg:grid-cols-1" : "lg:grid-cols-3")}>
+      <div className={cn("grid grid-cols-1 gap-3 sm:gap-4", isPurchase ? "lg:grid-cols-1" : "lg:grid-cols-2")}>
         {!isPurchase && (
           <RankingTable
             title="Top 10 Export Customers"
             subtitle={includeIntercompany ? "Excl. India, including intercompany" : "Excl. India and intercompany"}
             nameHeader="Customer"
             items={exportCustomers}
+            loading={suppliersLoading}
+          />
+        )}
+
+        {!isPurchase && (
+          <RankingTable
+            title="Top 10 Domestic Customers"
+            subtitle={includeIntercompany ? "India only, including intercompany" : "India only, excl. intercompany"}
+            nameHeader="Customer"
+            items={domesticCustomers}
             loading={suppliersLoading}
           />
         )}

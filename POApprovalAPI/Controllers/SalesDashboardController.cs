@@ -47,6 +47,7 @@ public class SalesDashboardController : ControllerBase
                 byCountry = data.ByCountry,
                 countryPeriodLabel = data.CountryPeriodLabel,
                 exportCustomers = data.ExportCustomers,
+                domesticCustomers = data.DomesticCustomers,
                 suppliers = data.Suppliers,
                 company,
                 category,
@@ -293,6 +294,43 @@ public class SalesDashboardController : ControllerBase
                 note = includeIntercompany
                     ? "Top export customers excl. India, including intercompany."
                     : "Top export customers excl. India and intercompany.",
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Top 10 domestic customers (India), excl. intercompany.
+    /// </summary>
+    [HttpGet("top-domestic-customers")]
+    public async Task<IActionResult> GetTopDomesticCustomers(
+        [FromQuery] string company = "All Companies",
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] int top = 10,
+        [FromQuery] bool refresh = false,
+        [FromQuery] bool includeIntercompany = false)
+    {
+        try
+        {
+            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
+            var to = dateTo ?? DateTime.Today;
+            var result = await _salesDashboard.GetTopDomesticCustomersAsync(company, from, to, top, refresh, includeIntercompany);
+            return Ok(new
+            {
+                items = result.Items,
+                company,
+                includeIntercompany,
+                dateFrom = from.ToString("yyyy-MM-dd"),
+                dateTo = to.ToString("yyyy-MM-dd"),
+                top,
+                source = result.Source,
+                note = includeIntercompany
+                    ? "Top domestic (India) customers, including intercompany."
+                    : "Top domestic (India) customers, excl. intercompany.",
             });
         }
         catch (Exception ex)

@@ -205,6 +205,7 @@ export async function getSalesTables(filters: {
   byCountry: SalesByCountryItem[];
   countryPeriodLabel: string;
   exportCustomers: RankedPartyItem[];
+  domesticCustomers: RankedPartyItem[];
 }> {
   const countryParams = new URLSearchParams({
     dateFrom: filters.dateFrom,
@@ -218,17 +219,22 @@ export async function getSalesTables(filters: {
     top: "10",
   });
   appendSalesParams(customerParams, filters);
-  const [countryRes, customersRes] = await Promise.all([
+  const [countryRes, customersRes, domesticRes] = await Promise.all([
     fetch(getSalesApiUrl(`/api/SalesDashboard/by-country?${countryParams}`)),
     fetch(getSalesApiUrl(`/api/SalesDashboard/top-export-customers?${customerParams}`)),
+    fetch(getSalesApiUrl(`/api/SalesDashboard/top-domestic-customers?${customerParams}`)),
   ]);
   const countryPayload = (await countryRes.json()) as Record<string, unknown> & { message?: string };
   const customersPayload = (await customersRes.json()) as Record<string, unknown> & { message?: string };
+  const domesticPayload = (await domesticRes.json()) as Record<string, unknown> & { message?: string };
   if (!countryRes.ok) {
     throw new Error(countryPayload.message || "Failed to load country sales");
   }
   if (!customersRes.ok) {
     throw new Error(customersPayload.message || "Failed to load export customers");
+  }
+  if (!domesticRes.ok) {
+    throw new Error(domesticPayload.message || "Failed to load domestic customers");
   }
   const countryRaw = (countryPayload.byCountry ?? countryPayload.ByCountry ?? []) as Array<
     Record<string, unknown>
@@ -242,6 +248,9 @@ export async function getSalesTables(filters: {
     countryPeriodLabel: str(countryPayload.periodLabel ?? countryPayload.PeriodLabel ?? countryPayload.countryPeriodLabel ?? countryPayload.CountryPeriodLabel),
     exportCustomers: mapRankedParties({
       items: (customersPayload.items ?? customersPayload.Items) as Array<Record<string, unknown>> | undefined,
+    }),
+    domesticCustomers: mapRankedParties({
+      items: (domesticPayload.items ?? domesticPayload.Items) as Array<Record<string, unknown>> | undefined,
     }),
   };
 }
@@ -265,6 +274,7 @@ export async function getSalesOverview(filters: {
   byCountry: SalesByCountryItem[];
   countryPeriodLabel: string;
   exportCustomers: RankedPartyItem[];
+  domesticCustomers: RankedPartyItem[];
   suppliers: RankedPartyItem[];
 }> {
   const params = new URLSearchParams({
@@ -301,6 +311,9 @@ export async function getSalesOverview(filters: {
     countryPeriodLabel: str(payload.countryPeriodLabel ?? payload.CountryPeriodLabel),
     exportCustomers: mapRankedParties({
       items: (payload.exportCustomers ?? payload.ExportCustomers) as Array<Record<string, unknown>> | undefined,
+    }),
+    domesticCustomers: mapRankedParties({
+      items: (payload.domesticCustomers ?? payload.DomesticCustomers) as Array<Record<string, unknown>> | undefined,
     }),
     suppliers: mapRankedParties({
       items: (payload.suppliers ?? payload.Suppliers) as Array<Record<string, unknown>> | undefined,

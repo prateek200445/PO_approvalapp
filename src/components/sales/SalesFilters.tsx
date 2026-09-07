@@ -1,18 +1,174 @@
+import { useState } from "react";
 import type { SalesCompanyOption, SalesDashboardFilters, SalesReportCategory } from "@/lib/sales-dashboard-types";
 import { indianFyDateRange, indianFyStartYear } from "@/lib/sales-dashboard-api";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ChevronDown, RefreshCw } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Check, ChevronDown, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+function CompanyCheckButton({
+  checked,
+  label,
+  onToggle,
+}: {
+  checked: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      onClick={onToggle}
+      className={cn(
+        "flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm outline-none transition-colors",
+        "hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring/20",
+        "touch-manipulation",
+        checked && "bg-accent/60 font-medium",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "flex h-5 w-5 shrink-0 items-center justify-center rounded border",
+          checked
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-muted-foreground/50 bg-background",
+        )}
+      >
+        {checked ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
+      </span>
+      <span className="min-w-0 flex-1 break-words">{label}</span>
+    </button>
+  );
+}
+
+function CompanyCheckMenuItem({
+  checked,
+  label,
+  onToggle,
+}: {
+  checked: boolean;
+  label: string;
+  onToggle: () => void;
+}) {
+  return (
+    <DropdownMenuItem
+      role="menuitemcheckbox"
+      aria-checked={checked}
+      onSelect={(e) => {
+        e.preventDefault();
+        onToggle();
+      }}
+      className={cn(
+        "cursor-pointer gap-2.5 py-2.5",
+        checked && "bg-accent/60 font-medium",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+          checked
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-muted-foreground/50 bg-background",
+        )}
+      >
+        {checked ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </DropdownMenuItem>
+  );
+}
+
+function CompanyOptionList({
+  allSelected,
+  groupOptions,
+  unitOptions,
+  selected,
+  setCompanies,
+  toggleCompany,
+  asButtons,
+}: {
+  allSelected: boolean;
+  groupOptions: SalesCompanyOption[];
+  unitOptions: SalesCompanyOption[];
+  selected: Set<string>;
+  setCompanies: (next: string[]) => void;
+  toggleCompany: (value: string) => void;
+  asButtons: boolean;
+}) {
+  const Row = asButtons ? CompanyCheckButton : CompanyCheckMenuItem;
+
+  return (
+    <>
+      <Row
+        checked={allSelected}
+        label="All Companies"
+        onToggle={() => setCompanies([])}
+      />
+      {groupOptions.length > 0 && (
+        <>
+          {asButtons ? (
+            <p className="px-3 pb-1 pt-3 text-xs font-semibold text-muted-foreground">Groups</p>
+          ) : (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Groups</DropdownMenuLabel>
+            </>
+          )}
+          {groupOptions.map((o) => (
+            <Row
+              key={o.value}
+              checked={selected.has(o.value)}
+              label={o.label}
+              onToggle={() => toggleCompany(o.value)}
+            />
+          ))}
+        </>
+      )}
+      {unitOptions.length > 0 && (
+        <>
+          {asButtons ? (
+            <p className="px-3 pb-1 pt-3 text-xs font-semibold text-muted-foreground">Units</p>
+          ) : (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Units</DropdownMenuLabel>
+            </>
+          )}
+          {unitOptions.map((o) => (
+            <Row
+              key={o.value}
+              checked={selected.has(o.value)}
+              label={o.label}
+              onToggle={() => toggleCompany(o.value)}
+            />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
 
 interface SalesFiltersProps {
   companyOptions: SalesCompanyOption[];
@@ -46,6 +202,8 @@ export function SalesFilters({
   onChange,
   onRefresh,
 }: SalesFiltersProps) {
+  const isMobile = useIsMobile();
+  const [companySheetOpen, setCompanySheetOpen] = useState(false);
   const fyPreset = detectFyPreset(filters.dateFrom, filters.dateTo);
   const groupOptions = companyOptions.filter((o) => o.kind === "group");
   const unitOptions = companyOptions.filter((o) => o.kind === "company");
@@ -86,6 +244,15 @@ export function SalesFilters({
     });
   }
 
+  const companyListProps = {
+    allSelected,
+    groupOptions,
+    unitOptions,
+    selected,
+    setCompanies,
+    toggleCompany,
+  };
+
   return (
     <section
       className="card-3d rounded-2xl p-3 sm:p-4"
@@ -112,7 +279,7 @@ export function SalesFilters({
                 aria-checked={filters.includeIntercompany === opt.id}
                 onClick={() => onChange({ includeIntercompany: opt.id })}
                 className={cn(
-                  "shrink-0 flex-1 rounded-sm px-2.5 py-2 text-xs font-medium transition-colors sm:text-sm",
+                  "min-h-11 shrink-0 flex-1 touch-manipulation rounded-sm px-2.5 py-2 text-xs font-medium transition-colors sm:text-sm",
                   filters.includeIntercompany === opt.id
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-secondary hover:text-foreground",
@@ -126,63 +293,69 @@ export function SalesFilters({
 
         <div className="min-w-0 space-y-1.5">
           <Label>Company</Label>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                disabled={companiesLoading}
-                aria-label="Select companies"
-                className="flex h-11 w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-3 text-left text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+          {isMobile ? (
+            <Sheet open={companySheetOpen} onOpenChange={setCompanySheetOpen}>
+              <SheetTrigger asChild>
+                <button
+                  type="button"
+                  disabled={companiesLoading}
+                  aria-label="Select companies"
+                  className="flex h-11 w-full touch-manipulation items-center justify-between gap-2 rounded-md border border-border bg-background px-3 text-left text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+                >
+                  <span className="min-w-0 truncate">{companyTriggerLabel}</span>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              </SheetTrigger>
+              <SheetContent
+                side="bottom"
+                className="flex max-h-[85dvh] flex-col gap-0 rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)]"
               >
-                <span className="min-w-0 truncate">{companyTriggerLabel}</span>
-                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className="max-h-72 w-[var(--radix-dropdown-menu-trigger-width)] min-w-[16rem]"
-            >
-              <DropdownMenuCheckboxItem
-                checked={allSelected}
-                onCheckedChange={() => setCompanies([])}
-                onSelect={(e) => e.preventDefault()}
+                <SheetHeader className="border-b border-border px-4 py-3 text-left">
+                  <SheetTitle>Select companies</SheetTitle>
+                  <SheetDescription>
+                    Tick one or more companies. Leave All Companies for the full group.
+                  </SheetDescription>
+                </SheetHeader>
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 py-2">
+                  <CompanyOptionList {...companyListProps} asButtons />
+                </div>
+                <div className="border-t border-border p-3">
+                  <Button
+                    type="button"
+                    className="h-11 w-full touch-manipulation"
+                    onClick={() => setCompanySheetOpen(false)}
+                  >
+                    Done
+                  </Button>
+                </div>
+              </SheetContent>
+            </Sheet>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  disabled={companiesLoading}
+                  aria-label="Select companies"
+                  className="flex h-11 w-full items-center justify-between gap-2 rounded-md border border-border bg-background px-3 text-left text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-50"
+                >
+                  <span className="min-w-0 truncate">{companyTriggerLabel}</span>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="max-h-72 w-[var(--radix-dropdown-menu-trigger-width)] min-w-[16rem]"
               >
-                All Companies
-              </DropdownMenuCheckboxItem>
-              {groupOptions.length > 0 && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Groups</DropdownMenuLabel>
-                  {groupOptions.map((o) => (
-                    <DropdownMenuCheckboxItem
-                      key={o.value}
-                      checked={selected.has(o.value)}
-                      onCheckedChange={() => toggleCompany(o.value)}
-                      onSelect={(e) => e.preventDefault()}
-                    >
-                      {o.label}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </>
-              )}
-              {unitOptions.length > 0 && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Units</DropdownMenuLabel>
-                  {unitOptions.map((o) => (
-                    <DropdownMenuCheckboxItem
-                      key={o.value}
-                      checked={selected.has(o.value)}
-                      onCheckedChange={() => toggleCompany(o.value)}
-                      onSelect={(e) => e.preventDefault()}
-                    >
-                      {o.label}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <CompanyOptionList {...companyListProps} asButtons={false} />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {!allSelected && selectedLabels.length > 0 && (
+            <p className="truncate text-[11px] text-muted-foreground sm:text-xs">
+              Selected: {selectedLabels.join(", ")}
+            </p>
+          )}
         </div>
 
         <fieldset className="space-y-1.5">
@@ -206,7 +379,7 @@ export function SalesFilters({
                 aria-checked={fyPreset === opt.id}
                 onClick={() => applyFyPreset(opt.id)}
                 className={cn(
-                  "shrink-0 flex-1 rounded-sm px-2.5 py-2 text-xs font-medium transition-colors sm:flex-none sm:px-3 sm:text-sm",
+                  "min-h-11 shrink-0 flex-1 touch-manipulation rounded-sm px-2.5 py-2 text-xs font-medium transition-colors sm:flex-none sm:px-3 sm:text-sm",
                   fyPreset === opt.id
                     ? "bg-primary text-primary-foreground"
                     : "text-muted-foreground hover:bg-secondary hover:text-foreground",
@@ -257,7 +430,7 @@ export function SalesFilters({
                   aria-checked={filters.category === category}
                   onClick={() => onChange({ category })}
                   className={cn(
-                    "flex-1 rounded-sm px-3 py-2 text-xs font-medium transition-colors sm:flex-none sm:text-sm",
+                    "min-h-11 flex-1 touch-manipulation rounded-sm px-3 py-2 text-xs font-medium transition-colors sm:flex-none sm:text-sm",
                     filters.category === category
                       ? "bg-primary text-primary-foreground"
                       : "text-muted-foreground hover:bg-secondary hover:text-foreground",
@@ -273,7 +446,7 @@ export function SalesFilters({
             type="button"
             onClick={onRefresh}
             disabled={isRefreshing}
-            className="h-11 w-full sm:ml-auto sm:w-auto"
+            className="h-11 w-full touch-manipulation sm:ml-auto sm:w-auto"
             aria-label="Refresh sales dashboard"
           >
             <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />

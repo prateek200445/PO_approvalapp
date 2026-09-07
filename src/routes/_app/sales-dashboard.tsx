@@ -258,11 +258,15 @@ function SalesDashboardPage() {
 
       <SalesSummaryTables
         exportCustomers={tablesQuery.data?.exportCustomers ?? []}
+        domesticCustomers={tablesQuery.data?.domesticCustomers ?? []}
         suppliers={suppliersQuery.data ?? []}
         byCountry={tablesQuery.data?.byCountry ?? []}
         countryPeriodLabel={tablesQuery.data?.countryPeriodLabel}
         isPurchase={isPurchase}
-        suppliersLoading={suppliersQuery.isFetching && !suppliersQuery.data}
+        suppliersLoading={
+          (tablesQuery.isFetching && !tablesQuery.data) ||
+          (suppliersQuery.isFetching && !suppliersQuery.data)
+        }
         totalSales={kpis?.totalSales ?? 0}
         includeIntercompany={includeIntercompany}
       />
