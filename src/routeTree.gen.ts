@@ -19,6 +19,7 @@ import { Route as AppPnlResultRouteImport } from './routes/_app/pnl-result'
 import { Route as AppPnlRouteImport } from './routes/_app/pnl'
 import { Route as AppPendingRouteImport } from './routes/_app/pending'
 import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
+import { Route as AppOrderBookSummaryRouteImport } from './routes/_app/order-book-summary'
 import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
 import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
 import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
@@ -91,6 +92,11 @@ const AppPendingRoute = AppPendingRouteImport.update({
 const AppPaymentsRoute = AppPaymentsRouteImport.update({
   id: '/payments',
   path: '/payments',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppOrderBookSummaryRoute = AppOrderBookSummaryRouteImport.update({
+  id: '/order-book-summary',
+  path: '/order-book-summary',
   getParentRoute: () => AppRoute,
 } as any)
 const AppLedgersRoute = AppLedgersRouteImport.update({
@@ -232,6 +238,7 @@ export interface FileRoutesByFullPath {
   '/intercompany': typeof AppIntercompanyRouteWithChildren
   '/ledger-summary': typeof AppLedgerSummaryRoute
   '/ledgers': typeof AppLedgersRoute
+  '/order-book-summary': typeof AppOrderBookSummaryRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
   '/pnl': typeof AppPnlRoute
@@ -266,6 +273,7 @@ export interface FileRoutesByTo {
   '/intercompany': typeof AppIntercompanyRouteWithChildren
   '/ledger-summary': typeof AppLedgerSummaryRoute
   '/ledgers': typeof AppLedgersRoute
+  '/order-book-summary': typeof AppOrderBookSummaryRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
   '/pnl': typeof AppPnlRoute
@@ -303,6 +311,7 @@ export interface FileRoutesById {
   '/_app/intercompany': typeof AppIntercompanyRouteWithChildren
   '/_app/ledger-summary': typeof AppLedgerSummaryRoute
   '/_app/ledgers': typeof AppLedgersRoute
+  '/_app/order-book-summary': typeof AppOrderBookSummaryRoute
   '/_app/payments': typeof AppPaymentsRoute
   '/_app/pending': typeof AppPendingRoute
   '/_app/pnl': typeof AppPnlRoute
@@ -340,6 +349,7 @@ export interface FileRouteTypes {
     | '/intercompany'
     | '/ledger-summary'
     | '/ledgers'
+    | '/order-book-summary'
     | '/payments'
     | '/pending'
     | '/pnl'
@@ -374,6 +384,7 @@ export interface FileRouteTypes {
     | '/intercompany'
     | '/ledger-summary'
     | '/ledgers'
+    | '/order-book-summary'
     | '/payments'
     | '/pending'
     | '/pnl'
@@ -410,6 +421,7 @@ export interface FileRouteTypes {
     | '/_app/intercompany'
     | '/_app/ledger-summary'
     | '/_app/ledgers'
+    | '/_app/order-book-summary'
     | '/_app/payments'
     | '/_app/pending'
     | '/_app/pnl'
@@ -505,6 +517,13 @@ declare module '@tanstack/react-router' {
       path: '/payments'
       fullPath: '/payments'
       preLoaderRoute: typeof AppPaymentsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/order-book-summary': {
+      id: '/_app/order-book-summary'
+      path: '/order-book-summary'
+      fullPath: '/order-book-summary'
+      preLoaderRoute: typeof AppOrderBookSummaryRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/ledgers': {
@@ -722,6 +741,7 @@ interface AppRouteChildren {
   AppIntercompanyRoute: typeof AppIntercompanyRouteWithChildren
   AppLedgerSummaryRoute: typeof AppLedgerSummaryRoute
   AppLedgersRoute: typeof AppLedgersRoute
+  AppOrderBookSummaryRoute: typeof AppOrderBookSummaryRoute
   AppPaymentsRoute: typeof AppPaymentsRoute
   AppPendingRoute: typeof AppPendingRoute
   AppPnlRoute: typeof AppPnlRoute
@@ -752,6 +772,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppIntercompanyRoute: AppIntercompanyRouteWithChildren,
   AppLedgerSummaryRoute: AppLedgerSummaryRoute,
   AppLedgersRoute: AppLedgersRoute,
+  AppOrderBookSummaryRoute: AppOrderBookSummaryRoute,
   AppPaymentsRoute: AppPaymentsRoute,
   AppPendingRoute: AppPendingRoute,
   AppPnlRoute: AppPnlRoute,

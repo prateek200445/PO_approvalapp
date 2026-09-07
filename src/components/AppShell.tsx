@@ -16,6 +16,7 @@ import {
   Building2,
   Landmark,
   FileBarChart,
+  BookMarked,
   PanelLeftClose,
   PanelLeftOpen,
   Hammer,
@@ -29,7 +30,7 @@ import { formatBadgeCount, useApprovalInbox, type InboxKind } from "@/hooks/useA
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { GlobalCommandPalette, SearchTrigger } from "@/components/GlobalCommandPalette";
 import { AssistantShellSkeleton } from "@/components/chat/AssistantShellSkeleton";
-import { BILL_PAYMENT_ENTRY_ENABLED } from "@/lib/feature-flags";
+import { BILL_PAYMENT_ENTRY_ENABLED, canAccessOrderBookSummary } from "@/lib/feature-flags";
 
 type AppPath =
   | "/dashboard"
@@ -40,6 +41,8 @@ type AppPath =
   | "/indents"
   | "/sales-dashboard"
   | "/bank-requirements"
+  | "/order-book-summary"
+  | "/cma"
   | "/intercompany"
   | "/ledgers"
   | "/export-bill-overdue"
@@ -64,7 +67,8 @@ export function AppShell() {
   const router = useRouter();
   const routerState = useRouterState();
   const path = routerState.location.pathname;
-  const fullScreenReport = path.includes("export-bill-overdue");
+  const fullScreenReport =
+    path.includes("export-bill-overdue") || path.includes("order-book-summary");
   const isCopilot = path.startsWith("/assistant");
   const assistantLoading = useRouterState({
     select: (s) =>
@@ -192,6 +196,16 @@ export function AppShell() {
       label: "Bank Requirements",
       match: (p) => p.startsWith("/bank-requirements"),
     },
+    ...(canAccessOrderBookSummary(user?.username)
+      ? [
+          {
+            to: "/order-book-summary" as const,
+            icon: BookMarked,
+            label: "Order Book Summary",
+            match: (p: string) => p.startsWith("/order-book-summary"),
+          },
+        ]
+      : []),
     {
       to: "/cma",
       icon: FileBarChart,
