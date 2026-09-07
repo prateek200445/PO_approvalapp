@@ -13,6 +13,14 @@ import { DmsAttachmentsSection } from "@/components/DmsAttachmentsSection";
 import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
 import { invalidateApprovalCaches, resolveNextAfterApproval } from "@/lib/approval-after-action";
 import { ApprovalCommandBar, RemarkComposer } from "@/components/ApprovalCommandBar";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 
 export const Route = createFileRoute("/_app/po/$poNo")({
   head: ({ params }) => ({ meta: [{ title: `${params.poNo} — PO Details` }] }),
@@ -32,6 +40,7 @@ function PODetails() {
   const [confirm, setConfirm] = useState<null | "approve" | "reject">(null);
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
+  const [selectedQuoteItemKey, setSelectedQuoteItemKey] = useState<string>("");
 
   // PDF.js Inline Viewer State
   const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -94,6 +103,7 @@ function PODetails() {
     setRemarks("");
     setRejectAttachment(null);
     setConfirm(null);
+    setSelectedQuoteItemKey("");
   }, [poNo]);
 
   // Transform data to match original format
@@ -380,11 +390,38 @@ function PODetails() {
     });
   }
 
-  const quoteGroups = (Array.isArray(po) ? po : []).map((item: any, index: number) => ({
-    key: `${item.ItemCode ?? "item"}-${index}`,
-    item,
-    quotes: quotesForItem(item),
-  }));
+  // One dropdown option per distinct item code (fallback to description)
+  const quoteItemOptions = (() => {
+    const lines = Array.isArray(po) ? po : [];
+    const seen = new Set<string>();
+    const options: { key: string; label: string; item: any; quoteCount: number }[] = [];
+    for (const item of lines) {
+      const code = String(item.ItemCode ?? "").trim();
+      const desc = String(item.ItemDesc ?? "").trim();
+      const key = code
+        ? `code:${code.toLowerCase()}`
+        : `desc:${desc.toLowerCase()}`;
+      if (!key || key.endsWith(":") || seen.has(key)) continue;
+      seen.add(key);
+      const quotes = quotesForItem(item);
+      const shortDesc = desc.length > 48 ? `${desc.slice(0, 48)}…` : desc;
+      options.push({
+        key,
+        label: code ? `${code} — ${shortDesc || "Item"}` : shortDesc || "Item",
+        item,
+        quoteCount: quotes.length,
+      });
+    }
+    return options;
+  })();
+
+  const activeQuoteKey =
+    selectedQuoteItemKey && quoteItemOptions.some((o) => o.key === selectedQuoteItemKey)
+      ? selectedQuoteItemKey
+      : quoteItemOptions[0]?.key ?? "";
+
+  const activeQuoteOption = quoteItemOptions.find((o) => o.key === activeQuoteKey);
+  const activeQuotes = activeQuoteOption ? quotesForItem(activeQuoteOption.item) : [];
 
   const headerItems = [
     { icon: Hash, label: "PO Number", value: poDetails.PurchaseCode },
@@ -526,33 +563,57 @@ function PODetails() {
           {/* Separate section: previous vendor quotes for the same items */}
           <Section title="Previous vendor quotes">
             <p className="text-sm text-muted-foreground">
-              For the same items — earlier vendor quotes (VendorRate) and previous PO rates, with rate per qty.
+              Pick an item to see earlier vendor quotes and previous PO rates (rate per unit).
             </p>
 
-            {quoteGroups.length === 0 ? (
+            {quoteItemOptions.length === 0 ? (
               <p className="mt-3 text-sm text-muted-foreground">No items on this PO.</p>
             ) : (
               <div className="mt-4 space-y-3">
-                {quoteGroups.map(({ key, item, quotes }) => (
-                  <div key={key} className="overflow-hidden rounded-xl border border-border">
+                <div className="space-y-1.5">
+                  <Label htmlFor="po-quote-item">Item</Label>
+                  <Select
+                    value={activeQuoteKey}
+                    onValueChange={setSelectedQuoteItemKey}
+                  >
+                    <SelectTrigger id="po-quote-item" className="h-11 w-full bg-background">
+                      <SelectValue placeholder="Select an item" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[50vh]">
+                      {quoteItemOptions.map((opt) => (
+                        <SelectItem key={opt.key} value={opt.key}>
+                          {opt.label} ({opt.quoteCount})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {activeQuoteOption ? (
+                  <div className="overflow-hidden rounded-xl border border-border">
                     <div className="border-b border-border bg-secondary/30 px-3 py-2.5">
-                      <div className="text-sm font-medium leading-snug">{item.ItemDesc}</div>
+                      <div className="text-sm font-medium leading-snug">
+                        {activeQuoteOption.item.ItemDesc}
+                      </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">
-                        This PO: {formatMoneyAmount(item.Rate)} {curLabel}
-                        {item.Qty != null ? ` · Qty ${item.Qty}` : ""}
-                        {item.FirmName ? ` · ${item.FirmName}` : ""}
+                        This PO: {formatMoneyAmount(activeQuoteOption.item.Rate)} {curLabel}
+                        {activeQuoteOption.item.Qty != null
+                          ? ` · Qty ${activeQuoteOption.item.Qty}`
+                          : ""}
+                        {activeQuoteOption.item.FirmName
+                          ? ` · ${activeQuoteOption.item.FirmName}`
+                          : ""}
                       </div>
                     </div>
 
-                    {quotes.length === 0 ? (
+                    {activeQuotes.length === 0 ? (
                       <p className="px-3 py-3 text-xs text-muted-foreground">
                         No earlier vendor quotes found for this item.
                       </p>
                     ) : (
                       <>
-                        {/* Mobile */}
                         <ul className="divide-y divide-border md:hidden">
-                          {quotes.map((q: any, qi: number) => {
+                          {activeQuotes.map((q: any, qi: number) => {
                             const unitLabel = q.Unit ? String(q.Unit).trim() : "unit";
                             return (
                               <li key={qi} className="space-y-1 px-3 py-2.5">
@@ -587,7 +648,6 @@ function PODetails() {
                           })}
                         </ul>
 
-                        {/* Desktop */}
                         <div className="hidden overflow-x-auto md:block">
                           <table className="w-full text-sm">
                             <thead className="bg-secondary/20 text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -600,7 +660,7 @@ function PODetails() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-border">
-                              {quotes.map((q: any, qi: number) => {
+                              {activeQuotes.map((q: any, qi: number) => {
                                 const unitLabel = q.Unit ? String(q.Unit).trim() : "unit";
                                 return (
                                   <tr key={qi}>
@@ -633,7 +693,7 @@ function PODetails() {
                       </>
                     )}
                   </div>
-                ))}
+                ) : null}
               </div>
             )}
           </Section>
