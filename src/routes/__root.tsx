@@ -120,18 +120,24 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   useEffect(() => {
-    if (typeof window !== "undefined" && "serviceWorker" in navigator && import.meta.env.PROD) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker
-          .register("/sw.js")
-          .then((registration) => {
-            console.log("Service Worker registered successfully with scope:", registration.scope);
-          })
-          .catch((error) => {
-            console.error("Service Worker registration failed:", error);
-          });
-      });
+    if (typeof window === "undefined" || !("serviceWorker" in navigator) || !import.meta.env.PROD) {
+      return;
     }
+
+    const onLoad = () => {
+      navigator.serviceWorker
+        .register("/sw.js")
+        .then((registration) => {
+          // Pick up new SW immediately after deploys
+          registration.update().catch(() => {});
+        })
+        .catch((error) => {
+          console.error("Service Worker registration failed:", error);
+        });
+    };
+
+    window.addEventListener("load", onLoad);
+    return () => window.removeEventListener("load", onLoad);
   }, []);
 
   return (

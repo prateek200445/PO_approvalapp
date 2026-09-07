@@ -12,10 +12,13 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
   const [url, setUrl] = useState("");
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [activeOverride, setActiveOverride] = useState("");
 
   useEffect(() => {
     if (isOpen) {
-      setUrl(getApiBaseUrl());
+      const stored = getApiBaseUrl();
+      setUrl(stored);
+      setActiveOverride(stored);
       setTestResult(null);
     }
   }, [isOpen]);
@@ -23,7 +26,10 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
   if (!isOpen) return null;
 
   async function testConnection() {
-    if (!url.trim()) {
+    const target = (url.trim() || activeOverride || "").replace(/\/$/, "");
+    // Empty URL means relative /api on this site — test that.
+    const base = target || (typeof window !== "undefined" ? window.location.origin : "");
+    if (!base) {
       setTestResult({ success: false, message: "Please enter a URL" });
       return;
     }
@@ -31,14 +37,11 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
     setTesting(true);
     setTestResult(null);
 
-    // Normalize URL (no trailing slash)
-    const normalizedUrl = url.trim().replace(/\/$/, "");
-
     try {
       const controller = new AbortController();
-      const id = setTimeout(() => controller.abort(), 6000); // 6s timeout
+      const id = setTimeout(() => controller.abort(), 8000);
 
-      const response = await fetch(`${normalizedUrl}/api/Auth/login`, {
+      const response = await fetch(`${base}/api/Auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userName: "test_connection_ping", password: "" }),
@@ -46,8 +49,7 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
       });
 
       clearTimeout(id);
-      
-      // Even if unauthorized/bad request, the server responded!
+
       setTestResult({
         success: true,
         message: `Connected successfully! Server responded with status ${response.status}.`,
@@ -57,8 +59,8 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
       console.error("Connection test failed:", err);
       setTestResult({
         success: false,
-        message: err.name === "AbortError" 
-          ? "Connection timed out (server is unreachable on this network)" 
+        message: err.name === "AbortError"
+          ? "Connection timed out (server is unreachable on this network)"
           : "Could not connect to server. Check URL, port, and network connection.",
       });
       toast.error("Connection failed.");
@@ -69,25 +71,24 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
 
   function handleSave() {
     if (!url.trim()) {
-      // If URL is empty, reset to relative default pathing
       setApiBaseUrl("");
-      toast.success("Reset to default relative API URL (IIS Reverse Proxy mode)!");
+      setActiveOverride("");
+      toast.success("Reset to website default API (/api → production server)");
       onClose();
       return;
     }
 
     try {
-      // Add protocol if not present
       let targetUrl = url.trim();
       if (!/^https?:\/\//i.test(targetUrl)) {
         targetUrl = "http://" + targetUrl;
       }
-      
+
       new URL(targetUrl);
       setApiBaseUrl(targetUrl);
+      setActiveOverride(targetUrl);
       toast.success("Server URL updated successfully!");
-      
-      // Ping the newly saved URL to trigger a cold start
+
       fetch(targetUrl, { method: "GET" })
         .then(() => console.log("New server URL pinged for cold start:", targetUrl))
         .catch((err) => console.warn("Failed to ping new server URL:", err));
@@ -98,13 +99,21 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
     }
   }
 
+  function handleResetToWebsite() {
+    setUrl("");
+    setApiBaseUrl("");
+    setActiveOverride("");
+    setTestResult(null);
+    toast.success("Using website default (production API)");
+  }
+
   return (
-    <div 
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center animate-in fade-in duration-200" 
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4 backdrop-blur-sm sm:items-center animate-in fade-in duration-200"
       onClick={onClose}
     >
-      <div 
-        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200" 
+      <div
+        className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-3">
@@ -118,26 +127,47 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
         </div>
 
         <div className="mt-5 space-y-4">
+          {activeOverride ? (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-900 dark:text-amber-100">
+              <div className="font-semibold">Custom API override is active on this browser</div>
+              <div className="mt-1 break-all font-mono">{activeOverride}</div>
+              <p className="mt-1.5 text-[11px] opacity-90">
+                Mobile may work while this PC fails if this points to localhost or an old LAN IP. Clear it to use production.
+              </p>
+              <button
+                type="button"
+                onClick={handleResetToWebsite}
+                className="mt-2 inline-flex h-8 items-center rounded-md bg-amber-600 px-3 text-[11px] font-semibold text-white hover:bg-amber-700"
+              >
+                Use website default
+              </button>
+            </div>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              Currently using: <span className="font-mono text-primary">Relative /api (production)</span>
+            </p>
+          )}
+
           <div className="space-y-1.5">
             <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               Backend API URL
             </label>
-            <input 
-              type="text" 
-              value={url} 
-              onChange={(e) => setUrl(e.target.value)} 
-              placeholder="e.g. http://192.168.0.188:5000" 
+            <input
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="Leave empty for website default"
               className="h-10 w-full rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 transition-all font-mono"
             />
             <p className="text-[11px] text-muted-foreground">
-              Current default: <span className="font-mono text-primary select-all">Relative to Site (/api)</span>
+              Only set this for local/dev testing. Leave blank on the live website.
             </p>
           </div>
 
           {testResult && (
             <div className={`flex items-start gap-2.5 rounded-lg border p-3 text-xs leading-relaxed ${
-              testResult.success 
-                ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400" 
+              testResult.success
+                ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400"
                 : "bg-destructive/5 border-destructive/20 text-destructive"
             }`}>
               {testResult.success ? (
@@ -154,10 +184,10 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
         </div>
 
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
-          <button 
+          <button
             type="button"
             disabled={testing}
-            onClick={testConnection} 
+            onClick={testConnection}
             className="inline-flex h-10 items-center justify-center gap-1.5 rounded-md border border-input bg-surface px-4 text-sm font-medium hover:bg-secondary disabled:opacity-50 transition cursor-pointer"
           >
             {testing ? (
@@ -167,10 +197,10 @@ export function ServerSettingsModal({ isOpen, onClose }: ServerSettingsModalProp
             )}
             Test Connection
           </button>
-          
+
           <div className="flex gap-2 w-full sm:w-auto">
-            <button 
-              onClick={onClose} 
+            <button
+              onClick={onClose}
               className="h-10 flex-1 sm:flex-none rounded-md border border-input bg-surface px-4 text-sm font-medium hover:bg-secondary transition cursor-pointer"
             >
               Cancel

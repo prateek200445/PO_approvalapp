@@ -1,105 +1,69 @@
-const CACHE_NAME = "po-approval-cache-v1";
+const CACHE_NAME = "po-approval-cache-v2";
 const PRECACHE_ASSETS = [
-  "/",
   "/manifest.json",
   "/favicon.png",
   "/icon-192.png",
   "/icon-512.png",
-  "/apple-touch-icon.png"
+  "/apple-touch-icon.png",
 ];
 
-// Install Event: cache static shell assets
+// Install: cache only stable shell icons (never hashed JS/CSS or HTML)
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      console.log("[Service Worker] Pre-caching offline assets");
-      return cache.addAll(PRECACHE_ASSETS);
-    }).then(() => self.skipWaiting())
+    caches
+      .open(CACHE_NAME)
+      .then((cache) => cache.addAll(PRECACHE_ASSETS))
+      .then(() => self.skipWaiting()),
   );
 });
 
-// Activate Event: clear old caches
+// Activate: drop every old cache so deploys cannot serve stale hashed assets
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cache) => {
-          if (cache !== CACHE_NAME) {
-            console.log("[Service Worker] Clearing old cache", cache);
-            return caches.delete(cache);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    caches
+      .keys()
+      .then((names) =>
+        Promise.all(names.filter((name) => name !== CACHE_NAME).map((name) => caches.delete(name))),
+      )
+      .then(() => self.clients.claim()),
   );
 });
 
-// Fetch Event: handle offline strategies
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // 1. Bypass API requests (always network-only)
-  if (url.pathname.startsWith("/api/")) {
+  // Never intercept API, Vite HMR, or hashed build assets — always network.
+  // Cache-first on /assets/*.js was breaking desktop after each Vercel deploy.
+  if (
+    url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/assets/") ||
+    url.pathname.includes("__vite_") ||
+    url.pathname.includes("hot-update")
+  ) {
     return;
   }
 
-  // 2. Bypass hot-reload or DevServer requests
-  if (url.pathname.includes("__vite_") || url.pathname.includes("hot-update")) {
-    return;
-  }
-
-  // 3. Navigation requests (HTML pages)
+  // Navigations: always prefer network (never serve stale HTML that points at deleted JS hashes)
   if (event.request.mode === "navigate") {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          // Cache the latest index page for offline shell
-          const responseClone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put("/", responseClone);
-          });
-          return response;
-        })
-        .catch(() => {
-          // If offline, return the cached index page
-          return caches.match("/");
-        })
-    );
+    event.respondWith(fetch(event.request));
     return;
   }
 
-  // 4. Static assets (JS, CSS, images, fonts)
-  // Use Stale-While-Revalidate/Cache-First strategy
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        // Return cached version, and update in background if it's stylesheet/script
-        if (event.request.url.startsWith(self.location.origin)) {
-          fetch(event.request).then((networkResponse) => {
-            if (networkResponse.status === 200) {
-              caches.open(CACHE_NAME).then((cache) => {
-                cache.put(event.request, networkResponse);
-              });
+  // Other same-origin static files (icons, etc.): stale-while-revalidate
+  if (event.request.url.startsWith(self.location.origin)) {
+    event.respondWith(
+      caches.match(event.request).then((cached) => {
+        const network = fetch(event.request)
+          .then((response) => {
+            if (response && response.status === 200) {
+              const clone = response.clone();
+              caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
             }
-          }).catch(() => {/* ignore background update errors */});
-        }
-        return cachedResponse;
-      }
-
-      return fetch(event.request).then((networkResponse) => {
-        // Cache newly fetched assets
-        if (
-          networkResponse &&
-          networkResponse.status === 200 &&
-          event.request.url.startsWith(self.location.origin)
-        ) {
-          const responseClone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
-          });
-        }
-        return networkResponse;
-      });
-    })
-  );
+            return response;
+          })
+          .catch(() => cached);
+        return cached || network;
+      }),
+    );
+  }
 });
