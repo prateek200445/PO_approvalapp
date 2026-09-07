@@ -41,6 +41,7 @@ function PODetails() {
   const [isApproving, setIsApproving] = useState(false);
   const [isRejecting, setIsRejecting] = useState(false);
   const [selectedQuoteItemKey, setSelectedQuoteItemKey] = useState<string>("");
+  const [selectedSummaryLine, setSelectedSummaryLine] = useState<string>("0");
 
   // PDF.js Inline Viewer State
   const [pdfDoc, setPdfDoc] = useState<any>(null);
@@ -104,6 +105,7 @@ function PODetails() {
     setRejectAttachment(null);
     setConfirm(null);
     setSelectedQuoteItemKey("");
+    setSelectedSummaryLine("0");
   }, [poNo]);
 
   // Transform data to match original format
@@ -423,6 +425,13 @@ function PODetails() {
   const activeQuoteOption = quoteItemOptions.find((o) => o.key === activeQuoteKey);
   const activeQuotes = activeQuoteOption ? quotesForItem(activeQuoteOption.item) : [];
 
+  const poLines = Array.isArray(po) ? po : [];
+  const summaryLineIndex = Math.min(
+    Math.max(0, Number.parseInt(selectedSummaryLine, 10) || 0),
+    Math.max(0, poLines.length - 1),
+  );
+  const summaryItem = poLines[summaryLineIndex];
+
   const headerItems = [
     { icon: Hash, label: "PO Number", value: poDetails.PurchaseCode },
     { icon: Building2, label: "Vendor", value: poDetails.FirmName },
@@ -483,37 +492,71 @@ function PODetails() {
               {poDetails.ItemDesc}
             </p>
 
-            {/* Mobile: stacked item rows */}
-            <div className="mt-4 overflow-hidden rounded-xl border border-border md:hidden">
-              <ul className="divide-y divide-border">
-                {po.map((item: any, index: number) => (
-                  <li key={index} className="space-y-1.5 px-3 py-3">
-                    {item.ItemCode ? (
-                      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                        {item.ItemCode}
+            {/* Mobile: one item card via dropdown */}
+            <div className="mt-4 space-y-3 md:hidden">
+              {poLines.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No items on this PO.</p>
+              ) : (
+                <>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="po-summary-item">Item line</Label>
+                    <Select
+                      value={String(summaryLineIndex)}
+                      onValueChange={setSelectedSummaryLine}
+                    >
+                      <SelectTrigger id="po-summary-item" className="h-11 w-full bg-background">
+                        <SelectValue placeholder="Select an item" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[50vh]">
+                        {poLines.map((item: any, index: number) => {
+                          const code = item.ItemCode ? `${item.ItemCode} · ` : "";
+                          const desc = String(item.ItemDesc ?? "Item");
+                          const short = desc.length > 36 ? `${desc.slice(0, 36)}…` : desc;
+                          return (
+                            <SelectItem key={index} value={String(index)}>
+                              {index + 1}. {code}{short} · Qty {item.Qty}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {summaryItem ? (
+                    <div className="overflow-hidden rounded-xl border border-border">
+                      <div className="space-y-1.5 px-3 py-3">
+                        {summaryItem.ItemCode ? (
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            {summaryItem.ItemCode}
+                          </div>
+                        ) : null}
+                        <div className="text-sm font-medium leading-snug">{summaryItem.ItemDesc}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Qty {summaryItem.Qty}
+                          <span className="mx-1.5 text-border">·</span>
+                          Rate {formatMoneyAmount(summaryItem.Rate)} {curLabel}
+                        </div>
+                        <div className="flex items-baseline justify-between gap-3 pt-0.5">
+                          <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                            Amount
+                          </span>
+                          <span className="text-sm font-semibold tabular-nums">
+                            {formatMoneyAmount(summaryItem.Total)}
+                          </span>
+                        </div>
                       </div>
-                    ) : null}
-                    <div className="text-sm font-medium leading-snug">{item.ItemDesc}</div>
-                    <div className="text-xs text-muted-foreground">
-                      Qty {item.Qty}
-                      <span className="mx-1.5 text-border">·</span>
-                      Rate {formatMoneyAmount(item.Rate)} {curLabel}
+                      <div className="flex items-baseline justify-between gap-3 border-t border-border bg-secondary/30 px-3 py-2.5">
+                        <span className="text-xs font-medium uppercase text-muted-foreground">
+                          PO total ({poLines.length} lines)
+                        </span>
+                        <span className="text-sm font-semibold tabular-nums">
+                          {formatMoneyAmount(grandTotal)}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-baseline justify-between gap-3 pt-0.5">
-                      <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Amount</span>
-                      <span className="text-sm font-semibold tabular-nums">
-                        {formatMoneyAmount(item.Total)}
-                      </span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              <div className="flex items-baseline justify-between gap-3 border-t border-border bg-secondary/30 px-3 py-2.5">
-                <span className="text-xs font-medium uppercase text-muted-foreground">Total</span>
-                <span className="text-sm font-semibold tabular-nums">
-                  {formatMoneyAmount(grandTotal)}
-                </span>
-              </div>
+                  ) : null}
+                </>
+              )}
             </div>
 
             {/* Desktop: table */}
