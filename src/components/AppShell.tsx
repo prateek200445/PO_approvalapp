@@ -67,7 +67,8 @@ export function AppShell() {
   const router = useRouter();
   const routerState = useRouterState();
   const path = routerState.location.pathname;
-  const fullScreenReport = path.includes("export-bill-overdue");
+  const fullScreenReport =
+    path.includes("export-bill-overdue") || path.includes("order-book-summary");
   const isCopilot = path.startsWith("/assistant");
   const assistantLoading = useRouterState({
     select: (s) =>

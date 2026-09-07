@@ -1,6 +1,4 @@
-using System.Data;
 using Dapper;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 
@@ -18,6 +16,33 @@ public sealed class OrderBookUnitOption
 {
     public string Code { get; set; } = "";
     public string CompanyName { get; set; } = "";
+    /// <summary>Extra ERP CompanyName spellings that roll into this PDF unit code.</summary>
+    public string[] Aliases { get; set; } = [];
+    /// <summary>
+    /// When set, only bag types containing any of these keywords count for this unit
+    /// (used to split HPBL-4 1L / HPBL-4 4L on PartyOrder / production rows).
+    /// </summary>
+    public string[] IncludeBagKeywords { get; set; } = [];
+    /// <summary>
+    /// PartyOrder = FIBCPartyOrdermaster Order−Despatch (official SP model).
+    /// MarketingPending = Despatch.vw_PendingOrderStatus FIBC dept (KPW/HPBL have no PartyOrder).
+    /// </summary>
+    public string BalanceSource { get; set; } = "PartyOrder";
+    /// <summary>Lookback days for MarketingPending (OrderDate &gt;= asOf − days).</summary>
+    public int MarketingPendingDays { get; set; } = 50;
+    /// <summary>Kg/pc used when MarketingPending has no net weight (PDF plant averages).</summary>
+    public double DefaultKgPerPc { get; set; } = 2.55;
+    /// <summary>
+    /// For HPBL-4 1L/4L marketing rows (no bag-type on pending): share of Unit-IV qty (0–1).
+    /// Remaining share goes to the sibling unit when both are configured.
+    /// </summary>
+    public double? MarketingQtyShare { get; set; }
+    /// <summary>When true, PartyOrder rows need Ready or Despatch activity.</summary>
+    public bool RequireActivity { get; set; }
+    /// <summary>Drop untouched PartyOrder balances above this kg (mega-order filter).</summary>
+    public double MegaOrderBalKg { get; set; } = 50_000;
+    /// <summary>Optional PartyOrder Sysdate lookback (0 = no date filter).</summary>
+    public int PartyOrderMaxAgeDays { get; set; }
     public int Sort { get; set; }
 }
 
@@ -87,9 +112,9 @@ public sealed class OrderBookSummaryDto
     public double OrdBookDaysCurr { get; set; }
     public int TotalOrders { get; set; }
     public string Source { get; set; } =
-        "MaterialProcessing.FIBCPartyOrdermaster + FIBCDespatch + VW_FIBCBagwiseProduction + Despatch.FIBCCapacityMaster";
+        "Hybrid: PartyOrder Order−Despatch (OEL) + Despatch.vw_PendingOrderStatus FIBC (KPW/PIA/PIL/PPL/HPBL*)";
     public string Note { get; set; } =
-        "Balance = Order − Despatch (positive). Open ≈ ContainerNo OPEN/OPN. Confirm = other issued balance. Planned ≈ VW_MarketingLinePlanning. Sample PDF codes KPW/HPBL* are not company names in FIBCPartyOrdermaster — map them in OrderBookSummary:Units when known. Add users via AllowedUsers (appsettings) and ORDER_BOOK_SUMMARY_ALLOWED_USERS (frontend).";
+        "PDF plants: KPW, OEL, PIA, PIL, PPL, HPBL-4 1L, HPBL-4 4L, HPBL, HPBL-5. OEL uses PartyOrder (base company only). Others use marketing FIBC pending with plant lookback/kg; HPBL-4 split by PDF qty share.";
     public List<OrderBookUnitBlockDto> Units { get; set; } = [];
 }
 
@@ -124,241 +149,191 @@ public sealed class OrderBookSummaryService
         };
     }
 
+    // Capacity / ₹/kg rates don't change with asOf — cache across date switches.
+    private const string CapacityCacheKey = "order-book-summary-v3-capacity";
+    private const string ValueCacheKey = "order-book-summary-v3-value";
+    private const string MarketingBandCacheKey = "order-book-summary-v3-mkt-band";
+    private static readonly TimeSpan SharedMetaTtl = TimeSpan.FromHours(2);
+    private static readonly TimeSpan MarketingTtl = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan SummaryTtl = TimeSpan.FromMinutes(30);
+    /// <summary>Extra days so past asOf dates can reuse one marketing fetch.</summary>
+    private const int MarketingAsOfBufferDays = 90;
+
     public async Task<OrderBookSummaryDto> GetSummaryAsync(DateTime? asOf, bool refresh = false)
     {
         var asOfDate = (asOf ?? DateTime.Today).Date;
-        var cacheKey = $"order-book-summary-v1:{asOfDate:yyyy-MM-dd}";
+        var cacheKey = $"order-book-summary-v3-hybrid:{asOfDate:yyyy-MM-dd}";
         if (!refresh && _cache.TryGetValue(cacheKey, out OrderBookSummaryDto? hit) && hit != null)
             return hit;
 
-        var units = _options.Units
-            .Where(u => !string.IsNullOrWhiteSpace(u.CompanyName) && !string.IsNullOrWhiteSpace(u.Code))
-            .Select(u => new OrderBookUnitOption
-            {
-                Code = u.Code.Trim(),
-                CompanyName = u.CompanyName.Trim(),
-                Sort = u.Sort,
-            })
-            .OrderBy(u => u.Sort)
-            .ThenBy(u => u.Code)
-            .ToList();
-
+        var units = NormalizeUnits(_options.Units);
         if (units.Count == 0)
             throw new InvalidOperationException("OrderBookSummary:Units is empty in configuration.");
 
-        var companyNames = units.Select(u => u.CompanyName).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        // ERP often stores "Plastene India Limited " with a trailing space — include both forms.
-        var companyNamesForSql = companyNames
-            .SelectMany(n => new[] { n, n + " " })
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+        var partyUnits = units
+            .Where(u => !IsMarketingSource(u.BalanceSource))
             .ToList();
+        var marketingUnits = units
+            .Where(u => IsMarketingSource(u.BalanceSource))
+            .ToList();
+
+        var partyCompanyNames = ExpandCompanyNames(partyUnits.SelectMany(UnitCompanyNames));
+        var allCompanyNames = ExpandCompanyNames(units.SelectMany(UnitCompanyNames));
+        var marketingCompanyNames = ExpandCompanyNames(marketingUnits.SelectMany(UnitCompanyNames));
+        var maxMktDays = marketingUnits.Count == 0
+            ? 0
+            : Math.Max(1, marketingUnits.Max(u => Math.Max(1, u.MarketingPendingDays)));
+
         var monthStart = new DateTime(asOfDate.Year, asOfDate.Month, 1);
         var monthDays = DateTime.DaysInMonth(asOfDate.Year, asOfDate.Month);
         var dayOfMonth = asOfDate.Day;
 
-        using var connection = _database.CreateConnection();
+        // One marketing scan (same as before), cached as a wide band so other asOf dates reuse it.
+        var marketingRows = await GetMarketingPendingBandAsync(
+            asOfDate, maxMktDays, marketingCompanyNames, MarketingBandCacheKey, refresh);
 
-        var balanceRows = (await connection.QueryAsync<BalanceRow>(@"
-SELECT
-    LTRIM(RTRIM(m.CompanyName)) AS CompanyName,
-    ISNULL(m.TypeofBag, '') AS TypeofBag,
-    ISNULL(m.ContainerNo, '') AS ContainerNo,
-    ISNULL(m.PONO, '') AS Pono,
-    CAST(ISNULL(m.Quantity, 0) AS float) AS OrderQty,
-    CAST(ISNULL(m.TotalWt, 0) AS float) AS OrderWt,
-    CAST(ISNULL(d.DespatchQty, 0) AS float) AS DespatchQty,
-    CAST(ISNULL(d.DespatchWt, 0) AS float) AS DespatchWt,
-    CAST(ISNULL(r.ReadyBags, 0) AS float) AS ReadyBags,
-    CAST(ISNULL(r.ReadyWt, 0) AS float) AS ReadyWt
-FROM dbo.FIBCPartyOrdermaster m WITH (NOLOCK)
-LEFT JOIN (
-    SELECT
-        LTRIM(RTRIM(PONO)) AS PONO,
-        LTRIM(RTRIM(CompanyName)) AS CompanyName,
-        LTRIM(RTRIM(PartyName)) AS PartyName,
-        SUM(CAST(ISNULL(Qty, 0) AS float)) AS DespatchQty,
-        SUM(CAST(ISNULL(Wt, 0) AS float)) AS DespatchWt
-    FROM dbo.FIBCDespatch WITH (NOLOCK)
-    WHERE Sysdate <= @AsOf
-    GROUP BY LTRIM(RTRIM(PONO)), LTRIM(RTRIM(CompanyName)), LTRIM(RTRIM(PartyName))
-) d
-    ON LTRIM(RTRIM(m.PONO)) = d.PONO
-   AND LTRIM(RTRIM(m.CompanyName)) = d.CompanyName
-   AND LTRIM(RTRIM(m.PartyName)) = d.PartyName
-LEFT JOIN (
-    SELECT
-        LTRIM(RTRIM(PONO)) AS PONO,
-        LTRIM(RTRIM(CompanyName)) AS CompanyName,
-        LTRIM(RTRIM(PartyName)) AS PartyName,
-        SUM(CAST(ISNULL(BagPCS, 0) AS float)) AS ReadyBags,
-        SUM(CAST(ISNULL(BagWt, 0) AS float)) AS ReadyWt
-    FROM dbo.FIBCTeamWiseProduction WITH (NOLOCK)
-    WHERE Sysdate <= @AsOf
-    GROUP BY LTRIM(RTRIM(PONO)), LTRIM(RTRIM(CompanyName)), LTRIM(RTRIM(PartyName))
-) r
-    ON LTRIM(RTRIM(m.PONO)) = r.PONO
-   AND LTRIM(RTRIM(m.CompanyName)) = r.CompanyName
-   AND LTRIM(RTRIM(m.PartyName)) = r.PartyName
-WHERE ISNULL(m.isfreeze, 'no') = 'no'
-  AND m.Sysdate <= @AsOf
-  AND LTRIM(RTRIM(m.CompanyName)) IN @CompanyNames
-", new { AsOf = asOfDate, CompanyNames = companyNamesForSql }, commandTimeout: 180)).ToList();
-
-        var capacityRows = (await connection.QueryAsync<CapacityRow>(@"
-SELECT
-    LTRIM(RTRIM(CompanyName)) AS CompanyName,
-    ISNULL(TypeofBag, '') AS TypeofBag,
-    CAST(ISNULL(Qty, 0) AS float) AS QtyMt
-FROM Despatch.dbo.FIBCCapacityMaster WITH (NOLOCK)
-WHERE LTRIM(RTRIM(CompanyName)) IN @CompanyNames
-", new { CompanyNames = companyNamesForSql }, commandTimeout: 60)).ToList();
-
-        var prodRows = (await connection.QueryAsync<ProdRow>(@"
-SELECT
-    LTRIM(RTRIM(CompanyName)) AS CompanyName,
-    ISNULL(TYPEOFBAG, '') AS TypeOfBag,
-    CAST(SUM(CASE WHEN CONVERT(date, Sysdate) = @AsOf THEN ISNULL(BagPCS, 0) ELSE 0 END) AS float) AS TodayPcs,
-    CAST(SUM(CASE WHEN CONVERT(date, Sysdate) = @AsOf THEN ISNULL(BagWt, 0) ELSE 0 END) AS float) AS TodayWt,
-    CAST(SUM(ISNULL(BagPCS, 0)) AS float) AS MtdPcs,
-    CAST(SUM(ISNULL(BagWt, 0)) AS float) AS MtdWt
-FROM dbo.VW_FIBCBagwiseProduction WITH (NOLOCK)
-WHERE Sysdate >= @MonthStart AND Sysdate < DATEADD(day, 1, @AsOf)
-  AND LTRIM(RTRIM(CompanyName)) IN @CompanyNames
-GROUP BY LTRIM(RTRIM(CompanyName)), ISNULL(TYPEOFBAG, '')
-", new { AsOf = asOfDate, MonthStart = monthStart, CompanyNames = companyNamesForSql }, commandTimeout: 120)).ToList();
-
-        List<PlannedRow> plannedRows;
-        try
-        {
-            plannedRows = (await connection.QueryAsync<PlannedRow>(@"
-SELECT
-    LTRIM(RTRIM(Companyname)) AS CompanyName,
-    ISNULL(BagType, '') AS BagType,
-    CAST(SUM(ISNULL(poqty, qty)) AS float) AS PlannedQty
-FROM dbo.VW_MarketingLinePlanning WITH (NOLOCK)
-WHERE LTRIM(RTRIM(Companyname)) IN @CompanyNames
-  AND (startdate IS NULL OR startdate <= DATEADD(day, 45, @AsOf))
-  AND (CompletionDate IS NULL OR CompletionDate >= DATEADD(day, -7, @AsOf))
-GROUP BY LTRIM(RTRIM(Companyname)), ISNULL(BagType, '')
-", new { AsOf = asOfDate, CompanyNames = companyNamesForSql }, commandTimeout: 60)).ToList();
-        }
-        catch
-        {
-            plannedRows = [];
-        }
-
-        List<ValueRow> valueRows;
-        try
-        {
-            valueRows = (await connection.QueryAsync<ValueRow>(@"
-SELECT
-    LTRIM(RTRIM(i.ProductionCompanyName)) AS CompanyName,
-    CAST(SUM(ISNULL(i.Amount, 0)) AS float) AS Amount,
-    CAST(SUM(CASE WHEN ISNULL(i.netwt, 0) > 0 THEN i.netwt ELSE 0 END) AS float) AS NetWt
-FROM Despatch.dbo.MarketingInvItem i WITH (NOLOCK)
-WHERE LTRIM(RTRIM(ISNULL(i.ProductionCompanyName, ''))) IN @CompanyNames
-GROUP BY LTRIM(RTRIM(i.ProductionCompanyName))
-", new { CompanyNames = companyNamesForSql }, commandTimeout: 120)).ToList();
-        }
-        catch
-        {
-            valueRows = [];
-        }
-
-        var capacityByCompany = capacityRows
-            .GroupBy(c => c.CompanyName, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
-        var prodByCompany = prodRows
-            .GroupBy(p => p.CompanyName, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
-        var plannedByCompany = plannedRows
-            .GroupBy(p => p.CompanyName, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.Sum(x => Math.Max(0, x.PlannedQty)), StringComparer.OrdinalIgnoreCase);
-        var valueByCompany = valueRows
-            .GroupBy(v => v.CompanyName, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(
-                g => g.Key,
-                g => (Amount: g.Sum(x => x.Amount), NetWt: g.Sum(x => x.NetWt)),
-                StringComparer.OrdinalIgnoreCase);
+        // Meta often cached; party/prod/planned are asOf-specific. Parallelize the light set.
+        var capacityTask = GetCapacityRowsAsync(allCompanyNames, refresh);
+        var valueTask = GetValueRowsAsync(allCompanyNames, refresh);
+        var balanceTask = partyCompanyNames.Count == 0
+            ? Task.FromResult(new List<BalanceRow>())
+            : QueryPartyBalanceAsync(asOfDate, partyCompanyNames);
+        var prodTask = QueryProductionAsync(asOfDate, monthStart, allCompanyNames);
+        var plannedTask = QueryPlannedAsync(asOfDate, allCompanyNames);
+        await Task.WhenAll(capacityTask, valueTask, balanceTask, prodTask, plannedTask);
+        var capacityRows = await capacityTask;
+        var valueRows = await valueTask;
+        var balanceRows = await balanceTask;
+        var prodRows = await prodTask;
+        var plannedRows = await plannedTask;
 
         var unitBlocks = new List<OrderBookUnitBlockDto>();
         foreach (var unit in units)
         {
-            var rows = balanceRows
-                .Where(r => string.Equals(r.CompanyName, unit.CompanyName.Trim(), StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
+            var names = UnitCompanyNames(unit).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var lineMap = new Dictionary<string, OrderBookBagLineDto>(StringComparer.OrdinalIgnoreCase);
             double confirmMt = 0, openMt = 0, inHandMt = 0;
             var orderKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var row in rows)
+            if (IsMarketingSource(unit.BalanceSource))
             {
-                var balQty = Math.Max(0, row.OrderQty - row.DespatchQty);
-                var balWtKg = Math.Max(0, row.OrderWt - row.DespatchWt);
-                if (balQty <= 0 && balWtKg <= 0)
-                    continue;
-                // Drop never-touched mega-orders that skew plant totals (no ready/despatch activity).
-                if (row.ReadyWt <= 0 && row.DespatchWt <= 0 && balWtKg > 50_000)
-                    continue;
+                var days = Math.Max(1, unit.MarketingPendingDays);
+                var cutoff = asOfDate.AddDays(-days);
+                var kg = unit.DefaultKgPerPc > 0 ? unit.DefaultKgPerPc : 2.55;
+                var share = unit.MarketingQtyShare is > 0 and <= 1 ? unit.MarketingQtyShare.Value : 1.0;
 
-                orderKeys.Add(row.Pono);
-                var bagGroup = NormalizeBagGroup(row.TypeofBag);
-                if (!lineMap.TryGetValue(bagGroup, out var line))
+                var rows = marketingRows
+                    .Where(r => names.Contains((r.CompanyName ?? "").Trim()))
+                    .Where(r => r.OrderDate.Date >= cutoff && r.OrderDate.Date <= asOfDate)
+                    .Where(r => r.PendingQty > 0)
+                    .ToList();
+
+                foreach (var row in rows)
                 {
-                    line = new OrderBookBagLineDto { BagGroup = bagGroup };
-                    lineMap[bagGroup] = line;
-                }
+                    var balQty = row.PendingQty * share;
+                    if (balQty <= 0) continue;
+                    var balWtKg = balQty * kg;
+                    orderKeys.Add(string.IsNullOrWhiteSpace(row.ItemNo) ? row.MarketingInvNo : row.ItemNo);
 
-                line.BalQty += balQty;
-                line.BalWtMt += balWtKg / 1000.0;
-
-                var open = IsOpenContainer(row.ContainerNo);
-                if (open)
-                    openMt += balWtKg / 1000.0;
-                else
+                    var bagGroup = GuessBagGroupFromMarketing(row.ItemDesc, row.Commodity, unit);
+                    if (!lineMap.TryGetValue(bagGroup, out var line))
+                    {
+                        line = new OrderBookBagLineDto { BagGroup = bagGroup };
+                        lineMap[bagGroup] = line;
+                    }
+                    line.BalQty += balQty;
+                    line.BalWtMt += balWtKg / 1000.0;
+                    // Marketing pending has no Open/Confirm flag — treat as confirm (issued book).
                     confirmMt += balWtKg / 1000.0;
+                }
+            }
+            else
+            {
+                var maxAge = unit.PartyOrderMaxAgeDays;
+                var megaKg = unit.MegaOrderBalKg > 0 ? unit.MegaOrderBalKg : 50_000;
+                var rows = balanceRows
+                    .Where(r => names.Contains((r.CompanyName ?? "").Trim()))
+                    .Where(r => BagAllowedForUnit(unit, r.TypeofBag))
+                    .Where(r => maxAge <= 0 || r.OrderDate.Date >= asOfDate.AddDays(-maxAge))
+                    .ToList();
 
-                var stockKg = Math.Max(0, row.ReadyWt - row.DespatchWt);
-                inHandMt += stockKg / 1000.0;
+                foreach (var row in rows)
+                {
+                    var balQty = Math.Max(0, row.OrderQty - row.DespatchQty);
+                    var balWtKg = Math.Max(0, row.OrderWt - row.DespatchWt);
+                    if (balQty <= 0 && balWtKg <= 0)
+                        continue;
+
+                    var hasActivity = row.ReadyWt > 0 || row.DespatchWt > 0 || row.ReadyBags > 0 || row.DespatchQty > 0;
+                    if (unit.RequireActivity && !hasActivity)
+                        continue;
+                    if (!hasActivity && balWtKg > megaKg)
+                        continue;
+
+                    orderKeys.Add(row.Pono);
+                    var bagGroup = NormalizeBagGroup(row.TypeofBag);
+                    if (!lineMap.TryGetValue(bagGroup, out var line))
+                    {
+                        line = new OrderBookBagLineDto { BagGroup = bagGroup };
+                        lineMap[bagGroup] = line;
+                    }
+
+                    line.BalQty += balQty;
+                    line.BalWtMt += balWtKg / 1000.0;
+
+                    if (IsOpenContainer(row.ContainerNo))
+                        openMt += balWtKg / 1000.0;
+                    else
+                        confirmMt += balWtKg / 1000.0;
+
+                    inHandMt += Math.Max(0, row.ReadyWt - row.DespatchWt) / 1000.0;
+                }
             }
 
-            capacityByCompany.TryGetValue(unit.CompanyName.Trim(), out var caps);
-            var unitCapMt = caps?.Sum(c => c.QtyMt) ?? 0;
-            if (unitCapMt > 1000) unitCapMt = unitCapMt / 1000.0; // some master rows store PCS-scale
+            var caps = capacityRows
+                .Where(c => names.Contains((c.CompanyName ?? "").Trim()))
+                .ToList();
+            var unitCapMt = caps.Sum(c => c.QtyMt);
+            if (unitCapMt > 1000) unitCapMt = unitCapMt / 1000.0;
 
-            prodByCompany.TryGetValue(unit.CompanyName.Trim(), out var prods);
-            var todayWt = prods?.Sum(p => p.TodayWt) ?? 0;
-            var mtdWt = prods?.Sum(p => p.MtdWt) ?? 0;
-            var mtdPcs = prods?.Sum(p => p.MtdPcs) ?? 0;
+            var prods = prodRows
+                .Where(p => names.Contains((p.CompanyName ?? "").Trim()))
+                .Where(p => BagAllowedForUnit(unit, p.TypeOfBag))
+                .ToList();
+            var todayWt = prods.Sum(p => p.TodayWt);
+            var mtdWt = prods.Sum(p => p.MtdWt);
+            var mtdPcs = prods.Sum(p => p.MtdPcs);
             var avgProd = dayOfMonth > 0 ? (mtdWt / 1000.0) / dayOfMonth : 0;
             var target = unitCapMt > 0 ? unitCapMt : avgProd;
             var expProd = target * dayOfMonth;
             var statusMt = (mtdWt / 1000.0) - expProd;
             var statusPct = expProd > 0 ? statusMt / expProd * 100.0 : 0;
 
-            plannedByCompany.TryGetValue(unit.CompanyName.Trim(), out var plannedQty);
-            // Planned weight estimate: use average kg/bag from balances when available
+            var plannedQty = plannedRows
+                .Where(p => names.Contains((p.CompanyName ?? "").Trim()))
+                .Where(p => BagAllowedForUnit(unit, p.BagType))
+                .Sum(p => Math.Max(0, p.PlannedQty));
             var unitBalQty = lineMap.Values.Sum(l => l.BalQty);
             var unitBalMt = lineMap.Values.Sum(l => l.BalWtMt);
-            var avgKg = unitBalQty > 0 ? (unitBalMt * 1000.0) / unitBalQty : 2.0;
+            var avgKg = unitBalQty > 0 ? (unitBalMt * 1000.0) / unitBalQty : unit.DefaultKgPerPc;
+            if (avgKg <= 0) avgKg = 2.0;
             var plannedMt = Math.Max(0, plannedQty) * avgKg / 1000.0;
 
             foreach (var line in lineMap.Values)
             {
-                var matchingCap = caps?
+                var matchingCap = caps
                     .Where(c => BagGroupsOverlap(line.BagGroup, NormalizeBagGroup(c.TypeofBag)))
-                    .Sum(c => c.QtyMt) ?? 0;
+                    .Sum(c => c.QtyMt);
                 if (matchingCap > 1000) matchingCap /= 1000.0;
                 line.DeclCapacityMt = Math.Round(matchingCap, 2);
                 line.DeclDays = matchingCap > 0 ? Math.Round(line.BalWtMt / matchingCap, 1) : 0;
 
-                var matchingProd = prods?
+                var matchingProd = prods
                     .Where(p => BagGroupsOverlap(line.BagGroup, NormalizeBagGroup(p.TypeOfBag)))
-                    .Sum(p => p.MtdWt) ?? 0;
+                    .Sum(p => p.MtdWt);
                 line.ActProdMt = Math.Round(matchingProd / 1000.0, 2);
                 line.ActDays = matchingProd > 0 && dayOfMonth > 0
-                    ? Math.Round((line.BalWtMt) / Math.Max(0.001, matchingProd / 1000.0 / dayOfMonth), 1)
+                    ? Math.Round(line.BalWtMt / Math.Max(0.001, matchingProd / 1000.0 / dayOfMonth), 1)
                     : 0;
                 line.Pct = line.DeclCapacityMt > 0
                     ? Math.Round(line.ActProdMt / (line.DeclCapacityMt * dayOfMonth) * 100.0, 0)
@@ -367,9 +342,10 @@ GROUP BY LTRIM(RTRIM(i.ProductionCompanyName))
                 line.BalWtMt = Math.Round(line.BalWtMt, 2);
             }
 
-            valueByCompany.TryGetValue(unit.CompanyName.Trim(), out var val);
+            var val = valueRows
+                .Where(v => names.Contains((v.CompanyName ?? "").Trim()))
+                .Aggregate((Amount: 0.0, NetWt: 0.0), (acc, v) => (acc.Amount + v.Amount, acc.NetWt + v.NetWt));
             var rsPerKg = val.NetWt > 0 ? val.Amount / val.NetWt : 0;
-            // Estimate open order book value from balance MT × recent Rs/Kg
             var valueInr = unitBalMt * 1000.0 * rsPerKg;
 
             unitBlocks.Add(new OrderBookUnitBlockDto
@@ -402,7 +378,6 @@ GROUP BY LTRIM(RTRIM(i.ProductionCompanyName))
         var openMtAll = unitBlocks.Sum(u => u.OpenMt);
         var plannedMtAll = unitBlocks.Sum(u => u.PlannedMt);
         var inHandAll = balanceRows.Sum(r => Math.Max(0, r.ReadyWt - r.DespatchWt) / 1000.0);
-        // Pending entry ≈ planned not yet on issued book (rough)
         var pendEntry = Math.Max(0, plannedMtAll);
         var finalPend = issuedMt + inHandAll + pendEntry;
         var totalBucket = confirmMtAll + openMtAll + plannedMtAll;
@@ -436,8 +411,301 @@ GROUP BY LTRIM(RTRIM(i.ProductionCompanyName))
             Units = unitBlocks,
         };
 
-        _cache.Set(cacheKey, dto, TimeSpan.FromMinutes(30));
+        _cache.Set(cacheKey, dto, SummaryTtl);
         return dto;
+    }
+
+    private static List<string> ExpandCompanyNames(IEnumerable<string> names) =>
+        names
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(n => n.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .SelectMany(n => new[] { n, n + " " })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private async Task<List<BalanceRow>> QueryPartyBalanceAsync(DateTime asOfDate, List<string> companyNames)
+    {
+        await using var connection = _database.CreateConnection();
+        var rows = await connection.QueryAsync<BalanceRow>(@"
+SELECT
+    LTRIM(RTRIM(m.CompanyName)) AS CompanyName,
+    ISNULL(m.TypeofBag, '') AS TypeofBag,
+    ISNULL(m.ContainerNo, '') AS ContainerNo,
+    ISNULL(m.PONO, '') AS Pono,
+    CAST(m.Sysdate AS datetime) AS OrderDate,
+    CAST(ISNULL(m.Quantity, 0) AS float) AS OrderQty,
+    CAST(ISNULL(m.TotalWt, 0) AS float) AS OrderWt,
+    CAST(ISNULL(d.DespatchQty, 0) AS float) AS DespatchQty,
+    CAST(ISNULL(d.DespatchWt, 0) AS float) AS DespatchWt,
+    CAST(ISNULL(r.ReadyBags, 0) AS float) AS ReadyBags,
+    CAST(ISNULL(r.ReadyWt, 0) AS float) AS ReadyWt
+FROM dbo.FIBCPartyOrdermaster m WITH (NOLOCK)
+LEFT JOIN (
+    SELECT
+        LTRIM(RTRIM(PONO)) AS PONO,
+        LTRIM(RTRIM(CompanyName)) AS CompanyName,
+        LTRIM(RTRIM(PartyName)) AS PartyName,
+        SUM(CAST(ISNULL(Qty, 0) AS float)) AS DespatchQty,
+        SUM(CAST(ISNULL(Wt, 0) AS float)) AS DespatchWt
+    FROM dbo.FIBCDespatch WITH (NOLOCK)
+    WHERE Sysdate <= @AsOf
+      AND LTRIM(RTRIM(CompanyName)) IN @CompanyNames
+    GROUP BY LTRIM(RTRIM(PONO)), LTRIM(RTRIM(CompanyName)), LTRIM(RTRIM(PartyName))
+) d
+    ON LTRIM(RTRIM(m.PONO)) = d.PONO
+   AND LTRIM(RTRIM(m.CompanyName)) = d.CompanyName
+   AND LTRIM(RTRIM(m.PartyName)) = d.PartyName
+LEFT JOIN (
+    SELECT
+        LTRIM(RTRIM(PONO)) AS PONO,
+        LTRIM(RTRIM(CompanyName)) AS CompanyName,
+        LTRIM(RTRIM(PartyName)) AS PartyName,
+        SUM(CAST(ISNULL(BagPCS, 0) AS float)) AS ReadyBags,
+        SUM(CAST(ISNULL(BagWt, 0) AS float)) AS ReadyWt
+    FROM dbo.FIBCTeamWiseProduction WITH (NOLOCK)
+    WHERE Sysdate <= @AsOf
+      AND LTRIM(RTRIM(CompanyName)) IN @CompanyNames
+    GROUP BY LTRIM(RTRIM(PONO)), LTRIM(RTRIM(CompanyName)), LTRIM(RTRIM(PartyName))
+) r
+    ON LTRIM(RTRIM(m.PONO)) = r.PONO
+   AND LTRIM(RTRIM(m.CompanyName)) = r.CompanyName
+   AND LTRIM(RTRIM(m.PartyName)) = r.PartyName
+WHERE ISNULL(m.isfreeze, 'no') = 'no'
+  AND m.Sysdate <= @AsOf
+  AND LTRIM(RTRIM(m.CompanyName)) IN @CompanyNames
+", new { AsOf = asOfDate, CompanyNames = companyNames }, commandTimeout: 180);
+        return rows.ToList();
+    }
+
+    private sealed class MarketingBandCache
+    {
+        public DateTime AnchorEnd { get; init; }
+        public DateTime WindowStart { get; init; }
+        public List<MarketingPendingRow> Rows { get; init; } = [];
+    }
+
+    /// <summary>
+    /// Fetches a wide marketing pending band once (keyed by short/long), then filters to the requested asOf.
+    /// Subsequent date changes reuse the band without re-scanning vw_PendingOrderStatus.
+    /// </summary>
+    private async Task<List<MarketingPendingRow>> GetMarketingPendingBandAsync(
+        DateTime asOfDate,
+        int unitMaxDays,
+        List<string> companyNames,
+        string cacheKey,
+        bool refresh)
+    {
+        if (companyNames.Count == 0 || unitMaxDays <= 0)
+            return [];
+
+        var neededStart = asOfDate.AddDays(-unitMaxDays);
+        if (!refresh
+            && _cache.TryGetValue(cacheKey, out MarketingBandCache? band)
+            && band != null
+            && band.WindowStart <= neededStart
+            && band.AnchorEnd >= asOfDate)
+        {
+            return band.Rows
+                .Where(r => r.OrderDate.Date >= neededStart && r.OrderDate.Date <= asOfDate)
+                .ToList();
+        }
+
+        var anchorEnd = asOfDate > DateTime.Today ? asOfDate : DateTime.Today;
+        var pastSlack = Math.Max(0, (anchorEnd - asOfDate).Days);
+        var fetchDays = unitMaxDays + pastSlack + MarketingAsOfBufferDays;
+        var windowStart = anchorEnd.AddDays(-fetchDays);
+        var rows = await QueryMarketingPendingAsync(anchorEnd, fetchDays, companyNames);
+        _cache.Set(cacheKey, new MarketingBandCache
+        {
+            AnchorEnd = anchorEnd,
+            WindowStart = windowStart,
+            Rows = rows,
+        }, MarketingTtl);
+
+        return rows
+            .Where(r => r.OrderDate.Date >= neededStart && r.OrderDate.Date <= asOfDate)
+            .ToList();
+    }
+
+    private async Task<List<MarketingPendingRow>> QueryMarketingPendingAsync(
+        DateTime asOfDate, int maxDays, List<string> companyNames)
+    {
+        await using var connection = _database.CreateConnection();
+        var rows = await connection.QueryAsync<MarketingPendingRow>(@"
+SELECT
+    LTRIM(RTRIM(Companyname)) AS CompanyName,
+    ISNULL(ItemDesc, '') AS ItemDesc,
+    ISNULL(Commodity, '') AS Commodity,
+    ISNULL(MarketingInvNo, '') AS MarketingInvNo,
+    ISNULL(ItemNO, '') AS ItemNo,
+    CAST(ISNULL(PendingQty, 0) AS float) AS PendingQty,
+    CAST(ISNULL(DespatchQty, 0) AS float) AS DespatchQty,
+    CAST(OrderDate AS datetime) AS OrderDate
+FROM Despatch.dbo.vw_PendingOrderStatus WITH (NOLOCK)
+WHERE ISNULL(PendingQty, 0) > 0
+  AND UPPER(LTRIM(RTRIM(ISNULL(Deptt, '')))) = 'FIBC'
+  AND OrderDate >= DATEADD(day, -@MaxDays, @AsOf)
+  AND OrderDate <= @AsOf
+  AND LTRIM(RTRIM(Companyname)) IN @CompanyNames
+", new { AsOf = asOfDate, MaxDays = maxDays, CompanyNames = companyNames }, commandTimeout: 180);
+        return rows.ToList();
+    }
+
+    private async Task<List<CapacityRow>> GetCapacityRowsAsync(List<string> companyNames, bool refresh)
+    {
+        if (!refresh && _cache.TryGetValue(CapacityCacheKey, out List<CapacityRow>? cached) && cached != null)
+            return cached;
+
+        await using var connection = _database.CreateConnection();
+        var rows = (await connection.QueryAsync<CapacityRow>(@"
+SELECT
+    LTRIM(RTRIM(CompanyName)) AS CompanyName,
+    ISNULL(TypeofBag, '') AS TypeofBag,
+    CAST(ISNULL(Qty, 0) AS float) AS QtyMt
+FROM Despatch.dbo.FIBCCapacityMaster WITH (NOLOCK)
+WHERE LTRIM(RTRIM(CompanyName)) IN @CompanyNames
+", new { CompanyNames = companyNames }, commandTimeout: 60)).ToList();
+        _cache.Set(CapacityCacheKey, rows, SharedMetaTtl);
+        return rows;
+    }
+
+    private async Task<List<ProdRow>> QueryProductionAsync(
+        DateTime asOfDate, DateTime monthStart, List<string> companyNames)
+    {
+        await using var connection = _database.CreateConnection();
+        var rows = await connection.QueryAsync<ProdRow>(@"
+SELECT
+    LTRIM(RTRIM(CompanyName)) AS CompanyName,
+    ISNULL(TYPEOFBAG, '') AS TypeOfBag,
+    CAST(SUM(CASE WHEN Sysdate >= @AsOf AND Sysdate < DATEADD(day, 1, @AsOf)
+        THEN ISNULL(BagPCS, 0) ELSE 0 END) AS float) AS TodayPcs,
+    CAST(SUM(CASE WHEN Sysdate >= @AsOf AND Sysdate < DATEADD(day, 1, @AsOf)
+        THEN ISNULL(BagWt, 0) ELSE 0 END) AS float) AS TodayWt,
+    CAST(SUM(ISNULL(BagPCS, 0)) AS float) AS MtdPcs,
+    CAST(SUM(ISNULL(BagWt, 0)) AS float) AS MtdWt
+FROM dbo.VW_FIBCBagwiseProduction WITH (NOLOCK)
+WHERE Sysdate >= @MonthStart AND Sysdate < DATEADD(day, 1, @AsOf)
+  AND LTRIM(RTRIM(CompanyName)) IN @CompanyNames
+GROUP BY LTRIM(RTRIM(CompanyName)), ISNULL(TYPEOFBAG, '')
+", new { AsOf = asOfDate, MonthStart = monthStart, CompanyNames = companyNames }, commandTimeout: 120);
+        return rows.ToList();
+    }
+
+    private async Task<List<PlannedRow>> QueryPlannedAsync(DateTime asOfDate, List<string> companyNames)
+    {
+        try
+        {
+            await using var connection = _database.CreateConnection();
+            var rows = await connection.QueryAsync<PlannedRow>(@"
+SELECT
+    LTRIM(RTRIM(Companyname)) AS CompanyName,
+    ISNULL(BagType, '') AS BagType,
+    CAST(SUM(ISNULL(poqty, qty)) AS float) AS PlannedQty
+FROM dbo.VW_MarketingLinePlanning WITH (NOLOCK)
+WHERE LTRIM(RTRIM(Companyname)) IN @CompanyNames
+  AND (startdate IS NULL OR startdate <= DATEADD(day, 45, @AsOf))
+  AND (CompletionDate IS NULL OR CompletionDate >= DATEADD(day, -7, @AsOf))
+GROUP BY LTRIM(RTRIM(Companyname)), ISNULL(BagType, '')
+", new { AsOf = asOfDate, CompanyNames = companyNames }, commandTimeout: 60);
+            return rows.ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private async Task<List<ValueRow>> GetValueRowsAsync(List<string> companyNames, bool refresh)
+    {
+        if (!refresh && _cache.TryGetValue(ValueCacheKey, out List<ValueRow>? cached) && cached != null)
+            return cached;
+
+        try
+        {
+            await using var connection = _database.CreateConnection();
+            var rows = (await connection.QueryAsync<ValueRow>(@"
+SELECT
+    LTRIM(RTRIM(i.ProductionCompanyName)) AS CompanyName,
+    CAST(SUM(ISNULL(i.Amount, 0)) AS float) AS Amount,
+    CAST(SUM(CASE WHEN ISNULL(i.netwt, 0) > 0 THEN i.netwt ELSE 0 END) AS float) AS NetWt
+FROM Despatch.dbo.MarketingInvItem i WITH (NOLOCK)
+WHERE LTRIM(RTRIM(ISNULL(i.ProductionCompanyName, ''))) IN @CompanyNames
+GROUP BY LTRIM(RTRIM(i.ProductionCompanyName))
+", new { CompanyNames = companyNames }, commandTimeout: 120)).ToList();
+            _cache.Set(ValueCacheKey, rows, SharedMetaTtl);
+            return rows;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static List<OrderBookUnitOption> NormalizeUnits(List<OrderBookUnitOption> raw) =>
+        raw
+            .Where(u => !string.IsNullOrWhiteSpace(u.CompanyName) && !string.IsNullOrWhiteSpace(u.Code))
+            .Select(u => new OrderBookUnitOption
+            {
+                Code = u.Code.Trim(),
+                CompanyName = u.CompanyName.Trim(),
+                Aliases = (u.Aliases ?? [])
+                    .Where(a => !string.IsNullOrWhiteSpace(a))
+                    .Select(a => a.Trim())
+                    .ToArray(),
+                IncludeBagKeywords = (u.IncludeBagKeywords ?? [])
+                    .Where(a => !string.IsNullOrWhiteSpace(a))
+                    .Select(a => a.Trim())
+                    .ToArray(),
+                BalanceSource = string.IsNullOrWhiteSpace(u.BalanceSource) ? "PartyOrder" : u.BalanceSource.Trim(),
+                MarketingPendingDays = u.MarketingPendingDays > 0 ? u.MarketingPendingDays : 50,
+                DefaultKgPerPc = u.DefaultKgPerPc > 0 ? u.DefaultKgPerPc : 2.55,
+                MarketingQtyShare = u.MarketingQtyShare,
+                RequireActivity = u.RequireActivity,
+                MegaOrderBalKg = u.MegaOrderBalKg > 0 ? u.MegaOrderBalKg : 50_000,
+                PartyOrderMaxAgeDays = u.PartyOrderMaxAgeDays,
+                Sort = u.Sort,
+            })
+            .OrderBy(u => u.Sort)
+            .ThenBy(u => u.Code)
+            .ToList();
+
+    private static bool IsMarketingSource(string? source) =>
+        string.Equals((source ?? "").Trim(), "MarketingPending", StringComparison.OrdinalIgnoreCase);
+
+    private static IEnumerable<string> UnitCompanyNames(OrderBookUnitOption unit)
+    {
+        yield return unit.CompanyName.Trim();
+        foreach (var a in unit.Aliases ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(a))
+                yield return a.Trim();
+        }
+    }
+
+    private static bool BagAllowedForUnit(OrderBookUnitOption unit, string? typeofBag)
+    {
+        var keys = unit.IncludeBagKeywords ?? [];
+        if (keys.Length == 0) return true;
+        var bag = (typeofBag ?? "").ToUpperInvariant();
+        return keys.Any(k => bag.Contains(k.Trim().ToUpperInvariant(), StringComparison.Ordinal));
+    }
+
+    private static string GuessBagGroupFromMarketing(string? itemDesc, string? commodity, OrderBookUnitOption unit)
+    {
+        if (unit.IncludeBagKeywords?.Any(k =>
+                k.Contains("LOOP", StringComparison.OrdinalIgnoreCase) == true) == true)
+            return "ONE LOOP/TWO LOOPS";
+        if (unit.IncludeBagKeywords?.Any(k =>
+                k.Contains("BUILDER", StringComparison.OrdinalIgnoreCase)
+                || k.Contains("TUNNEL", StringComparison.OrdinalIgnoreCase)) == true)
+        {
+            var blob = $"{itemDesc} {commodity}".ToUpperInvariant();
+            if (blob.Contains("TUNNEL")) return "TUNNEL";
+            if (blob.Contains("BUILDER")) return "BUILDER";
+            return "BUILDER";
+        }
+        return NormalizeBagGroup($"{itemDesc} {commodity}");
     }
 
     private static double Share(double part, double total) =>
@@ -489,12 +757,25 @@ GROUP BY LTRIM(RTRIM(i.ProductionCompanyName))
         public string TypeofBag { get; set; } = "";
         public string ContainerNo { get; set; } = "";
         public string Pono { get; set; } = "";
+        public DateTime OrderDate { get; set; }
         public double OrderQty { get; set; }
         public double OrderWt { get; set; }
         public double DespatchQty { get; set; }
         public double DespatchWt { get; set; }
         public double ReadyBags { get; set; }
         public double ReadyWt { get; set; }
+    }
+
+    private sealed class MarketingPendingRow
+    {
+        public string CompanyName { get; set; } = "";
+        public string ItemDesc { get; set; } = "";
+        public string Commodity { get; set; } = "";
+        public string MarketingInvNo { get; set; } = "";
+        public string ItemNo { get; set; } = "";
+        public double PendingQty { get; set; }
+        public double DespatchQty { get; set; }
+        public DateTime OrderDate { get; set; }
     }
 
     private sealed class CapacityRow

@@ -8,11 +8,11 @@ export const BILL_PAYMENT_ENTRY_ENABLED = true;
  * Add a username here AND in appsettings to grant access.
  */
 export const ORDER_BOOK_SUMMARY_ALLOWED_USERS = [
-  "admin",
-  "gautam",
-  "prateek",
-  "manish",
-  "jinal",
+  "aman",
+  "anil",
+  "dilendra",
+  "prakash",
+  "pritesh",
 ] as const;
 
 export function canAccessOrderBookSummary(username?: string | null): boolean {
