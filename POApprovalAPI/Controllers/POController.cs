@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using POApprovalAPI.Services;
 using POApprovalAPI.Models;
 using System.Text.Json;
+using System.Linq;
 namespace POApprovalAPI.Controllers;
 
 [ApiController]
@@ -109,25 +110,106 @@ public async Task<IActionResult> GetDetails([FromQuery] string poNo)
 {
     using var connection = _database.CreateConnection();
 
-   var data = await connection.QueryAsync(
-    @"SELECT
-        v.PurchaseCode,
-        v.FirmName,
-        v.ItemDesc,
-        v.Qty,
-        v.Rate,
-        v.Total,
-        v.DepttName,
-        v.deliverydate,
-        v.Currency,
-        p.TotalAmount
-      FROM Vw_PurchaseOrder v
-      LEFT JOIN PurchasePayment p
-        ON v.PurchaseCode = p.PurchaseCode
-      WHERE v.PurchaseCode = @poNo",
-    new { poNo });
+    var items = (await connection.QueryAsync(
+        @"SELECT
+            v.PurchaseCode,
+            v.FirmName,
+            v.ItemCode,
+            v.ItemDesc,
+            v.Qty,
+            v.Rate,
+            v.Total,
+            v.DepttName,
+            v.deliverydate,
+            v.Currency,
+            p.TotalAmount
+          FROM Vw_PurchaseOrder v
+          LEFT JOIN PurchasePayment p
+            ON v.PurchaseCode = p.PurchaseCode
+          WHERE v.PurchaseCode = @poNo",
+        new { poNo })).ToList();
 
-    return Ok(data);
+    // Previous rates for the same ItemCode:
+    // 1) VendorRate = quoted unit rates (common on spare/store POs)
+    // 2) Prior Vw_PurchaseOrder = last purchased rates (needed for RAW/WIP where VendorRate is empty)
+    // Use Rate (unit rate / qty). Do NOT use NegoRate — it is often qty * rate.
+    var itemCodes = items
+        .Select(i => ((string?)i.ItemCode)?.Trim())
+        .Where(c => !string.IsNullOrWhiteSpace(c))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Cast<string>()
+        .ToList();
+
+    IEnumerable<dynamic> previousQuotes = Array.Empty<dynamic>();
+    if (itemCodes.Count > 0)
+    {
+        previousQuotes = await connection.QueryAsync(
+            @"SELECT
+                ItemCode,
+                Vendor,
+                Rate,
+                Qty,
+                Unit,
+                QuotedOn,
+                Source,
+                PreviousPoNo
+              FROM (
+                SELECT
+                  u.ItemCode,
+                  u.Vendor,
+                  u.Rate,
+                  u.Qty,
+                  u.Unit,
+                  u.QuotedOn,
+                  u.Source,
+                  u.PreviousPoNo,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY u.ItemCode, u.Vendor
+                    ORDER BY u.QuotedOn DESC
+                  ) AS rn
+                FROM (
+                  SELECT
+                    vr.ItemCode,
+                    vr.FirmName AS Vendor,
+                    vr.Rate AS Rate,
+                    vr.Qty,
+                    vr.Unit,
+                    vr.Sysdate AS QuotedOn,
+                    CAST('Quote' AS varchar(20)) AS Source,
+                    CAST(NULL AS varchar(50)) AS PreviousPoNo
+                  FROM VendorRate vr WITH (NOLOCK)
+                  WHERE vr.ItemCode IN @itemCodes
+                    AND vr.Rate IS NOT NULL
+                    AND vr.Rate <> 0
+
+                  UNION ALL
+
+                  SELECT
+                    po.ItemCode,
+                    po.FirmName AS Vendor,
+                    po.Rate AS Rate,
+                    po.Qty,
+                    po.Unit,
+                    po.deliverydate AS QuotedOn,
+                    CAST('Previous PO' AS varchar(20)) AS Source,
+                    po.PurchaseCode AS PreviousPoNo
+                  FROM Vw_PurchaseOrder po WITH (NOLOCK)
+                  WHERE po.ItemCode IN @itemCodes
+                    AND po.PurchaseCode <> @poNo
+                    AND po.Rate IS NOT NULL
+                    AND po.Rate <> 0
+                ) u
+              ) q
+              WHERE q.rn = 1
+              ORDER BY QuotedOn DESC",
+            new { itemCodes, poNo });
+    }
+
+    return Ok(new
+    {
+        items,
+        previousQuotes,
+    });
 }
 
 [HttpGet("approval")]

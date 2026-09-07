@@ -47,8 +47,8 @@ function PODetails() {
   const [pdfError, setPdfError] = useState<string | null>(null);
 
   // Fetch PO details with React Query (cache indefinitely - immutable data)
-  const { data: poData, isLoading: poLoading } = useQuery({
-    queryKey: ['po-details', poNo],
+  const { data: poPayload, isLoading: poLoading } = useQuery({
+    queryKey: ['po-details', poNo, 'prev-rates-v2'],
     queryFn: async () => {
       const response = await fetch(getApiUrl(`/api/PO/details?poNo=${encodeURIComponent(poNo)}`));
       if (!response.ok) throw new Error('Failed to fetch PO details');
@@ -97,7 +97,14 @@ function PODetails() {
   }, [poNo]);
 
   // Transform data to match original format
-  const po = poData;
+  const po = Array.isArray(poPayload)
+    ? poPayload
+    : Array.isArray(poPayload?.items)
+      ? poPayload.items
+      : undefined;
+  const previousQuotes: any[] = Array.isArray(poPayload?.previousQuotes)
+    ? poPayload.previousQuotes
+    : [];
   const poDetails = Array.isArray(po) ? po[0] : po;
   const approval = approvalData;
   const workflow = Array.isArray(workflowData) ? workflowData : [];
@@ -351,6 +358,33 @@ function PODetails() {
 
   const grandTotal = Number(poDetails?.TotalAmount || 0);
   const currency = poDetails?.Currency;
+  const curLabel = currencyLabel(currency);
+
+  function formatQuoteDate(value?: string | null) {
+    if (!value) return "—";
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  }
+
+  function quotesForItem(item: any) {
+    const code = String(item.ItemCode ?? "").trim().toLowerCase();
+    const desc = String(item.ItemDesc ?? "").trim().toLowerCase();
+    return previousQuotes.filter((q) => {
+      const qCode = String(q.ItemCode ?? "").trim().toLowerCase();
+      const qDesc = String(q.ItemDesc ?? "").trim().toLowerCase();
+      if (code && qCode) return qCode === code;
+      if (!code && desc && qDesc) return qDesc === desc;
+      if (code && qDesc && !qCode) return qDesc === desc;
+      return false;
+    });
+  }
+
+  const quoteGroups = (Array.isArray(po) ? po : []).map((item: any, index: number) => ({
+    key: `${item.ItemCode ?? "item"}-${index}`,
+    item,
+    quotes: quotesForItem(item),
+  }));
 
   const headerItems = [
     { icon: Hash, label: "PO Number", value: poDetails.PurchaseCode },
@@ -417,11 +451,16 @@ function PODetails() {
               <ul className="divide-y divide-border">
                 {po.map((item: any, index: number) => (
                   <li key={index} className="space-y-1.5 px-3 py-3">
+                    {item.ItemCode ? (
+                      <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        {item.ItemCode}
+                      </div>
+                    ) : null}
                     <div className="text-sm font-medium leading-snug">{item.ItemDesc}</div>
                     <div className="text-xs text-muted-foreground">
                       Qty {item.Qty}
                       <span className="mx-1.5 text-border">·</span>
-                      Rate {formatMoneyAmount(item.Rate)} {currencyLabel(currency)}
+                      Rate {formatMoneyAmount(item.Rate)} {curLabel}
                     </div>
                     <div className="flex items-baseline justify-between gap-3 pt-0.5">
                       <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Amount</span>
@@ -447,14 +486,21 @@ function PODetails() {
                   <tr>
                     <th className="px-3 py-2 font-medium">Item</th>
                     <th className="px-3 py-2 text-right font-medium">Qty</th>
-                    <th className="px-3 py-2 text-right font-medium">Rate({currencyLabel(currency)})</th>
-                    <th className="px-3 py-2 text-right font-medium">Amount({currencyLabel(currency)})</th>
+                    <th className="px-3 py-2 text-right font-medium">Rate({curLabel})</th>
+                    <th className="px-3 py-2 text-right font-medium">Amount({curLabel})</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {po.map((item: any, index: number) => (
                     <tr key={index}>
-                      <td className="px-3 py-2">{item.ItemDesc}</td>
+                      <td className="px-3 py-2">
+                        {item.ItemCode ? (
+                          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            {item.ItemCode}
+                          </div>
+                        ) : null}
+                        <div>{item.ItemDesc}</div>
+                      </td>
                       <td className="px-3 py-2 text-right">{item.Qty}</td>
                       <td className="px-3 py-2 text-right">
                         {formatMoneyAmount(item.Rate)}
@@ -475,6 +521,121 @@ function PODetails() {
                 </tfoot>
               </table>
             </div>
+          </Section>
+
+          {/* Separate section: previous vendor quotes for the same items */}
+          <Section title="Previous vendor quotes">
+            <p className="text-sm text-muted-foreground">
+              For the same items — earlier vendor quotes (VendorRate) and previous PO rates, with rate per qty.
+            </p>
+
+            {quoteGroups.length === 0 ? (
+              <p className="mt-3 text-sm text-muted-foreground">No items on this PO.</p>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {quoteGroups.map(({ key, item, quotes }) => (
+                  <div key={key} className="overflow-hidden rounded-xl border border-border">
+                    <div className="border-b border-border bg-secondary/30 px-3 py-2.5">
+                      <div className="text-sm font-medium leading-snug">{item.ItemDesc}</div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        This PO: {formatMoneyAmount(item.Rate)} {curLabel}
+                        {item.Qty != null ? ` · Qty ${item.Qty}` : ""}
+                        {item.FirmName ? ` · ${item.FirmName}` : ""}
+                      </div>
+                    </div>
+
+                    {quotes.length === 0 ? (
+                      <p className="px-3 py-3 text-xs text-muted-foreground">
+                        No earlier vendor quotes found for this item.
+                      </p>
+                    ) : (
+                      <>
+                        {/* Mobile */}
+                        <ul className="divide-y divide-border md:hidden">
+                          {quotes.map((q: any, qi: number) => {
+                            const unitLabel = q.Unit ? String(q.Unit).trim() : "unit";
+                            return (
+                              <li key={qi} className="space-y-1 px-3 py-2.5">
+                                <div className="text-sm font-medium leading-snug">
+                                  {q.Vendor?.trim() || "Unknown vendor"}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  Rate{" "}
+                                  <span className="font-semibold text-foreground tabular-nums">
+                                    {q.Rate != null
+                                      ? `${formatMoneyAmount(q.Rate)} ${curLabel} / ${unitLabel}`
+                                      : "—"}
+                                  </span>
+                                  {q.Qty != null ? (
+                                    <>
+                                      <span className="mx-1.5 text-border">·</span>
+                                      Qty {q.Qty}
+                                      {q.Unit ? ` ${String(q.Unit).trim()}` : ""}
+                                    </>
+                                  ) : null}
+                                  <span className="mx-1.5 text-border">·</span>
+                                  {formatQuoteDate(q.QuotedOn)}
+                                  {q.Source ? (
+                                    <>
+                                      <span className="mx-1.5 text-border">·</span>
+                                      {q.Source}
+                                    </>
+                                  ) : null}
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+
+                        {/* Desktop */}
+                        <div className="hidden overflow-x-auto md:block">
+                          <table className="w-full text-sm">
+                            <thead className="bg-secondary/20 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                              <tr>
+                                <th className="px-3 py-2 font-medium">Vendor</th>
+                                <th className="px-3 py-2 text-right font-medium">Rate (per unit)</th>
+                                <th className="px-3 py-2 text-right font-medium">Qty</th>
+                                <th className="px-3 py-2 font-medium">Date</th>
+                                <th className="px-3 py-2 font-medium">Source</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border">
+                              {quotes.map((q: any, qi: number) => {
+                                const unitLabel = q.Unit ? String(q.Unit).trim() : "unit";
+                                return (
+                                  <tr key={qi}>
+                                    <td className="px-3 py-2 font-medium">
+                                      {q.Vendor?.trim() || "—"}
+                                    </td>
+                                    <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                                      {q.Rate != null
+                                        ? `${formatMoneyAmount(q.Rate)} / ${unitLabel}`
+                                        : "—"}
+                                    </td>
+                                    <td className="px-3 py-2 text-right tabular-nums">
+                                      {q.Qty != null
+                                        ? `${q.Qty}${q.Unit ? ` ${String(q.Unit).trim()}` : ""}`
+                                        : "—"}
+                                    </td>
+                                    <td className="px-3 py-2 whitespace-nowrap">
+                                      {formatQuoteDate(q.QuotedOn)}
+                                    </td>
+                                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                                      {q.Source || "—"}
+                                      {q.PreviousPoNo ? ` · ${q.PreviousPoNo}` : ""}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </Section>
 
           {/* Section B: PDF */}
