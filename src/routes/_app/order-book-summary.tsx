@@ -120,11 +120,11 @@ function OrderBookSummaryPage() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+    <div className="flex flex-col gap-3 md:min-h-0 md:flex-1 md:overflow-hidden">
       <div className="flex shrink-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2 text-primary">
-            <BookMarked className="h-5 w-5" />
+            <BookMarked className="h-5 w-5 shrink-0" />
             <p className="text-xs font-semibold uppercase tracking-wide">Order Book</p>
           </div>
           <h1 className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">
@@ -137,8 +137,8 @@ function OrderBookSummaryPage() {
             </p>
           ) : null}
         </div>
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="min-w-[14rem] space-y-1">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="min-w-0 flex-1 space-y-1 sm:min-w-[14rem]">
             <Label htmlFor="obs-company" className="text-xs text-muted-foreground">
               Company / unit
             </Label>
@@ -147,7 +147,7 @@ function OrderBookSummaryPage() {
               value={selectedUnit}
               onChange={(e) => setSelectedUnit(e.target.value)}
               disabled={!data && units.length === 0}
-              className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+              className="h-11 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 sm:h-10"
             >
               <option value={ALL_COMPANIES}>
                 All companies
@@ -160,36 +160,40 @@ function OrderBookSummaryPage() {
               ))}
             </select>
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="obs-asof" className="text-xs text-muted-foreground">
-              As of
-            </Label>
-            <input
-              id="obs-asof"
-              type="date"
-              value={asOf}
-              onChange={(e) => setAsOf(e.target.value)}
-              className="h-10 rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
-            />
+          <div className="flex gap-2">
+            <div className="min-w-0 flex-1 space-y-1 sm:flex-none">
+              <Label htmlFor="obs-asof" className="text-xs text-muted-foreground">
+                As of
+              </Label>
+              <input
+                id="obs-asof"
+                type="date"
+                value={asOf}
+                onChange={(e) => setAsOf(e.target.value)}
+                className="h-11 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 sm:h-10 sm:w-auto"
+              />
+            </div>
+            <div className="flex flex-col justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-11 sm:h-10"
+                disabled={summaryQuery.isFetching}
+                onClick={() => {
+                  forceRefreshRef.current = true;
+                  setRefreshToken((n) => n + 1);
+                  toast.message("Refreshing from ERP…");
+                }}
+              >
+                {summaryQuery.isFetching ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                <span className="ml-1.5 sm:ml-0">Refresh</span>
+              </Button>
+            </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-10"
-            disabled={summaryQuery.isFetching}
-            onClick={() => {
-              forceRefreshRef.current = true;
-              setRefreshToken((n) => n + 1);
-              toast.message("Refreshing from ERP…");
-            }}
-          >
-            {summaryQuery.isFetching ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4" />
-            )}
-            Refresh
-          </Button>
         </div>
       </div>
 
@@ -218,7 +222,7 @@ function OrderBookSummaryPage() {
       ) : null}
 
       {!showLoadingOverlay && unit ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+        <div className="flex flex-col gap-3 md:min-h-0 md:flex-1 md:overflow-hidden">
           <div className="shrink-0 rounded-xl border border-border bg-[#0B3A5B] px-4 py-3 text-white">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <div className="min-w-0">
@@ -248,8 +252,8 @@ function OrderBookSummaryPage() {
             ))}
           </div>
 
-          {/* Mobile: bag-family cards */}
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto md:hidden">
+          {/* Mobile: bag-family cards — page scroll (not nested) */}
+          <div className="space-y-2 pb-4 md:hidden">
             {unit.lines.length === 0 ? (
               <div className="rounded-2xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
                 No bag-family lines for this company.
@@ -331,7 +335,7 @@ function AllCompaniesView({
   onSelectUnit: (code: string) => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+    <div className="flex flex-col gap-3 md:min-h-0 md:flex-1 md:overflow-hidden">
       <div className="shrink-0 rounded-xl border border-border bg-[#0B3A5B] px-4 py-3 text-white">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <div>
@@ -358,14 +362,14 @@ function AllCompaniesView({
         ))}
       </div>
 
-      {/* Mobile: plant cards */}
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto md:hidden">
+      {/* Mobile: plant cards — scroll with main (not nested overflow) */}
+      <div className="space-y-2 pb-4 md:hidden">
         {units.map((u) => (
           <button
             key={u.unitCode}
             type="button"
             onClick={() => onSelectUnit(u.unitCode)}
-            className="block w-full min-w-0 rounded-2xl border border-border bg-card p-4 text-left shadow-soft active:scale-[.99]"
+            className="block w-full min-w-0 touch-manipulation rounded-2xl border border-border bg-card p-4 text-left shadow-soft active:scale-[.99]"
           >
             <div className="flex min-w-0 items-start justify-between gap-2">
               <div className="min-w-0 flex-1">

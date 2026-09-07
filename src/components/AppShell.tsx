@@ -519,14 +519,16 @@ export function AppShell() {
             "w-full min-w-0 max-w-full overflow-x-hidden px-4 py-5 transition-[margin-left] duration-300 ease-in-out md:px-6 md:py-8 lg:px-8",
             sidebarCollapsed ? "md:ml-[4.5rem]" : "md:ml-64",
             fullScreenReport &&
-              "flex min-h-0 flex-1 flex-col overflow-hidden px-2 py-2 sm:px-3 sm:py-2.5 md:h-auto md:px-3 md:py-3 lg:px-4",
+              // Mobile: scroll the report body (cards). Desktop: keep overflow locked for sticky table heads.
+              "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] sm:px-3 sm:py-2.5 md:h-auto md:overflow-hidden md:px-3 md:py-3 md:pb-3 lg:px-4",
           )}
           id="main-content"
         >
           <div
             className={cn(
               "mx-auto w-full max-w-7xl",
-              fullScreenReport && "flex min-h-0 max-w-none flex-1 flex-col",
+              // Mobile: let content grow so <main> can scroll. Desktop: fill height for table panes.
+              fullScreenReport && "flex max-w-none flex-col md:min-h-0 md:flex-1 md:overflow-hidden",
             )}
           >
             <Outlet />
