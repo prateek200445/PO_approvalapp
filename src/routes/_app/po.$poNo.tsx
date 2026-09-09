@@ -2,7 +2,7 @@ import { useAuth } from "@/lib/auth-context";
 import { getApiUrl } from "@/lib/api-config";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
-import { ArrowLeft, FileText, Download, CheckCircle2, XCircle, Building2, Calendar, User as UserIcon, Hash, IndianRupee, Briefcase, ExternalLink, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader2 } from "lucide-react";
+import { ArrowLeft, FileText, Download, CheckCircle2, XCircle, Building2, Calendar, User as UserIcon, Hash, IndianRupee, Briefcase, ClipboardList, ExternalLink, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Loader2 } from "lucide-react";
 import { currencyLabel, formatMoney, formatMoneyAmount, type ApprovalStep } from "@/lib/mock-data";
 import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
@@ -56,15 +56,30 @@ function PODetails() {
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
-  // Fetch PO details with React Query (cache indefinitely - immutable data)
+  // Fetch PO details fast (indent + lines). Previous quotes load separately.
   const { data: poPayload, isLoading: poLoading } = useQuery({
-    queryKey: ['po-details', poNo, 'prev-rates-v2'],
+    queryKey: ['po-details', poNo, 'indent-info-v2'],
     queryFn: async () => {
-      const response = await fetch(getApiUrl(`/api/PO/details?poNo=${encodeURIComponent(poNo)}`));
+      const response = await fetch(
+        getApiUrl(`/api/PO/details?poNo=${encodeURIComponent(poNo)}&includePreviousQuotes=false`),
+      );
       if (!response.ok) throw new Error('Failed to fetch PO details');
       return response.json();
     },
-    staleTime: Infinity, // Cache indefinitely
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const { data: previousQuotesPayload } = useQuery({
+    queryKey: ['po-previous-quotes', poNo, 'v1'],
+    queryFn: async () => {
+      const response = await fetch(
+        getApiUrl(`/api/PO/previous-quotes?poNo=${encodeURIComponent(poNo)}`),
+      );
+      if (!response.ok) throw new Error('Failed to fetch previous quotes');
+      return response.json();
+    },
+    enabled: !!poNo,
+    staleTime: 1000 * 60 * 10,
   });
 
   // Fetch approval data with React Query
@@ -114,16 +129,47 @@ function PODetails() {
     : Array.isArray(poPayload?.items)
       ? poPayload.items
       : undefined;
-  const previousQuotes: any[] = Array.isArray(poPayload?.previousQuotes)
-    ? poPayload.previousQuotes
-    : [];
+  const previousQuotes: any[] = Array.isArray(previousQuotesPayload)
+    ? previousQuotesPayload
+    : Array.isArray(poPayload?.previousQuotes)
+      ? poPayload.previousQuotes
+      : [];
   const poDetails = Array.isArray(po) ? po[0] : po;
+  const indentInfo = poPayload?.indent && typeof poPayload.indent === "object"
+    ? poPayload.indent
+    : null;
+  const indentNo =
+    String(
+      indentInfo?.indentNo ??
+        poDetails?.indentNo ??
+        poDetails?.IndentNo ??
+        poDetails?.storeCode ??
+        poDetails?.StoreCode ??
+        "",
+    ).trim() || null;
+  const indentRemarksRaw =
+    String(
+      indentInfo?.indentRemarks ??
+        poDetails?.indentRemarks ??
+        poDetails?.IndentRemarks ??
+        "",
+    ).trim() || null;
+  const indentPurposeText =
+    String(
+      indentInfo?.indentPurpose ??
+        poDetails?.indentPurpose ??
+        poDetails?.IndentPurpose ??
+        "",
+    ).trim() || null;
+  const indentRemarks = indentRemarksRaw || indentPurposeText;
   const approval = approvalData;
   const workflow = Array.isArray(workflowData) ? workflowData : [];
   const loading = poLoading;
 
-  // Dynamically load PDF.js from CDN and fetch PDF buffer
+  // Dynamically load PDF.js from CDN and fetch PDF buffer (after header data is ready)
   useEffect(() => {
+    if (poLoading || !poDetails) return;
+
     let isMounted = true;
 
     const loadPdf = async () => {
@@ -173,7 +219,7 @@ function PODetails() {
     return () => {
       isMounted = false;
     };
-  }, [poNo]);
+  }, [poNo, poLoading, poDetails?.PurchaseCode]);
 
   // Automatically adjust scale to fit container width on load
   useEffect(() => {
@@ -439,6 +485,12 @@ function PODetails() {
     { icon: Briefcase, label: "Department", value: poDetails.DepttName },
     { icon: UserIcon, label: "Requested By", value: poDetails.FirmName },
     {
+      icon: ClipboardList,
+      label: "Indent Number",
+      value: indentNo || "—",
+      linkTo: indentNo ? (`/indent/${encodeURIComponent(indentNo)}` as const) : undefined,
+    },
+    {
       icon: IndianRupee,
       label: "PO Amount",
       value: formatMoney(grandTotal, currency),
@@ -477,11 +529,49 @@ function PODetails() {
               <h.icon className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
               <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{h.label}</div>
-                <div className={`truncate text-sm ${h.strong ? "font-semibold tabular-nums" : "font-medium"}`}>{h.value}</div>
+                {"linkTo" in h && h.linkTo && indentNo ? (
+                  <Link
+                    to="/indent/$indentNo"
+                    params={{ indentNo }}
+                    className={`truncate text-sm text-primary underline-offset-2 hover:underline ${h.strong ? "font-semibold tabular-nums" : "font-medium"}`}
+                  >
+                    {h.value}
+                  </Link>
+                ) : (
+                  <div className={`truncate text-sm ${h.strong ? "font-semibold tabular-nums" : "font-medium"}`}>{h.value}</div>
+                )}
               </div>
             </div>
           ))}
         </div>
+        {(indentRemarks || indentPurposeText) && (
+          <div className="mt-4 space-y-2 border-t border-border pt-4">
+            {indentRemarks ? (
+              <div className="flex items-start gap-2.5">
+                <FileText className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                <div className="min-w-0">
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                    {indentRemarksRaw ? "Indent Remarks" : "Indent Purpose"}
+                  </div>
+                  <p className="mt-0.5 whitespace-pre-wrap text-sm font-medium leading-snug">
+                    {indentRemarks}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+            {indentRemarksRaw && indentPurposeText && indentPurposeText !== indentRemarksRaw ? (
+              <div className="flex items-start gap-2.5">
+                <ClipboardList className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                <div className="min-w-0">
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Indent Purpose</div>
+                  <p className="mt-0.5 whitespace-pre-wrap text-sm font-medium leading-snug">
+                    {indentPurposeText}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
       </div>
 
       <div className="grid gap-5 lg:grid-cols-3 min-w-0 w-full">
