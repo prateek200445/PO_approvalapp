@@ -41,7 +41,8 @@ SELECT
     a.ApprovalDate,
     a.TransId,
     MAX(ISNULL(p.TotalAmount,0)) AS Total,
-    MAX(v.FirmName) AS FirmName
+    MAX(v.FirmName) AS FirmName,
+    MAX(NULLIF(LTRIM(RTRIM(v.CompanyName)), N'')) AS CompanyName
 FROM ApprovePO a
 LEFT JOIN Vw_PurchaseOrder v
     ON a.PoNo = v.PurchaseCode
@@ -75,7 +76,8 @@ SELECT
     a.ApprovalDate,
     a.TransId,
     MAX(ISNULL(p.TotalAmount,0)) AS Total,
-    MAX(v.FirmName) AS FirmName
+    MAX(v.FirmName) AS FirmName,
+    MAX(NULLIF(LTRIM(RTRIM(v.CompanyName)), N'')) AS CompanyName
 FROM ApprovePOHOD a
 LEFT JOIN Vw_PurchaseOrder v
     ON a.PoNo = v.PurchaseCode

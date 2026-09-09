@@ -26,6 +26,7 @@ function PendingList() {
   const [amount, setAmount] = useState("");
   const [filterType, setFilterType] = useState("gte");
   const [status, setStatus] = useState<"All" | POStatus>("Pending");
+  const [company, setCompany] = useState("All");
   const [sortDesc, setSortDesc] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
@@ -65,16 +66,29 @@ function PendingList() {
 
   const pendingPOs = Array.isArray(pendingPOsData) ? pendingPOsData : [];
 
+  const companyOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const row of pendingPOs) {
+      const name = String(row.CompanyName ?? row.companyName ?? "").trim();
+      if (name) names.add(name);
+    }
+    return ["All", ...Array.from(names).sort((a, b) => a.localeCompare(b))];
+  }, [pendingPOs]);
+
   const filtered = pendingPOs
     .filter((p) => {
       const search = q.toLowerCase();
+      const rowCompany = String(p.CompanyName ?? p.companyName ?? "").trim();
 
       const matchesSearch =
         p.PoNo?.toLowerCase().includes(search) ||
         p.ApprovalName?.toLowerCase().includes(search) ||
+        p.FirmName?.toLowerCase().includes(search) ||
+        rowCompany.toLowerCase().includes(search) ||
         p.Status?.toLowerCase().includes(search) ||
         String(p.Total || "").includes(search);
       const matchesStatus = status === "All" || p.Status === status;
+      const matchesCompany = company === "All" || rowCompany === company;
 
       const poAmount = Number(p.Total || 0);
       const enteredAmount = Number(amount || 0);
@@ -86,7 +100,7 @@ function PendingList() {
             ? poAmount >= enteredAmount
             : poAmount <= enteredAmount;
 
-      return matchesSearch && matchesStatus && matchesAmount;
+      return matchesSearch && matchesStatus && matchesCompany && matchesAmount;
     })
     .sort((a, b) =>
       sortDesc
@@ -96,7 +110,13 @@ function PendingList() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [q, amount, status, filterType, sortDesc]);
+  }, [q, amount, status, company, filterType, sortDesc]);
+
+  useEffect(() => {
+    if (company !== "All" && !companyOptions.includes(company)) {
+      setCompany("All");
+    }
+  }, [company, companyOptions]);
 
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -574,6 +594,18 @@ function PendingList() {
             <option value="gte">≥</option>
             <option value="lte">≤</option>
           </select>
+          <select
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            className="h-10 w-full min-w-0 rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 md:max-w-xs"
+            aria-label="Filter by company"
+          >
+            {companyOptions.map((name) => (
+              <option key={name} value={name}>
+                {name === "All" ? "All companies" : name}
+              </option>
+            ))}
+          </select>
           <div className="relative flex-1 md:flex-none">
             <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <select
@@ -622,6 +654,15 @@ function PendingList() {
                 <X className="h-3 w-3" />
               </button>
             )}
+            {company !== "All" && (
+              <button
+                onClick={() => setCompany("All")}
+                className="inline-flex max-w-[10rem] items-center gap-1 rounded-full bg-primary/20 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/30 transition"
+              >
+                <span className="truncate">{company}</span>
+                <X className="h-3 w-3 shrink-0" />
+              </button>
+            )}
             {amount && (
               <button
                 onClick={() => setAmount("")}
@@ -639,9 +680,9 @@ function PendingList() {
           >
             <Filter className="h-4 w-4" />
             <span className="text-xs">Filters</span>
-            {(status !== "All" || amount) && (
+            {(status !== "All" || company !== "All" || amount) && (
               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-                {(status !== "All" ? 1 : 0) + (amount ? 1 : 0)}
+                {(status !== "All" ? 1 : 0) + (company !== "All" ? 1 : 0) + (amount ? 1 : 0)}
               </span>
             )}
           </button>
@@ -700,17 +741,27 @@ function PendingList() {
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-semibold">{p.PoNo}</div>
                           <div className="mt-0.5 truncate text-sm text-muted-foreground">
-                            {p.FirmName || p.ApprovalName}
+                            {p.FirmName || p.ApprovalName || "—"}
                           </div>
                         </div>
                         <StatusBadge status={p.Status} />
                       </div>
-                      <div className="mt-3 flex min-w-0 items-end justify-between gap-2">
-                        <div className="min-w-0 truncate text-xs text-muted-foreground">
-                          {formatShortDate(p.PODate)}
+                      <div className="mt-3 space-y-1.5 border-t border-border/70 pt-3">
+                        <div className="flex min-w-0 items-baseline justify-between gap-3">
+                          <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground">
+                            Company
+                          </span>
+                          <span className="truncate text-sm font-medium">
+                            {p.CompanyName || p.companyName || "—"}
+                          </span>
                         </div>
-                        <div className="shrink-0 text-base font-semibold tabular-nums">
-                          {formatINR(p.Total || 0)}
+                        <div className="flex min-w-0 items-end justify-between gap-3">
+                          <span className="min-w-0 truncate text-xs text-muted-foreground">
+                            {formatShortDate(p.PODate)}
+                          </span>
+                          <span className="shrink-0 text-base font-semibold tabular-nums">
+                            {formatINR(p.Total || 0)}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -731,17 +782,27 @@ function PendingList() {
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold">{p.PoNo}</div>
                     <div className="mt-0.5 truncate text-sm text-muted-foreground">
-                      {p.FirmName || p.ApprovalName}
+                      {p.FirmName || p.ApprovalName || "—"}
                     </div>
                   </div>
                   <StatusBadge status={p.Status} />
                 </div>
-                <div className="mt-3 flex min-w-0 items-end justify-between gap-2">
-                  <div className="min-w-0 truncate text-xs text-muted-foreground">
-                    {formatShortDate(p.PODate)}
+                <div className="mt-3 space-y-1.5 border-t border-border/70 pt-3">
+                  <div className="flex min-w-0 items-baseline justify-between gap-3">
+                    <span className="shrink-0 text-[11px] uppercase tracking-wide text-muted-foreground">
+                      Company
+                    </span>
+                    <span className="truncate text-sm font-medium">
+                      {p.CompanyName || p.companyName || "—"}
+                    </span>
                   </div>
-                  <div className="shrink-0 text-base font-semibold tabular-nums">
-                    {formatINR(p.Total || 0)}
+                  <div className="flex min-w-0 items-end justify-between gap-3">
+                    <span className="min-w-0 truncate text-xs text-muted-foreground">
+                      {formatShortDate(p.PODate)}
+                    </span>
+                    <span className="shrink-0 text-base font-semibold tabular-nums">
+                      {formatINR(p.Total || 0)}
+                    </span>
                   </div>
                 </div>
               </Link>
@@ -776,6 +837,7 @@ function PendingList() {
                 )}
                 <th className="px-4 py-3 font-medium">PO Number</th>
                 <th className="px-4 py-3 font-medium">Vendor</th>
+                <th className="px-4 py-3 font-medium">Company</th>
                 <th className="px-4 py-3 font-medium">Date</th>
                 <th className="px-4 py-3 text-right font-medium">Amount</th>
                 <th className="px-4 py-3 font-medium">Status</th>
@@ -818,6 +880,9 @@ function PendingList() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{p.FirmName || p.ApprovalName}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {p.CompanyName || p.companyName || "—"}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">{p.PODate}</td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums">
                       {formatINR(p.Total || 0)}
@@ -1029,6 +1094,24 @@ function PendingList() {
             </div>
 
             <div className="mb-5 space-y-2">
+              <label className="text-sm font-medium" htmlFor="mobile-po-company">
+                Company
+              </label>
+              <select
+                id="mobile-po-company"
+                value={company}
+                onChange={(e) => setCompany(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+              >
+                {companyOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name === "All" ? "All companies" : name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mb-5 space-y-2">
               <label className="text-sm font-medium">Amount</label>
               <div className="flex gap-2">
                 <input
@@ -1080,6 +1163,7 @@ function PendingList() {
                   setAmount("");
                   setFilterType("gte");
                   setStatus("All");
+                  setCompany("All");
                   setSortDesc(true);
                   setCurrentPage(1);
                 }}

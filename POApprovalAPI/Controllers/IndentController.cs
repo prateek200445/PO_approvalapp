@@ -27,7 +27,8 @@ public async Task<IActionResult> GetPending(
         @"SELECT
             IndentNo,
             MAX(IndentDate) AS IndentDate,
-            COUNT(*) AS TotalItems
+            COUNT(*) AS TotalItems,
+            CAST(N'Pending' AS nvarchar(20)) AS Status
           FROM ApproveIndent
           WHERE ApprovalName = @username
             AND Status = 'Pending'

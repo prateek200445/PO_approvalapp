@@ -61,7 +61,8 @@ function PendingList() {
       String(p.TotalItems || "").includes(search);
 
     const matchesStatus =
-      status === "All" || p.Status === status;
+      status === "All" ||
+      (p.Status ?? p.status ?? "Pending") === status;
 
     return matchesSearch && matchesStatus;
   })
@@ -205,9 +206,16 @@ function PendingList() {
                 className="mt-1 shrink-0"
               />
               <div className="min-w-0 flex-1">
-                <div className="truncate font-semibold">{p.IndentNo}</div>
-                <div className="mt-0.5 truncate text-sm text-muted-foreground">
-                  {p.TotalItems} Items
+                <div className="flex min-w-0 items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-semibold">{p.IndentNo}</div>
+                    <div className="mt-0.5 truncate text-sm text-muted-foreground">
+                      {p.TotalItems} item{Number(p.TotalItems) === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
+                    {p.Status ?? p.status ?? "Pending"}
+                  </span>
                 </div>
                 <div className="mt-3 truncate text-xs text-muted-foreground">
                   {formatShortDate(p.IndentDate)}
