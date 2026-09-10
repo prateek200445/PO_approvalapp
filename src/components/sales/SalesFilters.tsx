@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { SalesCompanyOption, SalesDashboardFilters, SalesReportCategory } from "@/lib/sales-dashboard-types";
+import type { SalesCompanyOption, SalesDashboardFilters, SalesReportCategory, SalesDashboardSection } from "@/lib/sales-dashboard-types";
 import { indianFyDateRange, indianFyStartYear } from "@/lib/sales-dashboard-api";
 import { Button } from "@/components/ui/button";
 import {
@@ -260,6 +260,39 @@ export function SalesFilters({
     >
       <div className="flex flex-col gap-3">
         <fieldset className="space-y-1.5">
+          <legend className="text-sm font-medium leading-none">Section</legend>
+          <div
+            className="flex w-full overflow-x-auto rounded-md border border-border p-0.5"
+            role="radiogroup"
+            aria-label="Dashboard section"
+          >
+            {(
+              [
+                { id: "Sales" as const, label: "Sales" },
+                { id: "FIBC Production" as const, label: "FIBC Production" },
+              ] satisfies { id: SalesDashboardSection; label: string }[]
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                role="radio"
+                aria-checked={filters.section === opt.id}
+                onClick={() => onChange({ section: opt.id })}
+                className={cn(
+                  "min-h-11 shrink-0 flex-1 touch-manipulation rounded-sm px-2.5 py-2 text-xs font-medium transition-colors sm:text-sm",
+                  filters.section === opt.id
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+
+        {filters.section === "Sales" && (
+        <fieldset className="space-y-1.5">
           <legend className="text-sm font-medium leading-none">Figures</legend>
           <div
             className="flex w-full overflow-x-auto rounded-md border border-border p-0.5"
@@ -290,6 +323,7 @@ export function SalesFilters({
             ))}
           </div>
         </fieldset>
+        )}
 
         <div className="min-w-0 space-y-1.5">
           <Label>Company</Label>
@@ -415,6 +449,7 @@ export function SalesFilters({
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+          {filters.section === "Sales" && (
           <fieldset className="space-y-1.5">
             <legend className="text-sm font-medium leading-none">Category</legend>
             <div
@@ -441,6 +476,7 @@ export function SalesFilters({
               ))}
             </div>
           </fieldset>
+          )}
 
           <Button
             type="button"

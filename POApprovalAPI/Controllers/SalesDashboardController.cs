@@ -420,4 +420,38 @@ public class SalesDashboardController : ControllerBase
             return StatusCode(500, new { message = ex.Message });
         }
     }
+
+    /// <summary>
+    /// FIBC production month-on-month (BagPCS / BagWt) from VW_FIBCBagwiseProduction.
+    /// </summary>
+    [HttpGet("fibc-production-monthly")]
+    public async Task<IActionResult> GetFibcProductionMonthly(
+        [FromQuery] string company = "All Companies",
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] bool refresh = false)
+    {
+        try
+        {
+            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
+            var to = dateTo ?? DateTime.Today;
+            var data = await _salesDashboard.GetFibcProductionMonthlyAsync(company, from, to, refresh);
+            return Ok(new
+            {
+                months = data.Months,
+                byBagType = data.ByBagType,
+                totalPcs = data.TotalPcs,
+                totalWt = data.TotalWt,
+                company,
+                dateFrom = data.DateFrom,
+                dateTo = data.DateTo,
+                source = data.Source,
+                note = "FIBC bag production month-on-month from VW_FIBCBagwiseProduction.",
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
 }

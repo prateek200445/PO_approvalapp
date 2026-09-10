@@ -1,6 +1,8 @@
 export type SalesReportView = "Summary" | "Detail" | "Date Summary";
 export type SalesReportCategory = "Sales" | "Purchase";
 export type SalesTrendPeriod = "Last 6 Months" | "Last 12 Months";
+/** Top-level section within Sales Dashboard (not a separate route). */
+export type SalesDashboardSection = "Sales" | "FIBC Production";
 
 export interface SalesDashboardFilters {
   company: string;
@@ -12,6 +14,8 @@ export interface SalesDashboardFilters {
   trendPeriod: SalesTrendPeriod;
   /** When true, KPIs/charts/tables include InterGroup = Intergroup. */
   includeIntercompany: boolean;
+  /** Sales KPIs vs FIBC production MoM (same page). */
+  section: SalesDashboardSection;
 }
 
 export interface SalesCompanyOption {
@@ -91,6 +95,29 @@ export interface SalesBySubGroupItem {
   subGroupName: string;
   quantity: number;
   salesAmount: number;
+}
+
+export interface FibcProductionMonthItem {
+  period: string;
+  year: number;
+  month: number;
+  pcs: number;
+  wt: number;
+  pcsChangePercent: number;
+  wtChangePercent: number;
+}
+
+export interface FibcProductionByBagTypeItem {
+  typeOfBag: string;
+  pcs: number;
+  wt: number;
+}
+
+export interface FibcProductionMomData {
+  months: FibcProductionMonthItem[];
+  byBagType: FibcProductionByBagTypeItem[];
+  totalPcs: number;
+  totalWt: number;
 }
 
 export interface DetailedSalesAnalysisItem {

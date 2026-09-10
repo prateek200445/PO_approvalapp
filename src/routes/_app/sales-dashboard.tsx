@@ -6,6 +6,7 @@ import { SalesFilters } from "@/components/sales/SalesFilters";
 import { SalesKpiCards } from "@/components/sales/SalesKpiCards";
 import { SalesCharts } from "@/components/sales/SalesCharts";
 import { SalesSummaryTables } from "@/components/sales/SalesSummaryTables";
+import { FibcProductionMom } from "@/components/sales/FibcProductionMom";
 import {
   DEFAULT_SALES_FILTERS,
   getSalesCompanies,
@@ -13,6 +14,7 @@ import {
   getSalesTables,
   getSalesYearlyTrend,
   getTopSuppliers,
+  getFibcProductionMonthly,
 } from "@/lib/sales-dashboard-api";
 import type {
   SalesDashboardFilters,
@@ -52,6 +54,7 @@ function SalesDashboardPage() {
   const [refreshToken, setRefreshToken] = useState(0);
   const bypassCacheRef = useRef(false);
   const isPurchase = filters.category === "Purchase";
+  const isFibcSection = filters.section === "FIBC Production";
   const companyFilter = filters.company?.trim() || "All Companies";
   const includeIntercompany = filters.includeIntercompany;
 
@@ -80,6 +83,7 @@ function SalesDashboardPage() {
         includeIntercompany,
         refresh: bypassCacheRef.current,
       }),
+    enabled: !isFibcSection,
     ...queryOptions,
   });
 
@@ -100,6 +104,7 @@ function SalesDashboardPage() {
         includeIntercompany,
         refresh: bypassCacheRef.current,
       }),
+    enabled: !isFibcSection,
     ...queryOptions,
   });
 
@@ -120,7 +125,7 @@ function SalesDashboardPage() {
         includeIntercompany,
         refresh: bypassCacheRef.current,
       }),
-    enabled: !isPurchase,
+    enabled: !isFibcSection && !isPurchase,
     ...queryOptions,
   });
 
@@ -142,25 +147,45 @@ function SalesDashboardPage() {
         includeIntercompany,
         refresh: bypassCacheRef.current,
       }),
-    enabled: true,
+    enabled: !isFibcSection,
+    ...queryOptions,
+  });
+
+  const fibcProdQuery = useQuery({
+    queryKey: [
+      "sales-fibc-production-mom",
+      companyFilter,
+      filters.dateFrom,
+      filters.dateTo,
+      refreshToken,
+    ],
+    queryFn: () =>
+      getFibcProductionMonthly({
+        company: companyFilter,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        refresh: bypassCacheRef.current,
+      }),
+    enabled: isFibcSection,
     ...queryOptions,
   });
 
   useEffect(() => {
-    if (
-      kpisQuery.isFetching ||
-      trendQuery.isFetching ||
-      tablesQuery.isFetching ||
-      suppliersQuery.isFetching
-    ) {
-      return;
-    }
+    const busy = isFibcSection
+      ? fibcProdQuery.isFetching
+      : kpisQuery.isFetching ||
+        trendQuery.isFetching ||
+        tablesQuery.isFetching ||
+        suppliersQuery.isFetching;
+    if (busy) return;
     bypassCacheRef.current = false;
   }, [
+    isFibcSection,
     kpisQuery.isFetching,
     trendQuery.isFetching,
     tablesQuery.isFetching,
     suppliersQuery.isFetching,
+    fibcProdQuery.isFetching,
   ]);
 
   const companyOptions = companyList?.options ?? [];
@@ -188,11 +213,12 @@ function SalesDashboardPage() {
     };
   }, [isPurchase, kpis]);
 
-  const isRefreshing =
-    kpisQuery.isFetching ||
-    trendQuery.isFetching ||
-    tablesQuery.isFetching ||
-    suppliersQuery.isFetching;
+  const isRefreshing = isFibcSection
+    ? fibcProdQuery.isFetching
+    : kpisQuery.isFetching ||
+      trendQuery.isFetching ||
+      tablesQuery.isFetching ||
+      suppliersQuery.isFetching;
 
   return (
     <div className="space-y-5 pb-2 sm:space-y-6 md:space-y-7">
@@ -201,7 +227,9 @@ function SalesDashboardPage() {
           Sales Dashboard
         </h1>
         <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-          Live ERP figures. Switch to Incl. intercompany for the same KPIs with IC, and tick companies to combine units.
+          {isFibcSection
+            ? "FIBC bag production month-on-month from ERP. Use company and date filters below."
+            : "Live ERP figures. Switch to Incl. intercompany for the same KPIs with IC, and tick companies to combine units."}
         </p>
       </div>
 
@@ -217,59 +245,89 @@ function SalesDashboardPage() {
         }}
       />
 
-      {kpisQuery.isFetching && !kpis && (
-        <div
-          className="flex items-center gap-2 text-xs text-muted-foreground"
-          aria-live="polite"
-        >
-          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          Loading {isPurchase ? "purchase" : "sales"} totals…
-        </div>
-      )}
-      {isRefreshing && kpis && (
-        <div
-          className="flex items-center gap-2 text-xs text-muted-foreground"
-          aria-live="polite"
-        >
-          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          Updating charts and tables…
-        </div>
-      )}
-      {kpisQuery.isError && (
-        <p className="text-xs text-destructive" role="alert">
-          Failed to load dashboard data. Please try again.
-        </p>
-      )}
+      {isFibcSection ? (
+        <>
+          {fibcProdQuery.isFetching && !fibcProdQuery.data && (
+            <div
+              className="flex items-center gap-2 text-xs text-muted-foreground"
+              aria-live="polite"
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              Loading FIBC production…
+            </div>
+          )}
+          <FibcProductionMom
+            months={fibcProdQuery.data?.months ?? []}
+            byBagType={fibcProdQuery.data?.byBagType ?? []}
+            totalPcs={fibcProdQuery.data?.totalPcs ?? 0}
+            totalWt={fibcProdQuery.data?.totalWt ?? 0}
+            loading={fibcProdQuery.isFetching && !fibcProdQuery.data}
+            error={
+              fibcProdQuery.isError
+                ? fibcProdQuery.error instanceof Error
+                  ? fibcProdQuery.error.message
+                  : "Failed to load FIBC production"
+                : null
+            }
+          />
+        </>
+      ) : (
+        <>
+          {kpisQuery.isFetching && !kpis && (
+            <div
+              className="flex items-center gap-2 text-xs text-muted-foreground"
+              aria-live="polite"
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              Loading {isPurchase ? "purchase" : "sales"} totals…
+            </div>
+          )}
+          {isRefreshing && kpis && (
+            <div
+              className="flex items-center gap-2 text-xs text-muted-foreground"
+              aria-live="polite"
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              Updating charts and tables…
+            </div>
+          )}
+          {kpisQuery.isError && (
+            <p className="text-xs text-destructive" role="alert">
+              Failed to load dashboard data. Please try again.
+            </p>
+          )}
 
-      <SalesKpiCards
-        summary={summary}
-        isPurchase={isPurchase}
-        loading={kpisQuery.isFetching && !kpis}
-      />
+          <SalesKpiCards
+            summary={summary}
+            isPurchase={isPurchase}
+            loading={kpisQuery.isFetching && !kpis}
+          />
 
-      <SalesCharts
-        byGroup={kpis?.byGroup ?? []}
-        bySubGroup={kpis?.bySubGroup ?? []}
-        trend={trendQuery.data ?? []}
-        trendLoading={trendQuery.isFetching && !trendQuery.data}
-        groupsLoading={kpisQuery.isFetching && !kpis}
-        includeIntercompany={includeIntercompany}
-      />
+          <SalesCharts
+            byGroup={kpis?.byGroup ?? []}
+            bySubGroup={kpis?.bySubGroup ?? []}
+            trend={trendQuery.data ?? []}
+            trendLoading={trendQuery.isFetching && !trendQuery.data}
+            groupsLoading={kpisQuery.isFetching && !kpis}
+            includeIntercompany={includeIntercompany}
+          />
 
-      <SalesSummaryTables
-        exportCustomers={tablesQuery.data?.exportCustomers ?? []}
-        domesticCustomers={tablesQuery.data?.domesticCustomers ?? []}
-        suppliers={suppliersQuery.data ?? []}
-        byCountry={tablesQuery.data?.byCountry ?? []}
-        countryPeriodLabel={tablesQuery.data?.countryPeriodLabel}
-        isPurchase={isPurchase}
-        suppliersLoading={
-          (tablesQuery.isFetching && !tablesQuery.data) ||
-          (suppliersQuery.isFetching && !suppliersQuery.data)
-        }
-        totalSales={kpis?.totalSales ?? 0}
-        includeIntercompany={includeIntercompany}
-      />
+          <SalesSummaryTables
+            exportCustomers={tablesQuery.data?.exportCustomers ?? []}
+            domesticCustomers={tablesQuery.data?.domesticCustomers ?? []}
+            suppliers={suppliersQuery.data ?? []}
+            byCountry={tablesQuery.data?.byCountry ?? []}
+            countryPeriodLabel={tablesQuery.data?.countryPeriodLabel}
+            isPurchase={isPurchase}
+            suppliersLoading={
+              (tablesQuery.isFetching && !tablesQuery.data) ||
+              (suppliersQuery.isFetching && !suppliersQuery.data)
+            }
+            totalSales={kpis?.totalSales ?? 0}
+            includeIntercompany={includeIntercompany}
+          />
+        </>
+      )}
     </div>
   );
 }

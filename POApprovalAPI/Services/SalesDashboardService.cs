@@ -841,6 +841,113 @@ GROUP BY GROUPING SETS (
         return TakeTrendYears(AggregateTrend(bundle.Rows, bundle.Ranges, slice), years);
     }
 
+    /// <summary>
+    /// FIBC bag production month-on-month from VW_FIBCBagwiseProduction (BagPCS / BagWt).
+    /// Respects the Sales Dashboard company slice (FactoryInfo / G- groups).
+    /// </summary>
+    public async Task<FibcProductionMomDto> GetFibcProductionMonthlyAsync(
+        string company,
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool refresh = false)
+    {
+        if (dateTo.Date < dateFrom.Date)
+            (dateFrom, dateTo) = (dateTo, dateFrom);
+
+        var from = dateFrom.Date;
+        var to = dateTo.Date;
+        var cacheKey = $"fibc-prod-mom:{from:yyyyMMdd}:{to:yyyyMMdd}";
+        var leaves = await CachedAsync(cacheKey, refresh, () => LoadFibcProductionLeavesAsync(from, to));
+        var slice = await ResolveSliceCompaniesAsync(company);
+        var filtered = FilterByCompany(leaves, slice, r => r.CompanyName).ToList();
+
+        var monthGroups = filtered
+            .GroupBy(r => (r.Year, r.Month))
+            .OrderBy(g => g.Key.Year)
+            .ThenBy(g => g.Key.Month)
+            .ToList();
+
+        var months = new List<FibcProductionMonthDto>();
+        FibcProductionMonthDto? prev = null;
+        foreach (var g in monthGroups)
+        {
+            var pcs = g.Sum(r => r.Pcs);
+            var wt = g.Sum(r => r.Wt);
+            var dto = new FibcProductionMonthDto
+            {
+                Period = new DateTime(g.Key.Year, g.Key.Month, 1).ToString("MMM-yy"),
+                Year = g.Key.Year,
+                Month = g.Key.Month,
+                Pcs = Math.Round(pcs, 0),
+                Wt = Math.Round(wt, 2),
+                PcsChangePercent = prev == null || prev.Pcs == 0
+                    ? 0
+                    : Math.Round((pcs - prev.Pcs) / prev.Pcs * 100, 1),
+                WtChangePercent = prev == null || prev.Wt == 0
+                    ? 0
+                    : Math.Round((wt - prev.Wt) / prev.Wt * 100, 1),
+            };
+            months.Add(dto);
+            prev = dto;
+        }
+
+        var byBagType = filtered
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.TypeOfBag) ? "Other" : r.TypeOfBag.Trim())
+            .Select(g => new FibcProductionByBagTypeDto
+            {
+                TypeOfBag = g.Key,
+                Pcs = Math.Round(g.Sum(r => r.Pcs), 0),
+                Wt = Math.Round(g.Sum(r => r.Wt), 2),
+            })
+            .OrderByDescending(x => x.Pcs)
+            .ThenBy(x => x.TypeOfBag, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new FibcProductionMomDto
+        {
+            Months = months,
+            ByBagType = byBagType,
+            TotalPcs = Math.Round(filtered.Sum(r => r.Pcs), 0),
+            TotalWt = Math.Round(filtered.Sum(r => r.Wt), 2),
+            DateFrom = from.ToString("yyyy-MM-dd"),
+            DateTo = to.ToString("yyyy-MM-dd"),
+            Source = "VW_FIBCBagwiseProduction",
+        };
+    }
+
+    private async Task<List<FibcProdLeaf>> LoadFibcProductionLeavesAsync(DateTime dateFrom, DateTime dateTo)
+    {
+        using var connection = _database.CreateConnection();
+        var rows = await connection.QueryAsync<FibcProdLeaf>(@"
+SELECT
+    YEAR(Sysdate) AS Year,
+    MONTH(Sysdate) AS Month,
+    LTRIM(RTRIM(ISNULL(CompanyName, N''))) AS CompanyName,
+    LTRIM(RTRIM(ISNULL(TYPEOFBAG, N''))) AS TypeOfBag,
+    CAST(SUM(ISNULL(BagPCS, 0)) AS float) AS Pcs,
+    CAST(SUM(ISNULL(BagWt, 0)) AS float) AS Wt
+FROM dbo.VW_FIBCBagwiseProduction WITH (NOLOCK)
+WHERE Sysdate >= @DateFrom
+  AND Sysdate < DATEADD(day, 1, @DateTo)
+GROUP BY
+    YEAR(Sysdate),
+    MONTH(Sysdate),
+    LTRIM(RTRIM(ISNULL(CompanyName, N''))),
+    LTRIM(RTRIM(ISNULL(TYPEOFBAG, N'')))
+", new { DateFrom = dateFrom.Date, DateTo = dateTo.Date }, commandTimeout: QueryTimeoutSeconds);
+        return rows.ToList();
+    }
+
+    private sealed class FibcProdLeaf
+    {
+        public int Year { get; set; }
+        public int Month { get; set; }
+        public string CompanyName { get; set; } = "";
+        public string TypeOfBag { get; set; } = "";
+        public double Pcs { get; set; }
+        public double Wt { get; set; }
+    }
+
     private async Task<(List<TrendLeaf> Rows, List<TrendRange> Ranges)> LoadTrendLeavesAsync(
         string category,
         DateTime asOf,
@@ -2933,6 +3040,35 @@ public class SalesTrendDto
 {
     public string Period { get; set; } = "";
     public double Amount { get; set; }
+}
+
+public class FibcProductionMomDto
+{
+    public List<FibcProductionMonthDto> Months { get; set; } = new();
+    public List<FibcProductionByBagTypeDto> ByBagType { get; set; } = new();
+    public double TotalPcs { get; set; }
+    public double TotalWt { get; set; }
+    public string DateFrom { get; set; } = "";
+    public string DateTo { get; set; } = "";
+    public string Source { get; set; } = "VW_FIBCBagwiseProduction";
+}
+
+public class FibcProductionMonthDto
+{
+    public string Period { get; set; } = "";
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public double Pcs { get; set; }
+    public double Wt { get; set; }
+    public double PcsChangePercent { get; set; }
+    public double WtChangePercent { get; set; }
+}
+
+public class FibcProductionByBagTypeDto
+{
+    public string TypeOfBag { get; set; } = "";
+    public double Pcs { get; set; }
+    public double Wt { get; set; }
 }
 
 public class SalesByGroupDto

@@ -7,6 +7,7 @@ import type {
   SalesByCountryItem,
   SalesCompanyOption,
   RankedPartyItem,
+  FibcProductionMomData,
 } from "@/lib/sales-dashboard-types";
 import { formatINR, formatMoneyAmount } from "@/lib/mock-data";
 
@@ -36,6 +37,7 @@ export const DEFAULT_SALES_FILTERS: SalesDashboardFilters = (() => {
     category: "Sales" as const,
     trendPeriod: "Last 6 Months" as const,
     includeIntercompany: false,
+    section: "Sales" as const,
   };
 })();
 
@@ -193,6 +195,50 @@ export async function getSalesYearlyTrend(filters: {
     period: str(t.period ?? t.Period),
     amount: num(t.amount ?? t.Amount),
   }));
+}
+
+/** FIBC bag production month-on-month (VW_FIBCBagwiseProduction). */
+export async function getFibcProductionMonthly(filters: {
+  company: string;
+  dateFrom: string;
+  dateTo: string;
+  refresh?: boolean;
+}): Promise<FibcProductionMomData> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    refresh: filters.refresh ? "true" : "false",
+  });
+  const response = await fetch(
+    getSalesApiUrl(`/api/SalesDashboard/fibc-production-monthly?${params}`),
+  );
+  const payload = (await response.json()) as Record<string, unknown> & { message?: string };
+  if (!response.ok) {
+    throw new Error(payload.message || "Failed to load FIBC production");
+  }
+
+  const monthsRaw = (payload.months ?? payload.Months ?? []) as Array<Record<string, unknown>>;
+  const bagRaw = (payload.byBagType ?? payload.ByBagType ?? []) as Array<Record<string, unknown>>;
+
+  return {
+    months: monthsRaw.map((m) => ({
+      period: str(m.period ?? m.Period),
+      year: num(m.year ?? m.Year),
+      month: num(m.month ?? m.Month),
+      pcs: num(m.pcs ?? m.Pcs),
+      wt: num(m.wt ?? m.Wt),
+      pcsChangePercent: num(m.pcsChangePercent ?? m.PcsChangePercent),
+      wtChangePercent: num(m.wtChangePercent ?? m.WtChangePercent),
+    })),
+    byBagType: bagRaw.map((b) => ({
+      typeOfBag: str(b.typeOfBag ?? b.TypeOfBag),
+      pcs: num(b.pcs ?? b.Pcs),
+      wt: num(b.wt ?? b.Wt),
+    })),
+    totalPcs: num(payload.totalPcs ?? payload.TotalPcs),
+    totalWt: num(payload.totalWt ?? payload.TotalWt),
+  };
 }
 
 export async function getSalesTables(filters: {
