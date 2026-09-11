@@ -1,6 +1,7 @@
 using POApprovalAPI.Models;
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using POApprovalAPI.Services;
 
 namespace POApprovalAPI.Controllers;
@@ -9,22 +10,27 @@ namespace POApprovalAPI.Controllers;
 [Route("api/[controller]")]
 public class IndentController : ControllerBase
 {
+    private static readonly TimeSpan AssociatedPoCacheTtl = TimeSpan.FromMinutes(20);
+
     private readonly DatabaseService _database;
+    private readonly IMemoryCache _cache;
 
-    public IndentController(DatabaseService database)
-{
-    _database = database;
-}
-[HttpGet("pending/{username}")]
-public async Task<IActionResult> GetPending(
-    string username,
-    [FromQuery] decimal? amount,
-    [FromQuery] string? filterType)
-{
-    using var connection = _database.CreateConnection();
+    public IndentController(DatabaseService database, IMemoryCache cache)
+    {
+        _database = database;
+        _cache = cache;
+    }
 
-    var data = await connection.QueryAsync(
-        @"SELECT
+    [HttpGet("pending/{username}")]
+    public async Task<IActionResult> GetPending(
+        string username,
+        [FromQuery] decimal? amount,
+        [FromQuery] string? filterType)
+    {
+        using var connection = _database.CreateConnection();
+
+        var data = await connection.QueryAsync(
+            @"SELECT
             IndentNo,
             MAX(IndentDate) AS IndentDate,
             COUNT(*) AS TotalItems,
@@ -34,17 +40,18 @@ public async Task<IActionResult> GetPending(
             AND Status = 'Pending'
           GROUP BY IndentNo
           ORDER BY MAX(IndentDate) DESC",
-        new { username });
+            new { username });
 
-    return Ok(data);
-}
+        return Ok(data);
+    }
+
     [HttpGet("workflow")]
-public async Task<IActionResult> GetWorkflow([FromQuery] string indentNo)
-{
-    using var connection = _database.CreateConnection();
+    public async Task<IActionResult> GetWorkflow([FromQuery] string indentNo)
+    {
+        using var connection = _database.CreateConnection();
 
-    var data = await connection.QueryAsync(
-       @"SELECT
+        var data = await connection.QueryAsync(
+           @"SELECT
     ApprovalName,
     MAX(Status) AS Status,
     MAX(ApprovalDate) AS ApprovalDate,
@@ -53,17 +60,18 @@ public async Task<IActionResult> GetWorkflow([FromQuery] string indentNo)
   WHERE IndentNo = @indentNo
   GROUP BY ApprovalName
   ORDER BY MIN(TransId)",
-        new { indentNo });
+            new { indentNo });
 
-    return Ok(data);
-}
-[HttpGet("details")]
-public async Task<IActionResult> GetDetails([FromQuery] string indentNo)
-{
-    using var connection = _database.CreateConnection();
+        return Ok(data);
+    }
 
-    var data = await connection.QueryAsync(
-        @"SELECT
+    [HttpGet("details")]
+    public async Task<IActionResult> GetDetails([FromQuery] string indentNo)
+    {
+        using var connection = _database.CreateConnection();
+
+        var data = await connection.QueryAsync(
+            @"SELECT
             code AS IndentSubCode,
             itemcode AS ItemCode,
             itemdesc AS ItemDesc,
@@ -75,128 +83,184 @@ public async Task<IActionResult> GetDetails([FromQuery] string indentNo)
             IndentSignal
           FROM vw_storedeptt
           WHERE Expr1 = @indentNo",
-        new { indentNo });
+            new { indentNo });
 
-    return Ok(data);
-}
-[HttpGet("purchase-orders")]
-public async Task<IActionResult> GetAssociatedPurchaseOrders([FromQuery] string indentNo)
-{
-    if (string.IsNullOrWhiteSpace(indentNo))
-        return BadRequest(new { message = "indentNo is required." });
+        return Ok(data);
+    }
 
-    using var connection = _database.CreateConnection();
+    [HttpGet("purchase-orders")]
+    public async Task<IActionResult> GetAssociatedPurchaseOrders([FromQuery] string indentNo)
+    {
+        if (string.IsNullOrWhiteSpace(indentNo))
+            return BadRequest(new { message = "indentNo is required." });
 
-    var data = await connection.QueryAsync(
-        @"
-;WITH Linked AS (
-    SELECT DISTINCT LTRIM(RTRIM(CONVERT(nvarchar(100), v.PurchaseCode))) AS PurchaseCode
-    FROM dbo.Vw_PurchaseOrder v WITH (NOLOCK)
-    WHERE LTRIM(RTRIM(CONVERT(nvarchar(100), ISNULL(v.RefNo, N'')))) = @indentNo
-       OR LTRIM(RTRIM(CONVERT(nvarchar(100), ISNULL(v.StoreCode, N'')))) = @indentNo
+        var key = indentNo.Trim();
+        var cacheKey = $"indent-associated-pos:{key}";
+        if (_cache.TryGetValue(cacheKey, out object? cached) && cached is not null)
+            return Ok(cached);
 
-    UNION
+        using var connection = _database.CreateConnection();
 
-    SELECT DISTINCT LTRIM(RTRIM(CONVERT(nvarchar(100), fq.PurchaseCode))) AS PurchaseCode
-    FROM dbo.FinalQuotation fq WITH (NOLOCK)
-    WHERE LTRIM(RTRIM(CONVERT(nvarchar(100), ISNULL(fq.StoreCode, N'')))) = @indentNo
-      AND ISNULL(LTRIM(RTRIM(CONVERT(nvarchar(100), fq.PurchaseCode))), N'') <> N''
+        // 1) Quotation bridge first — usually enough and much cheaper than PO view.
+        var codes = (await connection.QueryAsync<string>(
+            @"
+SELECT PurchaseCode
+FROM dbo.FinalQuotation WITH (NOLOCK)
+WHERE StoreCode = @indentNo
+  AND PurchaseCode IS NOT NULL
+  AND PurchaseCode <> N''
+UNION
+SELECT PurchaseCode
+FROM dbo.Vw_Quotation WITH (NOLOCK)
+WHERE StoreCode = @indentNo
+  AND PurchaseCode IS NOT NULL
+  AND PurchaseCode <> N''",
+            new { indentNo = key },
+            commandTimeout: 30)).ToList();
 
-    UNION
+        // 2) Fallback only when quotes have no link (avoid scanning Vw_PurchaseOrder unless needed).
+        if (codes.Count == 0)
+        {
+            codes = (await connection.QueryAsync<string>(
+                @"
+SELECT DISTINCT PurchaseCode
+FROM dbo.Vw_PurchaseOrder WITH (NOLOCK)
+WHERE RefNo = @indentNo
+   OR StoreCode = @indentNo",
+                new { indentNo = key },
+                commandTimeout: 45)).ToList();
+        }
 
-    SELECT DISTINCT LTRIM(RTRIM(CONVERT(nvarchar(100), q.PurchaseCode))) AS PurchaseCode
-    FROM dbo.Vw_Quotation q WITH (NOLOCK)
-    WHERE LTRIM(RTRIM(CONVERT(nvarchar(100), ISNULL(q.StoreCode, N'')))) = @indentNo
-      AND ISNULL(LTRIM(RTRIM(CONVERT(nvarchar(100), q.PurchaseCode))), N'') <> N''
-)
+        codes = codes
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        IEnumerable<dynamic> data;
+        if (codes.Count == 0)
+        {
+            data = Array.Empty<dynamic>();
+        }
+        else
+        {
+            // Enrich from PurchasePayment by exact PurchaseCode (no view join).
+            data = await connection.QueryAsync(
+                @"
 SELECT
-    l.PurchaseCode AS PoNo,
-    MAX(NULLIF(LTRIM(RTRIM(v.FirmName)), N'')) AS FirmName,
+    p.PurchaseCode AS PoNo,
+    MAX(NULLIF(LTRIM(RTRIM(q.FirmName)), N'')) AS FirmName,
     MAX(CAST(p.TotalAmount AS float)) AS TotalAmount,
-    MAX(NULLIF(LTRIM(RTRIM(v.Currency)), N'')) AS Currency
-FROM Linked l
-LEFT JOIN dbo.Vw_PurchaseOrder v WITH (NOLOCK)
-  ON LTRIM(RTRIM(CONVERT(nvarchar(100), v.PurchaseCode))) = l.PurchaseCode
-LEFT JOIN dbo.PurchasePayment p WITH (NOLOCK)
-  ON LTRIM(RTRIM(CONVERT(nvarchar(100), p.PurchaseCode))) = l.PurchaseCode
-WHERE ISNULL(l.PurchaseCode, N'') <> N''
-GROUP BY l.PurchaseCode
-ORDER BY l.PurchaseCode DESC",
-        new { indentNo = indentNo.Trim() });
+    MAX(NULLIF(LTRIM(RTRIM(p.Currency)), N'')) AS Currency
+FROM dbo.PurchasePayment p WITH (NOLOCK)
+LEFT JOIN dbo.Vw_Quotation q WITH (NOLOCK)
+  ON q.PurchaseCode = p.PurchaseCode
+ AND q.StoreCode = @indentNo
+WHERE p.PurchaseCode IN @PurchaseCodes
+GROUP BY p.PurchaseCode
+ORDER BY p.PurchaseCode DESC",
+                new { indentNo = key, PurchaseCodes = codes },
+                commandTimeout: 30);
 
-    return Ok(new
-    {
-        indentNo = indentNo.Trim(),
-        purchaseOrders = data,
-        note = "PO links via Vw_PurchaseOrder.RefNo/StoreCode, FinalQuotation.StoreCode, and Vw_Quotation.StoreCode.",
-    });
-}
-[HttpPost("approve")]
-public async Task<IActionResult> Approve(
-    [FromBody] POApprovalAPI.Models.IndentApprovalRequest request)
-{
-    using var connection = _database.CreateConnection();
+            // Include any codes that exist only on quotation/PO view but not yet in PurchasePayment.
+            var found = new HashSet<string>(
+                data.Select(r => (string)r.PoNo),
+                StringComparer.OrdinalIgnoreCase);
+            var missing = codes.Where(c => !found.Contains(c)).ToList();
+            if (missing.Count > 0)
+            {
+                var extras = await connection.QueryAsync(
+                    @"
+SELECT
+    q.PurchaseCode AS PoNo,
+    MAX(NULLIF(LTRIM(RTRIM(q.FirmName)), N'')) AS FirmName,
+    CAST(NULL AS float) AS TotalAmount,
+    CAST(NULL AS nvarchar(20)) AS Currency
+FROM dbo.Vw_Quotation q WITH (NOLOCK)
+WHERE q.StoreCode = @indentNo
+  AND q.PurchaseCode IN @PurchaseCodes
+GROUP BY q.PurchaseCode
+ORDER BY q.PurchaseCode DESC",
+                    new { indentNo = key, PurchaseCodes = missing },
+                    commandTimeout: 30);
+                data = data.Concat(extras).OrderByDescending(r => (string)r.PoNo);
+            }
+        }
 
-    foreach (var subCode in request.IndentSubCodes)
+        var payload = new
+        {
+            indentNo = key,
+            purchaseOrders = data,
+            note = "Fast path: FinalQuotation/Vw_Quotation by StoreCode, then PurchasePayment enrich; Vw_PurchaseOrder only if needed (cached).",
+        };
+        _cache.Set(cacheKey, payload, AssociatedPoCacheTtl);
+        return Ok(payload);
+    }
+
+    [HttpPost("approve")]
+    public async Task<IActionResult> Approve(
+        [FromBody] POApprovalAPI.Models.IndentApprovalRequest request)
     {
-        // Existing query (keep this as it is)
-        await connection.ExecuteAsync(
-            @"UPDATE ApproveIndent
+        using var connection = _database.CreateConnection();
+
+        foreach (var subCode in request.IndentSubCodes)
+        {
+            await connection.ExecuteAsync(
+                @"UPDATE ApproveIndent
               SET Status = 'Approved',
                   ApprovalDate = GETDATE()
               WHERE IndentSubCode = @subCode
                 AND ApprovalName = @username
                 AND Status = 'Pending'",
-            new
-            {
-                subCode,
-                username = request.Username
-            });
+                new
+                {
+                    subCode,
+                    username = request.Username
+                });
 
-        // New query (add this below)
-        await connection.ExecuteAsync(
-            @"UPDATE ItemInfo
+            await connection.ExecuteAsync(
+                @"UPDATE ItemInfo
               SET Approved = 'Approved'
               WHERE code = @subCode",
-            new
-            {
-                subCode
-            });
+                new
+                {
+                    subCode
+                });
+        }
+
+        return Ok(new
+        {
+            success = true,
+            approvedItems = request.IndentSubCodes.Count
+        });
     }
 
-    return Ok(new
+    [HttpPost("reject")]
+    public async Task<IActionResult> Reject(
+        [FromBody] POApprovalAPI.Models.IndentApprovalRequest request)
     {
-        success = true,
-        approvedItems = request.IndentSubCodes.Count
-    });
-}
-[HttpPost("reject")]
-public async Task<IActionResult> Reject(
-    [FromBody] POApprovalAPI.Models.IndentApprovalRequest request)
-{
-    using var connection = _database.CreateConnection();
+        using var connection = _database.CreateConnection();
 
-    foreach (var subCode in request.IndentSubCodes)
-    {
-        await connection.ExecuteAsync(
-            @"UPDATE ApproveIndent
+        foreach (var subCode in request.IndentSubCodes)
+        {
+            await connection.ExecuteAsync(
+                @"UPDATE ApproveIndent
               SET Status = 'Rejected',
                   ApprovalDate = GETDATE()
               WHERE IndentSubCode = @subCode
                 AND ApprovalName = @username
                 AND Status = 'Pending'",
-            new
-            {
-                subCode,
-                username = request.Username
-            });
-    }
-    
+                new
+                {
+                    subCode,
+                    username = request.Username
+                });
+        }
 
-    return Ok(new
-    {
-        success = true,
-        rejectedItems = request.IndentSubCodes.Count
-    });
-}
+        return Ok(new
+        {
+            success = true,
+            rejectedItems = request.IndentSubCodes.Count
+        });
+    }
 }

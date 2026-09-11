@@ -47,6 +47,29 @@ function IndentDetailsPage() {
 
   useEffect(() => {
     setSelectedItems([]);
+    setAssociatedPos([]);
+  }, [indentNo]);
+
+  // Associated POs do not need auth — start as soon as indentNo is known.
+  useEffect(() => {
+    let cancelled = false;
+    setPosLoading(true);
+    fetch(getApiUrl(`/api/Indent/purchase-orders?indentNo=${encodeURIComponent(indentNo)}`))
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const rows = (data.purchaseOrders ?? data.PurchaseOrders ?? []) as AssociatedPo[];
+        setAssociatedPos(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setAssociatedPos([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPosLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [indentNo]);
 
   useEffect(() => {
@@ -60,16 +83,6 @@ function IndentDetailsPage() {
     fetch(getApiUrl(`/api/Indent/workflow?indentNo=${encodeURIComponent(indentNo)}`))
       .then((r) => r.json())
       .then(setWorkflow);
-
-    setPosLoading(true);
-    fetch(getApiUrl(`/api/Indent/purchase-orders?indentNo=${encodeURIComponent(indentNo)}`))
-      .then((r) => r.json())
-      .then((data) => {
-        const rows = (data.purchaseOrders ?? data.PurchaseOrders ?? []) as AssociatedPo[];
-        setAssociatedPos(Array.isArray(rows) ? rows : []);
-      })
-      .catch(() => setAssociatedPos([]))
-      .finally(() => setPosLoading(false));
   }, [indentNo, user?.username]);
 
   function navigateAfterAction() {
