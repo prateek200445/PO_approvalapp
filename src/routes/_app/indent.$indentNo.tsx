@@ -1,16 +1,28 @@
 import { useAuth } from "@/lib/auth-context";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { getApiUrl } from "@/lib/api-config";
-import { useEffect, useState, ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { ApprovalDetailNav } from "@/components/ApprovalDetailNav";
 import { useApprovalListNavigation } from "@/hooks/use-approval-list-navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { invalidateApprovalCaches, resolveNextAfterApproval } from "@/lib/approval-after-action";
+import { formatINR } from "@/lib/mock-data";
 
 export const Route = createFileRoute("/_app/indent/$indentNo")({
   component: IndentDetailsPage,
 });
+
+type AssociatedPo = {
+  PoNo?: string;
+  poNo?: string;
+  FirmName?: string;
+  firmName?: string;
+  TotalAmount?: number;
+  totalAmount?: number;
+  Currency?: string;
+  currency?: string;
+};
 
 function IndentDetailsPage() {
   const { indentNo } = Route.useParams();
@@ -21,6 +33,8 @@ function IndentDetailsPage() {
   const [items, setItems] = useState<any[]>([]);
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [workflow, setWorkflow] = useState<any[]>([]);
+  const [associatedPos, setAssociatedPos] = useState<AssociatedPo[]>([]);
+  const [posLoading, setPosLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const indentNavigation = useApprovalListNavigation({
@@ -46,6 +60,16 @@ function IndentDetailsPage() {
     fetch(getApiUrl(`/api/Indent/workflow?indentNo=${encodeURIComponent(indentNo)}`))
       .then((r) => r.json())
       .then(setWorkflow);
+
+    setPosLoading(true);
+    fetch(getApiUrl(`/api/Indent/purchase-orders?indentNo=${encodeURIComponent(indentNo)}`))
+      .then((r) => r.json())
+      .then((data) => {
+        const rows = (data.purchaseOrders ?? data.PurchaseOrders ?? []) as AssociatedPo[];
+        setAssociatedPos(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => setAssociatedPos([]))
+      .finally(() => setPosLoading(false));
   }, [indentNo, user?.username]);
 
   function navigateAfterAction() {
@@ -129,6 +153,18 @@ function IndentDetailsPage() {
     }
   }
 
+  const normalizedPos = associatedPos
+    .map((row) => {
+      const poNo = String(row.PoNo ?? row.poNo ?? "").trim();
+      return {
+        poNo,
+        firmName: String(row.FirmName ?? row.firmName ?? "").trim(),
+        totalAmount: Number(row.TotalAmount ?? row.totalAmount ?? 0) || 0,
+        currency: String(row.Currency ?? row.currency ?? "").trim() || "INR",
+      };
+    })
+    .filter((row) => row.poNo.length > 0);
+
   return (
     <div className="space-y-6">
       <ApprovalDetailNav
@@ -173,8 +209,101 @@ function IndentDetailsPage() {
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Total Items</div>
             <div className="text-sm font-medium">{items.length}</div>
           </div>
+
+          <div className="col-span-2">
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+              Associated PO Number{normalizedPos.length === 1 ? "" : "s"}
+            </div>
+            {posLoading ? (
+              <div className="mt-1 text-sm text-muted-foreground">Loading…</div>
+            ) : normalizedPos.length === 0 ? (
+              <div className="mt-1 text-sm text-muted-foreground">
+                No PO linked to this indent in ERP yet.
+              </div>
+            ) : normalizedPos.length === 1 ? (
+              <Link
+                to="/po/$poNo"
+                params={{ poNo: normalizedPos[0].poNo }}
+                className="mt-1 inline-block text-sm font-medium text-primary underline-offset-2 hover:underline"
+              >
+                {normalizedPos[0].poNo}
+              </Link>
+            ) : (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                {normalizedPos.map((po) => (
+                  <Link
+                    key={po.poNo}
+                    to="/po/$poNo"
+                    params={{ poNo: po.poNo }}
+                    className="text-sm font-medium text-primary underline-offset-2 hover:underline"
+                  >
+                    {po.poNo}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {normalizedPos.length > 0 && (
+        <Section title="Associated Purchase Orders">
+          {/* Mobile cards */}
+          <div className="space-y-2 sm:hidden">
+            {normalizedPos.map((po) => (
+              <Link
+                key={po.poNo}
+                to="/po/$poNo"
+                params={{ poNo: po.poNo }}
+                className="block rounded-xl border border-border/70 bg-background px-3 py-2.5 transition hover:border-primary/40"
+              >
+                <div className="text-sm font-semibold text-primary">{po.poNo}</div>
+                {po.firmName ? (
+                  <div className="mt-0.5 break-words text-[11px] text-muted-foreground">{po.firmName}</div>
+                ) : null}
+                {po.totalAmount > 0 ? (
+                  <div className="mt-1.5 text-xs font-medium tabular-nums">
+                    {formatINR(po.totalAmount)}
+                    {po.currency && po.currency !== "INR" ? ` ${po.currency}` : ""}
+                  </div>
+                ) : null}
+              </Link>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden overflow-hidden rounded-lg border border-border sm:block">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2">PO Number</th>
+                  <th className="px-3 py-2">Vendor</th>
+                  <th className="px-3 py-2 text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {normalizedPos.map((po) => (
+                  <tr key={po.poNo}>
+                    <td className="px-3 py-2">
+                      <Link
+                        to="/po/$poNo"
+                        params={{ poNo: po.poNo }}
+                        className="font-medium text-primary underline-offset-2 hover:underline"
+                      >
+                        {po.poNo}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2">{po.firmName || "—"}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {po.totalAmount > 0 ? formatINR(po.totalAmount) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Section>
+      )}
 
       <Section title="Indent Items">
         <div className="overflow-hidden rounded-lg border border-border">

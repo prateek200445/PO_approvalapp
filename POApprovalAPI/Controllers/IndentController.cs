@@ -79,6 +79,58 @@ public async Task<IActionResult> GetDetails([FromQuery] string indentNo)
 
     return Ok(data);
 }
+[HttpGet("purchase-orders")]
+public async Task<IActionResult> GetAssociatedPurchaseOrders([FromQuery] string indentNo)
+{
+    if (string.IsNullOrWhiteSpace(indentNo))
+        return BadRequest(new { message = "indentNo is required." });
+
+    using var connection = _database.CreateConnection();
+
+    var data = await connection.QueryAsync(
+        @"
+;WITH Linked AS (
+    SELECT DISTINCT LTRIM(RTRIM(CONVERT(nvarchar(100), v.PurchaseCode))) AS PurchaseCode
+    FROM dbo.Vw_PurchaseOrder v WITH (NOLOCK)
+    WHERE LTRIM(RTRIM(CONVERT(nvarchar(100), ISNULL(v.RefNo, N'')))) = @indentNo
+       OR LTRIM(RTRIM(CONVERT(nvarchar(100), ISNULL(v.StoreCode, N'')))) = @indentNo
+
+    UNION
+
+    SELECT DISTINCT LTRIM(RTRIM(CONVERT(nvarchar(100), fq.PurchaseCode))) AS PurchaseCode
+    FROM dbo.FinalQuotation fq WITH (NOLOCK)
+    WHERE LTRIM(RTRIM(CONVERT(nvarchar(100), ISNULL(fq.StoreCode, N'')))) = @indentNo
+      AND ISNULL(LTRIM(RTRIM(CONVERT(nvarchar(100), fq.PurchaseCode))), N'') <> N''
+
+    UNION
+
+    SELECT DISTINCT LTRIM(RTRIM(CONVERT(nvarchar(100), q.PurchaseCode))) AS PurchaseCode
+    FROM dbo.Vw_Quotation q WITH (NOLOCK)
+    WHERE LTRIM(RTRIM(CONVERT(nvarchar(100), ISNULL(q.StoreCode, N'')))) = @indentNo
+      AND ISNULL(LTRIM(RTRIM(CONVERT(nvarchar(100), q.PurchaseCode))), N'') <> N''
+)
+SELECT
+    l.PurchaseCode AS PoNo,
+    MAX(NULLIF(LTRIM(RTRIM(v.FirmName)), N'')) AS FirmName,
+    MAX(CAST(p.TotalAmount AS float)) AS TotalAmount,
+    MAX(NULLIF(LTRIM(RTRIM(v.Currency)), N'')) AS Currency
+FROM Linked l
+LEFT JOIN dbo.Vw_PurchaseOrder v WITH (NOLOCK)
+  ON LTRIM(RTRIM(CONVERT(nvarchar(100), v.PurchaseCode))) = l.PurchaseCode
+LEFT JOIN dbo.PurchasePayment p WITH (NOLOCK)
+  ON LTRIM(RTRIM(CONVERT(nvarchar(100), p.PurchaseCode))) = l.PurchaseCode
+WHERE ISNULL(l.PurchaseCode, N'') <> N''
+GROUP BY l.PurchaseCode
+ORDER BY l.PurchaseCode DESC",
+        new { indentNo = indentNo.Trim() });
+
+    return Ok(new
+    {
+        indentNo = indentNo.Trim(),
+        purchaseOrders = data,
+        note = "PO links via Vw_PurchaseOrder.RefNo/StoreCode, FinalQuotation.StoreCode, and Vw_Quotation.StoreCode.",
+    });
+}
 [HttpPost("approve")]
 public async Task<IActionResult> Approve(
     [FromBody] POApprovalAPI.Models.IndentApprovalRequest request)
