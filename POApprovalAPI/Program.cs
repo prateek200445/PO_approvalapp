@@ -84,6 +84,7 @@ builder.Services.AddScoped<IntercompanyBalanceService>();
 builder.Services.AddScoped<BomService>();
 builder.Services.AddScoped<BomCreationService>();
 builder.Services.AddScoped<DailyProductionPriceService>();
+builder.Services.AddScoped<FibcBuyersService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();

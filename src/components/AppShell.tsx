@@ -22,6 +22,7 @@ import {
   Hammer,
   Menu,
   Search,
+  Globe2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useLayoutEffect, useState, type ComponentType } from "react";
@@ -49,6 +50,7 @@ type AppPath =
   | "/daily-production"
   | "/daily-reports"
   | "/bom"
+  | "/fibc-buyers"
   | "/profile"
   | "/assistant";
 
@@ -189,6 +191,12 @@ export function AppShell() {
       icon: BarChart3,
       label: "Sales Dashboard",
       match: (p) => p.startsWith("/sales-dashboard"),
+    },
+    {
+      to: "/fibc-buyers",
+      icon: Globe2,
+      label: "FIBC Buyers",
+      match: (p) => p.startsWith("/fibc-buyers"),
     },
     {
       to: "/bank-requirements",

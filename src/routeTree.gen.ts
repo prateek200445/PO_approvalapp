@@ -9,154 +9,56 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
-import { Route as AppSalesDashboardRouteImport } from './routes/_app/sales-dashboard'
-import { Route as AppReconciliationRouteImport } from './routes/_app/reconciliation'
-import { Route as AppProfileRouteImport } from './routes/_app/profile'
-import { Route as AppPnlResultRouteImport } from './routes/_app/pnl-result'
-import { Route as AppPnlRouteImport } from './routes/_app/pnl'
-import { Route as AppPendingRouteImport } from './routes/_app/pending'
-import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
-import { Route as AppOrderBookSummaryRouteImport } from './routes/_app/order-book-summary'
-import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
-import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
-import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
-import { Route as AppIndentsRouteImport } from './routes/_app/indents'
-import { Route as AppHistoryRouteImport } from './routes/_app/history'
-import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
-import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
-import { Route as AppDailyReportsRouteImport } from './routes/_app/daily-reports'
-import { Route as AppDailyProductionRouteImport } from './routes/_app/daily-production'
-import { Route as AppCmaRouteImport } from './routes/_app/cma'
-import { Route as AppBomRouteImport } from './routes/_app/bom'
-import { Route as AppBankRequirementsRouteImport } from './routes/_app/bank-requirements'
-import { Route as AppAssistantRouteImport } from './routes/_app/assistant'
+import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppAdvancePaymentsRouteImport } from './routes/_app/advance-payments'
-import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
-import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
-import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
-import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
-import { Route as AppIntercompanySettlementRouteImport } from './routes/_app/intercompany.settlement'
-import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
-import { Route as AppBomCustomersRouteImport } from './routes/_app/bom.customers'
-import { Route as AppBomCreateRouteImport } from './routes/_app/bom.create'
-import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
+import { Route as AppAssistantRouteImport } from './routes/_app/assistant'
+import { Route as AppBankRequirementsRouteImport } from './routes/_app/bank-requirements'
+import { Route as AppBomRouteImport } from './routes/_app/bom'
+import { Route as AppCmaRouteImport } from './routes/_app/cma'
+import { Route as AppDailyProductionRouteImport } from './routes/_app/daily-production'
+import { Route as AppDailyReportsRouteImport } from './routes/_app/daily-reports'
+import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
+import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
+import { Route as AppFibcBuyersRouteImport } from './routes/_app/fibc-buyers'
+import { Route as AppHistoryRouteImport } from './routes/_app/history'
+import { Route as AppIndentsRouteImport } from './routes/_app/indents'
+import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
+import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
+import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
+import { Route as AppOrderBookSummaryRouteImport } from './routes/_app/order-book-summary'
+import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
+import { Route as AppPendingRouteImport } from './routes/_app/pending'
+import { Route as AppPnlRouteImport } from './routes/_app/pnl'
+import { Route as AppPnlResultRouteImport } from './routes/_app/pnl-result'
+import { Route as AppProfileRouteImport } from './routes/_app/profile'
+import { Route as AppReconciliationRouteImport } from './routes/_app/reconciliation'
+import { Route as AppSalesDashboardRouteImport } from './routes/_app/sales-dashboard'
+import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
 import { Route as AppAdvancePaymentPaymentNoRouteImport } from './routes/_app/advance-payment.$paymentNo'
+import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
+import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
+import { Route as AppBomCreateRouteImport } from './routes/_app/bom.create'
+import { Route as AppBomCustomersRouteImport } from './routes/_app/bom.customers'
+import { Route as AppFibcBuyersBuyerIdRouteImport } from './routes/_app/fibc-buyers.$buyerId'
+import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
+import { Route as AppIntercompanySettlementRouteImport } from './routes/_app/intercompany.settlement'
+import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
+import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
+import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
 
-const AppRoute = AppRouteImport.update({
-  id: '/_app',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppWorkordersRoute = AppWorkordersRouteImport.update({
-  id: '/workorders',
-  path: '/workorders',
-  getParentRoute: () => AppRoute,
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AppSalesDashboardRoute = AppSalesDashboardRouteImport.update({
-  id: '/sales-dashboard',
-  path: '/sales-dashboard',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppReconciliationRoute = AppReconciliationRouteImport.update({
-  id: '/reconciliation',
-  path: '/reconciliation',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppProfileRoute = AppProfileRouteImport.update({
-  id: '/profile',
-  path: '/profile',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPnlResultRoute = AppPnlResultRouteImport.update({
-  id: '/pnl-result',
-  path: '/pnl-result',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPnlRoute = AppPnlRouteImport.update({
-  id: '/pnl',
-  path: '/pnl',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPendingRoute = AppPendingRouteImport.update({
-  id: '/pending',
-  path: '/pending',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPaymentsRoute = AppPaymentsRouteImport.update({
-  id: '/payments',
-  path: '/payments',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppOrderBookSummaryRoute = AppOrderBookSummaryRouteImport.update({
-  id: '/order-book-summary',
-  path: '/order-book-summary',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppLedgersRoute = AppLedgersRouteImport.update({
-  id: '/ledgers',
-  path: '/ledgers',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppLedgerSummaryRoute = AppLedgerSummaryRouteImport.update({
-  id: '/ledger-summary',
-  path: '/ledger-summary',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppIntercompanyRoute = AppIntercompanyRouteImport.update({
-  id: '/intercompany',
-  path: '/intercompany',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppIndentsRoute = AppIndentsRouteImport.update({
-  id: '/indents',
-  path: '/indents',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppHistoryRoute = AppHistoryRouteImport.update({
-  id: '/history',
-  path: '/history',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppExportBillOverdueRoute = AppExportBillOverdueRouteImport.update({
-  id: '/export-bill-overdue',
-  path: '/export-bill-overdue',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDashboardRoute = AppDashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDailyReportsRoute = AppDailyReportsRouteImport.update({
-  id: '/daily-reports',
-  path: '/daily-reports',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDailyProductionRoute = AppDailyProductionRouteImport.update({
-  id: '/daily-production',
-  path: '/daily-production',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppCmaRoute = AppCmaRouteImport.update({
-  id: '/cma',
-  path: '/cma',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppBomRoute = AppBomRouteImport.update({
-  id: '/bom',
-  path: '/bom',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppBankRequirementsRoute = AppBankRequirementsRouteImport.update({
-  id: '/bank-requirements',
-  path: '/bank-requirements',
+const AppAdvancePaymentsRoute = AppAdvancePaymentsRouteImport.update({
+  id: '/advance-payments',
+  path: '/advance-payments',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAssistantRoute = AppAssistantRouteImport.update({
@@ -164,29 +66,150 @@ const AppAssistantRoute = AppAssistantRouteImport.update({
   path: '/assistant',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAdvancePaymentsRoute = AppAdvancePaymentsRouteImport.update({
-  id: '/advance-payments',
-  path: '/advance-payments',
+const AppBankRequirementsRoute = AppBankRequirementsRouteImport.update({
+  id: '/bank-requirements',
+  path: '/bank-requirements',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBomRoute = AppBomRouteImport.update({
+  id: '/bom',
+  path: '/bom',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCmaRoute = AppCmaRouteImport.update({
+  id: '/cma',
+  path: '/cma',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDailyProductionRoute = AppDailyProductionRouteImport.update({
+  id: '/daily-production',
+  path: '/daily-production',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDailyReportsRoute = AppDailyReportsRouteImport.update({
+  id: '/daily-reports',
+  path: '/daily-reports',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardRoute = AppDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppExportBillOverdueRoute = AppExportBillOverdueRouteImport.update({
+  id: '/export-bill-overdue',
+  path: '/export-bill-overdue',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFibcBuyersRoute = AppFibcBuyersRouteImport.update({
+  id: '/fibc-buyers',
+  path: '/fibc-buyers',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppHistoryRoute = AppHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppIndentsRoute = AppIndentsRouteImport.update({
+  id: '/indents',
+  path: '/indents',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppIntercompanyRoute = AppIntercompanyRouteImport.update({
+  id: '/intercompany',
+  path: '/intercompany',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLedgerSummaryRoute = AppLedgerSummaryRouteImport.update({
+  id: '/ledger-summary',
+  path: '/ledger-summary',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLedgersRoute = AppLedgersRouteImport.update({
+  id: '/ledgers',
+  path: '/ledgers',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppOrderBookSummaryRoute = AppOrderBookSummaryRouteImport.update({
+  id: '/order-book-summary',
+  path: '/order-book-summary',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPaymentsRoute = AppPaymentsRouteImport.update({
+  id: '/payments',
+  path: '/payments',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPendingRoute = AppPendingRouteImport.update({
+  id: '/pending',
+  path: '/pending',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPnlRoute = AppPnlRouteImport.update({
+  id: '/pnl',
+  path: '/pnl',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPnlResultRoute = AppPnlResultRouteImport.update({
+  id: '/pnl-result',
+  path: '/pnl-result',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProfileRoute = AppProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReconciliationRoute = AppReconciliationRouteImport.update({
+  id: '/reconciliation',
+  path: '/reconciliation',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSalesDashboardRoute = AppSalesDashboardRouteImport.update({
+  id: '/sales-dashboard',
+  path: '/sales-dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWorkordersRoute = AppWorkordersRouteImport.update({
+  id: '/workorders',
+  path: '/workorders',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAdvancePaymentPaymentNoRoute =
+  AppAdvancePaymentPaymentNoRouteImport.update({
+    id: '/advance-payment/$paymentNo',
+    path: '/advance-payment/$paymentNo',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppBomIndexRoute = AppBomIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppBomRoute,
 } as any)
-const AppWorkorderPoNoRoute = AppWorkorderPoNoRouteImport.update({
-  id: '/workorder/$poNo',
-  path: '/workorder/$poNo',
-  getParentRoute: () => AppRoute,
+const AppBomSplatRoute = AppBomSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
+  getParentRoute: () => AppBomRoute,
 } as any)
-const AppPoPoNoRoute = AppPoPoNoRouteImport.update({
-  id: '/po/$poNo',
-  path: '/po/$poNo',
-  getParentRoute: () => AppRoute,
+const AppBomCreateRoute = AppBomCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
+  getParentRoute: () => AppBomRoute,
 } as any)
-const AppPaymentPaymentNoRoute = AppPaymentPaymentNoRouteImport.update({
-  id: '/payment/$paymentNo',
-  path: '/payment/$paymentNo',
+const AppBomCustomersRoute = AppBomCustomersRouteImport.update({
+  id: '/customers',
+  path: '/customers',
+  getParentRoute: () => AppBomRoute,
+} as any)
+const AppFibcBuyersBuyerIdRoute = AppFibcBuyersBuyerIdRouteImport.update({
+  id: '/$buyerId',
+  path: '/$buyerId',
+  getParentRoute: () => AppFibcBuyersRoute,
+} as any)
+const AppIndentIndentNoRoute = AppIndentIndentNoRouteImport.update({
+  id: '/indent/$indentNo',
+  path: '/indent/$indentNo',
   getParentRoute: () => AppRoute,
 } as any)
 const AppIntercompanySettlementRoute =
@@ -195,32 +218,21 @@ const AppIntercompanySettlementRoute =
     path: '/settlement',
     getParentRoute: () => AppIntercompanyRoute,
   } as any)
-const AppIndentIndentNoRoute = AppIndentIndentNoRouteImport.update({
-  id: '/indent/$indentNo',
-  path: '/indent/$indentNo',
+const AppPaymentPaymentNoRoute = AppPaymentPaymentNoRouteImport.update({
+  id: '/payment/$paymentNo',
+  path: '/payment/$paymentNo',
   getParentRoute: () => AppRoute,
 } as any)
-const AppBomCustomersRoute = AppBomCustomersRouteImport.update({
-  id: '/customers',
-  path: '/customers',
-  getParentRoute: () => AppBomRoute,
+const AppPoPoNoRoute = AppPoPoNoRouteImport.update({
+  id: '/po/$poNo',
+  path: '/po/$poNo',
+  getParentRoute: () => AppRoute,
 } as any)
-const AppBomCreateRoute = AppBomCreateRouteImport.update({
-  id: '/create',
-  path: '/create',
-  getParentRoute: () => AppBomRoute,
+const AppWorkorderPoNoRoute = AppWorkorderPoNoRouteImport.update({
+  id: '/workorder/$poNo',
+  path: '/workorder/$poNo',
+  getParentRoute: () => AppRoute,
 } as any)
-const AppBomSplatRoute = AppBomSplatRouteImport.update({
-  id: '/$',
-  path: '/$',
-  getParentRoute: () => AppBomRoute,
-} as any)
-const AppAdvancePaymentPaymentNoRoute =
-  AppAdvancePaymentPaymentNoRouteImport.update({
-    id: '/advance-payment/$paymentNo',
-    path: '/advance-payment/$paymentNo',
-    getParentRoute: () => AppRoute,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -233,6 +245,7 @@ export interface FileRoutesByFullPath {
   '/daily-reports': typeof AppDailyReportsRoute
   '/dashboard': typeof AppDashboardRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
+  '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/intercompany': typeof AppIntercompanyRouteWithChildren
@@ -251,6 +264,7 @@ export interface FileRoutesByFullPath {
   '/bom/$': typeof AppBomSplatRoute
   '/bom/create': typeof AppBomCreateRoute
   '/bom/customers': typeof AppBomCustomersRoute
+  '/fibc-buyers/$buyerId': typeof AppFibcBuyersBuyerIdRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/intercompany/settlement': typeof AppIntercompanySettlementRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
@@ -268,6 +282,7 @@ export interface FileRoutesByTo {
   '/daily-reports': typeof AppDailyReportsRoute
   '/dashboard': typeof AppDashboardRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
+  '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/intercompany': typeof AppIntercompanyRouteWithChildren
@@ -286,6 +301,7 @@ export interface FileRoutesByTo {
   '/bom/$': typeof AppBomSplatRoute
   '/bom/create': typeof AppBomCreateRoute
   '/bom/customers': typeof AppBomCustomersRoute
+  '/fibc-buyers/$buyerId': typeof AppFibcBuyersBuyerIdRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/intercompany/settlement': typeof AppIntercompanySettlementRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
@@ -306,6 +322,7 @@ export interface FileRoutesById {
   '/_app/daily-reports': typeof AppDailyReportsRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
+  '/_app/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
   '/_app/history': typeof AppHistoryRoute
   '/_app/indents': typeof AppIndentsRoute
   '/_app/intercompany': typeof AppIntercompanyRouteWithChildren
@@ -324,6 +341,7 @@ export interface FileRoutesById {
   '/_app/bom/$': typeof AppBomSplatRoute
   '/_app/bom/create': typeof AppBomCreateRoute
   '/_app/bom/customers': typeof AppBomCustomersRoute
+  '/_app/fibc-buyers/$buyerId': typeof AppFibcBuyersBuyerIdRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/_app/intercompany/settlement': typeof AppIntercompanySettlementRoute
   '/_app/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
@@ -344,6 +362,7 @@ export interface FileRouteTypes {
     | '/daily-reports'
     | '/dashboard'
     | '/export-bill-overdue'
+    | '/fibc-buyers'
     | '/history'
     | '/indents'
     | '/intercompany'
@@ -362,6 +381,7 @@ export interface FileRouteTypes {
     | '/bom/$'
     | '/bom/create'
     | '/bom/customers'
+    | '/fibc-buyers/$buyerId'
     | '/indent/$indentNo'
     | '/intercompany/settlement'
     | '/payment/$paymentNo'
@@ -379,6 +399,7 @@ export interface FileRouteTypes {
     | '/daily-reports'
     | '/dashboard'
     | '/export-bill-overdue'
+    | '/fibc-buyers'
     | '/history'
     | '/indents'
     | '/intercompany'
@@ -397,6 +418,7 @@ export interface FileRouteTypes {
     | '/bom/$'
     | '/bom/create'
     | '/bom/customers'
+    | '/fibc-buyers/$buyerId'
     | '/indent/$indentNo'
     | '/intercompany/settlement'
     | '/payment/$paymentNo'
@@ -416,6 +438,7 @@ export interface FileRouteTypes {
     | '/_app/daily-reports'
     | '/_app/dashboard'
     | '/_app/export-bill-overdue'
+    | '/_app/fibc-buyers'
     | '/_app/history'
     | '/_app/indents'
     | '/_app/intercompany'
@@ -434,6 +457,7 @@ export interface FileRouteTypes {
     | '/_app/bom/$'
     | '/_app/bom/create'
     | '/_app/bom/customers'
+    | '/_app/fibc-buyers/$buyerId'
     | '/_app/indent/$indentNo'
     | '/_app/intercompany/settlement'
     | '/_app/payment/$paymentNo'
@@ -449,13 +473,6 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/_app': {
-      id: '/_app'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AppRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -463,151 +480,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/workorders': {
-      id: '/_app/workorders'
-      path: '/workorders'
-      fullPath: '/workorders'
-      preLoaderRoute: typeof AppWorkordersRouteImport
-      parentRoute: typeof AppRoute
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/_app/sales-dashboard': {
-      id: '/_app/sales-dashboard'
-      path: '/sales-dashboard'
-      fullPath: '/sales-dashboard'
-      preLoaderRoute: typeof AppSalesDashboardRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/reconciliation': {
-      id: '/_app/reconciliation'
-      path: '/reconciliation'
-      fullPath: '/reconciliation'
-      preLoaderRoute: typeof AppReconciliationRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/profile': {
-      id: '/_app/profile'
-      path: '/profile'
-      fullPath: '/profile'
-      preLoaderRoute: typeof AppProfileRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/pnl-result': {
-      id: '/_app/pnl-result'
-      path: '/pnl-result'
-      fullPath: '/pnl-result'
-      preLoaderRoute: typeof AppPnlResultRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/pnl': {
-      id: '/_app/pnl'
-      path: '/pnl'
-      fullPath: '/pnl'
-      preLoaderRoute: typeof AppPnlRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/pending': {
-      id: '/_app/pending'
-      path: '/pending'
-      fullPath: '/pending'
-      preLoaderRoute: typeof AppPendingRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/payments': {
-      id: '/_app/payments'
-      path: '/payments'
-      fullPath: '/payments'
-      preLoaderRoute: typeof AppPaymentsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/order-book-summary': {
-      id: '/_app/order-book-summary'
-      path: '/order-book-summary'
-      fullPath: '/order-book-summary'
-      preLoaderRoute: typeof AppOrderBookSummaryRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/ledgers': {
-      id: '/_app/ledgers'
-      path: '/ledgers'
-      fullPath: '/ledgers'
-      preLoaderRoute: typeof AppLedgersRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/ledger-summary': {
-      id: '/_app/ledger-summary'
-      path: '/ledger-summary'
-      fullPath: '/ledger-summary'
-      preLoaderRoute: typeof AppLedgerSummaryRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/intercompany': {
-      id: '/_app/intercompany'
-      path: '/intercompany'
-      fullPath: '/intercompany'
-      preLoaderRoute: typeof AppIntercompanyRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/indents': {
-      id: '/_app/indents'
-      path: '/indents'
-      fullPath: '/indents'
-      preLoaderRoute: typeof AppIndentsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/history': {
-      id: '/_app/history'
-      path: '/history'
-      fullPath: '/history'
-      preLoaderRoute: typeof AppHistoryRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/export-bill-overdue': {
-      id: '/_app/export-bill-overdue'
-      path: '/export-bill-overdue'
-      fullPath: '/export-bill-overdue'
-      preLoaderRoute: typeof AppExportBillOverdueRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/dashboard': {
-      id: '/_app/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof AppDashboardRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/daily-reports': {
-      id: '/_app/daily-reports'
-      path: '/daily-reports'
-      fullPath: '/daily-reports'
-      preLoaderRoute: typeof AppDailyReportsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/daily-production': {
-      id: '/_app/daily-production'
-      path: '/daily-production'
-      fullPath: '/daily-production'
-      preLoaderRoute: typeof AppDailyProductionRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/cma': {
-      id: '/_app/cma'
-      path: '/cma'
-      fullPath: '/cma'
-      preLoaderRoute: typeof AppCmaRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/bom': {
-      id: '/_app/bom'
-      path: '/bom'
-      fullPath: '/bom'
-      preLoaderRoute: typeof AppBomRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/bank-requirements': {
-      id: '/_app/bank-requirements'
-      path: '/bank-requirements'
-      fullPath: '/bank-requirements'
-      preLoaderRoute: typeof AppBankRequirementsRouteImport
+    '/_app/advance-payments': {
+      id: '/_app/advance-payments'
+      path: '/advance-payments'
+      fullPath: '/advance-payments'
+      preLoaderRoute: typeof AppAdvancePaymentsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/assistant': {
@@ -617,11 +501,165 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAssistantRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/advance-payments': {
-      id: '/_app/advance-payments'
-      path: '/advance-payments'
-      fullPath: '/advance-payments'
-      preLoaderRoute: typeof AppAdvancePaymentsRouteImport
+    '/_app/bank-requirements': {
+      id: '/_app/bank-requirements'
+      path: '/bank-requirements'
+      fullPath: '/bank-requirements'
+      preLoaderRoute: typeof AppBankRequirementsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/bom': {
+      id: '/_app/bom'
+      path: '/bom'
+      fullPath: '/bom'
+      preLoaderRoute: typeof AppBomRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/cma': {
+      id: '/_app/cma'
+      path: '/cma'
+      fullPath: '/cma'
+      preLoaderRoute: typeof AppCmaRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/daily-production': {
+      id: '/_app/daily-production'
+      path: '/daily-production'
+      fullPath: '/daily-production'
+      preLoaderRoute: typeof AppDailyProductionRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/daily-reports': {
+      id: '/_app/daily-reports'
+      path: '/daily-reports'
+      fullPath: '/daily-reports'
+      preLoaderRoute: typeof AppDailyReportsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard': {
+      id: '/_app/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/export-bill-overdue': {
+      id: '/_app/export-bill-overdue'
+      path: '/export-bill-overdue'
+      fullPath: '/export-bill-overdue'
+      preLoaderRoute: typeof AppExportBillOverdueRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/fibc-buyers': {
+      id: '/_app/fibc-buyers'
+      path: '/fibc-buyers'
+      fullPath: '/fibc-buyers'
+      preLoaderRoute: typeof AppFibcBuyersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/history': {
+      id: '/_app/history'
+      path: '/history'
+      fullPath: '/history'
+      preLoaderRoute: typeof AppHistoryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/indents': {
+      id: '/_app/indents'
+      path: '/indents'
+      fullPath: '/indents'
+      preLoaderRoute: typeof AppIndentsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/intercompany': {
+      id: '/_app/intercompany'
+      path: '/intercompany'
+      fullPath: '/intercompany'
+      preLoaderRoute: typeof AppIntercompanyRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/ledger-summary': {
+      id: '/_app/ledger-summary'
+      path: '/ledger-summary'
+      fullPath: '/ledger-summary'
+      preLoaderRoute: typeof AppLedgerSummaryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/ledgers': {
+      id: '/_app/ledgers'
+      path: '/ledgers'
+      fullPath: '/ledgers'
+      preLoaderRoute: typeof AppLedgersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/order-book-summary': {
+      id: '/_app/order-book-summary'
+      path: '/order-book-summary'
+      fullPath: '/order-book-summary'
+      preLoaderRoute: typeof AppOrderBookSummaryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/payments': {
+      id: '/_app/payments'
+      path: '/payments'
+      fullPath: '/payments'
+      preLoaderRoute: typeof AppPaymentsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pending': {
+      id: '/_app/pending'
+      path: '/pending'
+      fullPath: '/pending'
+      preLoaderRoute: typeof AppPendingRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pnl': {
+      id: '/_app/pnl'
+      path: '/pnl'
+      fullPath: '/pnl'
+      preLoaderRoute: typeof AppPnlRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pnl-result': {
+      id: '/_app/pnl-result'
+      path: '/pnl-result'
+      fullPath: '/pnl-result'
+      preLoaderRoute: typeof AppPnlResultRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/profile': {
+      id: '/_app/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof AppProfileRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/reconciliation': {
+      id: '/_app/reconciliation'
+      path: '/reconciliation'
+      fullPath: '/reconciliation'
+      preLoaderRoute: typeof AppReconciliationRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/sales-dashboard': {
+      id: '/_app/sales-dashboard'
+      path: '/sales-dashboard'
+      fullPath: '/sales-dashboard'
+      preLoaderRoute: typeof AppSalesDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/workorders': {
+      id: '/_app/workorders'
+      path: '/workorders'
+      fullPath: '/workorders'
+      preLoaderRoute: typeof AppWorkordersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/advance-payment/$paymentNo': {
+      id: '/_app/advance-payment/$paymentNo'
+      path: '/advance-payment/$paymentNo'
+      fullPath: '/advance-payment/$paymentNo'
+      preLoaderRoute: typeof AppAdvancePaymentPaymentNoRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/bom/': {
@@ -631,46 +669,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBomIndexRouteImport
       parentRoute: typeof AppBomRoute
     }
-    '/_app/workorder/$poNo': {
-      id: '/_app/workorder/$poNo'
-      path: '/workorder/$poNo'
-      fullPath: '/workorder/$poNo'
-      preLoaderRoute: typeof AppWorkorderPoNoRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/po/$poNo': {
-      id: '/_app/po/$poNo'
-      path: '/po/$poNo'
-      fullPath: '/po/$poNo'
-      preLoaderRoute: typeof AppPoPoNoRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/payment/$paymentNo': {
-      id: '/_app/payment/$paymentNo'
-      path: '/payment/$paymentNo'
-      fullPath: '/payment/$paymentNo'
-      preLoaderRoute: typeof AppPaymentPaymentNoRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/intercompany/settlement': {
-      id: '/_app/intercompany/settlement'
-      path: '/settlement'
-      fullPath: '/intercompany/settlement'
-      preLoaderRoute: typeof AppIntercompanySettlementRouteImport
-      parentRoute: typeof AppIntercompanyRoute
-    }
-    '/_app/indent/$indentNo': {
-      id: '/_app/indent/$indentNo'
-      path: '/indent/$indentNo'
-      fullPath: '/indent/$indentNo'
-      preLoaderRoute: typeof AppIndentIndentNoRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/bom/customers': {
-      id: '/_app/bom/customers'
-      path: '/customers'
-      fullPath: '/bom/customers'
-      preLoaderRoute: typeof AppBomCustomersRouteImport
+    '/_app/bom/$': {
+      id: '/_app/bom/$'
+      path: '/$'
+      fullPath: '/bom/$'
+      preLoaderRoute: typeof AppBomSplatRouteImport
       parentRoute: typeof AppBomRoute
     }
     '/_app/bom/create': {
@@ -680,18 +683,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBomCreateRouteImport
       parentRoute: typeof AppBomRoute
     }
-    '/_app/bom/$': {
-      id: '/_app/bom/$'
-      path: '/$'
-      fullPath: '/bom/$'
-      preLoaderRoute: typeof AppBomSplatRouteImport
+    '/_app/bom/customers': {
+      id: '/_app/bom/customers'
+      path: '/customers'
+      fullPath: '/bom/customers'
+      preLoaderRoute: typeof AppBomCustomersRouteImport
       parentRoute: typeof AppBomRoute
     }
-    '/_app/advance-payment/$paymentNo': {
-      id: '/_app/advance-payment/$paymentNo'
-      path: '/advance-payment/$paymentNo'
-      fullPath: '/advance-payment/$paymentNo'
-      preLoaderRoute: typeof AppAdvancePaymentPaymentNoRouteImport
+    '/_app/fibc-buyers/$buyerId': {
+      id: '/_app/fibc-buyers/$buyerId'
+      path: '/$buyerId'
+      fullPath: '/fibc-buyers/$buyerId'
+      preLoaderRoute: typeof AppFibcBuyersBuyerIdRouteImport
+      parentRoute: typeof AppFibcBuyersRoute
+    }
+    '/_app/indent/$indentNo': {
+      id: '/_app/indent/$indentNo'
+      path: '/indent/$indentNo'
+      fullPath: '/indent/$indentNo'
+      preLoaderRoute: typeof AppIndentIndentNoRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/intercompany/settlement': {
+      id: '/_app/intercompany/settlement'
+      path: '/settlement'
+      fullPath: '/intercompany/settlement'
+      preLoaderRoute: typeof AppIntercompanySettlementRouteImport
+      parentRoute: typeof AppIntercompanyRoute
+    }
+    '/_app/payment/$paymentNo': {
+      id: '/_app/payment/$paymentNo'
+      path: '/payment/$paymentNo'
+      fullPath: '/payment/$paymentNo'
+      preLoaderRoute: typeof AppPaymentPaymentNoRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/po/$poNo': {
+      id: '/_app/po/$poNo'
+      path: '/po/$poNo'
+      fullPath: '/po/$poNo'
+      preLoaderRoute: typeof AppPoPoNoRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/workorder/$poNo': {
+      id: '/_app/workorder/$poNo'
+      path: '/workorder/$poNo'
+      fullPath: '/workorder/$poNo'
+      preLoaderRoute: typeof AppWorkorderPoNoRouteImport
       parentRoute: typeof AppRoute
     }
   }
@@ -713,6 +751,18 @@ const AppBomRouteChildren: AppBomRouteChildren = {
 
 const AppBomRouteWithChildren =
   AppBomRoute._addFileChildren(AppBomRouteChildren)
+
+interface AppFibcBuyersRouteChildren {
+  AppFibcBuyersBuyerIdRoute: typeof AppFibcBuyersBuyerIdRoute
+}
+
+const AppFibcBuyersRouteChildren: AppFibcBuyersRouteChildren = {
+  AppFibcBuyersBuyerIdRoute: AppFibcBuyersBuyerIdRoute,
+}
+
+const AppFibcBuyersRouteWithChildren = AppFibcBuyersRoute._addFileChildren(
+  AppFibcBuyersRouteChildren,
+)
 
 interface AppIntercompanyRouteChildren {
   AppIntercompanySettlementRoute: typeof AppIntercompanySettlementRoute
@@ -736,6 +786,7 @@ interface AppRouteChildren {
   AppDailyReportsRoute: typeof AppDailyReportsRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
+  AppFibcBuyersRoute: typeof AppFibcBuyersRouteWithChildren
   AppHistoryRoute: typeof AppHistoryRoute
   AppIndentsRoute: typeof AppIndentsRoute
   AppIntercompanyRoute: typeof AppIntercompanyRouteWithChildren
@@ -767,6 +818,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDailyReportsRoute: AppDailyReportsRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
+  AppFibcBuyersRoute: AppFibcBuyersRouteWithChildren,
   AppHistoryRoute: AppHistoryRoute,
   AppIndentsRoute: AppIndentsRoute,
   AppIntercompanyRoute: AppIntercompanyRouteWithChildren,
@@ -797,13 +849,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
