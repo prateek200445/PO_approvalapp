@@ -25,6 +25,7 @@ import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summa
 import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
+import { Route as AppGroupSalaryRouteImport } from './routes/_app/group-salary'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppDailyReportsRouteImport } from './routes/_app/daily-reports'
@@ -122,6 +123,11 @@ const AppIndentsRoute = AppIndentsRouteImport.update({
 const AppHistoryRoute = AppHistoryRouteImport.update({
   id: '/history',
   path: '/history',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGroupSalaryRoute = AppGroupSalaryRouteImport.update({
+  id: '/group-salary',
+  path: '/group-salary',
   getParentRoute: () => AppRoute,
 } as any)
 const AppExportBillOverdueRoute = AppExportBillOverdueRouteImport.update({
@@ -233,6 +239,7 @@ export interface FileRoutesByFullPath {
   '/daily-reports': typeof AppDailyReportsRoute
   '/dashboard': typeof AppDashboardRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
+  '/group-salary': typeof AppGroupSalaryRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/intercompany': typeof AppIntercompanyRouteWithChildren
@@ -268,6 +275,7 @@ export interface FileRoutesByTo {
   '/daily-reports': typeof AppDailyReportsRoute
   '/dashboard': typeof AppDashboardRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
+  '/group-salary': typeof AppGroupSalaryRoute
   '/history': typeof AppHistoryRoute
   '/indents': typeof AppIndentsRoute
   '/intercompany': typeof AppIntercompanyRouteWithChildren
@@ -306,6 +314,7 @@ export interface FileRoutesById {
   '/_app/daily-reports': typeof AppDailyReportsRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
+  '/_app/group-salary': typeof AppGroupSalaryRoute
   '/_app/history': typeof AppHistoryRoute
   '/_app/indents': typeof AppIndentsRoute
   '/_app/intercompany': typeof AppIntercompanyRouteWithChildren
@@ -344,6 +353,7 @@ export interface FileRouteTypes {
     | '/daily-reports'
     | '/dashboard'
     | '/export-bill-overdue'
+    | '/group-salary'
     | '/history'
     | '/indents'
     | '/intercompany'
@@ -379,6 +389,7 @@ export interface FileRouteTypes {
     | '/daily-reports'
     | '/dashboard'
     | '/export-bill-overdue'
+    | '/group-salary'
     | '/history'
     | '/indents'
     | '/intercompany'
@@ -416,6 +427,7 @@ export interface FileRouteTypes {
     | '/_app/daily-reports'
     | '/_app/dashboard'
     | '/_app/export-bill-overdue'
+    | '/_app/group-salary'
     | '/_app/history'
     | '/_app/indents'
     | '/_app/intercompany'
@@ -559,6 +571,13 @@ declare module '@tanstack/react-router' {
       path: '/history'
       fullPath: '/history'
       preLoaderRoute: typeof AppHistoryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/group-salary': {
+      id: '/_app/group-salary'
+      path: '/group-salary'
+      fullPath: '/group-salary'
+      preLoaderRoute: typeof AppGroupSalaryRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/export-bill-overdue': {
@@ -736,6 +755,7 @@ interface AppRouteChildren {
   AppDailyReportsRoute: typeof AppDailyReportsRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
+  AppGroupSalaryRoute: typeof AppGroupSalaryRoute
   AppHistoryRoute: typeof AppHistoryRoute
   AppIndentsRoute: typeof AppIndentsRoute
   AppIntercompanyRoute: typeof AppIntercompanyRouteWithChildren
@@ -767,6 +787,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDailyReportsRoute: AppDailyReportsRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
+  AppGroupSalaryRoute: AppGroupSalaryRoute,
   AppHistoryRoute: AppHistoryRoute,
   AppIndentsRoute: AppIndentsRoute,
   AppIntercompanyRoute: AppIntercompanyRouteWithChildren,

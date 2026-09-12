@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeftRight, BookOpen, ChevronRight, LineChart } from "lucide-react";
+import { ArrowLeftRight, BookOpen, ChevronRight, LineChart, Wallet } from "lucide-react";
 
 export const Route = createFileRoute("/_app/ledgers")({
   head: () => ({ meta: [{ title: "Ledgers — PO Portal" }] }),
@@ -28,6 +28,12 @@ function LedgersHubPage() {
           icon={LineChart}
           title="P&L / EBITDA Result"
           description="Select company and month to generate the final P&L and EBITDA statement."
+        />
+        <HubCard
+          to="/group-salary"
+          icon={Wallet}
+          title="Group Salary"
+          description="Company-wise and month-wise salaries, allowances, bonus, labour charges from vw_LedgerSummary."
         />
         <HubCard
           to="/ledger-summary"

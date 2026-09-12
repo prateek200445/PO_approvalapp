@@ -45,6 +45,7 @@ type AppPath =
   | "/cma"
   | "/intercompany"
   | "/ledgers"
+  | "/group-salary"
   | "/export-bill-overdue"
   | "/daily-production"
   | "/daily-reports"
@@ -226,7 +227,8 @@ export function AppShell() {
         p.startsWith("/ledgers") ||
         p.startsWith("/ledger-summary") ||
         p.startsWith("/reconciliation") ||
-        p.startsWith("/pnl"),
+        p.startsWith("/pnl") ||
+        p.startsWith("/group-salary"),
     },
     {
       to: "/export-bill-overdue",
