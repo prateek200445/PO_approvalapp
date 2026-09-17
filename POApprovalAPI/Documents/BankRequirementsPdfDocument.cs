@@ -29,10 +29,12 @@ public sealed class BankRequirementsPdfDocument : IDocument
         container.Page(page =>
         {
             page.Size(PageSizes.A4);
-            page.Margin(28);
+            page.MarginTop(28);
+            page.MarginHorizontal(28);
+            page.MarginBottom(36);
             page.DefaultTextStyle(x => x.FontSize(10).FontFamily(Fonts.Arial).FontColor(Navy));
             page.Header().Element(ComposeHeader);
-            page.Content().PaddingTop(16).Element(ComposeTable);
+            page.Content().PaddingTop(16).PaddingBottom(8).Element(ComposeTable);
             page.Footer().Element(ComposeFooter);
         });
     }
@@ -134,7 +136,7 @@ public sealed class BankRequirementsPdfDocument : IDocument
         cell.Border(0.5f).BorderColor("#D6DEE8").Padding(7).AlignMiddle();
 
     private static IContainer TotalCell(IContainer cell) =>
-        cell.Background(Navy).Border(0.5f).BorderColor("#083049").Padding(7).AlignMiddle();
+        cell.Background(Navy).Border(0.5f).BorderColor("#083049").PaddingVertical(9).PaddingHorizontal(7).AlignMiddle();
 
     private static void ComposeFooter(IContainer container)
     {

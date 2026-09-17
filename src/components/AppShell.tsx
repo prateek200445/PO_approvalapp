@@ -71,6 +71,7 @@ export function AppShell() {
   const path = routerState.location.pathname;
   const fullScreenReport =
     path.includes("export-bill-overdue") || path.includes("order-book-summary");
+  const wideContent = path.startsWith("/bank-statement-import");
   const isCopilot = path.startsWith("/assistant");
   const assistantLoading = useRouterState({
     select: (s) =>
@@ -201,8 +202,11 @@ export function AppShell() {
     {
       to: "/bank-requirements",
       icon: Landmark,
-      label: "Bank Requirements",
-      match: (p) => p.startsWith("/bank-requirements"),
+      label: "Banking",
+      match: (p) =>
+        p.startsWith("/bank-requirements") ||
+        p.startsWith("/bank-sales-profile") ||
+        p.startsWith("/bank-statement-import"),
     },
     ...(canAccessOrderBookSummary(user?.username)
       ? [
@@ -523,13 +527,14 @@ export function AppShell() {
         </aside>
 
         <main
-          className={cn(
-            "w-full min-w-0 max-w-full overflow-x-hidden px-4 py-5 transition-[margin-left] duration-300 ease-in-out md:px-6 md:py-8 lg:px-8",
-            sidebarCollapsed ? "md:ml-[4.5rem]" : "md:ml-64",
-            fullScreenReport &&
+            className={cn(
+              "w-full min-w-0 max-w-full overflow-x-hidden px-4 py-5 transition-[margin-left] duration-300 ease-in-out md:px-6 md:py-8 lg:px-8",
+              sidebarCollapsed ? "md:ml-[4.5rem]" : "md:ml-64",
+              wideContent && "overflow-x-auto md:px-4 lg:px-5",
+              fullScreenReport &&
               // Mobile: scroll the report body (cards). Desktop: keep overflow locked for sticky table heads.
               "flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] sm:px-3 sm:py-2.5 md:h-auto md:overflow-hidden md:px-3 md:py-3 md:pb-3 lg:px-4",
-          )}
+            )}
           id="main-content"
         >
           <div
@@ -537,6 +542,7 @@ export function AppShell() {
               "mx-auto w-full max-w-7xl",
               // Mobile: let content grow so <main> can scroll. Desktop: fill height for table panes.
               fullScreenReport && "flex max-w-none flex-col md:min-h-0 md:flex-1 md:overflow-hidden",
+              wideContent && "max-w-none",
             )}
           >
             <Outlet />

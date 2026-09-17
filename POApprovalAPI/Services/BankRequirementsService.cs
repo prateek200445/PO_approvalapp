@@ -107,20 +107,24 @@ public sealed class BankRequirementsService
         sheet.Range(1, 1, 1, 4).Merge().Style.Font.SetBold().Font.SetFontSize(14).Font.SetFontColor(navy);
         sheet.Cell(2, 1).Value = $"Company: {data.Company}    Period: {data.PeriodLabel}";
         sheet.Range(2, 1, 2, 4).Merge().Style.Font.SetFontColor(headerBlue);
+        sheet.Range(3, 1, 3, 4).Style.Fill.SetBackgroundColor(gold);
 
         sheet.Cell(4, 1).Value = "Sr. No.";
         sheet.Cell(4, 2).Value = "Revenue Streams";
         sheet.Cell(4, 3).Value = data.PeriodLabel;
+        sheet.Range(4, 1, 5, 1).Merge();
+        sheet.Range(4, 2, 5, 2).Merge();
         sheet.Range(4, 3, 4, 4).Merge();
         sheet.Range(4, 1, 4, 4).Style.Font.SetBold().Font.SetFontColor(XLColor.White).Fill.SetBackgroundColor(navy);
-        sheet.Range(4, 1, 4, 4).Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+        sheet.Range(4, 1, 5, 2).Style.Font.SetBold().Font.SetFontColor(XLColor.White).Fill.SetBackgroundColor(navy);
+        sheet.Range(4, 1, 5, 2).Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+        sheet.Range(4, 1, 5, 2).Style.Alignment.SetVertical(XLAlignmentVerticalValues.Center);
+        sheet.Range(4, 3, 4, 4).Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
 
-        sheet.Cell(5, 1).Value = "";
-        sheet.Cell(5, 2).Value = "";
         sheet.Cell(5, 3).Value = "Amt (INR Cr)";
         sheet.Cell(5, 4).Value = "% Share";
-        sheet.Range(5, 1, 5, 4).Style.Font.SetBold().Font.SetFontColor(XLColor.White).Fill.SetBackgroundColor(headerBlue);
-        sheet.Range(5, 1, 5, 4).Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+        sheet.Range(5, 3, 5, 4).Style.Font.SetBold().Font.SetFontColor(XLColor.White).Fill.SetBackgroundColor(headerBlue);
+        sheet.Range(5, 3, 5, 4).Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
 
         WriteRow(sheet, 6, 1, "Export", data.ExportAmountCr, data.ExportShare);
         WriteRow(sheet, 7, 2, "Domestic", data.DomesticAmountCr, data.DomesticShare);
@@ -129,11 +133,14 @@ public sealed class BankRequirementsService
         sheet.Cell(8, 2).Value = "Total";
         sheet.Cell(8, 3).Value = data.TotalAmountCr;
         sheet.Cell(8, 4).Value = data.TotalAmount > 0 ? 100d : 0d;
-        sheet.Range(8, 1, 8, 4).Style.Font.SetBold().Fill.SetBackgroundColor(gold);
+        sheet.Range(8, 1, 8, 4).Style.Font.SetBold().Font.SetFontColor(XLColor.White).Fill.SetBackgroundColor(navy);
+        sheet.Range(8, 1, 8, 4).Style.Border.SetOutsideBorder(XLBorderStyleValues.Thin);
+        sheet.Range(8, 1, 8, 4).Style.Border.SetInsideBorder(XLBorderStyleValues.Thin);
         sheet.Cell(8, 3).Style.NumberFormat.Format = "#,##0.00";
         sheet.Cell(8, 4).Style.NumberFormat.Format = "0.00\"%\"";
         sheet.Cell(8, 3).Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Right);
         sheet.Cell(8, 4).Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Right);
+        sheet.Row(8).Height = 22;
 
         sheet.Cell(10, 1).Value = data.Note;
         sheet.Range(10, 1, 10, 4).Merge().Style.Font.SetItalic().Font.SetFontColor(XLColor.FromHtml("#64748B"));
