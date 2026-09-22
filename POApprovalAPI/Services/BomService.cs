@@ -345,6 +345,12 @@ SELECT TOP 1
     b.QtyUnit,
     b.PrintType,
     b.TotalKg,
+    b.BodyGSM AS BodyGsm,
+    b.BodyLami,
+    b.BodyFabric,
+    b.BodyCutSize,
+    b.BodyTotalMtr,
+    b.BodyTotalKg,
     b.Instruction,
     b.printingremarks AS PrintingRemarks,
     b.BodyRemarks1 AS BodyRemarks,
@@ -400,6 +406,23 @@ FROM BOM b WITH (NOLOCK)
 WHERE b.PONo = @FilePoNo
 ORDER BY b.TransId", new { FilePoNo = trimmed }, commandTimeout: BomCommandTimeoutSeconds)).ToList();
 
+        var lines = lineRows.Select(row => new BomPdfLine
+        {
+            SortOrder = row.SortOrder,
+            Heading = row.Heading ?? "",
+            Gsm = row.Gsm ?? "",
+            Lami = row.Lami ?? "",
+            Color = row.Color ?? "",
+            FabricSize = row.FabricSize ?? "",
+            CutSize = row.CutSize ?? "",
+            TotalMtr = row.TotalMtr,
+            TotalKg = row.TotalKg,
+            Gpm = row.Gpm ?? "",
+            Remarks = row.Remarks ?? "",
+        }).ToList();
+
+        RestoreErpFourPanelBody(headerRow, lines);
+
         return new BomPdfModel
         {
             QtnNo = headerRow.FilePONo ?? trimmed,
@@ -435,20 +458,7 @@ ORDER BY b.TransId", new { FilePoNo = trimmed }, commandTimeout: BomCommandTimeo
             Instruction = headerRow.Instruction ?? "",
             PrintingRemarks = headerRow.PrintingRemarks ?? "",
             BodyRemarks = headerRow.BodyRemarks ?? "",
-            Lines = lineRows.Select(row => new BomPdfLine
-            {
-                SortOrder = row.SortOrder,
-                Heading = row.Heading ?? "",
-                Gsm = row.Gsm ?? "",
-                Lami = row.Lami ?? "",
-                Color = row.Color ?? "",
-                FabricSize = row.FabricSize ?? "",
-                CutSize = row.CutSize ?? "",
-                TotalMtr = row.TotalMtr,
-                TotalKg = row.TotalKg,
-                Gpm = row.Gpm ?? "",
-                Remarks = row.Remarks ?? "",
-            }).ToList(),
+            Lines = lines,
         };
     }
 
@@ -621,6 +631,68 @@ WHERE CompanyName = @CompanyName", new
         return "";
     }
 
+    /// <summary>
+    /// ERP skips writing a Body row for square 4-panel bags but still adds BodyWt to BOM1.TotalKg.
+    /// Restore that counted Body line so the PDF kg column matches the ERP bag total.
+    /// </summary>
+    private static void RestoreErpFourPanelBody(BomHeaderRow header, List<BomPdfLine> lines)
+    {
+        if (lines.Any(line => string.Equals(line.Heading.Trim(), "Body", StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        var bagType = header.BagType ?? "";
+        if (bagType.IndexOf("4 Panel", StringComparison.OrdinalIgnoreCase) < 0)
+            return;
+
+        var missingKg = Math.Round(
+            (header.TotalKg ?? 0d) - lines.Sum(line => line.TotalKg ?? 0d),
+            4,
+            MidpointRounding.AwayFromZero);
+        if (missingKg <= 0.001d)
+            return;
+
+        var side = lines.FirstOrDefault(line =>
+            string.Equals(line.Heading.Trim(), "Side", StringComparison.OrdinalIgnoreCase));
+        var sortOrder = lines.Count == 0 ? 0 : lines.Min(line => line.SortOrder) - 1;
+
+        lines.Insert(0, new BomPdfLine
+        {
+            SortOrder = sortOrder,
+            Heading = "Body",
+            Gsm = FirstMeaningful(header.BodyGsm, side?.Gsm),
+            Lami = FirstMeaningful(header.BodyLami, side?.Lami),
+            Color = FirstMeaningful(side?.Color, header.FabColor),
+            FabricSize = FirstMeaningful(header.BodyFabric, side?.FabricSize),
+            CutSize = FirstMeaningful(FormatOptionalNumber(header.BodyCutSize), side?.CutSize),
+            TotalMtr = header.BodyTotalMtr is > 0 ? header.BodyTotalMtr : side?.TotalMtr,
+            TotalKg = missingKg,
+            Gpm = side?.Gpm ?? "",
+            Remarks = "",
+        });
+    }
+
+    private static string FirstMeaningful(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            var text = value?.Trim();
+            if (string.IsNullOrWhiteSpace(text) || text == "0" || text == "0.0")
+                continue;
+            return text;
+        }
+
+        return "";
+    }
+
+    private static string FormatOptionalNumber(double? value)
+    {
+        if (value is null or 0)
+            return "";
+        return value.Value % 1 == 0
+            ? value.Value.ToString("0", System.Globalization.CultureInfo.InvariantCulture)
+            : value.Value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     private sealed class BomHeaderRow
     {
         public string? FilePONo { get; set; }
@@ -642,6 +714,12 @@ WHERE CompanyName = @CompanyName", new
         public string? QtyUnit { get; set; }
         public string? PrintType { get; set; }
         public double? TotalKg { get; set; }
+        public string? BodyGsm { get; set; }
+        public string? BodyLami { get; set; }
+        public string? BodyFabric { get; set; }
+        public double? BodyCutSize { get; set; }
+        public double? BodyTotalMtr { get; set; }
+        public double? BodyTotalKg { get; set; }
         public string? Instruction { get; set; }
         public string? PrintingRemarks { get; set; }
         public string? BodyRemarks { get; set; }
