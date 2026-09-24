@@ -16,6 +16,18 @@ public class PnlService
         "RawMaterial", "Packing", "WIP", "FinishedGoods", "Traded", "Stores",
     };
 
+    /// <summary>
+    /// Trading / HO units with no factory stock or provision pack. P&amp;L is TB only
+    /// (no Provisioning overlay, no PnlStockValue, no Common/HO allocation).
+    /// </summary>
+    private static readonly HashSet<string> TrialBalanceOnlyCompanies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Plastene India Limited (Unit -III)",
+        "Plastene India Limited - HO",
+        "HCP ENTERPRISE LIMITED",
+        "OSWAL COMMODITIES PRIVATE LIMITED",
+    };
+
     private static readonly Dictionary<string, string> StockLabels = new(StringComparer.OrdinalIgnoreCase)
     {
         ["RawMaterial"] = "Raw materials",
@@ -1006,17 +1018,18 @@ END");
             : new DateTime(monthStart.Year - 1, 4, 1);
 
         var companies = await ResolveCompaniesAsync(company);
+        var tbOnly = !IsAggregate(company) && IsTrialBalanceOnly(company);
         var monthBooks = await LoadBooksPlusProvisionAsync(companies, monthStart, monthEnd);
         var ytdBooks = await LoadBooksPlusProvisionAsync(companies, ytdFrom, monthEnd);
 
         var monthHeads = SumHeads(monthBooks);
         var ytdHeads = SumHeads(ytdBooks);
 
-        var stock = IsAggregate(company)
-            ? new PnlStockState { Rows = StockCategories.Select(c => new PnlStockRow { Category = c, Label = StockLabels[c] }).ToList() }
+        var stock = IsAggregate(company) || tbOnly
+            ? EmptyStock()
             : await GetStockAsync(company, monthStart);
 
-        var ytdStockOpening = IsAggregate(company)
+        var ytdStockOpening = IsAggregate(company) || tbOnly
             ? stock
             : await GetStockAsync(company, ytdFrom);
 
@@ -1031,8 +1044,13 @@ END");
             }).ToList(),
         }, useYtdOpening: true);
 
-        var monthOh = await SumOverheadAsync(companies, monthStart, monthStart);
-        var ytdOh = await SumOverheadAsync(companies, ytdFrom, monthStart);
+        var emptyOh = new OverheadBits();
+        var monthOh = tbOnly
+            ? emptyOh
+            : await SumOverheadAsync(companies, monthStart, monthStart);
+        var ytdOh = tbOnly
+            ? emptyOh
+            : await SumOverheadAsync(companies, ytdFrom, monthStart);
 
         var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var rows = BuildTemplate(monthHeads, ytdHeads, monthComputed, ytdComputed, monthOh, ytdOh, used);
@@ -1050,7 +1068,7 @@ END");
 
         var ebitda = rows.FirstOrDefault(r => r.Id == "ebitda")?.MonthLacs ?? 0;
         var pbt = rows.FirstOrDefault(r => r.Id == "pbt")?.MonthLacs ?? 0;
-        var stockIncomplete = stock.Rows.All(r => r.OpeningLacs == 0 && r.ClosingLacs == 0);
+        var stockIncomplete = !tbOnly && stock.Rows.All(r => r.OpeningLacs == 0 && r.ClosingLacs == 0);
 
         return new PnlStatementResult
         {
@@ -1249,7 +1267,7 @@ END");
 
         sheet.Range(2, 1, 2, lastCol).Merge();
         sheet.Cell(2, 1).Value =
-            $"Live P&L (TB + stock + provision + Common/HO)  •  FY {fyStart:MMM yyyy} – {monthStart:MMM yyyy}  •  Amounts in lacs";
+            $"Live P&L (TB + stock + provision + Common/HO)  •  FY {fyStart:MMM yyyy} – {monthStart:MMM yyyy}  •  Amounts in lacs  •  PIL3 / PIL HO / HCP Enterprise / Oswal Commodities = TB only";
         sheet.Range(2, 1, 2, lastCol).Style.Fill.BackgroundColor = XLColor.FromHtml("#D4E6F1");
         sheet.Cell(2, 1).Style.Font.FontColor = navy;
 
@@ -1531,21 +1549,19 @@ END");
 
     private async Task<List<string>> ResolveExportCompaniesAsync()
     {
-        var summaryNames = new HashSet<string>(SummaryPlantNames(), StringComparer.OrdinalIgnoreCase);
-        var companies = (await GetCompaniesAsync())
-            .Where(c => c.Kind == "company")
-            .Select(c => c.Value)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(name => summaryNames.Contains(name))
+        var existing = new HashSet<string>(
+            (await GetCompaniesAsync())
+                .Where(c => c.Kind == "company")
+                .Select(c => c.Value.Trim()),
+            StringComparer.OrdinalIgnoreCase);
+        var ordered = SummaryPlantNames()
+            .Select(n => n.Trim())
+            .Where(existing.Contains)
             .ToList();
-        if (companies.Count > 0)
-            return companies;
+        if (ordered.Count > 0)
+            return ordered;
 
-        return (await GetCompaniesAsync())
-            .Where(c => c.Kind == "company")
-            .Select(c => c.Value)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        return existing.OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static void WriteKpi(
@@ -1590,16 +1606,18 @@ END");
         {
             "Plastene India Limited",
             "Plastene India Limited (Unit -II)",
+            "Plastene India Limited (Unit -III)",
             "Plastene India Limited - HO",
             "HCP Plastene Bulkpack Ltd (Unit - IV)",
             "HCP Plastene Bulkpack Ltd",
             "HCP Plastene Bulkpack Ltd (Unit - II)",
             "HCP Plastene Bulkpack Ltd (Unit - III)",
             "HCP Plastene Bulkpack ltd (Vadodara)",
+            "HCP ENTERPRISE LIMITED",
             "Plastene Polyfilms Limited",
             "Oswal Extrusion Limited",
+            "OSWAL COMMODITIES PRIVATE LIMITED",
             "K.P. WOVEN PRIVATE LIMITED",
-            "K.P. WOVEN PRIVATE LIMITED (UNIT-II)",
             "K.P. WOVEN PRIVATE LIMITED (UNIT-III)",
         };
 
@@ -1609,16 +1627,18 @@ END");
         {
             ["Plastene India Limited"] = "PIL I",
             ["Plastene India Limited (Unit -II)"] = "PIL II",
+            ["Plastene India Limited (Unit -III)"] = "PIL III",
             ["Plastene India Limited - HO"] = "PIL HO",
             ["HCP Plastene Bulkpack Ltd (Unit - IV)"] = "HPBL4",
             ["HCP Plastene Bulkpack Ltd"] = "HPBL I",
             ["HCP Plastene Bulkpack Ltd (Unit - II)"] = "HPBL II",
             ["HCP Plastene Bulkpack Ltd (Unit - III)"] = "HPBL III",
             ["HCP Plastene Bulkpack ltd (Vadodara)"] = "HPBL VAD",
+            ["HCP ENTERPRISE LIMITED"] = "HCP ENT",
             ["Plastene Polyfilms Limited"] = "PPL",
             ["Oswal Extrusion Limited"] = "OEL I",
+            ["OSWAL COMMODITIES PRIVATE LIMITED"] = "OCL",
             ["K.P. WOVEN PRIVATE LIMITED"] = "KP I",
-            ["K.P. WOVEN PRIVATE LIMITED (UNIT-II)"] = "KP II",
             ["K.P. WOVEN PRIVATE LIMITED (UNIT-III)"] = "KP III",
         };
         return map.TryGetValue(company.Trim(), out var nick) ? $"{nick}  —  {company.Trim()}" : company.Trim();
@@ -1649,6 +1669,7 @@ END");
         var reverseInFy = reverseMonth >= fyStart;
         var allCompanies = companies.Count == 0;
         var companyFilter = allCompanies ? new List<string> { "__none__" } : companies.ToList();
+        var tbOnlyNames = TrialBalanceOnlyCompanies.ToList();
 
         using var connection = _database.CreateConnection();
         var books = (await connection.QueryAsync<BookRow>(@"
@@ -1690,6 +1711,7 @@ INNER JOIN LedgerMaster L WITH (NOLOCK)
 WHERE ISNULL(L.Underschedule6, N'') <> N''
   AND VL.sysdate BETWEEN @DateFrom AND @DateTo
   AND (@AllCompanies = 1 OR VL.companyname IN @Companies)
+  AND LTRIM(RTRIM(VL.companyname)) NOT IN @TbOnly
 GROUP BY LTRIM(RTRIM(ISNULL(L.Category, N'Expense'))),
          LTRIM(RTRIM(ISNULL(L.Underschedule6, N''))),
          LTRIM(RTRIM(ISNULL(VL.Ledgername, N'')))",
@@ -1699,6 +1721,7 @@ GROUP BY LTRIM(RTRIM(ISNULL(L.Category, N'Expense'))),
                 DateTo = closingEnd,
                 AllCompanies = allCompanies ? 1 : 0,
                 Companies = companyFilter,
+                TbOnly = tbOnlyNames,
             },
             commandTimeout: TimeoutSeconds)).ToList();
 
@@ -1718,6 +1741,7 @@ INNER JOIN LedgerMaster L WITH (NOLOCK)
 WHERE ISNULL(L.Underschedule6, N'') <> N''
   AND VL.sysdate BETWEEN @DateFrom AND @DateTo
   AND (@AllCompanies = 1 OR VL.companyname IN @Companies)
+  AND LTRIM(RTRIM(VL.companyname)) NOT IN @TbOnly
 GROUP BY LTRIM(RTRIM(ISNULL(L.Category, N'Expense'))),
          LTRIM(RTRIM(ISNULL(L.Underschedule6, N''))),
          LTRIM(RTRIM(ISNULL(VL.Ledgername, N'')))",
@@ -1727,6 +1751,7 @@ GROUP BY LTRIM(RTRIM(ISNULL(L.Category, N'Expense'))),
                     DateTo = reverseEnd,
                     AllCompanies = allCompanies ? 1 : 0,
                     Companies = companyFilter,
+                    TbOnly = tbOnlyNames,
                 },
                 commandTimeout: TimeoutSeconds)).ToList();
         }
@@ -2109,6 +2134,19 @@ ELSE
 
     private static bool IsAggregate(string company) =>
         IsAll(company) || company.StartsWith("G-", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTrialBalanceOnly(string? company) =>
+        !string.IsNullOrWhiteSpace(company) && TrialBalanceOnlyCompanies.Contains(company.Trim());
+
+    private static PnlStockState EmptyStock() =>
+        new()
+        {
+            Rows = StockCategories.Select(c => new PnlStockRow
+            {
+                Category = c,
+                Label = StockLabels[c],
+            }).ToList(),
+        };
 
     private static double Round2(double v) => Math.Round(v, 2, MidpointRounding.AwayFromZero);
     private static double Round4(double v) => Math.Round(v, 4, MidpointRounding.AwayFromZero);
