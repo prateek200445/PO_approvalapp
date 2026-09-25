@@ -139,7 +139,8 @@ function HrReportsPage() {
       !!username &&
       (isSelfMode ||
         (isFullAccess &&
-          (debouncedQ.length >= 1 || !!company.trim() || !!branch.trim()))),
+          (debouncedQ.length >= 1 || !!company.trim() || !!branch.trim()) &&
+          !companiesQuery.isError)),
   });
 
   // Self users: auto-select their own employee row
@@ -330,6 +331,20 @@ function HrReportsPage() {
         {access?.message ? (
           <p className="mt-2 text-xs text-muted-foreground">{access.message}</p>
         ) : null}
+        {(companiesQuery.isError ||
+          (isFullAccess && pendingLeaveQuery.isError)) && (
+          <div className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+            <p className="font-medium">Payroll database unreachable from the cloud API</p>
+            <p className="mt-1 text-xs opacity-90">
+              {(companiesQuery.error instanceof Error
+                ? companiesQuery.error.message
+                : pendingLeaveQuery.error instanceof Error
+                  ? pendingLeaveQuery.error.message
+                  : null) ||
+                "HR data lives on SQL port 3445. IT must allow Render → 180.211.107.118:3445. Until then use localhost (API on :5115) which can reach payroll."}
+            </p>
+          </div>
+        )}
       </div>
 
       {!username ? (
