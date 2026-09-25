@@ -106,29 +106,34 @@ public class WorkOrderController : ControllerBase
 
         var data = await connection.QueryAsync(
             @"SELECT TOP 1
-            PurchaseCode,
-            FirmName,
-            ItemDesc,
-            Qty,
-            Rate,
-            Total,
-            TotalAmount,
-            DepttName,
-            PoSignal,
-            deliverydate,
-            CompanyName,
-            GST,
-            VendorGST,
-            hsncode,
-            CGSTPer,
-            CGSTAmount,
-            SGSTPer,
-            SGSTAmount,
-            IGSTPer,
-            IGSTAmount,
-            Currency
-          FROM Vw_PurchaseOrder
-          WHERE PurchaseCode = @poNo",
+            v.PurchaseCode,
+            v.FirmName,
+            v.ItemDesc,
+            v.Qty,
+            v.Rate,
+            v.Total,
+            v.TotalAmount,
+            v.DepttName,
+            v.PoSignal,
+            v.deliverydate,
+            v.CompanyName,
+            v.GST,
+            v.VendorGST,
+            v.hsncode,
+            v.CGSTPer,
+            v.CGSTAmount,
+            v.SGSTPer,
+            v.SGSTAmount,
+            v.IGSTPer,
+            v.IGSTAmount,
+            v.Currency,
+            NULLIF(LTRIM(RTRIM(v.PONote)), '') AS PONote,
+            NULLIF(LTRIM(RTRIM(v.SpecialNote)), '') AS SpecialNote,
+            NULLIF(LTRIM(RTRIM(v.SpecialNote1)), '') AS SpecialNote1,
+            NULLIF(LTRIM(RTRIM(pp.ApprovalRemarks)), '') AS ApprovalRemarks
+          FROM Vw_PurchaseOrder v
+          LEFT JOIN PurchasePayment pp ON pp.PurchaseCode = v.PurchaseCode
+          WHERE v.PurchaseCode = @poNo",
             new { poNo });
 
         return Ok(data);
@@ -185,6 +190,15 @@ public class WorkOrderController : ControllerBase
           WHERE TransId = @transId",
             new { transId });
 
+        await connection.ExecuteAsync(
+            @"UPDATE PurchasePayment
+          SET ApprovalRemarks = CASE
+                  WHEN NULLIF(LTRIM(RTRIM(@Remarks)), '') IS NULL THEN ApprovalRemarks
+                  ELSE LEFT(LTRIM(RTRIM(@Remarks)), 1000)
+              END
+          WHERE PurchaseCode = @PoNo",
+            new { PoNo = approvalData.PoNo, Remarks = remarks });
+
         if (!string.IsNullOrWhiteSpace(approvalData.Email))
         {
             await _emailService.SendMail(
@@ -193,7 +207,7 @@ public class WorkOrderController : ControllerBase
                 $"Dear Sir,\n\n" +
                 $"Work Order: {approvalData.PoNo}\n" +
                 $"Rejected By: {approvalData.ApprovalName}\n" +
-                $"Remarks: {remarks}\n\n" +
+                $"Remarks: {(string.IsNullOrWhiteSpace(remarks) ? "(none)" : remarks)}\n\n" +
                 $"Regards,\n" +
                 $"{approvalData.ApprovalName}",
                 attachment != null ? [attachment] : null

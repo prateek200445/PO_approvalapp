@@ -188,6 +188,14 @@ public class PdfController : ControllerBase
         if (header == null)
             return null;
 
+        var approvalRemarks = await connection.ExecuteScalarAsync<string?>(
+            new CommandDefinition(
+                @"SELECT TOP 1 NULLIF(LTRIM(RTRIM(ApprovalRemarks)), '')
+                  FROM PurchasePayment WITH (NOLOCK)
+                  WHERE PurchaseCode = @poNo",
+                new { poNo },
+                commandTimeout: 30));
+
         var items = (await connection.QueryAsync(
             new CommandDefinition(
                 @"SELECT
@@ -254,7 +262,9 @@ public class PdfController : ControllerBase
             DeliverySchedule = (Convert.ToString(header.DeliverySch) ?? "").Trim(),
             PaymentTerms = Convert.ToString(header.Payment) ?? "",
             ModeOfTransport = Convert.ToString(header.Mode) ?? "",
-            Note = (Convert.ToString(header.PONote) ?? "").Trim(),
+            Note = FirstNonEmpty(
+                Convert.ToString(header.PONote),
+                approvalRemarks) ?? "",
             SpecialNote = FirstNonEmpty(header.SpecialNote1, header.SpecialNote),
             TotalAmount = ToDecimal(header.TotalAmount),
             TdsAmount = ToDecimal(header.TDSAmt),

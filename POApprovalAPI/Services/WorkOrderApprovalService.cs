@@ -114,9 +114,13 @@ public class WorkOrderApprovalService
 
                 await connection.ExecuteAsync(
                     @"UPDATE PurchasePayment
-                      SET PoSignal = '*'
+                      SET PoSignal = '*',
+                          ApprovalRemarks = CASE
+                              WHEN NULLIF(LTRIM(RTRIM(@Remarks)), '') IS NULL THEN ApprovalRemarks
+                              ELSE LEFT(LTRIM(RTRIM(@Remarks)), 1000)
+                          END
                       WHERE PurchaseCode = @PoNo",
-                    new { PoNo = approvalData.PoNo });
+                    new { PoNo = approvalData.PoNo, Remarks = remarks });
 
                 if (!string.IsNullOrWhiteSpace(approvalData.Email))
                 {
@@ -126,7 +130,7 @@ public class WorkOrderApprovalService
                         $"Dear Sir,\n\n" +
                         $"Work Order: {approvalData.PoNo}\n" +
                         $"Approved By: {approvalData.ApprovalName}\n" +
-                        $"Remarks: {remarks}\n\n" +
+                        $"Remarks: {(string.IsNullOrWhiteSpace(remarks) ? "(none)" : remarks)}\n\n" +
                         $"Regards,\n" +
                         $"{approvalData.ApprovalName}"
                     );
@@ -148,9 +152,13 @@ public class WorkOrderApprovalService
 
             await connection.ExecuteAsync(
                 @"UPDATE PurchasePayment
-                  SET PoSignal = '#'
+                  SET PoSignal = '#',
+                      ApprovalRemarks = CASE
+                          WHEN NULLIF(LTRIM(RTRIM(@Remarks)), '') IS NULL THEN ApprovalRemarks
+                          ELSE LEFT(LTRIM(RTRIM(@Remarks)), 1000)
+                      END
                   WHERE PurchaseCode = @PoNo",
-                new { PoNo = approvalData.PoNo });
+                new { PoNo = approvalData.PoNo, Remarks = remarks });
 
             return Ok(transId, approvalData.PoNo);
         }

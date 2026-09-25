@@ -391,6 +391,15 @@ if (!po || po.length === 0) {
     }
   ];
 
+  const woNote =
+    (typeof woDetails?.SpecialNote1 === "string" && woDetails.SpecialNote1.trim()) ||
+    (typeof woDetails?.SpecialNote === "string" && woDetails.SpecialNote.trim()) ||
+    (typeof woDetails?.PONote === "string" && woDetails.PONote.trim()) ||
+    "";
+  const approvalRemarks =
+    (typeof woDetails?.ApprovalRemarks === "string" && woDetails.ApprovalRemarks.trim()) ||
+    "";
+
   return (
     <div className="space-y-5 pb-action max-w-full overflow-x-hidden min-w-0">
       <ApprovalDetailNav
@@ -589,8 +598,34 @@ if (!po || po.length === 0) {
 
           <DmsAttachmentsSection purchaseCode={poNo} kind="WO" />
 
-          <Section title="Remarks">
+          {(woNote || approvalRemarks) && (
+            <Section title="Work Order remarks">
+              <div className="space-y-3 text-sm">
+                {woNote ? (
+                  <div>
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Document note
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap text-foreground">{woNote}</p>
+                  </div>
+                ) : null}
+                {approvalRemarks ? (
+                  <div>
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Approval remarks
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap text-foreground">{approvalRemarks}</p>
+                  </div>
+                ) : null}
+              </div>
+            </Section>
+          )}
+
+          <Section title="Your remarks">
             <RemarkComposer value={remarks} onChange={setRemarks} />
+            <p className="mt-2 text-xs text-muted-foreground">
+              Remarks entered here are saved on the work order and included in the approval email when you approve or reject.
+            </p>
           </Section>
         </div>
 

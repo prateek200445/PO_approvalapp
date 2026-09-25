@@ -97,6 +97,8 @@ builder.Services.AddScoped<FibcBuyersService>();
 builder.Services.AddScoped<BankStatementService>();
 builder.Services.Configure<HrReportsOptions>(
     builder.Configuration.GetSection(HrReportsOptions.SectionName));
+builder.Services.Configure<AuthOptions>(
+    builder.Configuration.GetSection(AuthOptions.SectionName));
 builder.Services.AddScoped<HrAccessService>();
 builder.Services.AddScoped<HrReportsService>();
 builder.Services.AddScoped<HrSelfServiceService>();

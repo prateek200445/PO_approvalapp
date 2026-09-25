@@ -1,5 +1,6 @@
 using Dapper;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 using POApprovalAPI.Services;
 
 namespace POApprovalAPI.Controllers;
@@ -9,15 +10,17 @@ namespace POApprovalAPI.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly DatabaseService _database;
+    private readonly AuthOptions _options;
 
-    public AuthController(DatabaseService database)
+    public AuthController(DatabaseService database, IOptions<AuthOptions> options)
     {
         _database = database;
+        _options = options.Value;
     }
 
     /// <summary>
-    /// Login credentials: portal LoginRights (5115) first, then payroll LoginRights (3445).
-    /// Authority / Deptt always come from MaterialProcessing poallocation on 5115.
+    /// Login against portal LoginRights (5115). Optional payroll (3445) fallback is off by default.
+    /// Authority / Deptt come from poallocation on 5115 in the same round-trip.
     /// </summary>
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequest request)
@@ -29,9 +32,11 @@ public class AuthController : ControllerBase
 
         string? empCode = null;
         string? fullName = null;
+        object? authority = null;
+        string? deptt = null;
         var authenticated = false;
 
-        // 1) Portal auth (5115)
+        // Single round-trip: credentials + PO authority from 5115
         try
         {
             using var portal = _database.CreateConnection();
@@ -39,8 +44,12 @@ public class AuthController : ControllerBase
 SELECT
     LTRIM(RTRIM(l.Name)) AS UserName,
     NULLIF(LTRIM(RTRIM(l.EmpCode)), '') AS EmpCode,
-    NULLIF(LTRIM(RTRIM(ISNULL(l.FullName, l.Name))), '') AS FullName
+    NULLIF(LTRIM(RTRIM(ISNULL(l.FullName, l.Name))), '') AS FullName,
+    p.authority AS Authority,
+    p.Deptt AS Deptt
 FROM Loginentry.dbo.LoginRights l
+LEFT JOIN poallocation p
+    ON LTRIM(RTRIM(p.username)) = LTRIM(RTRIM(l.Name))
 WHERE LTRIM(RTRIM(l.Name)) = @UserName
   AND l.Password = @Password",
                 new { UserName = userName, Password = password });
@@ -50,23 +59,22 @@ WHERE LTRIM(RTRIM(l.Name)) = @UserName
                 authenticated = true;
                 empCode = portalUser.EmpCode;
                 fullName = portalUser.FullName;
+                authority = portalUser.Authority;
+                deptt = portalUser.Deptt;
             }
         }
         catch
         {
-            // Fall through to payroll
+            // Fall through to optional payroll
         }
 
-        // 2) Payroll LoginRights (3445) — HR accounts that only exist there.
-        // Keep this short: Render often cannot reach 3445; a long timeout makes
-        // every miss look like a slow "wrong password".
-        if (!authenticated)
+        // Optional payroll LoginRights (3445) — disabled on production by default
+        if (!authenticated && _options.EnablePayrollLoginFallback)
         {
             try
             {
                 using var payroll = _database.CreatePayrollLoginEntryConnection();
-                // Fail fast if payroll SQL is unreachable from the cloud host.
-                await using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
                 await payroll.OpenAsync(cts.Token);
                 var payUser = await payroll.QueryFirstOrDefaultAsync<LoginRow>(@"
 SELECT
@@ -87,31 +95,12 @@ WHERE LTRIM(RTRIM(Name)) = @UserName
             }
             catch
             {
-                // Keep unauthenticated — portal DB is the primary auth path for production.
+                // Keep unauthenticated
             }
         }
 
         if (!authenticated)
             return Unauthorized(new { message = "Invalid Username or Password" });
-
-        // Rest from 5115: PO authority / department
-        string? authority = null;
-        string? deptt = null;
-        try
-        {
-            using var app = _database.CreateConnection();
-            var alloc = await app.QueryFirstOrDefaultAsync<(string? authority, string? Deptt)>(@"
-SELECT TOP 1 authority, Deptt
-FROM poallocation WITH (NOLOCK)
-WHERE LTRIM(RTRIM(username)) = @UserName",
-                new { UserName = userName });
-            authority = alloc.authority;
-            deptt = alloc.Deptt;
-        }
-        catch
-        {
-            // Optional — many HR logins have no poallocation row
-        }
 
         return Ok(new
         {
@@ -128,6 +117,8 @@ WHERE LTRIM(RTRIM(username)) = @UserName",
         public string? UserName { get; set; }
         public string? EmpCode { get; set; }
         public string? FullName { get; set; }
+        public object? Authority { get; set; }
+        public string? Deptt { get; set; }
     }
 }
 
