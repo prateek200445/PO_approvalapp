@@ -11,8 +11,25 @@ import { getSalesCompanies } from "@/lib/sales-dashboard-api";
 export const Route = createFileRoute("/_app")({
   beforeLoad: () => {
     if (typeof window === "undefined") return;
-    const raw = localStorage.getItem("po-portal-user") ?? sessionStorage.getItem("po-portal-user");
+    const raw =
+      localStorage.getItem("po-portal-user") ??
+      sessionStorage.getItem("po-portal-user");
     if (!raw) throw redirect({ to: "/" });
+    try {
+      const parsed = JSON.parse(raw) as { username?: unknown };
+      const username =
+        typeof parsed?.username === "string" ? parsed.username.trim() : "";
+      if (!username) {
+        localStorage.removeItem("po-portal-user");
+        sessionStorage.removeItem("po-portal-user");
+        throw redirect({ to: "/" });
+      }
+    } catch (e) {
+      if (e && typeof e === "object" && "to" in e) throw e;
+      localStorage.removeItem("po-portal-user");
+      sessionStorage.removeItem("po-portal-user");
+      throw redirect({ to: "/" });
+    }
   },
   component: AppLayout,
 });

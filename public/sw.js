@@ -1,4 +1,4 @@
-const CACHE_NAME = "po-approval-cache-v2";
+const CACHE_NAME = "po-approval-cache-v3";
 const PRECACHE_ASSETS = [
   "/manifest.json",
   "/favicon.png",

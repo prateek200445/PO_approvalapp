@@ -38,19 +38,49 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   useEffect(() => {
     reportLovableError(error, { boundary: "tanstack_root_error_component" });
   }, [error]);
+  const detail =
+    error?.message && error.message.trim() && error.message !== "undefined"
+      ? error.message
+      : null;
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
         <h1 className="text-xl font-semibold">This page didn't load</h1>
-        <p className="mt-2 text-sm text-muted-foreground">Something went wrong. Try again or go home.</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Something went wrong. Try again or go home.
+        </p>
+        {detail ? (
+          <p className="mt-3 break-words rounded-md border border-border bg-secondary/40 px-3 py-2 text-left text-xs text-muted-foreground">
+            {detail}
+          </p>
+        ) : null}
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
-            onClick={() => { router.invalidate(); reset(); }}
+            onClick={() => {
+              try {
+                localStorage.removeItem("po-portal-user");
+                sessionStorage.removeItem("po-portal-user");
+                const api = localStorage.getItem("API_BASE_URL");
+                if (api && (/localhost/i.test(api) || /127\.0\.0\.1/.test(api))) {
+                  localStorage.removeItem("API_BASE_URL");
+                }
+              } catch {
+                // ignore
+              }
+              router.invalidate();
+              reset();
+              window.location.href = "/";
+            }}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
             Try again
           </button>
-          <a href="/" className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent">Go home</a>
+          <a
+            href="/"
+            className="rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent"
+          >
+            Go home
+          </a>
         </div>
       </div>
     </div>
