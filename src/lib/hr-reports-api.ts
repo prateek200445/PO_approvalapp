@@ -161,13 +161,15 @@ export async function searchHrEmployees(args: {
   branch?: string;
   officeOnly?: boolean;
   username?: string;
+  take?: number;
 }): Promise<HrEmployeeOption[]> {
   const params = withUser(new URLSearchParams(), args.username);
   if (args.q?.trim()) params.set("q", args.q.trim());
   if (args.company?.trim()) params.set("company", args.company.trim());
   if (args.branch?.trim()) params.set("branch", args.branch.trim());
   if (args.officeOnly) params.set("officeOnly", "true");
-  params.set("take", args.officeOnly ? "300" : "120");
+  const take = Math.min(Math.max(args.take ?? 50, 1), 200);
+  params.set("take", String(take));
   const res = await fetch(getApiUrl(`/api/hr/reports/employees?${params}`));
   if (!res.ok) throw new Error(await readError(res));
   const rows = (await res.json()) as Record<string, unknown>[];

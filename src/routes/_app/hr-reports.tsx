@@ -69,7 +69,7 @@ function HrReportsPage() {
   const [dailyRate, setDailyRate] = useState("");
   const [workingDays, setWorkingDays] = useState("");
   const [exporting, setExporting] = useState<"att" | "sal" | null>(null);
-  const [tab, setTab] = useState<HrTab>("attendance");
+  const [tab, setTab] = useState<HrTab>("leave");
   const [leaveType, setLeaveType] = useState("LWP");
   const [leaveFrom, setLeaveFrom] = useState(todayIso);
   const [leaveTo, setLeaveTo] = useState(todayIso);
@@ -115,7 +115,15 @@ function HrReportsPage() {
   });
 
   const employeesQuery = useQuery({
-    queryKey: ["hr-employees", debouncedQ, company, branch, officeOnly, username, access?.mode],
+    queryKey: [
+      "hr-employees",
+      debouncedQ,
+      company,
+      branch,
+      officeOnly,
+      username,
+      access?.mode,
+    ],
     queryFn: () =>
       searchHrEmployees({
         q: debouncedQ,
@@ -123,9 +131,15 @@ function HrReportsPage() {
         branch: branch || undefined,
         officeOnly,
         username,
+        take: 50,
       }),
     placeholderData: keepPreviousData,
-    enabled: !!username && (isFullAccess || isSelfMode),
+    // Full HR: wait for search/filter so Approvals tab opens without a 300-row payroll scan
+    enabled:
+      !!username &&
+      (isSelfMode ||
+        (isFullAccess &&
+          (debouncedQ.length >= 1 || !!company.trim() || !!branch.trim()))),
   });
 
   // Self users: auto-select their own employee row
@@ -235,7 +249,7 @@ function HrReportsPage() {
   const creditQuery = useQuery({
     queryKey: ["hr-leave-credit", selected?.empCode, username],
     queryFn: () => getHrLeaveCreditPreview(selected!.empCode, username),
-    enabled: !!selected?.empCode && !!username && isFullAccess,
+    enabled: !!selected?.empCode && !!username && isFullAccess && tab === "policy",
   });
 
   // Clear manual overrides when switching employee

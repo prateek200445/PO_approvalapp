@@ -4,6 +4,7 @@ import { Lock, User, ShieldCheck, Settings, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { toast } from "sonner";
 import { ServerSettingsModal } from "@/components/ServerSettingsModal";
+import { hrHomePath } from "@/lib/feature-flags";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -26,7 +27,7 @@ function Login() {
   const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
-    if (ready && user) navigate({ to: "/dashboard" });
+    if (ready && user) navigate({ to: hrHomePath(user.username) });
   }, [ready, user, navigate]);
 
   async function submit(e: React.FormEvent) {
@@ -40,7 +41,7 @@ function Login() {
     try {
       await login(username, password, remember);
       toast.success("Welcome back");
-      navigate({ to: "/dashboard" });
+      navigate({ to: hrHomePath(username) });
     } catch (err: any) {
       alert("ERROR: " + (err?.message || "Unknown error"));
     } finally {

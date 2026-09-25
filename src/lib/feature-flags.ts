@@ -32,3 +32,25 @@ export const HR_REPORTS_FULL_ACCESS_USERS = [
   "grouphr",
   "plastenehr",
 ] as const;
+
+/**
+ * These logins only get the HR Reports shell (no PO/approvals/sales nav).
+ * Speeds up load by skipping inbox + report prefetches.
+ */
+export const HR_PORTAL_ONLY_USERS = ["grouphr", "plastenehr"] as const;
+
+export function isHrPortalOnlyUser(username?: string | null): boolean {
+  if (!username) return false;
+  const key = username.trim().toLowerCase();
+  return HR_PORTAL_ONLY_USERS.some((u) => u.toLowerCase() === key);
+}
+
+export function isHrReportsFullAccessUser(username?: string | null): boolean {
+  if (!username) return false;
+  const key = username.trim().toLowerCase();
+  return HR_REPORTS_FULL_ACCESS_USERS.some((u) => u.toLowerCase() === key);
+}
+
+export function hrHomePath(username?: string | null): "/hr-reports" | "/dashboard" {
+  return isHrPortalOnlyUser(username) ? "/hr-reports" : "/dashboard";
+}

@@ -32,7 +32,7 @@ import { formatBadgeCount, useApprovalInbox, type InboxKind } from "@/hooks/useA
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { GlobalCommandPalette, SearchTrigger } from "@/components/GlobalCommandPalette";
 import { AssistantShellSkeleton } from "@/components/chat/AssistantShellSkeleton";
-import { BILL_PAYMENT_ENTRY_ENABLED, canAccessOrderBookSummary } from "@/lib/feature-flags";
+import { BILL_PAYMENT_ENTRY_ENABLED, canAccessOrderBookSummary, isHrPortalOnlyUser } from "@/lib/feature-flags";
 
 type AppPath =
   | "/dashboard"
@@ -71,6 +71,7 @@ export function AppShell() {
   const router = useRouter();
   const routerState = useRouterState();
   const path = routerState.location.pathname;
+  const hrOnly = isHrPortalOnlyUser(user?.username);
   const fullScreenReport =
     path.includes("export-bill-overdue") || path.includes("order-book-summary");
   const wideContent = path.startsWith("/bank-statement-import");
@@ -82,12 +83,22 @@ export function AppShell() {
   const [dark, setDark] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const inbox = useApprovalInbox(user?.username);
+  // HR-only logins skip the 5 approval inbox calls — biggest win for load time
+  const inbox = useApprovalInbox(hrOnly ? undefined : user?.username);
 
   useEffect(() => {
+    if (hrOnly) return;
     void router.preloadRoute({ to: "/assistant" });
-  }, [router]);
+  }, [router, hrOnly]);
 
+  useEffect(() => {
+    if (!hrOnly || !user?.username) return;
+    const allowed =
+      path.startsWith("/hr-reports") || path.startsWith("/profile");
+    if (!allowed) {
+      void navigate({ to: "/hr-reports", replace: true });
+    }
+  }, [hrOnly, path, user?.username, navigate]);
   useEffect(() => {
     const stored = localStorage.getItem("po-theme");
     if (stored === "dark" || (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
@@ -273,22 +284,37 @@ export function AppShell() {
     { to: "/profile", icon: User, label: "Profile", match: (p) => p.startsWith("/profile") },
   ];
 
-  const desktopGroups: { title: string; items: NavItem[] }[] = [
-    {
-      title: "Home",
-      items: [
+  const desktopGroups: { title: string; items: NavItem[] }[] = hrOnly
+    ? [
         {
-          to: "/dashboard",
-          icon: LayoutDashboard,
-          label: "Dashboard",
-          match: (p) => p.startsWith("/dashboard"),
+          title: "HR",
+          items: [
+            {
+              to: "/hr-reports",
+              icon: Users,
+              label: "HR Reports",
+              match: (p) => p.startsWith("/hr-reports"),
+            },
+          ],
         },
-      ],
-    },
-    { title: "Approvals", items: approvalNav },
-    { title: "Reports", items: reportNav },
-    { title: "Account", items: accountNav },
-  ];
+        { title: "Account", items: accountNav },
+      ]
+    : [
+        {
+          title: "Home",
+          items: [
+            {
+              to: "/dashboard",
+              icon: LayoutDashboard,
+              label: "Dashboard",
+              match: (p) => p.startsWith("/dashboard"),
+            },
+          ],
+        },
+        { title: "Approvals", items: approvalNav },
+        { title: "Reports", items: reportNav },
+        { title: "Account", items: accountNav },
+      ];
 
   function badgeFor(kind?: InboxKind) {
     if (!kind) return null;
@@ -459,14 +485,18 @@ export function AppShell() {
               )}
             >
               <div className="truncate text-sm font-semibold">HCP</div>
-              <div className="truncate text-[11px] text-muted-foreground">Approvals Portal</div>
+              <div className="truncate text-[11px] text-muted-foreground">
+                {hrOnly ? "HR Portal" : "Approvals Portal"}
+              </div>
             </div>
           </div>
 
           <nav className="flex-1 space-y-4 overflow-x-hidden overflow-y-auto px-2 py-4">
-            <div className={cn(sidebarCollapsed ? "px-0" : "px-1")}>
-              <SearchTrigger collapsed={sidebarCollapsed} />
-            </div>
+            {!hrOnly ? (
+              <div className={cn(sidebarCollapsed ? "px-0" : "px-1")}>
+                <SearchTrigger collapsed={sidebarCollapsed} />
+              </div>
+            ) : null}
             {desktopGroups.map((group) => (
               <div key={group.title} className="space-y-1">
                 <div
@@ -582,9 +612,11 @@ export function AppShell() {
           </SheetHeader>
 
           <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
-            <div className="px-1" onClick={() => setMenuOpen(false)}>
-              <SearchTrigger />
-            </div>
+            {!hrOnly ? (
+              <div className="px-1" onClick={() => setMenuOpen(false)}>
+                <SearchTrigger />
+              </div>
+            ) : null}
             {desktopGroups.map((group) => (
               <div key={group.title} className="space-y-1">
                 <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -626,7 +658,7 @@ export function AppShell() {
           </div>
         </SheetContent>
       </Sheet>
-      <GlobalCommandPalette />
+      {!hrOnly ? <GlobalCommandPalette /> : null}
     </div>
   );
 }
