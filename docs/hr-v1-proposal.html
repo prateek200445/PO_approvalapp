@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>HR Module V1 — Proposal</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 16mm 14mm 16mm 14mm;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", Calibri, Arial, sans-serif;
+      color: #1a2332;
+      line-height: 1.45;
+      font-size: 11pt;
+      margin: 0;
+      padding: 0;
+    }
+    .page {
+      page-break-after: always;
+      min-height: 250mm;
+      position: relative;
+      padding-bottom: 18mm;
+    }
+    .page:last-child { page-break-after: auto; }
+
+    /* Cover */
+    .cover {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 250mm;
+      background: linear-gradient(160deg, #0f2744 0%, #1a4a6e 55%, #2563a8 100%);
+      color: #fff;
+      padding: 28mm 18mm;
+      margin: -16mm -14mm;
+      width: calc(100% + 28mm);
+    }
+    .cover .eyebrow {
+      font-size: 11pt;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      opacity: 0.85;
+      margin-bottom: 18px;
+      font-weight: 600;
+    }
+    .cover h1 {
+      font-size: 32pt;
+      font-weight: 700;
+      margin: 0 0 12px;
+      line-height: 1.15;
+    }
+    .cover .subtitle {
+      font-size: 14pt;
+      opacity: 0.92;
+      max-width: 480px;
+      margin-bottom: 36px;
+    }
+    .cover .meta {
+      border-top: 1px solid rgba(255,255,255,0.35);
+      padding-top: 18px;
+      font-size: 10.5pt;
+      opacity: 0.9;
+    }
+    .cover .meta div { margin: 4px 0; }
+
+    h2 {
+      font-size: 16pt;
+      color: #0f2744;
+      margin: 0 0 12px;
+      padding-bottom: 6px;
+      border-bottom: 2.5px solid #2563a8;
+    }
+    h3 {
+      font-size: 12pt;
+      color: #1a4a6e;
+      margin: 16px 0 8px;
+    }
+    p { margin: 0 0 10px; }
+    ul { margin: 6px 0 12px; padding-left: 18px; }
+    li { margin-bottom: 5px; }
+
+    .lead {
+      font-size: 11.5pt;
+      color: #334155;
+      margin-bottom: 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0 16px;
+      font-size: 9.5pt;
+    }
+    th, td {
+      border: 1px solid #c5d0dc;
+      padding: 7px 9px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #0f2744;
+      color: #fff;
+      font-weight: 600;
+    }
+    tr:nth-child(even) td { background: #f4f7fb; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 8.5pt;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .badge-yes { background: #dcfce7; color: #166534; }
+    .badge-partial { background: #fef3c7; color: #92400e; }
+    .badge-no { background: #fee2e2; color: #991b1b; }
+    .badge-new { background: #dbeafe; color: #1e40af; }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 12px 0;
+    }
+    .card {
+      border: 1px solid #c5d0dc;
+      border-left: 4px solid #2563a8;
+      padding: 10px 12px;
+      background: #f8fafc;
+      border-radius: 2px;
+    }
+    .card h4 {
+      margin: 0 0 4px;
+      font-size: 10.5pt;
+      color: #0f2744;
+    }
+    .card p {
+      margin: 0;
+      font-size: 9.5pt;
+      color: #475569;
+    }
+    .card .num {
+      font-size: 18pt;
+      font-weight: 700;
+      color: #2563a8;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .callout {
+      background: #eff6ff;
+      border: 1px solid #93c5fd;
+      border-left: 4px solid #2563a8;
+      padding: 10px 12px;
+      margin: 12px 0;
+      font-size: 10pt;
+    }
+    .callout strong { color: #0f2744; }
+
+    .footer-note {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      font-size: 8.5pt;
+      color: #64748b;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 6px;
+    }
+
+    .scope-in { color: #166534; font-weight: 600; }
+    .scope-out { color: #991b1b; font-weight: 600; }
+
+    ol.ask { padding-left: 20px; }
+    ol.ask li { margin-bottom: 8px; }
+
+    .phase-box {
+      border: 1px solid #c5d0dc;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .phase-box .head {
+      background: #0f2744;
+      color: #fff;
+      padding: 7px 10px;
+      font-weight: 600;
+      font-size: 10.5pt;
+    }
+    .phase-box .body {
+      padding: 8px 10px;
+      font-size: 9.5pt;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- PAGE 1: Cover -->
+  <div class="page cover">
+    <div class="eyebrow">PO Approval Application · Feature Proposal</div>
+    <h1>HR Module — Version 1</h1>
+    <div class="subtitle">
+      Proposal to bring ERP HR / attendance / salary workflows into the application
+      as a dedicated HR section.
+    </div>
+    <div class="meta">
+      <div><strong>Prepared for:</strong> Management discussion</div>
+      <div><strong>Branch:</strong> feature/attendance-salary</div>
+      <div><strong>Date:</strong> 16 September 2026</div>
+      <div><strong>Scope note:</strong> Bank statement categorization is a separate track and is not part of this proposal.</div>
+    </div>
+  </div>
+
+  <!-- PAGE 2: Current state -->
+  <div class="page">
+    <h2>1. Current State in Our Application</h2>
+    <p class="lead">
+      Today the portal has only thin, ops-adjacent HR capability. There is no dedicated HR section.
+      Most employee / attendance data already exists in ERP (Loginentry database) but is not exposed as a proper module.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:28%">Feature</th>
+          <th style="width:32%">Where it lives today</th>
+          <th style="width:20%">Status</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Stitcher / sewer present count</td>
+          <td>Chatbot (Assistant) only</td>
+          <td><span class="badge badge-partial">Partial</span></td>
+          <td>Headcount for production; not a full attendance register</td>
+        </tr>
+        <tr>
+          <td>Daily Reports</td>
+          <td>/daily-reports</td>
+          <td><span class="badge badge-yes">Live</span></td>
+          <td>Manager work logs — can sit under HR hub</td>
+        </tr>
+        <tr>
+          <td>User email / role lookup</td>
+          <td>Auth + Chatbot</td>
+          <td><span class="badge badge-yes">Live</span></td>
+          <td>ERP portal users (LoginRights), not full employee master</td>
+        </tr>
+        <tr>
+          <td>Salaries / PF / gratuity in P&amp;L</td>
+          <td>Finance P&amp;L</td>
+          <td><span class="badge badge-partial">Finance only</span></td>
+          <td>Ledger totals — not employee-level payroll</td>
+        </tr>
+        <tr>
+          <td>Employee directory</td>
+          <td>—</td>
+          <td><span class="badge badge-no">Not built</span></td>
+          <td>Data exists in empinfo</td>
+        </tr>
+        <tr>
+          <td>Attendance register / salary calc</td>
+          <td>—</td>
+          <td><span class="badge badge-no">Not built</span></td>
+          <td>Biometric punches exist in Attendancemachine</td>
+        </tr>
+        <tr>
+          <td>Leave / PF / ESI / payslips</td>
+          <td>—</td>
+          <td><span class="badge badge-no">Not built</span></td>
+          <td>Needs ERP confirmation for V2+</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout">
+      <strong>Gap:</strong> HR work that is done in ERP today is largely unavailable as a first-class experience in our application.
+      V1 closes that gap for the highest-value, data-ready workflows.
+    </div>
+    <div class="footer-note">HR Module V1 Proposal · Confidential — for internal discussion</div>
+  </div>
+
+  <!-- PAGE 3: ERP data we already have -->
+  <div class="page">
+    <h2>2. ERP Data Already Available (Loginentry)</h2>
+    <p class="lead">
+      These sources are already connected / referenced in our stack. V1 can be built without inventing new masters.
+    </p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ERP Object</th>
+          <th>What it contains</th>
+          <th>Approx. size</th>
+          <th>V1 use</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>empinfo</strong></td>
+          <td>Employee master — EmpCode, Name, Designation, Department, Company, Branch, Date of joining</td>
+          <td>~18,000 employees</td>
+          <td>Directory, filters, salary base link</td>
+        </tr>
+        <tr>
+          <td><strong>Attendancemachine</strong></td>
+          <td>Biometric punches — AttendanceDate, EmpCode, In-time, Branch</td>
+          <td>~2 million rows</td>
+          <td>Present / absent, monthly days</td>
+        </tr>
+        <tr>
+          <td><strong>LoginRights</strong></td>
+          <td>Portal users — Email, FullName, EmpCode, Category (incl. Payroll), IsPayroll flag</td>
+          <td>ERP logins</td>
+          <td>HR role access control</td>
+        </tr>
+        <tr>
+          <td><strong>DailyReportLogs</strong></td>
+          <td>Daily work report content by employee / date</td>
+          <td>Operational logs</td>
+          <td>Already live; place under HR hub</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Important notes</h3>
+    <ul>
+      <li>Prefer <strong>Attendancemachine</strong> for attendance. Older tables <em>attendance</em> / <em>DailyAttendance</em> are often empty.</li>
+      <li>Present = punch with non-null <strong>intime</strong> on the attendance date.</li>
+      <li>Employee master joins attendance on <strong>EmpCode</strong>.</li>
+      <li>Dedicated leave / PF / ESI / payslip tables are <strong>not yet confirmed</strong> in our schema catalog — treat as V2 pending ERP review.</li>
+    </ul>
+
+    <div class="footer-note">HR Module V1 Proposal · Confidential — for internal discussion</div>
+  </div>
+
+  <!-- PAGE 4: V1 scope -->
+  <div class="page">
+    <h2>3. Proposed HR Section — Version 1 Scope</h2>
+    <p class="lead">
+      A new <strong>HR</strong> area in the application navigation, covering the workflows below.
+      Everything listed here is feasible from known ERP data (salary formula details to be confirmed with management).
+    </p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="num">01</div>
+        <h4>Employee Directory</h4>
+        <p>Searchable list by company, department, designation, branch. View EmpCode, name, joining info.</p>
+      </div>
+      <div class="card">
+        <div class="num">02</div>
+        <h4>Attendance Register</h4>
+        <p>Daily present / absent by company &amp; department. Drill into who punched in and when.</p>
+      </div>
+      <div class="card">
+        <div class="num">03</div>
+        <h4>Headcount Dashboard</h4>
+        <p>Daily / monthly headcount by designation (generalize today’s stitcher/sewer chat logic).</p>
+      </div>
+      <div class="card">
+        <div class="num">04</div>
+        <h4>Monthly Attendance Summary</h4>
+        <p>Present days per employee for a selected month — input for salary calculation.</p>
+      </div>
+      <div class="card">
+        <div class="num">05</div>
+        <h4>Salary Calculation (Attendance-based)</h4>
+        <p>Payable salary from present days × rate / formula (basic, OT, deductions as defined by sir).</p>
+      </div>
+      <div class="card">
+        <div class="num">06</div>
+        <h4>Daily Reports (existing)</h4>
+        <p>Move / link existing Daily Reports under the HR hub for one place of work.</p>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>In scope (V1):</strong> <span class="scope-in">Read + calculate + report</span> from Loginentry employee &amp; attendance data.<br/>
+      <strong>Out of scope (V1):</strong> <span class="scope-out">Leave approvals, PF/ESI filings, payslip PDF generation, recruitment, bank payout matching</span>
+      (bank statement work stays on its own branch).
+    </div>
+
+    <div class="footer-note">HR Module V1 Proposal · Confidential — for internal discussion</div>
+  </div>
+
+  <!-- PAGE 5: Feature detail + delivery -->
+  <div class="page">
+    <h2>4. Feature Detail — What Users Will Be Able To Do</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:22%">Feature</th>
+          <th>User capability</th>
+          <th style="width:28%">Primary ERP source</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Employee Directory</strong></td>
+          <td>Browse / filter employees; open profile card (code, name, designation, dept, company, branch, DOJ)</td>
+          <td>empinfo</td>
+        </tr>
+        <tr>
+          <td><strong>Attendance Register</strong></td>
+          <td>Pick date + company → see present vs absent list; export optional</td>
+          <td>Attendancemachine + empinfo</td>
+        </tr>
+        <tr>
+          <td><strong>Headcount</strong></td>
+          <td>See how many present by designation / department for today, yesterday, or custom date</td>
+          <td>Attendancemachine + empinfo</td>
+        </tr>
+        <tr>
+          <td><strong>Monthly Summary</strong></td>
+          <td>For a month: present days, absent days, late punches (if out-time available later)</td>
+          <td>Attendancemachine</td>
+        </tr>
+        <tr>
+          <td><strong>Salary Calc</strong></td>
+          <td>Generate payable sheet for month using agreed formula; review before download / share</td>
+          <td>Attendance summary + rate source (TBD)</td>
+        </tr>
+        <tr>
+          <td><strong>Daily Reports</strong></td>
+          <td>Same as today — view submitted daily reports</td>
+          <td>DailyReportLogs</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Suggested delivery phases inside V1</h3>
+    <div class="phase-box">
+      <div class="head">Phase A — Foundation (quick win)</div>
+      <div class="body">HR nav section · Employee Directory · Attendance Register · Headcount dashboard</div>
+    </div>
+    <div class="phase-box">
+      <div class="head">Phase B — Payroll-ready attendance</div>
+      <div class="body">Monthly attendance summary · Export (Excel/CSV) · Role-based access (IsPayroll / HR users)</div>
+    </div>
+    <div class="phase-box">
+      <div class="head">Phase C — Salary calculation</div>
+      <div class="body">Apply approved formula · Payable sheet · Adjustments (OT / deductions) · Export for accounts</div>
+    </div>
+
+    <div class="footer-note">HR Module V1 Proposal · Confidential — for internal discussion</div>
+  </div>
+
+  <!-- PAGE 6: Decisions needed -->
+  <div class="page">
+    <h2>5. Decisions Needed from Management</h2>
+    <p class="lead">To start build on <strong>feature/attendance-salary</strong>, we need clarity on the points below.</p>
+
+    <ol class="ask">
+      <li>
+        <strong>V1 feature set:</strong> Confirm which of the six items (Directory, Attendance Register, Headcount,
+        Monthly Summary, Salary Calc, Daily Reports hub) are approved for V1.
+      </li>
+      <li>
+        <strong>Salary formula:</strong> How is payable salary calculated today?
+        (e.g. Basic ÷ working days × present days, OT rate, deductions, minimum days, etc.)
+        Share sample Excel / ERP screen if available.
+      </li>
+      <li>
+        <strong>Rate master location:</strong> Where is employee basic / wage rate stored — ERP table, Excel, or other system?
+      </li>
+      <li>
+        <strong>Who can access HR:</strong> All managers, Payroll role only (<code>IsPayroll</code>), or a new HR role?
+      </li>
+      <li>
+        <strong>Companies / plants in V1:</strong> All companies, or pilot one unit first (e.g. stitcher-heavy plants)?
+      </li>
+      <li>
+        <strong>V2 backlog:</strong> Confirm leave, PF/ESI, payslips as later phase after ERP table confirmation.
+      </li>
+    </ol>
+
+    <h3>Recommended starting point</h3>
+    <div class="callout">
+      Approve <strong>Phase A + B</strong> immediately (directory + attendance + monthly summary),
+      and run <strong>Phase C (salary)</strong> as soon as the formula and rate source are shared.
+      This delivers visible HR value quickly while salary logic is finalized with Accounts / HR.
+    </div>
+
+    <h3>Separate tracks (not mixed)</h3>
+    <ul>
+      <li><strong>This proposal:</strong> HR / attendance / salary → branch <em>feature/attendance-salary</em></li>
+      <li><strong>Other track:</strong> Bank statement categorization → branch <em>feature/bank-statement-categorization</em></li>
+    </ul>
+
+    <p style="margin-top:28px; font-size:10.5pt; color:#334155;">
+      Once decisions are confirmed, implementation can begin on the HR branch without affecting other features.
+    </p>
+
+    <div class="footer-note">HR Module V1 Proposal · Confidential — for internal discussion · End of document</div>
+  </div>
+
+</body>
+</html>

@@ -11,6 +11,10 @@ var dbPassword = Environment.GetEnvironmentVariable("DB_PASSWORD");
 if (string.IsNullOrWhiteSpace(dbPassword))
     dbPassword = AppSecretsDefaults.DbPassword;
 
+var payrollDbPassword = Environment.GetEnvironmentVariable("PAYROLL_DB_PASSWORD");
+if (string.IsNullOrWhiteSpace(payrollDbPassword))
+    payrollDbPassword = AppSecretsDefaults.PayrollDbPassword;
+
 var emailPassword = Environment.GetEnvironmentVariable("EMAIL_PASSWORD");
 if (string.IsNullOrWhiteSpace(emailPassword))
     emailPassword = AppSecretsDefaults.EmailPassword;
@@ -19,6 +23,7 @@ if (string.IsNullOrWhiteSpace(emailPassword))
 var defaultConnection = builder.Configuration.GetConnectionString("DefaultConnection");
 var loginConnection = builder.Configuration.GetConnectionString("LoginEntryConnection");
 var productionConnection = builder.Configuration.GetConnectionString("ProductionConnection");
+var payrollLoginConnection = builder.Configuration.GetConnectionString("PayrollLoginEntryConnection");
 
 if (!string.IsNullOrEmpty(dbPassword))
 {
@@ -28,6 +33,9 @@ if (!string.IsNullOrEmpty(dbPassword))
         productionConnection = $"{productionConnection}Password={dbPassword};";
 }
 
+if (!string.IsNullOrEmpty(payrollDbPassword) && !string.IsNullOrEmpty(payrollLoginConnection))
+    payrollLoginConnection = $"{payrollLoginConnection}Password={payrollDbPassword};";
+
 if (!string.IsNullOrEmpty(emailPassword))
     builder.Configuration["EmailSettings:Password"] = emailPassword;
 
@@ -35,6 +43,7 @@ if (!string.IsNullOrEmpty(emailPassword))
 builder.Configuration["ConnectionStrings:DefaultConnection"] = defaultConnection;
 builder.Configuration["ConnectionStrings:LoginEntryConnection"] = loginConnection;
 builder.Configuration["ConnectionStrings:ProductionConnection"] = productionConnection;
+builder.Configuration["ConnectionStrings:PayrollLoginEntryConnection"] = payrollLoginConnection;
 
 QuestPDF.Settings.License = LicenseType.Community;
 
@@ -86,6 +95,11 @@ builder.Services.AddScoped<BomCreationService>();
 builder.Services.AddScoped<DailyProductionPriceService>();
 builder.Services.AddScoped<FibcBuyersService>();
 builder.Services.AddScoped<BankStatementService>();
+builder.Services.Configure<HrReportsOptions>(
+    builder.Configuration.GetSection(HrReportsOptions.SectionName));
+builder.Services.AddScoped<HrAccessService>();
+builder.Services.AddScoped<HrReportsService>();
+builder.Services.AddScoped<HrSelfServiceService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();

@@ -24,6 +24,7 @@ import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
 import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
 import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
+import { Route as AppHrReportsRouteImport } from './routes/_app/hr-reports'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppFibcBuyersRouteImport } from './routes/_app/fibc-buyers'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
@@ -121,6 +122,11 @@ const AppIntercompanyRoute = AppIntercompanyRouteImport.update({
 const AppIndentsRoute = AppIndentsRouteImport.update({
   id: '/indents',
   path: '/indents',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppHrReportsRoute = AppHrReportsRouteImport.update({
+  id: '/hr-reports',
+  path: '/hr-reports',
   getParentRoute: () => AppRoute,
 } as any)
 const AppHistoryRoute = AppHistoryRouteImport.update({
@@ -261,6 +267,7 @@ export interface FileRoutesByFullPath {
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
   '/history': typeof AppHistoryRoute
+  '/hr-reports': typeof AppHrReportsRoute
   '/indents': typeof AppIndentsRoute
   '/intercompany': typeof AppIntercompanyRouteWithChildren
   '/ledger-summary': typeof AppLedgerSummaryRoute
@@ -300,6 +307,7 @@ export interface FileRoutesByTo {
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
   '/history': typeof AppHistoryRoute
+  '/hr-reports': typeof AppHrReportsRoute
   '/indents': typeof AppIndentsRoute
   '/intercompany': typeof AppIntercompanyRouteWithChildren
   '/ledger-summary': typeof AppLedgerSummaryRoute
@@ -342,6 +350,7 @@ export interface FileRoutesById {
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/_app/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
   '/_app/history': typeof AppHistoryRoute
+  '/_app/hr-reports': typeof AppHrReportsRoute
   '/_app/indents': typeof AppIndentsRoute
   '/_app/intercompany': typeof AppIntercompanyRouteWithChildren
   '/_app/ledger-summary': typeof AppLedgerSummaryRoute
@@ -384,6 +393,7 @@ export interface FileRouteTypes {
     | '/export-bill-overdue'
     | '/fibc-buyers'
     | '/history'
+    | '/hr-reports'
     | '/indents'
     | '/intercompany'
     | '/ledger-summary'
@@ -423,6 +433,7 @@ export interface FileRouteTypes {
     | '/export-bill-overdue'
     | '/fibc-buyers'
     | '/history'
+    | '/hr-reports'
     | '/indents'
     | '/intercompany'
     | '/ledger-summary'
@@ -464,6 +475,7 @@ export interface FileRouteTypes {
     | '/_app/export-bill-overdue'
     | '/_app/fibc-buyers'
     | '/_app/history'
+    | '/_app/hr-reports'
     | '/_app/indents'
     | '/_app/intercompany'
     | '/_app/ledger-summary'
@@ -600,6 +612,13 @@ declare module '@tanstack/react-router' {
       path: '/indents'
       fullPath: '/indents'
       preLoaderRoute: typeof AppIndentsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/hr-reports': {
+      id: '/_app/hr-reports'
+      path: '/hr-reports'
+      fullPath: '/hr-reports'
+      preLoaderRoute: typeof AppHrReportsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/history': {
@@ -828,6 +847,7 @@ interface AppRouteChildren {
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
   AppFibcBuyersRoute: typeof AppFibcBuyersRouteWithChildren
   AppHistoryRoute: typeof AppHistoryRoute
+  AppHrReportsRoute: typeof AppHrReportsRoute
   AppIndentsRoute: typeof AppIndentsRoute
   AppIntercompanyRoute: typeof AppIntercompanyRouteWithChildren
   AppLedgerSummaryRoute: typeof AppLedgerSummaryRoute
@@ -862,6 +882,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
   AppFibcBuyersRoute: AppFibcBuyersRouteWithChildren,
   AppHistoryRoute: AppHistoryRoute,
+  AppHrReportsRoute: AppHrReportsRoute,
   AppIndentsRoute: AppIndentsRoute,
   AppIntercompanyRoute: AppIntercompanyRouteWithChildren,
   AppLedgerSummaryRoute: AppLedgerSummaryRoute,

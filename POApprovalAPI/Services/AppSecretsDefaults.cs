@@ -7,5 +7,7 @@ namespace POApprovalAPI.Services;
 internal static class AppSecretsDefaults
 {
     internal const string DbPassword = "PlastOswal#@123$%^&*()iop";
+    /// <summary>NEWERP payroll instance (MSSQLPAYROLL / port 3445) — live attendance &amp; empinfo.</summary>
+    internal const string PayrollDbPassword = "Pil#Osl#Ahd@123$%^&*()iop";
     internal const string EmailPassword = "Mani$&22";
 }

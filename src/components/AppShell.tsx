@@ -23,6 +23,7 @@ import {
   Menu,
   Search,
   Globe2,
+  Users,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useLayoutEffect, useState, type ComponentType } from "react";
@@ -49,6 +50,7 @@ type AppPath =
   | "/export-bill-overdue"
   | "/daily-production"
   | "/daily-reports"
+  | "/hr-reports"
   | "/bom"
   | "/fibc-buyers"
   | "/profile"
@@ -257,6 +259,12 @@ export function AppShell() {
       icon: ClipboardList,
       label: "Daily Reports",
       match: (p) => p.startsWith("/daily-reports"),
+    },
+    {
+      to: "/hr-reports",
+      icon: Users,
+      label: "HR Reports",
+      match: (p) => p.startsWith("/hr-reports"),
     },
     { to: "/bom", icon: Layers, label: "BOM Report", match: (p) => p.startsWith("/bom") },
   ];

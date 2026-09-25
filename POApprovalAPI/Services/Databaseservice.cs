@@ -32,6 +32,20 @@ namespace POApprovalAPI.Services
             return connection;
         }
 
+        /// <summary>
+        /// Live payroll / attendance Loginentry on NEWERP MSSQLPAYROLL (port 3445).
+        /// Do not use the archive LoginEntryConnection (port 5115) for HR punches.
+        /// </summary>
+        public SqlConnection CreatePayrollLoginEntryConnection()
+        {
+            var connection = new SqlConnection(
+                _configuration.GetConnectionString("PayrollLoginEntryConnection")
+            );
+
+            connection.Open();
+            return connection;
+        }
+
         public SqlConnection CreateProductionConnection()
         {
             var connection = new SqlConnection(
