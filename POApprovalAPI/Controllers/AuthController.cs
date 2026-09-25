@@ -57,12 +57,17 @@ WHERE LTRIM(RTRIM(l.Name)) = @UserName
             // Fall through to payroll
         }
 
-        // 2) Payroll LoginRights (3445) — HR accounts that only exist there
+        // 2) Payroll LoginRights (3445) — HR accounts that only exist there.
+        // Keep this short: Render often cannot reach 3445; a long timeout makes
+        // every miss look like a slow "wrong password".
         if (!authenticated)
         {
             try
             {
                 using var payroll = _database.CreatePayrollLoginEntryConnection();
+                // Fail fast if payroll SQL is unreachable from the cloud host.
+                await using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                await payroll.OpenAsync(cts.Token);
                 var payUser = await payroll.QueryFirstOrDefaultAsync<LoginRow>(@"
 SELECT
     LTRIM(RTRIM(Name)) AS UserName,
@@ -82,7 +87,7 @@ WHERE LTRIM(RTRIM(Name)) = @UserName
             }
             catch
             {
-                // Keep unauthenticated
+                // Keep unauthenticated — portal DB is the primary auth path for production.
             }
         }
 
