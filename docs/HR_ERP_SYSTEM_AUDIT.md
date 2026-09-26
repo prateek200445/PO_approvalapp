@@ -77,7 +77,7 @@ There is **no** separate Employee HR Portal vs HR Portal shell; one page switche
 |----------------|---------------------|----------|----------------|
 | `DefaultConnection` | `103.240.33.122,5115` | **MaterialProcessing** | Login (cross-db), **`HrAttendanceMonthAck`** |
 | `LoginEntryConnection` | Same host **5115** | **loginentry** (archive) | EmpCode via `loginentry.dbo.LoginRights`; **not** used for punches |
-| `PayrollLoginEntryConnection` | `180.211.107.118,3445` | **Loginentry** (live payroll) | **Primary HR data**: empinfo, punches, leave, salary, confirmation |
+| `PayrollLoginEntryConnection` | `103.240.33.122,3445` | **Loginentry** (live payroll) | **Primary HR data**: empinfo, punches, leave, salary, confirmation |
 | `ProductionConnection` | 5115 | **production** | Not used by Hr*.cs |
 
 Secrets: `AppSecretsDefaults` / env `DB_PASSWORD`, `PAYROLL_DB_PASSWORD` (injected in `Program.cs`).
