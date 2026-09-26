@@ -41,11 +41,11 @@ public class WorkOrderController : ControllerBase
                 a.ApprovalDate,
                 a.TransId,
                 MAX(ISNULL(j.TotalAmount,0)) AS Total,
-                MAX(v.FirmName) AS FirmName
+                MAX(v.FirmName) AS FirmName,
+                MAX(NULLIF(LTRIM(RTRIM(j.ApprovalRemarks)), '')) AS ApprovalRemarks
               FROM ApproveWorkOrder a
              LEFT JOIN PurchasePayment j
     ON a.PoNo = j.PurchaseCode
-    AND j.TotalAmount IS NOT NULL
              LEFT JOIN Vw_PurchaseOrder v
     ON a.PoNo = v.PurchaseCode
              WHERE a.ApprovalName = @username

@@ -72,6 +72,7 @@ function PendingList() {
         p.PoNo?.toLowerCase().includes(search) ||
         p.ApprovalName?.toLowerCase().includes(search) ||
         p.Status?.toLowerCase().includes(search) ||
+        workOrderRemarks(p).toLowerCase().includes(search) ||
         String(p.Total || "").includes(search);
 
       const matchesStatus = status === "All" || p.Status === status;
@@ -653,6 +654,7 @@ function PendingList() {
             const transId = Number(p.TransId ?? p.Transid);
             const canSelect = selectMode && p.Status === "Pending" && !!transId;
             const isChecked = canSelect && selected.has(transId);
+            const remarks = workOrderRemarks(p);
 
             if (selectMode) {
               return (
@@ -691,6 +693,12 @@ function PendingList() {
                         </div>
                         <StatusBadge status={p.Status} />
                       </div>
+                      {remarks ? (
+                        <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                          <span className="font-medium text-foreground/80">Remarks: </span>
+                          {remarks}
+                        </p>
+                      ) : null}
                       <div className="mt-3 flex min-w-0 items-end justify-between gap-2">
                         <div className="min-w-0 truncate text-xs text-muted-foreground">
                           {formatShortDate(p.PODate)}
@@ -727,6 +735,12 @@ function PendingList() {
                   </div>
                   <StatusBadge status={p.Status} />
                 </div>
+                {remarks ? (
+                  <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground/80">Remarks: </span>
+                    {remarks}
+                  </p>
+                ) : null}
                 <div className="mt-3 flex min-w-0 items-end justify-between gap-2">
                   <div className="min-w-0 truncate text-xs text-muted-foreground">
                     {formatShortDate(p.PODate)}
@@ -1097,6 +1111,14 @@ function PendingList() {
       )}
     </div>
   );
+}
+
+function workOrderRemarks(row: {
+  ApprovalRemarks?: string | null;
+  approvalRemarks?: string | null;
+}): string {
+  const text = row.ApprovalRemarks ?? row.approvalRemarks ?? "";
+  return typeof text === "string" ? text.trim() : "";
 }
 
 function EmptyState() {
