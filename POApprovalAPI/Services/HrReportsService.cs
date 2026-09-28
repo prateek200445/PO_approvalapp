@@ -169,6 +169,8 @@ WHERE LTRIM(RTRIM(EmpCode)) = @EmpCode", new { EmpCode = empCode }, commandTimeo
                 (to.Year - dateOj.Value.Year) * 12 + to.Month - dateOj.Value.Month
                 - (to.Day < dateOj.Value.Day ? 1 : 0));
         var canApplyPlCl = monthsOfService >= 12;
+        var isConsultant = employee.IsConsultant;
+        var canApplyCl = canApplyPlCl && !isConsultant;
 
         var punches = (await connection.QueryAsync<HrPunchRow>(@"
 SELECT
@@ -228,6 +230,8 @@ WHERE LTRIM(RTRIM(EmpCode)) = @EmpCode
             var type = (leave.TypeofLeave ?? "").Trim().ToUpperInvariant();
             // Under 1 year: ignore PL/CL entirely (no calendar / payable leave of those types).
             if (!canApplyPlCl && type is "PL" or "CL")
+                continue;
+            if (!canApplyCl && type == "CL")
                 continue;
             if (type is not ("PL" or "CL" or "WFH"))
                 continue;
@@ -360,6 +364,8 @@ SELECT MAX(Sysdate) FROM tempattendance WITH (NOLOCK)", commandTimeout: 60);
             Days = days,
             DataNote = dataNote,
             CanApplyPlCl = canApplyPlCl,
+            CanApplyCl = canApplyCl,
+            IsConsultant = isConsultant,
             CompletedOneYear = canApplyPlCl,
             MonthsOfService = monthsOfService,
             DateOfJoining = dateOj?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
@@ -368,9 +374,9 @@ SELECT MAX(Sysdate) FROM tempattendance WITH (NOLOCK)", commandTimeout: 60);
                 : new HrLeaveBalanceDto
                 {
                     TotalPl = leaveBalance.TotalPl,
-                    TotalCl = leaveBalance.TotalCl,
+                    TotalCl = isConsultant ? 0 : leaveBalance.TotalCl,
                     AvailPl = leaveBalance.AvailPl,
-                    AvailCl = leaveBalance.AvailCl,
+                    AvailCl = isConsultant ? 0 : leaveBalance.AvailCl,
                     PeriodFrom = leaveBalance.FromDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                     PeriodTo = leaveBalance.ToDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 },
@@ -381,7 +387,7 @@ SELECT MAX(Sysdate) FROM tempattendance WITH (NOLOCK)", commandTimeout: 60);
                 HalfDays = half,
                 AbsentDays = absent,
                 PlDays = canApplyPlCl ? plDays : 0,
-                ClDays = canApplyPlCl ? clDays : 0,
+                ClDays = canApplyCl ? clDays : 0,
                 WfhDays = wfhDays,
                 PayableDays = payableDays,
             },
@@ -626,18 +632,22 @@ ORDER BY FromDate DESC",
         ws.Cell(1, 1).Value = "Employee Attendance Report";
         ws.Cell(2, 1).Value = $"{report.Employee.Name} ({report.Employee.EmpCode})";
         ws.Cell(3, 1).Value = report.PeriodLabel;
-        ws.Cell(4, 1).Value = report.CanApplyPlCl
-            ? $"Present {report.Summary.PresentDays} | Half {report.Summary.HalfDays} | PL {report.Summary.PlDays} | CL {report.Summary.ClDays} | WFH {report.Summary.WfhDays} | Absent {report.Summary.AbsentDays} | Payable {report.Summary.PayableDays}"
-            : $"Present {report.Summary.PresentDays} | Half {report.Summary.HalfDays} | WFH {report.Summary.WfhDays} | Absent {report.Summary.AbsentDays} | Payable {report.Summary.PayableDays} (PL/CL N/A — under 1 year)";
+        var leaveLabel = report.IsConsultant ? "PL" : "PL/CL";
+        ws.Cell(4, 1).Value = !report.CanApplyPlCl
+            ? $"Present {report.Summary.PresentDays} | Half {report.Summary.HalfDays} | WFH {report.Summary.WfhDays} | Absent {report.Summary.AbsentDays} | Payable {report.Summary.PayableDays} ({leaveLabel} N/A — under 1 year)"
+            : report.IsConsultant
+                ? $"Present {report.Summary.PresentDays} | Half {report.Summary.HalfDays} | PL {report.Summary.PlDays} | WFH {report.Summary.WfhDays} | Absent {report.Summary.AbsentDays} | Payable {report.Summary.PayableDays} (Consultant — no CL)"
+                : $"Present {report.Summary.PresentDays} | Half {report.Summary.HalfDays} | PL {report.Summary.PlDays} | CL {report.Summary.ClDays} | WFH {report.Summary.WfhDays} | Absent {report.Summary.AbsentDays} | Payable {report.Summary.PayableDays}";
         if (report.CanApplyPlCl && report.LeaveBalance is not null)
         {
-            ws.Cell(5, 1).Value =
-                $"Leave balance — Avail PL {report.LeaveBalance.AvailPl} / Total {report.LeaveBalance.TotalPl} · Avail CL {report.LeaveBalance.AvailCl} / Total {report.LeaveBalance.TotalCl}";
+            ws.Cell(5, 1).Value = report.IsConsultant
+                ? $"Leave balance — Avail PL {report.LeaveBalance.AvailPl} / Total {report.LeaveBalance.TotalPl}"
+                : $"Leave balance — Avail PL {report.LeaveBalance.AvailPl} / Total {report.LeaveBalance.TotalPl} · Avail CL {report.LeaveBalance.AvailCl} / Total {report.LeaveBalance.TotalCl}";
         }
         else if (!report.CanApplyPlCl)
         {
             ws.Cell(5, 1).Value =
-                $"PL/CL not applicable until 1 year of joining ({report.MonthsOfService} month(s)" +
+                $"{leaveLabel} not applicable until 1 year of joining ({report.MonthsOfService} month(s)" +
                 (string.IsNullOrEmpty(report.DateOfJoining) ? ")" : $", DOJ {report.DateOfJoining})");
         }
 
@@ -833,6 +843,7 @@ public sealed class HrEmployeeOptionDto
     public string? Branch { get; set; }
     public bool IsHoEmp { get; set; }
     public string? IsActive { get; set; }
+    public bool IsConsultant => HrEmployeeRules.IsConsultant(CompanyName);
 }
 
 public sealed class HrAttendanceDayDto
@@ -882,6 +893,8 @@ public sealed class HrAttendanceReportDto
     public List<HrAttendanceDayDto> Days { get; set; } = [];
     public string? DataNote { get; set; }
     public bool CanApplyPlCl { get; set; } = true;
+    public bool CanApplyCl { get; set; } = true;
+    public bool IsConsultant { get; set; }
     public bool CompletedOneYear { get; set; } = true;
     public int MonthsOfService { get; set; }
     public string? DateOfJoining { get; set; }

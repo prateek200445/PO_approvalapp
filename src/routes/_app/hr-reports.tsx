@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { HrAddEmployeeForm } from "@/components/HrAddEmployeeForm";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { HR_REPORTS_FULL_ACCESS_USERS } from "@/lib/feature-flags";
@@ -36,7 +37,7 @@ import {
   type HrEmployeeOption,
 } from "@/lib/hr-reports-api";
 
-type HrTab = "attendance" | "leave" | "wfh" | "verify" | "policy";
+type HrTab = "attendance" | "leave" | "wfh" | "verify" | "policy" | "employee";
 
 export const Route = createFileRoute("/_app/hr-reports")({
   head: () => ({ meta: [{ title: "HR Reports — PO Portal" }] }),
@@ -177,7 +178,7 @@ function HrReportsPage() {
   }, [selected, isFullAccess, user?.empCode, access?.empCode, employeesQuery.data]);
 
   useEffect(() => {
-    if (!isFullAccess && tab === "policy") setTab("attendance");
+    if (!isFullAccess && (tab === "policy" || tab === "employee")) setTab("attendance");
   }, [isFullAccess, tab]);
 
   const attendanceQuery = useQuery({
@@ -233,12 +234,21 @@ function HrReportsPage() {
     leaveEligQuery.data?.canApplyPlCl ??
     attendanceQuery.data?.canApplyPlCl ??
     true;
+  const isConsultant =
+    leaveEligQuery.data?.isConsultant ??
+    attendanceQuery.data?.isConsultant ??
+    selected?.isConsultant ??
+    false;
+  const canApplyCl = canApplyPlCl && !isConsultant;
+  const leaveLabel = isConsultant ? "PL" : "PL / CL";
 
   useEffect(() => {
     if (leaveEligQuery.data && !canApplyPlCl && (leaveType === "PL" || leaveType === "CL")) {
       setLeaveType("LWP");
+    } else if (!canApplyCl && leaveType === "CL") {
+      setLeaveType(canApplyPlCl ? "PL" : "LWP");
     }
-  }, [leaveEligQuery.data, canApplyPlCl, leaveType]);
+  }, [leaveEligQuery.data, canApplyPlCl, canApplyCl, leaveType]);
 
   const ackQuery = useQuery({
     queryKey: ["hr-att-ack", selected?.empCode, yearMonth, username],
@@ -374,7 +384,7 @@ function HrReportsPage() {
         </div>
       ) : null}
 
-      {username && access && access.mode !== "none" ? (
+      {username && access && access.mode !== "none" && tab !== "employee" ? (
       <section className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm">
         {isFullAccess ? (
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
@@ -606,6 +616,7 @@ function HrReportsPage() {
                   ? [{ id: "policy" as const, label: "Leave policy" }]
                   : [{ id: "wfh" as const, label: "Work from home" }]),
                 { id: "verify" as const, label: "Month-end verify" },
+                ...(isFullAccess ? [{ id: "employee" as const, label: "Add employee" }] : []),
               ]
             ).map((t) => (
               <button
@@ -624,6 +635,8 @@ function HrReportsPage() {
             ))}
           </div>
 
+          {tab === "employee" && isFullAccess ? <HrAddEmployeeForm username={username} /> : null}
+
           {tab === "attendance" ? (
             !selected ? (
               <p className="rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-8 text-center text-sm text-muted-foreground">
@@ -640,7 +653,9 @@ function HrReportsPage() {
             {canApplyPlCl ? (
               <>
                 <Stat label="PL (month)" value={summary ? String(summary.plDays) : "—"} />
-                <Stat label="CL (month)" value={summary ? String(summary.clDays) : "—"} />
+                {canApplyCl ? (
+                  <Stat label="CL (month)" value={summary ? String(summary.clDays) : "—"} />
+                ) : null}
               </>
             ) : null}
             <Stat label="WFH (month)" value={summary ? String(summary.wfhDays) : "—"} />
@@ -651,15 +666,17 @@ function HrReportsPage() {
             />
             {canApplyPlCl ? (
               <Stat
-                label="Avail PL / CL"
+                label={isConsultant ? "Avail PL" : "Avail PL / CL"}
                 value={
                   attendanceQuery.data?.leaveBalance
-                    ? `${attendanceQuery.data.leaveBalance.availPl} / ${attendanceQuery.data.leaveBalance.availCl}`
+                    ? isConsultant
+                      ? String(attendanceQuery.data.leaveBalance.availPl)
+                      : `${attendanceQuery.data.leaveBalance.availPl} / ${attendanceQuery.data.leaveBalance.availCl}`
                     : "—"
                 }
               />
             ) : (
-              <Stat label="PL / CL" value="N/A (<1 yr)" />
+              <Stat label={leaveLabel} value="N/A (<1 yr)" />
             )}
           </section>
 
@@ -670,9 +687,15 @@ function HrReportsPage() {
               {": "}
               PL available {attendanceQuery.data.leaveBalance.availPl} of{" "}
               {attendanceQuery.data.leaveBalance.totalPl}
-              {" · "}
-              CL available {attendanceQuery.data.leaveBalance.availCl} of{" "}
-              {attendanceQuery.data.leaveBalance.totalCl}
+              {isConsultant ? (
+                " · Consultant — no casual leave (CL)"
+              ) : (
+                <>
+                  {" · "}
+                  CL available {attendanceQuery.data.leaveBalance.availCl} of{" "}
+                  {attendanceQuery.data.leaveBalance.totalCl}
+                </>
+              )}
               {attendanceQuery.data.leaveBalance.periodFrom
                 ? ` (period from ${attendanceQuery.data.leaveBalance.periodFrom}${
                     attendanceQuery.data.leaveBalance.periodTo
@@ -680,11 +703,11 @@ function HrReportsPage() {
                       : " → open"
                   })`
                 : ""}
-              . Approved PL/CL/WFH days count as payable.
+              . Approved {isConsultant ? "PL" : "PL/CL"}/WFH days count as payable.
             </p>
           ) : !canApplyPlCl && selected ? (
             <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
-              PL / CL not available — employee has not completed 1 year of joining
+              {leaveLabel} not available — employee has not completed 1 year of joining
               {attendanceQuery.data?.dateOfJoining
                 ? ` (DOJ ${attendanceQuery.data.dateOfJoining}, ${attendanceQuery.data.monthsOfService ?? leaveEligQuery.data?.monthsOfService ?? "—"} months)`
                 : leaveEligQuery.data?.dateOfJoining
@@ -1195,7 +1218,7 @@ function HrReportsPage() {
                         {canApplyPlCl ? (
                           <>
                             <option value="PL">PL</option>
-                            <option value="CL">CL</option>
+                            {canApplyCl ? <option value="CL">CL</option> : null}
                           </>
                         ) : null}
                         <option value="LWP">LWP</option>
@@ -1549,6 +1572,10 @@ function HrReportsPage() {
                 </li>
                 <li>HO emp after 1 year: one-time 18 PL, then +1.5 PL every month (replaces yearly bulk).</li>
                 <li>CL credited when employee confirmation is applied.</li>
+                <li>
+                  Consultants (company = Consultant): PL only — no casual leave (CL), no CL credit on
+                  confirmation.
+                </li>
               </ul>
 
               {creditQuery.data ? (
@@ -1611,8 +1638,17 @@ function HrReportsPage() {
               <div className="rounded-lg border border-border px-3 py-3">
                 <div className="font-medium text-sm">Employee confirmation</div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Writes <code className="text-[11px]">EmployeeConfirmation</code> and credits CL
-                  (up to 6) on the open availableleave period.
+                  {isConsultant ? (
+                    <>
+                      Writes <code className="text-[11px]">EmployeeConfirmation</code> only — consultants
+                      get PL only, so no CL is credited.
+                    </>
+                  ) : (
+                    <>
+                      Writes <code className="text-[11px]">EmployeeConfirmation</code> and credits CL
+                      (up to 6) on the open availableleave period.
+                    </>
+                  )}
                 </p>
                 <Button
                   type="button"
@@ -1634,7 +1670,7 @@ function HrReportsPage() {
                   }}
                 >
                   {busy === "confirm" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  Apply confirmation + credit CL
+                  {isConsultant ? "Apply confirmation" : "Apply confirmation + credit CL"}
                 </Button>
               </div>
             </section>

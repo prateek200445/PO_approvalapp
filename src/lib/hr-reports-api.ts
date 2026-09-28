@@ -9,6 +9,7 @@ export type HrEmployeeOption = {
   branch?: string | null;
   isHoEmp?: boolean;
   isActive?: string | null;
+  isConsultant?: boolean;
 };
 
 export type HrAttendanceDay = {
@@ -53,6 +54,8 @@ export type HrAttendanceReport = {
   days: HrAttendanceDay[];
   dataNote?: string | null;
   canApplyPlCl?: boolean;
+  canApplyCl?: boolean;
+  isConsultant?: boolean;
   completedOneYear?: boolean;
   monthsOfService?: number;
   dateOfJoining?: string | null;
@@ -86,6 +89,7 @@ function mapEmployee(raw: Record<string, unknown>): HrEmployeeOption {
     branch: (raw.branch ?? raw.Branch) as string | null,
     isHoEmp: Boolean(raw.isHoEmp ?? raw.IsHoEmp ?? false),
     isActive: (raw.isActive ?? raw.IsActive) as string | null,
+    isConsultant: Boolean(raw.isConsultant ?? raw.IsConsultant ?? false),
   };
 }
 
@@ -223,6 +227,10 @@ export async function getHrAttendanceReport(
     canApplyPlCl: raw.canApplyPlCl != null || raw.CanApplyPlCl != null
       ? Boolean(raw.canApplyPlCl ?? raw.CanApplyPlCl)
       : true,
+    canApplyCl: raw.canApplyCl != null || raw.CanApplyCl != null
+      ? Boolean(raw.canApplyCl ?? raw.CanApplyCl)
+      : undefined,
+    isConsultant: Boolean(raw.isConsultant ?? raw.IsConsultant ?? false),
     completedOneYear: Boolean(raw.completedOneYear ?? raw.CompletedOneYear ?? true),
     monthsOfService: Number(raw.monthsOfService ?? raw.MonthsOfService ?? 0),
     dateOfJoining: (raw.dateOfJoining ?? raw.DateOfJoining) as string | null,
@@ -401,6 +409,8 @@ export type HrLeaveEligibility = {
   monthsOfService: number;
   completedOneYear: boolean;
   canApplyPlCl: boolean;
+  canApplyCl: boolean;
+  isConsultant: boolean;
   message: string;
 };
 
@@ -418,6 +428,10 @@ export async function getHrLeaveEligibility(
     monthsOfService: Number(raw.monthsOfService ?? raw.MonthsOfService ?? 0),
     completedOneYear: Boolean(raw.completedOneYear ?? raw.CompletedOneYear),
     canApplyPlCl: Boolean(raw.canApplyPlCl ?? raw.CanApplyPlCl),
+    canApplyCl: raw.canApplyCl != null || raw.CanApplyCl != null
+      ? Boolean(raw.canApplyCl ?? raw.CanApplyCl)
+      : Boolean(raw.canApplyPlCl ?? raw.CanApplyPlCl),
+    isConsultant: Boolean(raw.isConsultant ?? raw.IsConsultant ?? false),
     message: String(raw.message ?? raw.Message ?? ""),
   };
 }
@@ -516,6 +530,166 @@ export async function applyHrConfirmation(
   return {
     message: String(raw.message ?? raw.Message ?? "Confirmed"),
     clCredited: Number(raw.clCredited ?? raw.ClCredited ?? 0),
+  };
+}
+
+export type HrCompanyBranch = { companyName: string; branch: string; employees: number };
+
+export type HrEmployeeFormOptions = {
+  companyBranches: HrCompanyBranch[];
+  departments: string[];
+  subDepartments: string[];
+  designations: string[];
+  workRoles: string[];
+  categories: string[];
+  jobDescriptions: string[];
+};
+
+function strList(v: unknown): string[] {
+  return Array.isArray(v) ? v.map((x) => String(x ?? "")).filter(Boolean) : [];
+}
+
+export async function getHrEmployeeFormOptions(username?: string): Promise<HrEmployeeFormOptions> {
+  const params = withUser(new URLSearchParams(), username);
+  const res = await fetch(getApiUrl(`/api/hr/reports/employee-form/options?${params}`));
+  if (!res.ok) throw new Error(await readError(res));
+  const raw = (await res.json()) as Record<string, unknown>;
+  const pairs = (raw.companyBranches ?? raw.CompanyBranches ?? []) as Record<string, unknown>[];
+  return {
+    companyBranches: pairs.map((p) => ({
+      companyName: String(p.companyName ?? p.CompanyName ?? ""),
+      branch: String(p.branch ?? p.Branch ?? ""),
+      employees: Number(p.employees ?? p.Employees ?? 0),
+    })),
+    departments: strList(raw.departments ?? raw.Departments),
+    subDepartments: strList(raw.subDepartments ?? raw.SubDepartments),
+    designations: strList(raw.designations ?? raw.Designations),
+    workRoles: strList(raw.workRoles ?? raw.WorkRoles),
+    categories: strList(raw.categories ?? raw.Categories),
+    jobDescriptions: strList(raw.jobDescriptions ?? raw.JobDescriptions),
+  };
+}
+
+export type HrNextEmpCode = {
+  branch: string;
+  prefix?: string | null;
+  lastEmpCode?: string | null;
+  suggestedEmpCode?: string | null;
+  alternatives: { lastEmpCode: string; nextEmpCode: string }[];
+};
+
+export async function getHrNextEmpCode(branch: string, username?: string): Promise<HrNextEmpCode> {
+  const params = withUser(new URLSearchParams(), username);
+  params.set("branch", branch);
+  const res = await fetch(getApiUrl(`/api/hr/reports/employee-form/next-code?${params}`));
+  if (!res.ok) throw new Error(await readError(res));
+  const raw = (await res.json()) as Record<string, unknown>;
+  return {
+    branch: String(raw.branch ?? raw.Branch ?? branch),
+    prefix: (raw.prefix ?? raw.Prefix ?? null) as string | null,
+    lastEmpCode: (raw.lastEmpCode ?? raw.LastEmpCode ?? null) as string | null,
+    suggestedEmpCode: (raw.suggestedEmpCode ?? raw.SuggestedEmpCode ?? null) as string | null,
+    alternatives: ((raw.alternatives ?? raw.Alternatives ?? []) as Record<string, unknown>[]).map((a) => ({
+      lastEmpCode: String(a.lastEmpCode ?? a.LastEmpCode ?? ""),
+      nextEmpCode: String(a.nextEmpCode ?? a.NextEmpCode ?? ""),
+    })),
+  };
+}
+
+/** Field names match the API HrCreateEmployeeRequest (ERP Employee Information form). */
+export type HrNewEmployee = {
+  companyName: string;
+  branch: string;
+  empCode: string;
+  name: string;
+  dateOfBirth?: string;
+  gender?: string;
+  maritalStatus?: string;
+  language?: string;
+  religion?: string;
+  caste?: string;
+  nationality?: string;
+  handicapped?: boolean;
+  bloodGroup?: string;
+  passportNo?: string;
+  passportValidFrom?: string;
+  passportValidTo?: string;
+  cardId?: string;
+  jobDescription?: string;
+  isDirector?: boolean;
+  fatherName?: string;
+  motherName?: string;
+  spouseName?: string;
+  noOfChildren?: string;
+  qualification?: string;
+  specialization?: string;
+  university?: string;
+  yearOfPassing?: string;
+  skills?: string;
+  abilities?: string;
+  dateOfJoining?: string;
+  confirmationDate?: string;
+  designation?: string;
+  department?: string;
+  subDepartment?: string;
+  category?: string;
+  subCategory?: string;
+  workRole?: string;
+  workArea?: string;
+  workLocation?: string;
+  experience?: string;
+  previousEmployer?: string;
+  contractorName?: string;
+  isHoEmp?: boolean;
+  ctc?: string;
+  isSalaryPerDay?: boolean;
+  salaryPerDay?: string;
+  pfApplicable?: boolean;
+  pfApplicableDate?: string;
+  bonusApplicable?: boolean;
+  hraApplicable?: boolean;
+  attendanceBonus?: boolean;
+  overtime?: boolean;
+  rotation?: boolean;
+  employeeRecognition?: string;
+  contactNo?: string;
+  email?: string;
+  presentAddress?: string;
+  permanentAddress?: string;
+  emergencyContactNo?: string;
+  emergencyContactAddress?: string;
+  guardian?: string;
+  paymentMode?: string;
+  bankName?: string;
+  bankAccountNo?: string;
+  ifscCode?: string;
+  panNo?: string;
+  aadhaarNo?: string;
+  uanNo?: string;
+  pfAccountNo?: string;
+  esicNo?: string;
+  nominee?: string;
+  nomineeRelationship?: string;
+  nomineeDob?: string;
+};
+
+export async function createHrEmployee(
+  employee: HrNewEmployee,
+  username?: string,
+): Promise<{ empCode: string; name: string; isConsultant: boolean; message: string }> {
+  const params = withUser(new URLSearchParams(), username);
+  const res = await fetch(getApiUrl(`/api/hr/reports/employees?${params}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...employee, username }),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const raw = (await res.json()) as Record<string, unknown>;
+  return {
+    empCode: String(raw.empCode ?? raw.EmpCode ?? employee.empCode),
+    name: String(raw.name ?? raw.Name ?? employee.name),
+    isConsultant: Boolean(raw.isConsultant ?? raw.IsConsultant ?? false),
+    message: String(raw.message ?? raw.Message ?? "Employee added"),
   };
 }
 

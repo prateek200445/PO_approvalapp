@@ -65,24 +65,31 @@ ORDER BY FromDate DESC, Currentdte DESC",
     {
         empCode = RequireEmpCode(empCode);
         using var connection = _database.CreatePayrollLoginEntryConnection();
-        var doj = await connection.ExecuteScalarAsync<DateTime?>(@"
-SELECT DateOJ FROM empinfo WITH (NOLOCK)
+        var emp = await connection.QueryFirstOrDefaultAsync<(DateTime? DateOj, string? CompanyName)>(@"
+SELECT DateOJ AS DateOj, CompanyName FROM empinfo WITH (NOLOCK)
 WHERE LTRIM(RTRIM(EmpCode)) = @EmpCode", new { EmpCode = empCode });
-        if (doj is null)
+        if (emp.DateOj is null)
             throw new InvalidOperationException($"Employee {empCode} not found.");
 
-        var months = MonthsOfService(doj.Value, DateTime.Today);
+        var months = MonthsOfService(emp.DateOj.Value, DateTime.Today);
         var completed = months >= 12;
+        var consultant = HrEmployeeRules.IsConsultant(emp.CompanyName);
         return new HrLeaveEligibilityDto
         {
             EmpCode = empCode,
-            DateOfJoining = doj.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            DateOfJoining = emp.DateOj.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             MonthsOfService = months,
             CompletedOneYear = completed,
             CanApplyPlCl = completed,
-            Message = completed
-                ? "PL / CL available (1 year of service completed)."
-                : $"PL / CL not available until 1 year of joining (now {months} month(s)). You can apply LWP / WFH.",
+            CanApplyCl = completed && !consultant,
+            IsConsultant = consultant,
+            Message = consultant
+                ? completed
+                    ? "Consultant — PL available (no casual leave for consultants)."
+                    : $"Consultant — PL not available until 1 year of joining (now {months} month(s)). No casual leave for consultants. You can apply LWP / WFH."
+                : completed
+                    ? "PL / CL available (1 year of service completed)."
+                    : $"PL / CL not available until 1 year of joining (now {months} month(s)). You can apply LWP / WFH.",
         };
     }
 
@@ -115,11 +122,15 @@ WHERE LTRIM(RTRIM(EmpCode)) = @EmpCode", new { EmpCode = empCode });
 
         using var connection = _database.CreatePayrollLoginEntryConnection();
 
-        var doj = await connection.ExecuteScalarAsync<DateTime?>(@"
-SELECT DateOJ FROM empinfo WITH (NOLOCK)
+        var emp = await connection.QueryFirstOrDefaultAsync<(DateTime? DateOj, string? CompanyName)>(@"
+SELECT DateOJ AS DateOj, CompanyName FROM empinfo WITH (NOLOCK)
 WHERE LTRIM(RTRIM(EmpCode)) = @EmpCode", new { EmpCode = empCode });
-        if (doj is null)
+        if (emp.DateOj is null)
             throw new InvalidOperationException($"Employee {empCode} not found.");
+        var doj = emp.DateOj;
+
+        if (leaveType == "CL" && HrEmployeeRules.IsConsultant(emp.CompanyName))
+            throw new InvalidOperationException("Consultants do not get casual leave (CL). Apply PL or LWP instead.");
 
         if (leaveType is "PL" or "CL")
         {
@@ -258,6 +269,15 @@ ORDER BY Currentdte DESC",
             if (row is null)
                 throw new InvalidOperationException("Leave / WFH request not found.");
 
+            if (approve && leaveType == "CL")
+            {
+                var company = await connection.ExecuteScalarAsync<string?>(@"
+SELECT CompanyName FROM empinfo WITH (NOLOCK) WHERE LTRIM(RTRIM(EmpCode)) = @EmpCode",
+                    new { EmpCode = empCode }, tx);
+                if (HrEmployeeRules.IsConsultant(company))
+                    throw new InvalidOperationException("Consultants do not get casual leave (CL). Reject this request or ask them to apply PL.");
+            }
+
             var status = ((string?)row.status_leave ?? "").Trim().ToLowerInvariant();
             if (status.StartsWith("approv", StringComparison.Ordinal))
                 throw new InvalidOperationException("This request is already approved.");
@@ -364,8 +384,8 @@ WHERE LTRIM(RTRIM(Empcode)) = @EmpCode AND FromDate = @FromDate",
         empCode = RequireEmpCode(empCode);
         using var connection = _database.CreatePayrollLoginEntryConnection();
 
-        var emp = await connection.QueryFirstOrDefaultAsync<(string EmpCode, int IsHoEmp, DateTime? DateOj)>(@"
-SELECT LTRIM(RTRIM(EmpCode)) AS EmpCode, ISNULL(IsHOEmp,0) AS IsHoEmp, DateOJ AS DateOj
+        var emp = await connection.QueryFirstOrDefaultAsync<(string EmpCode, int IsHoEmp, DateTime? DateOj, string? CompanyName)>(@"
+SELECT LTRIM(RTRIM(EmpCode)) AS EmpCode, ISNULL(IsHOEmp,0) AS IsHoEmp, DateOJ AS DateOj, CompanyName
 FROM empinfo WITH (NOLOCK)
 WHERE LTRIM(RTRIM(EmpCode)) = @EmpCode", new { EmpCode = empCode });
         if (emp.EmpCode is null)
@@ -381,6 +401,19 @@ SELECT CASE WHEN EXISTS (
         await connection.ExecuteAsync(@"
 INSERT INTO EmployeeConfirmation (Empcode, MailDate) VALUES (@EmpCode, CAST(GETDATE() AS date))",
             new { EmpCode = empCode });
+
+        if (HrEmployeeRules.IsConsultant(emp.CompanyName))
+        {
+            return new HrConfirmationResultDto
+            {
+                EmpCode = empCode,
+                Confirmed = true,
+                ConfirmedOn = DateTime.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                ClCredited = 0,
+                Message = "Confirmation recorded. No CL credited — consultants get PL only.",
+                AppliedBy = appliedBy,
+            };
+        }
 
         // Credit CL after confirmation (open leave period row)
         var open = await connection.QueryFirstOrDefaultAsync<(decimal TotalCl, decimal AvailCl, DateTime? FromDate)>(@"
@@ -737,13 +770,25 @@ ORDER BY ISNULL(RequestedAt, VerifiedAt) DESC",
         value.Length <= max ? value : value[..max];
 }
 
+public static class HrEmployeeRules
+{
+    public const string ConsultantCompanyName = "Consultant";
+
+    /// <summary>ERP files consultants under empinfo.CompanyName = 'Consultant'. They get PL only (no CL).</summary>
+    public static bool IsConsultant(string? companyName) =>
+        string.Equals((companyName ?? "").Trim(), ConsultantCompanyName, StringComparison.OrdinalIgnoreCase);
+}
+
 public sealed class HrLeaveEligibilityDto
 {
     public string EmpCode { get; set; } = "";
     public string? DateOfJoining { get; set; }
     public int MonthsOfService { get; set; }
     public bool CompletedOneYear { get; set; }
+    /// <summary>PL is allowed (1 year of service). CL additionally requires <see cref="CanApplyCl"/>.</summary>
     public bool CanApplyPlCl { get; set; }
+    public bool CanApplyCl { get; set; }
+    public bool IsConsultant { get; set; }
     public string Message { get; set; } = "";
 }
 

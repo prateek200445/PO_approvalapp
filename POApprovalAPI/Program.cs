@@ -102,6 +102,7 @@ builder.Services.Configure<AuthOptions>(
 builder.Services.AddScoped<HrAccessService>();
 builder.Services.AddScoped<HrReportsService>();
 builder.Services.AddScoped<HrSelfServiceService>();
+builder.Services.AddScoped<HrEmployeeMasterService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();
