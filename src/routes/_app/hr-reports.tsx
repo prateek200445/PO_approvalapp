@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Download, Loader2, Search, Users } from "lucide-react";
@@ -34,7 +34,10 @@ import {
   verifyHrAttendanceMonth,
   approveHrAttendanceMonth,
   listPendingHrAttendanceAck,
+  type HrAttendanceAck,
+  type HrAttendanceDay,
   type HrEmployeeOption,
+  type HrLeaveApplication,
 } from "@/lib/hr-reports-api";
 
 type HrTab = "attendance" | "leave" | "wfh" | "verify" | "policy" | "employee";
@@ -275,6 +278,75 @@ function HrReportsPage() {
     queryFn: () => getHrLeaveCreditPreview(selected!.empCode, username),
     enabled: !!selected?.empCode && !!username && isFullAccess && tab === "policy",
   });
+
+  async function decidePendingLeave(
+    row: HrLeaveApplication,
+    key: string,
+    approve: boolean,
+    refreshSelected: boolean,
+  ) {
+    setBusy(`${approve ? "ap" : "rj"}-${key}`);
+    try {
+      const r = await decideHrLeave({
+        empCode: row.empCode,
+        leaveType: row.leaveType,
+        fromDate: row.fromDate,
+        toDate: row.toDate,
+        username,
+        approve,
+      });
+      toast.success(r.message);
+      await pendingLeaveQuery.refetch();
+      if (refreshSelected) {
+        await leaveQuery.refetch();
+        if (approve) await attendanceQuery.refetch();
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : approve ? "Approve failed" : "Reject failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function approveVerifyRequest(row: HrAttendanceAck) {
+    setBusy(`approve-${row.empCode}-${row.yearMonth}`);
+    try {
+      await approveHrAttendanceMonth(row.empCode, row.yearMonth, username);
+      toast.success(`Approved ${row.empCode} ${row.yearMonth}`);
+      await pendingAckQuery.refetch();
+      if (selected?.empCode === row.empCode && yearMonth === row.yearMonth) {
+        await ackQuery.refetch();
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Approve failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function renderLeaveActions(row: HrLeaveApplication, key: string, refreshSelected: boolean) {
+    return (
+      <>
+        <Button
+          type="button"
+          size="sm"
+          disabled={busy === `ap-${key}`}
+          onClick={() => void decidePendingLeave(row, key, true, refreshSelected)}
+        >
+          Approve
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={busy === `rj-${key}`}
+          onClick={() => void decidePendingLeave(row, key, false, refreshSelected)}
+        >
+          Reject
+        </Button>
+      </>
+    );
+  }
 
   // Clear manual overrides when switching employee
   useEffect(() => {
@@ -604,7 +676,7 @@ function HrReportsPage() {
 
       {username && access && access.mode !== "none" && (selected || isFullAccess) ? (
         <>
-          <div className="flex flex-wrap gap-1 rounded-xl border border-border bg-card p-1 shadow-sm">
+          <div className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1 shadow-sm md:flex-wrap [&>button]:shrink-0 [&>button]:whitespace-nowrap">
             {(
               [
                 { id: "attendance" as const, label: "Attendance & salary" },
@@ -644,7 +716,7 @@ function HrReportsPage() {
               </p>
             ) : (
             <>
-          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+          <section className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
             <Stat label="Present" value={String(summary?.presentDays ?? "—")} />
             <Stat
               label={applyHalfDayRule ? "Half day (late >10:30 & <9h)" : "Half day (off)"}
@@ -752,7 +824,12 @@ function HrReportsPage() {
                     {attendanceQuery.data.dataNote}
                   </p>
                 ) : null}
-              <div className="overflow-x-auto rounded-lg border border-border">
+              <ul className="space-y-2 md:hidden">
+                {(attendanceQuery.data?.days ?? []).map((day) => (
+                  <AttendanceDayCard key={day.date} day={day} tone={statusTone[day.status]} />
+                ))}
+              </ul>
+              <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
                 <table className="w-full min-w-[36rem] border-collapse text-sm">
                   <thead>
                     <tr className="bg-secondary/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -931,7 +1008,21 @@ function HrReportsPage() {
                           No pending leave / WFH requests.
                         </p>
                       ) : (
-                        <div className="overflow-x-auto rounded-lg border border-border">
+                        <>
+                        <ul className="space-y-2 md:hidden">
+                          {(pendingLeaveQuery.data ?? []).map((row, i) => {
+                            const key = `${row.empCode}-${row.leaveType}-${row.fromDate}-${row.toDate}-${i}`;
+                            return (
+                              <LeaveCard
+                                key={key}
+                                row={row}
+                                showEmp
+                                actions={renderLeaveActions(row, key, false)}
+                              />
+                            );
+                          })}
+                        </ul>
+                        <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
                           <table className="w-full min-w-[44rem] text-sm">
                             <thead>
                               <tr className="bg-secondary/50 text-left text-xs uppercase text-muted-foreground">
@@ -958,72 +1049,9 @@ function HrReportsPage() {
                                     <td className="px-3 py-1.5">{row.purpose ?? "—"}</td>
                                     <td className="px-3 py-1.5 text-xs">{row.appliedAt ?? "—"}</td>
                                     <td className="px-3 py-1.5 text-right whitespace-nowrap">
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        className="mr-1"
-                                        disabled={busy === `ap-${key}`}
-                                        onClick={() => {
-                                          void (async () => {
-                                            setBusy(`ap-${key}`);
-                                            try {
-                                              const r = await decideHrLeave({
-                                                empCode: row.empCode,
-                                                leaveType: row.leaveType,
-                                                fromDate: row.fromDate,
-                                                toDate: row.toDate,
-                                                username,
-                                                approve: true,
-                                              });
-                                              toast.success(r.message);
-                                              await pendingLeaveQuery.refetch();
-                                            } catch (err) {
-                                              toast.error(
-                                                err instanceof Error
-                                                  ? err.message
-                                                  : "Approve failed",
-                                              );
-                                            } finally {
-                                              setBusy(null);
-                                            }
-                                          })();
-                                        }}
-                                      >
-                                        Approve
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        size="sm"
-                                        variant="outline"
-                                        disabled={busy === `rj-${key}`}
-                                        onClick={() => {
-                                          void (async () => {
-                                            setBusy(`rj-${key}`);
-                                            try {
-                                              const r = await decideHrLeave({
-                                                empCode: row.empCode,
-                                                leaveType: row.leaveType,
-                                                fromDate: row.fromDate,
-                                                toDate: row.toDate,
-                                                username,
-                                                approve: false,
-                                              });
-                                              toast.success(r.message);
-                                              await pendingLeaveQuery.refetch();
-                                            } catch (err) {
-                                              toast.error(
-                                                err instanceof Error
-                                                  ? err.message
-                                                  : "Reject failed",
-                                              );
-                                            } finally {
-                                              setBusy(null);
-                                            }
-                                          })();
-                                        }}
-                                      >
-                                        Reject
-                                      </Button>
+                                      <div className="inline-flex gap-1">
+                                        {renderLeaveActions(row, key, false)}
+                                      </div>
                                     </td>
                                   </tr>
                                 );
@@ -1031,6 +1059,7 @@ function HrReportsPage() {
                             </tbody>
                           </table>
                         </div>
+                        </>
                       )}
                     </>
                   ) : (
@@ -1044,7 +1073,19 @@ function HrReportsPage() {
                         return (
                           <div className="space-y-2">
                             <h3 className="text-sm font-semibold">Pending for this employee</h3>
-                            <div className="overflow-x-auto rounded-lg border border-border">
+                            <ul className="space-y-2 md:hidden">
+                              {empPending.map((row, i) => {
+                                const key = `sel-${row.leaveType}-${row.fromDate}-${i}`;
+                                return (
+                                  <LeaveCard
+                                    key={key}
+                                    row={row}
+                                    actions={renderLeaveActions(row, key, true)}
+                                  />
+                                );
+                              })}
+                            </ul>
+                            <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
                               <table className="w-full min-w-[36rem] text-sm">
                                 <thead>
                                   <tr className="bg-secondary/50 text-left text-xs uppercase text-muted-foreground">
@@ -1065,75 +1106,9 @@ function HrReportsPage() {
                                         <td className="px-3 py-1.5 tabular-nums">{row.toDate}</td>
                                         <td className="px-3 py-1.5">{row.days}</td>
                                         <td className="px-3 py-1.5 text-right whitespace-nowrap">
-                                          <Button
-                                            type="button"
-                                            size="sm"
-                                            className="mr-1"
-                                            disabled={busy === `ap-${key}`}
-                                            onClick={() => {
-                                              void (async () => {
-                                                setBusy(`ap-${key}`);
-                                                try {
-                                                  const r = await decideHrLeave({
-                                                    empCode: row.empCode,
-                                                    leaveType: row.leaveType,
-                                                    fromDate: row.fromDate,
-                                                    toDate: row.toDate,
-                                                    username,
-                                                    approve: true,
-                                                  });
-                                                  toast.success(r.message);
-                                                  await pendingLeaveQuery.refetch();
-                                                  await leaveQuery.refetch();
-                                                  await attendanceQuery.refetch();
-                                                } catch (err) {
-                                                  toast.error(
-                                                    err instanceof Error
-                                                      ? err.message
-                                                      : "Approve failed",
-                                                  );
-                                                } finally {
-                                                  setBusy(null);
-                                                }
-                                              })();
-                                            }}
-                                          >
-                                            Approve
-                                          </Button>
-                                          <Button
-                                            type="button"
-                                            size="sm"
-                                            variant="outline"
-                                            disabled={busy === `rj-${key}`}
-                                            onClick={() => {
-                                              void (async () => {
-                                                setBusy(`rj-${key}`);
-                                                try {
-                                                  const r = await decideHrLeave({
-                                                    empCode: row.empCode,
-                                                    leaveType: row.leaveType,
-                                                    fromDate: row.fromDate,
-                                                    toDate: row.toDate,
-                                                    username,
-                                                    approve: false,
-                                                  });
-                                                  toast.success(r.message);
-                                                  await pendingLeaveQuery.refetch();
-                                                  await leaveQuery.refetch();
-                                                } catch (err) {
-                                                  toast.error(
-                                                    err instanceof Error
-                                                      ? err.message
-                                                      : "Reject failed",
-                                                  );
-                                                } finally {
-                                                  setBusy(null);
-                                                }
-                                              })();
-                                            }}
-                                          >
-                                            Reject
-                                          </Button>
+                                          <div className="inline-flex gap-1">
+                                            {renderLeaveActions(row, key, true)}
+                                          </div>
                                         </td>
                                       </tr>
                                     );
@@ -1152,7 +1127,13 @@ function HrReportsPage() {
                           No leave records for this employee.
                         </p>
                       ) : (
-                        <div className="overflow-x-auto rounded-lg border border-border">
+                        <>
+                        <ul className="space-y-2 md:hidden">
+                          {(leaveQuery.data ?? []).map((row, i) => (
+                            <LeaveCard key={`${row.fromDate}-${row.leaveType}-${i}`} row={row} showStatus />
+                          ))}
+                        </ul>
+                        <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
                           <table className="w-full min-w-[40rem] text-sm">
                             <thead>
                               <tr className="bg-secondary/50 text-left text-xs uppercase text-muted-foreground">
@@ -1181,6 +1162,7 @@ function HrReportsPage() {
                             </tbody>
                           </table>
                         </div>
+                        </>
                       )}
                     </>
                   )}
@@ -1294,8 +1276,16 @@ function HrReportsPage() {
                   <h3 className="pt-2 text-sm font-semibold">Your leave applications</h3>
                   {leaveQuery.isLoading ? (
                     <p className="text-sm text-muted-foreground">Loading…</p>
+                  ) : (leaveQuery.data?.length ?? 0) === 0 ? (
+                    <p className="text-sm text-muted-foreground">No leave applications yet.</p>
                   ) : (
-                    <div className="overflow-x-auto rounded-lg border border-border">
+                    <>
+                    <ul className="space-y-2 md:hidden">
+                      {(leaveQuery.data ?? []).map((row, i) => (
+                        <LeaveCard key={`${row.fromDate}-${row.leaveType}-${i}`} row={row} showStatus />
+                      ))}
+                    </ul>
+                    <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
                       <table className="w-full min-w-[40rem] text-sm">
                         <thead>
                           <tr className="bg-secondary/50 text-left text-xs uppercase text-muted-foreground">
@@ -1324,6 +1314,7 @@ function HrReportsPage() {
                         </tbody>
                       </table>
                     </div>
+                    </>
                   )}
                 </>
               )}
@@ -1493,7 +1484,36 @@ function HrReportsPage() {
                   ) : (pendingAckQuery.data?.length ?? 0) === 0 ? (
                     <p className="text-sm text-muted-foreground">No pending requests.</p>
                   ) : (
-                    <div className="overflow-x-auto rounded-lg border border-border">
+                    <>
+                    <ul className="space-y-2 md:hidden">
+                      {(pendingAckQuery.data ?? []).map((row) => (
+                        <li
+                          key={`${row.empCode}-${row.yearMonth}`}
+                          className="rounded-lg border border-border bg-card p-3 text-sm shadow-sm"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold tabular-nums">{row.empCode}</span>
+                            <span className="rounded-md bg-secondary px-2 py-0.5 text-xs tabular-nums">
+                              {row.yearMonth}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Requested {row.requestedAt ?? row.verifiedAt ?? "—"} by{" "}
+                            {row.requestedBy ?? row.verifiedBy ?? "—"}
+                          </p>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="mt-2 w-full"
+                            disabled={busy === `approve-${row.empCode}-${row.yearMonth}`}
+                            onClick={() => void approveVerifyRequest(row)}
+                          >
+                            Approve
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
                       <table className="w-full min-w-[32rem] text-sm">
                         <thead>
                           <tr className="bg-secondary/50 text-left text-xs uppercase text-muted-foreground">
@@ -1519,33 +1539,7 @@ function HrReportsPage() {
                                   type="button"
                                   size="sm"
                                   disabled={busy === `approve-${row.empCode}-${row.yearMonth}`}
-                                  onClick={() => {
-                                    void (async () => {
-                                      const key = `approve-${row.empCode}-${row.yearMonth}`;
-                                      setBusy(key);
-                                      try {
-                                        await approveHrAttendanceMonth(
-                                          row.empCode,
-                                          row.yearMonth,
-                                          username,
-                                        );
-                                        toast.success(`Approved ${row.empCode} ${row.yearMonth}`);
-                                        await pendingAckQuery.refetch();
-                                        if (
-                                          selected.empCode === row.empCode &&
-                                          yearMonth === row.yearMonth
-                                        ) {
-                                          await ackQuery.refetch();
-                                        }
-                                      } catch (err) {
-                                        toast.error(
-                                          err instanceof Error ? err.message : "Approve failed",
-                                        );
-                                      } finally {
-                                        setBusy(null);
-                                      }
-                                    })();
-                                  }}
+                                  onClick={() => void approveVerifyRequest(row)}
                                 >
                                   Approve
                                 </Button>
@@ -1555,6 +1549,7 @@ function HrReportsPage() {
                         </tbody>
                       </table>
                     </div>
+                    </>
                   )}
                 </div>
               ) : null}
@@ -1682,6 +1677,80 @@ function HrReportsPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function AttendanceDayCard({ day, tone }: { day: HrAttendanceDay; tone?: string }) {
+  return (
+    <li className="rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium tabular-nums">
+          {day.date} <span className="text-muted-foreground">{day.dayName}</span>
+        </span>
+        <span className={cn("inline-flex rounded-md px-2 py-0.5 text-xs font-medium", tone ?? "bg-secondary")}>
+          {day.status}
+        </span>
+      </div>
+      <div className="mt-1 grid grid-cols-4 gap-2 text-xs text-muted-foreground">
+        <div>
+          In
+          <div className="font-medium text-foreground tabular-nums">{day.punchIn ?? "—"}</div>
+        </div>
+        <div>
+          Out
+          <div className="font-medium text-foreground tabular-nums">{day.punchOut ?? "—"}</div>
+        </div>
+        <div>
+          Hours
+          <div className="font-medium text-foreground tabular-nums">
+            {day.workedHours != null ? day.workedHours.toFixed(2) : "—"}
+          </div>
+        </div>
+        <div className="text-right">
+          Payable
+          <div className="font-medium text-foreground tabular-nums">{day.payableDay}</div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function LeaveCard({
+  row,
+  showEmp,
+  showStatus,
+  actions,
+}: {
+  row: HrLeaveApplication;
+  showEmp?: boolean;
+  showStatus?: boolean;
+  actions?: ReactNode;
+}) {
+  const sameDay = !row.toDate || row.toDate === row.fromDate;
+  return (
+    <li className="rounded-lg border border-border bg-card p-3 text-sm shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <span className="flex items-center gap-2">
+          <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+            {row.leaveType}
+          </span>
+          {showEmp ? <span className="font-medium tabular-nums">{row.empCode}</span> : null}
+        </span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {row.days} day{row.days === 1 ? "" : "s"}
+        </span>
+      </div>
+      <p className="mt-1 tabular-nums">{sameDay ? row.fromDate : `${row.fromDate} → ${row.toDate}`}</p>
+      {row.purpose ? <p className="mt-1 text-xs text-muted-foreground">{row.purpose}</p> : null}
+      {showStatus || row.appliedAt ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          {showStatus ? <>Status: <span className="font-medium text-foreground">{row.status ?? "—"}</span></> : null}
+          {showStatus && row.appliedAt ? " · " : null}
+          {row.appliedAt ? `Applied ${row.appliedAt}` : null}
+        </p>
+      ) : null}
+      {actions ? <div className="mt-2 grid grid-cols-2 gap-2 [&>button]:w-full">{actions}</div> : null}
+    </li>
   );
 }
 
