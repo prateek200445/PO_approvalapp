@@ -277,7 +277,7 @@ export function HrAddEmployeeForm({ username }: Props) {
         </p>
       ) : null}
 
-      <div className="flex flex-wrap gap-1 border-b border-border">
+      <div className="flex gap-1 overflow-x-auto border-b border-border md:flex-wrap [&>button]:shrink-0 [&>button]:whitespace-nowrap">
         {SECTIONS.map((s) => (
           <button
             key={s.id}
@@ -566,7 +566,7 @@ export function HrAddEmployeeForm({ username }: Props) {
           {missing.length > 0 ? `Still required: ${missing.join(", ")}.` : "Ready to save."} Photo / document
           upload stays in ERP for now.
         </p>
-        <div className="flex gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
           <Button
             type="button"
             variant="outline"
