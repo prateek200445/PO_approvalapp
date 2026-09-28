@@ -105,42 +105,49 @@ ORDER BY CreatedAt DESC, Id DESC",
     public async Task<(byte[] Bytes, string FileName)> ExportExcelAsync(string? formType, string? exhibitionName)
     {
         var rows = await ListAsync(formType, exhibitionName);
+        var dealer = string.Equals(formType, "DealerDistributor", StringComparison.Ordinal);
         using var workbook = new XLWorkbook();
-        var sheet = workbook.Worksheets.Add("Exhibition Leads");
-        var headers = new[]
-        {
-            "Id", "Form Type", "Company Name", "Person Name", "Contact Number", "Email",
-            "Address", "Postal Code", "Product Inquiry", "Quantity", "Exhibition Name", "Created At",
-        };
+        var sheet = workbook.Worksheets.Add(dealer ? "Dealer Distributor" : "Product Inquiry");
+        var headers = dealer
+            ? new[] { "Company Name", "Person Name", "Contact Number", "Email", "Address", "Postal Code", "Created At" }
+            : new[] { "Name", "Contact Number", "Email", "Product Inquiry", "Quantity", "Created At" };
         for (var i = 0; i < headers.Length; i++)
             sheet.Cell(1, i + 1).Value = headers[i];
 
         var rowIndex = 2;
         foreach (var row in rows)
         {
-            sheet.Cell(rowIndex, 1).Value = row.Id;
-            sheet.Cell(rowIndex, 2).Value = row.FormType;
-            sheet.Cell(rowIndex, 3).Value = row.CompanyName ?? "";
-            sheet.Cell(rowIndex, 4).Value = row.PersonName;
-            sheet.Cell(rowIndex, 5).Value = row.ContactNumber;
-            sheet.Cell(rowIndex, 6).Value = row.Email ?? "";
-            sheet.Cell(rowIndex, 7).Value = row.Address ?? "";
-            sheet.Cell(rowIndex, 8).Value = row.PostalCode ?? "";
-            sheet.Cell(rowIndex, 9).Value = row.ProductInquiry ?? "";
-            if (row.Quantity.HasValue)
-                sheet.Cell(rowIndex, 10).Value = row.Quantity.Value;
-            sheet.Cell(rowIndex, 11).Value = row.ExhibitionName ?? "";
-            sheet.Cell(rowIndex, 12).Value = row.CreatedAt;
+            if (dealer)
+            {
+                sheet.Cell(rowIndex, 1).Value = row.CompanyName ?? "";
+                sheet.Cell(rowIndex, 2).Value = row.PersonName;
+                sheet.Cell(rowIndex, 3).Value = row.ContactNumber;
+                sheet.Cell(rowIndex, 4).Value = row.Email ?? "";
+                sheet.Cell(rowIndex, 5).Value = row.Address ?? "";
+                sheet.Cell(rowIndex, 6).Value = row.PostalCode ?? "";
+                sheet.Cell(rowIndex, 7).Value = row.CreatedAt;
+            }
+            else
+            {
+                sheet.Cell(rowIndex, 1).Value = row.PersonName;
+                sheet.Cell(rowIndex, 2).Value = row.ContactNumber;
+                sheet.Cell(rowIndex, 3).Value = row.Email ?? "";
+                sheet.Cell(rowIndex, 4).Value = row.ProductInquiry ?? "";
+                if (row.Quantity.HasValue)
+                    sheet.Cell(rowIndex, 5).Value = row.Quantity.Value;
+                sheet.Cell(rowIndex, 6).Value = row.CreatedAt;
+            }
             rowIndex++;
         }
 
         sheet.Row(1).Style.Font.Bold = true;
-        sheet.Column(12).Style.DateFormat.Format = "yyyy-mm-dd hh:mm:ss";
+        sheet.Column(headers.Length).Style.DateFormat.Format = "yyyy-mm-dd hh:mm:ss";
         sheet.Columns().AdjustToContents();
 
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
-        return (stream.ToArray(), $"exhibition-leads-{DateTime.Now:yyyyMMdd-HHmm}.xlsx");
+        var filePrefix = dealer ? "dealer-distributor" : "product-inquiry";
+        return (stream.ToArray(), $"{filePrefix}-{DateTime.Now:yyyyMMdd-HHmm}.xlsx");
     }
 
     private async Task EnsureTableAsync()
