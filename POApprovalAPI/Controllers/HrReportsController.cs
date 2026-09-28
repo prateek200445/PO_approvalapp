@@ -10,15 +10,18 @@ public class HrReportsController : ControllerBase
     private readonly HrReportsService _service;
     private readonly HrSelfServiceService _selfService;
     private readonly HrAccessService _access;
+    private readonly HrEmployeeMasterService _employeeMaster;
 
     public HrReportsController(
         HrReportsService service,
         HrSelfServiceService selfService,
-        HrAccessService access)
+        HrAccessService access,
+        HrEmployeeMasterService employeeMaster)
     {
         _service = service;
         _selfService = selfService;
         _access = access;
+        _employeeMaster = employeeMaster;
     }
 
     [HttpGet("access")]
@@ -483,6 +486,55 @@ public class HrReportsController : ControllerBase
         catch (UnauthorizedAccessException ex)
         {
             return StatusCode(403, new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    [HttpGet("employee-form/options")]
+    public async Task<IActionResult> EmployeeFormOptions([FromQuery] string username = "")
+    {
+        try
+        {
+            var access = await _access.ResolveAsync(username);
+            if (!access.HasFullAccess)
+                return StatusCode(403, new { message = "Only HR can add employees." });
+            return Ok(await _employeeMaster.GetFormOptionsAsync());
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    [HttpGet("employee-form/next-code")]
+    public async Task<IActionResult> EmployeeNextCode([FromQuery] string branch, [FromQuery] string username = "")
+    {
+        try
+        {
+            var access = await _access.ResolveAsync(username);
+            if (!access.HasFullAccess)
+                return StatusCode(403, new { message = "Only HR can add employees." });
+            return Ok(await _employeeMaster.SuggestEmpCodeAsync(branch));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    [HttpPost("employees")]
+    public async Task<IActionResult> CreateEmployee([FromBody] HrCreateEmployeeRequest request, [FromQuery] string username = "")
+    {
+        try
+        {
+            var user = FirstNonEmpty(username, request.Username);
+            var access = await _access.ResolveAsync(user);
+            if (!access.HasFullAccess)
+                return StatusCode(403, new { message = "Only HR can add employees." });
+            return Ok(await _employeeMaster.CreateEmployeeAsync(request, user));
         }
         catch (Exception ex)
         {
