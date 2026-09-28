@@ -11,6 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ExhibitionProductRouteImport } from './routes/exhibition.product'
+import { Route as ExhibitionDealerRouteImport } from './routes/exhibition.dealer'
 import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
 import { Route as AppSalesDashboardRouteImport } from './routes/_app/sales-dashboard'
 import { Route as AppReconciliationRouteImport } from './routes/_app/reconciliation'
@@ -28,6 +30,7 @@ import { Route as AppHrReportsRouteImport } from './routes/_app/hr-reports'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppFibcBuyersRouteImport } from './routes/_app/fibc-buyers'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
+import { Route as AppExhibitionLeadsRouteImport } from './routes/_app/exhibition-leads'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppDailyReportsRouteImport } from './routes/_app/daily-reports'
 import { Route as AppDailyProductionRouteImport } from './routes/_app/daily-production'
@@ -57,6 +60,16 @@ const AppRoute = AppRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExhibitionProductRoute = ExhibitionProductRouteImport.update({
+  id: '/exhibition/product',
+  path: '/exhibition/product',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExhibitionDealerRoute = ExhibitionDealerRouteImport.update({
+  id: '/exhibition/dealer',
+  path: '/exhibition/dealer',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AppWorkordersRoute = AppWorkordersRouteImport.update({
@@ -142,6 +155,11 @@ const AppFibcBuyersRoute = AppFibcBuyersRouteImport.update({
 const AppExportBillOverdueRoute = AppExportBillOverdueRouteImport.update({
   id: '/export-bill-overdue',
   path: '/export-bill-overdue',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppExhibitionLeadsRoute = AppExhibitionLeadsRouteImport.update({
+  id: '/exhibition-leads',
+  path: '/exhibition-leads',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDashboardRoute = AppDashboardRouteImport.update({
@@ -264,6 +282,7 @@ export interface FileRoutesByFullPath {
   '/daily-production': typeof AppDailyProductionRoute
   '/daily-reports': typeof AppDailyReportsRoute
   '/dashboard': typeof AppDashboardRoute
+  '/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
   '/history': typeof AppHistoryRoute
@@ -281,6 +300,8 @@ export interface FileRoutesByFullPath {
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
+  '/exhibition/dealer': typeof ExhibitionDealerRoute
+  '/exhibition/product': typeof ExhibitionProductRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
   '/bom/$': typeof AppBomSplatRoute
   '/bom/create': typeof AppBomCreateRoute
@@ -304,6 +325,7 @@ export interface FileRoutesByTo {
   '/daily-production': typeof AppDailyProductionRoute
   '/daily-reports': typeof AppDailyReportsRoute
   '/dashboard': typeof AppDashboardRoute
+  '/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
   '/history': typeof AppHistoryRoute
@@ -321,6 +343,8 @@ export interface FileRoutesByTo {
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
+  '/exhibition/dealer': typeof ExhibitionDealerRoute
+  '/exhibition/product': typeof ExhibitionProductRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
   '/bom/$': typeof AppBomSplatRoute
   '/bom/create': typeof AppBomCreateRoute
@@ -347,6 +371,7 @@ export interface FileRoutesById {
   '/_app/daily-production': typeof AppDailyProductionRoute
   '/_app/daily-reports': typeof AppDailyReportsRoute
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/_app/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
   '/_app/history': typeof AppHistoryRoute
@@ -364,6 +389,8 @@ export interface FileRoutesById {
   '/_app/reconciliation': typeof AppReconciliationRoute
   '/_app/sales-dashboard': typeof AppSalesDashboardRoute
   '/_app/workorders': typeof AppWorkordersRoute
+  '/exhibition/dealer': typeof ExhibitionDealerRoute
+  '/exhibition/product': typeof ExhibitionProductRoute
   '/_app/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
   '/_app/bom/$': typeof AppBomSplatRoute
   '/_app/bom/create': typeof AppBomCreateRoute
@@ -390,6 +417,7 @@ export interface FileRouteTypes {
     | '/daily-production'
     | '/daily-reports'
     | '/dashboard'
+    | '/exhibition-leads'
     | '/export-bill-overdue'
     | '/fibc-buyers'
     | '/history'
@@ -407,6 +435,8 @@ export interface FileRouteTypes {
     | '/reconciliation'
     | '/sales-dashboard'
     | '/workorders'
+    | '/exhibition/dealer'
+    | '/exhibition/product'
     | '/advance-payment/$paymentNo'
     | '/bom/$'
     | '/bom/create'
@@ -430,6 +460,7 @@ export interface FileRouteTypes {
     | '/daily-production'
     | '/daily-reports'
     | '/dashboard'
+    | '/exhibition-leads'
     | '/export-bill-overdue'
     | '/fibc-buyers'
     | '/history'
@@ -447,6 +478,8 @@ export interface FileRouteTypes {
     | '/reconciliation'
     | '/sales-dashboard'
     | '/workorders'
+    | '/exhibition/dealer'
+    | '/exhibition/product'
     | '/advance-payment/$paymentNo'
     | '/bom/$'
     | '/bom/create'
@@ -472,6 +505,7 @@ export interface FileRouteTypes {
     | '/_app/daily-production'
     | '/_app/daily-reports'
     | '/_app/dashboard'
+    | '/_app/exhibition-leads'
     | '/_app/export-bill-overdue'
     | '/_app/fibc-buyers'
     | '/_app/history'
@@ -489,6 +523,8 @@ export interface FileRouteTypes {
     | '/_app/reconciliation'
     | '/_app/sales-dashboard'
     | '/_app/workorders'
+    | '/exhibition/dealer'
+    | '/exhibition/product'
     | '/_app/advance-payment/$paymentNo'
     | '/_app/bom/$'
     | '/_app/bom/create'
@@ -505,6 +541,8 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
+  ExhibitionDealerRoute: typeof ExhibitionDealerRoute
+  ExhibitionProductRoute: typeof ExhibitionProductRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -521,6 +559,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exhibition/product': {
+      id: '/exhibition/product'
+      path: '/exhibition/product'
+      fullPath: '/exhibition/product'
+      preLoaderRoute: typeof ExhibitionProductRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exhibition/dealer': {
+      id: '/exhibition/dealer'
+      path: '/exhibition/dealer'
+      fullPath: '/exhibition/dealer'
+      preLoaderRoute: typeof ExhibitionDealerRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_app/workorders': {
@@ -640,6 +692,13 @@ declare module '@tanstack/react-router' {
       path: '/export-bill-overdue'
       fullPath: '/export-bill-overdue'
       preLoaderRoute: typeof AppExportBillOverdueRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/exhibition-leads': {
+      id: '/_app/exhibition-leads'
+      path: '/exhibition-leads'
+      fullPath: '/exhibition-leads'
+      preLoaderRoute: typeof AppExhibitionLeadsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/dashboard': {
@@ -844,6 +903,7 @@ interface AppRouteChildren {
   AppDailyProductionRoute: typeof AppDailyProductionRoute
   AppDailyReportsRoute: typeof AppDailyReportsRoute
   AppDashboardRoute: typeof AppDashboardRoute
+  AppExhibitionLeadsRoute: typeof AppExhibitionLeadsRoute
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
   AppFibcBuyersRoute: typeof AppFibcBuyersRouteWithChildren
   AppHistoryRoute: typeof AppHistoryRoute
@@ -879,6 +939,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDailyProductionRoute: AppDailyProductionRoute,
   AppDailyReportsRoute: AppDailyReportsRoute,
   AppDashboardRoute: AppDashboardRoute,
+  AppExhibitionLeadsRoute: AppExhibitionLeadsRoute,
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
   AppFibcBuyersRoute: AppFibcBuyersRouteWithChildren,
   AppHistoryRoute: AppHistoryRoute,
@@ -908,17 +969,23 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
+  ExhibitionDealerRoute: ExhibitionDealerRoute,
+  ExhibitionProductRoute: ExhibitionProductRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
 
 import type { getRouter } from './router.tsx'
+
 import type { startInstance } from './start.ts'
+
 declare module '@tanstack/react-start' {
   interface Register {
     ssr: true
+
     router: Awaited<ReturnType<typeof getRouter>>
+
     config: Awaited<ReturnType<typeof startInstance.getOptions>>
   }
 }

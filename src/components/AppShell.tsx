@@ -24,6 +24,7 @@ import {
   Search,
   Globe2,
   Users,
+  QrCode,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useLayoutEffect, useState, type ComponentType } from "react";
@@ -51,6 +52,7 @@ type AppPath =
   | "/daily-production"
   | "/daily-reports"
   | "/hr-reports"
+  | "/exhibition-leads"
   | "/bom"
   | "/fibc-buyers"
   | "/profile"
@@ -276,6 +278,12 @@ export function AppShell() {
       icon: Users,
       label: "HR Reports",
       match: (p) => p.startsWith("/hr-reports"),
+    },
+    {
+      to: "/exhibition-leads",
+      icon: QrCode,
+      label: "Exhibition Leads",
+      match: (p) => p.startsWith("/exhibition-leads"),
     },
     { to: "/bom", icon: Layers, label: "BOM Report", match: (p) => p.startsWith("/bom") },
   ];
