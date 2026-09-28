@@ -3,6 +3,7 @@ import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { createExhibitionLead, PRODUCT_INQUIRIES, type ExhibitionFormType } from "@/lib/exhibition-leads-api";
 
@@ -165,19 +166,18 @@ export function PublicExhibitionForm({
             ) : (
               <>
                 <Field label="Product Inquiry" required>
-                  <select
-                    className="flex h-12 w-full rounded-md border border-input bg-transparent px-3 text-base shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    value={productInquiry}
-                    required
-                    onChange={(e) => setProductInquiry(e.target.value)}
-                  >
-                    <option value="">Select a product</option>
-                    {PRODUCT_INQUIRIES.map((product) => (
-                      <option key={product} value={product}>
-                        {product}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={productInquiry || undefined} onValueChange={setProductInquiry}>
+                    <SelectTrigger className="h-12 w-full bg-background px-3 text-base">
+                      <SelectValue placeholder="Select a product" />
+                    </SelectTrigger>
+                    <SelectContent className="w-[var(--radix-select-trigger-width)]">
+                      {PRODUCT_INQUIRIES.map((product) => (
+                        <SelectItem key={product} value={product} className="py-2.5 text-base">
+                          {product}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
                 <Field label="Quantity" required>
                   <Input className={fieldClass} type="number" inputMode="decimal" min={0} step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} required />
