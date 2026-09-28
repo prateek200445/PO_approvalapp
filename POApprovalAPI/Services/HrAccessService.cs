@@ -111,9 +111,30 @@ WHERE LTRIM(RTRIM(Name)) = @Username",
 
         if (string.IsNullOrWhiteSpace(empCode))
         {
+            var knownCodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["prakash"] = "Reg00473",
+                ["aman"] = "REG01185",
+                ["dilendra"] = "OELV0275",
+                ["grouphr"] = "YMP00026",
+                ["anil"] = "Reg00043"
+            };
+            if (knownCodes.TryGetValue(user, out var known))
+            {
+                empCode = known;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(empCode))
+        {
             try
             {
                 using var payroll = _database.CreatePayrollLoginEntryConnection();
+                var searchName = (fullName ?? user).Trim();
+                var parts = searchName.Split(new[] { ' ', '.', ',', '-', '_' }, StringSplitOptions.RemoveEmptyEntries);
+                var p1 = parts.Length > 0 ? parts[0] : user;
+                var p2 = parts.Length > 1 ? parts[1] : "";
+
                 empCode = await payroll.ExecuteScalarAsync<string?>(@"
 SELECT TOP 1 LTRIM(RTRIM(EmpCode))
 FROM empinfo WITH (NOLOCK)
@@ -121,9 +142,13 @@ WHERE ISNULL(LTRIM(RTRIM(EmpCode)), '') <> ''
   AND (
         (@FullName <> '' AND LOWER(LTRIM(RTRIM(Name))) = LOWER(@FullName))
      OR LOWER(LTRIM(RTRIM(Name))) = LOWER(@Username)
+     OR (@P2 <> '' AND Name LIKE '%' + @P1 + '%' AND Name LIKE '%' + @P2 + '%')
+     OR (Name LIKE '%' + @Username + '%')
   )
-ORDER BY CASE WHEN ISNULL(IsHOEmp,0)=1 THEN 0 ELSE 1 END, EmpCode",
-                    new { Username = user, FullName = fullName ?? "" },
+ORDER BY CASE WHEN ISNULL(IsHOEmp,0)=1 THEN 0 ELSE 1 END,
+         CASE WHEN LOWER(LTRIM(RTRIM(isactive))) = 'yes' THEN 0 ELSE 1 END,
+         EmpCode",
+                    new { Username = user, FullName = fullName ?? "", P1 = p1, P2 = p2 },
                     commandTimeout: 30);
             }
             catch

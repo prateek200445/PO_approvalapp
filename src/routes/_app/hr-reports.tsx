@@ -134,33 +134,46 @@ function HrReportsPage() {
         take: 50,
       }),
     placeholderData: keepPreviousData,
-    // Full HR: wait for search/filter so Approvals tab opens without a 300-row payroll scan
-    enabled:
-      !!username &&
-      (isSelfMode ||
-        (isFullAccess &&
-          (debouncedQ.length >= 1 || !!company.trim() || !!branch.trim()) &&
-          !companiesQuery.isError)),
+    // Full HR or Self mode: load employees so the list and data are immediately available
+    enabled: !!username && (isSelfMode || isFullAccess),
   });
 
-  // Self users: auto-select their own employee row
+  // Self users: auto-select own employee immediately from access or from employees query
   useEffect(() => {
     if (!isSelfMode) return;
     const self = employeesQuery.data?.[0];
     if (self && selected?.empCode !== self.empCode) {
       setSelected(self);
+    } else if (!selected && access?.empCode) {
+      setSelected({
+        empCode: access.empCode,
+        name: access.fullName || access.empCode,
+        designation: "",
+        department: "",
+        companyName: "",
+        branch: "",
+        isHoEmp: false,
+        isActive: "yes",
+      });
     }
-  }, [isSelfMode, employeesQuery.data, selected?.empCode]);
+  }, [isSelfMode, employeesQuery.data, selected, access?.empCode, access?.fullName]);
 
-  // Prefer login EmpCode when available (picker still works for other employees)
+  // Full HR: auto-select logged-in user's employee if found, or first employee in list
   useEffect(() => {
     if (selected || !isFullAccess) return;
     const code = (user?.empCode ?? access?.empCode ?? "").trim();
-    if (!code) return;
-    const match = employeesQuery.data?.find(
-      (e) => e.empCode.toLowerCase() === code.toLowerCase(),
-    );
-    if (match) setSelected(match);
+    if (code && employeesQuery.data?.length) {
+      const match = employeesQuery.data.find(
+        (e) => e.empCode.toLowerCase() === code.toLowerCase(),
+      );
+      if (match) {
+        setSelected(match);
+        return;
+      }
+    }
+    if (employeesQuery.data && employeesQuery.data.length > 0) {
+      setSelected(employeesQuery.data[0]);
+    }
   }, [selected, isFullAccess, user?.empCode, access?.empCode, employeesQuery.data]);
 
   useEffect(() => {
@@ -341,7 +354,7 @@ function HrReportsPage() {
                 : pendingLeaveQuery.error instanceof Error
                   ? pendingLeaveQuery.error.message
                   : null) ||
-                "HR data lives on SQL port 3445. IT must allow Render → 180.211.107.118:3445. Until then use localhost (API on :5115) which can reach payroll."}
+                "HR data lives on SQL port 3445 (103.240.33.122:3445). If unreachable from the cloud host, check firewall or use the office network."}
             </p>
           </div>
         )}
