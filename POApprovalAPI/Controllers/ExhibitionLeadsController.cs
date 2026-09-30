@@ -9,12 +9,15 @@ namespace POApprovalAPI.Controllers;
 public class ExhibitionLeadsController : ControllerBase
 {
     private readonly ExhibitionLeadService _service;
+    private readonly IConfiguration _configuration;
 
-    public ExhibitionLeadsController(ExhibitionLeadService service)
+    public ExhibitionLeadsController(ExhibitionLeadService service, IConfiguration configuration)
     {
         _service = service;
+        _configuration = configuration;
     }
 
+    /// <summary>Public: visitors submit the exhibition forms without logging in.</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ExhibitionLeadCreateRequest request)
     {
@@ -30,8 +33,13 @@ public class ExhibitionLeadsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] string? formType = null, [FromQuery] string? exhibitionName = null)
+    public async Task<IActionResult> List(
+        [FromQuery] string? formType = null,
+        [FromQuery] string? exhibitionName = null,
+        [FromQuery] string username = "")
     {
+        if (!CanView(username))
+            return StatusCode(403, new { message = "You do not have access to Exhibition Leads." });
         try
         {
             var rows = await _service.ListAsync(formType, exhibitionName);
@@ -44,8 +52,13 @@ public class ExhibitionLeadsController : ControllerBase
     }
 
     [HttpGet("excel")]
-    public async Task<IActionResult> ExportExcel([FromQuery] string? formType = null, [FromQuery] string? exhibitionName = null)
+    public async Task<IActionResult> ExportExcel(
+        [FromQuery] string? formType = null,
+        [FromQuery] string? exhibitionName = null,
+        [FromQuery] string username = "")
     {
+        if (!CanView(username))
+            return StatusCode(403, new { message = "You do not have access to Exhibition Leads." });
         try
         {
             var (bytes, fileName) = await _service.ExportExcelAsync(formType, exhibitionName);
@@ -55,5 +68,14 @@ public class ExhibitionLeadsController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+    }
+
+    private bool CanView(string? username)
+    {
+        var allowed = _configuration.GetSection("ExhibitionLeads:AllowedUsers").Get<string[]>();
+        if (allowed is null || allowed.Length == 0)
+            allowed = ["umesh"];
+        return !string.IsNullOrWhiteSpace(username)
+            && allowed.Any(a => string.Equals(a.Trim(), username.Trim(), StringComparison.OrdinalIgnoreCase));
     }
 }

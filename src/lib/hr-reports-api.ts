@@ -21,7 +21,41 @@ export type HrAttendanceDay = {
   status: string;
   payableDay: number;
   branch?: string | null;
+  machineStatus?: string;
+  machinePunchIn?: string | null;
+  machinePunchOut?: string | null;
+  isEdited?: boolean;
+  editReason?: string | null;
+  editedBy?: string | null;
+  editedAt?: string | null;
 };
+
+export const HR_ATTENDANCE_EDIT_STATUSES = ["Present", "Half Day", "Absent", "WFH", "Holiday"] as const;
+
+export type HrAttendanceEditInput = {
+  empCode: string;
+  date: string;
+  status: string;
+  punchIn?: string | null;
+  punchOut?: string | null;
+  reason: string;
+};
+
+export async function saveHrAttendanceEdit(input: HrAttendanceEditInput, username?: string): Promise<void> {
+  const params = withUser(new URLSearchParams(), username);
+  const res = await fetch(getApiUrl(`/api/hr/reports/attendance/edit?${params}`), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+}
+
+export async function revertHrAttendanceEdit(empCode: string, date: string, username?: string): Promise<void> {
+  const params = withUser(new URLSearchParams({ empCode, date }), username);
+  const res = await fetch(getApiUrl(`/api/hr/reports/attendance/edit?${params}`), { method: "DELETE" });
+  if (!res.ok) throw new Error(await readError(res));
+}
 
 export type HrAttendanceSummary = {
   calendarDays: number;
@@ -113,6 +147,7 @@ export type HrAccess = {
   empCode?: string | null;
   fullName?: string | null;
   hasFullAccess: boolean;
+  canModifyAttendance?: boolean;
   canUseSelfService: boolean;
   isViewOnly: boolean;
   mode: "full" | "self" | "none";
@@ -164,6 +199,7 @@ export async function searchHrEmployees(args: {
   company?: string;
   branch?: string;
   officeOnly?: boolean;
+  includeInactive?: boolean;
   username?: string;
   take?: number;
 }): Promise<HrEmployeeOption[]> {
@@ -172,6 +208,7 @@ export async function searchHrEmployees(args: {
   if (args.company?.trim()) params.set("company", args.company.trim());
   if (args.branch?.trim()) params.set("branch", args.branch.trim());
   if (args.officeOnly) params.set("officeOnly", "true");
+  if (args.includeInactive) params.set("includeInactive", "true");
   const take = Math.min(Math.max(args.take ?? 50, 1), 200);
   params.set("take", String(take));
   const res = await fetch(getApiUrl(`/api/hr/reports/employees?${params}`));
@@ -204,6 +241,13 @@ export async function getHrAttendanceReport(
     status: String(d.status ?? d.Status ?? ""),
     payableDay: Number(d.payableDay ?? d.PayableDay ?? 0),
     branch: (d.branch ?? d.Branch) as string | null,
+    machineStatus: String(d.machineStatus ?? d.MachineStatus ?? d.status ?? d.Status ?? ""),
+    machinePunchIn: (d.machinePunchIn ?? d.MachinePunchIn) as string | null,
+    machinePunchOut: (d.machinePunchOut ?? d.MachinePunchOut) as string | null,
+    isEdited: Boolean(d.isEdited ?? d.IsEdited ?? false),
+    editReason: (d.editReason ?? d.EditReason) as string | null,
+    editedBy: (d.editedBy ?? d.EditedBy) as string | null,
+    editedAt: (d.editedAt ?? d.EditedAt) as string | null,
   }));
   return {
     yearMonth: String(raw.yearMonth ?? raw.YearMonth ?? yearMonth),
@@ -691,6 +735,90 @@ export async function createHrEmployee(
     isConsultant: Boolean(raw.isConsultant ?? raw.IsConsultant ?? false),
     message: String(raw.message ?? raw.Message ?? "Employee added"),
   };
+}
+
+export type HrEmployeeDocument = {
+  docId: number;
+  empCode: string;
+  docType: string;
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  uploadedBy?: string | null;
+  uploadedAt: string;
+};
+
+export async function getHrEmployeeDocumentTypes(): Promise<string[]> {
+  const res = await fetch(getApiUrl(`/api/hr/reports/employee-form/document-types`));
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as string[];
+}
+
+export async function uploadHrEmployeePhoto(empCode: string, file: Blob, fileName: string, username?: string) {
+  const params = withUser(new URLSearchParams(), username);
+  const body = new FormData();
+  body.append("file", file, fileName);
+  const res = await fetch(
+    getApiUrl(`/api/hr/reports/employees/${encodeURIComponent(empCode)}/photo?${params}`),
+    { method: "POST", body },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as { message: string };
+}
+
+export async function getHrEmployeePhotoUrl(empCode: string, username?: string): Promise<string | null> {
+  const params = withUser(new URLSearchParams(), username);
+  const res = await fetch(getApiUrl(`/api/hr/reports/employees/${encodeURIComponent(empCode)}/photo?${params}`));
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(await readError(res));
+  return URL.createObjectURL(await res.blob());
+}
+
+export async function getHrEmployeeDocuments(empCode: string, username?: string): Promise<HrEmployeeDocument[]> {
+  const params = withUser(new URLSearchParams(), username);
+  const res = await fetch(
+    getApiUrl(`/api/hr/reports/employees/${encodeURIComponent(empCode)}/documents?${params}`),
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as HrEmployeeDocument[];
+}
+
+export async function uploadHrEmployeeDocument(
+  empCode: string,
+  docType: string,
+  file: File,
+  username?: string,
+): Promise<HrEmployeeDocument> {
+  const params = withUser(new URLSearchParams(), username);
+  const body = new FormData();
+  body.append("docType", docType);
+  body.append("file", file, file.name);
+  const res = await fetch(
+    getApiUrl(`/api/hr/reports/employees/${encodeURIComponent(empCode)}/documents?${params}`),
+    { method: "POST", body },
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  return (await res.json()) as HrEmployeeDocument;
+}
+
+export async function openHrEmployeeDocument(empCode: string, docId: number, username?: string) {
+  const params = withUser(new URLSearchParams(), username);
+  const res = await fetch(
+    getApiUrl(`/api/hr/reports/employees/${encodeURIComponent(empCode)}/documents/${docId}/file?${params}`),
+  );
+  if (!res.ok) throw new Error(await readError(res));
+  const url = URL.createObjectURL(await res.blob());
+  window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+export async function deleteHrEmployeeDocument(empCode: string, docId: number, username?: string) {
+  const params = withUser(new URLSearchParams(), username);
+  const res = await fetch(
+    getApiUrl(`/api/hr/reports/employees/${encodeURIComponent(empCode)}/documents/${docId}?${params}`),
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw new Error(await readError(res));
 }
 
 export type HrLeaveCreditPreview = {

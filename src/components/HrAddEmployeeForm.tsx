@@ -1,6 +1,23 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCw, UserPlus } from "lucide-react";
+import {
+  Briefcase,
+  Camera,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  FileUp,
+  Landmark,
+  Loader2,
+  Paperclip,
+  Phone,
+  RefreshCw,
+  Trash2,
+  User,
+  UserPlus,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,19 +25,65 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
   createHrEmployee,
+  deleteHrEmployeeDocument,
+  getHrEmployeeDocuments,
+  getHrEmployeeDocumentTypes,
   getHrEmployeeFormOptions,
   getHrNextEmpCode,
+  openHrEmployeeDocument,
+  uploadHrEmployeeDocument,
+  uploadHrEmployeePhoto,
   type HrNewEmployee,
 } from "@/lib/hr-reports-api";
 
-type Section = "personal" | "official" | "communication" | "bank";
+type Section = "personal" | "official" | "communication" | "bank" | "docs";
 
-const SECTIONS: { id: Section; label: string }[] = [
-  { id: "personal", label: "Personal Information" },
-  { id: "official", label: "Official Records" },
-  { id: "communication", label: "Communication Details" },
-  { id: "bank", label: "Bank / Tax Details" },
+const SECTIONS: { id: Section; label: string; hint: string; icon: LucideIcon }[] = [
+  { id: "personal", label: "Personal Information", hint: "Basic details, family and qualification", icon: User },
+  { id: "official", label: "Official Records", hint: "Joining, designation, department and salary rules", icon: Briefcase },
+  { id: "communication", label: "Communication Details", hint: "Phone, email and addresses", icon: Phone },
+  { id: "bank", label: "Bank / Tax Details", hint: "Bank account, PAN, Aadhaar, PF and ESIC", icon: Landmark },
+  { id: "docs", label: "Upload Docs", hint: "Employee photo and ID / certificate documents", icon: Paperclip },
 ];
+
+const MAX_DOC_BYTES = 5 * 1024 * 1024;
+const MAX_RAW_PHOTO_BYTES = 15 * 1024 * 1024;
+const PHOTO_MAX_SIDE = 600;
+
+type PendingPhoto = { blob: Blob; name: string; previewUrl: string };
+type PendingDoc = { id: string; docType: string; file: File };
+
+async function toErpJpeg(file: File): Promise<Blob> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("Could not read that image. Use a JPG or PNG photo."));
+      el.src = url;
+    });
+    const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Could not process the photo.");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Could not process the photo."))), "image/jpeg", 0.85),
+    );
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 
@@ -60,9 +123,20 @@ export function HrAddEmployeeForm({ username }: Props) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<HrNewEmployee>(emptyEmployee);
   const [section, setSection] = useState<Section>("personal");
+  const sectionIndex = SECTIONS.findIndex((s) => s.id === section);
+  const sectionNavRef = useRef<HTMLElement>(null);
+
+  function goToSection(id: Section) {
+    setSection(id);
+    sectionNavRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
   const [saving, setSaving] = useState(false);
   const [codeTouched, setCodeTouched] = useState(false);
   const [sameAddress, setSameAddress] = useState(false);
+  const [photo, setPhoto] = useState<PendingPhoto | null>(null);
+  const [docs, setDocs] = useState<PendingDoc[]>([]);
+  const [savedEmpCode, setSavedEmpCode] = useState<string | null>(null);
+  const [retryEmpCode, setRetryEmpCode] = useState<string | null>(null);
 
   const optionsQuery = useQuery({
     queryKey: ["hr-employee-form-options", username],
@@ -122,6 +196,43 @@ export function HrAddEmployeeForm({ username }: Props) {
     !form.gender && "Gender",
   ].filter(Boolean) as string[];
 
+  const attachmentCount = (photo ? 1 : 0) + docs.length;
+
+  async function uploadAttachments(empCode: string): Promise<string[]> {
+    const failures: string[] = [];
+    if (photo) {
+      try {
+        await uploadHrEmployeePhoto(empCode, photo.blob, photo.name, username);
+        URL.revokeObjectURL(photo.previewUrl);
+        setPhoto(null);
+      } catch (err) {
+        failures.push(`Photo: ${err instanceof Error ? err.message : "upload failed"}`);
+      }
+    }
+    const remaining: PendingDoc[] = [];
+    for (const doc of docs) {
+      try {
+        await uploadHrEmployeeDocument(empCode, doc.docType, doc.file, username);
+      } catch (err) {
+        remaining.push(doc);
+        failures.push(`${doc.file.name}: ${err instanceof Error ? err.message : "upload failed"}`);
+      }
+    }
+    setDocs(remaining);
+    await queryClient.invalidateQueries({ queryKey: ["hr-employee-docs", empCode] });
+    return failures;
+  }
+
+  function reportUploads(empCode: string, failures: string[]) {
+    if (failures.length === 0) {
+      setRetryEmpCode(null);
+      return;
+    }
+    setRetryEmpCode(empCode);
+    setSection("docs");
+    toast.error(`${failures.length} file(s) did not upload for ${empCode}. ${failures[0]}`);
+  }
+
   async function submit() {
     if (missing.length > 0) {
       toast.error(`Required: ${missing.join(", ")}`);
@@ -131,6 +242,9 @@ export function HrAddEmployeeForm({ username }: Props) {
     try {
       const r = await createHrEmployee(form, username);
       toast.success(r.message);
+      setSavedEmpCode(r.empCode);
+      const failures = attachmentCount > 0 ? await uploadAttachments(r.empCode) : [];
+      if (attachmentCount > 0 && failures.length === 0) toast.success(`Documents uploaded for ${r.empCode}.`);
       await queryClient.invalidateQueries({ queryKey: ["hr-employees"] });
       await queryClient.invalidateQueries({ queryKey: ["hr-next-emp-code"] });
       const keep = { companyName: form.companyName, branch: form.branch };
@@ -138,11 +252,31 @@ export function HrAddEmployeeForm({ username }: Props) {
       setCodeTouched(false);
       setSameAddress(false);
       setSection("personal");
+      reportUploads(r.empCode, failures);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not add employee");
     } finally {
       setSaving(false);
     }
+  }
+
+  async function retryUploads() {
+    if (!retryEmpCode) return;
+    setSaving(true);
+    try {
+      const failures = await uploadAttachments(retryEmpCode);
+      if (failures.length === 0) toast.success(`Documents uploaded for ${retryEmpCode}.`);
+      reportUploads(retryEmpCode, failures);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function clearAttachments() {
+    if (photo) URL.revokeObjectURL(photo.previewUrl);
+    setPhoto(null);
+    setDocs([]);
+    setRetryEmpCode(null);
   }
 
   const opts = optionsQuery.data;
@@ -277,27 +411,51 @@ export function HrAddEmployeeForm({ username }: Props) {
         </p>
       ) : null}
 
-      <div className="flex gap-1 overflow-x-auto border-b border-border md:flex-wrap [&>button]:shrink-0 [&>button]:whitespace-nowrap">
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => setSection(s.id)}
-            className={cn(
-              "-mb-px rounded-t-lg border border-transparent px-3 py-1.5 text-sm transition",
-              section === s.id
-                ? "border-border border-b-card bg-card font-medium text-foreground"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {s.label}
-          </button>
-        ))}
+      <div className="space-y-4">
+      <div>
+        <nav
+          ref={sectionNavRef}
+          aria-label="Employee form sections"
+          className="flex gap-1 overflow-x-auto border-b border-border md:flex-wrap md:overflow-visible"
+        >
+          {SECTIONS.map((s) => {
+            const Icon = s.icon;
+            const active = section === s.id;
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={(e) => {
+                  setSection(s.id);
+                  e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
+                }}
+                aria-current={active ? "step" : undefined}
+                className={cn(
+                  "-mb-px flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm transition",
+                  active
+                    ? "border-primary font-medium text-primary"
+                    : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {s.label}
+                {s.id === "docs" && attachmentCount > 0 ? (
+                  <span className="rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
+                    {attachmentCount}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </nav>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Step {sectionIndex + 1} of {SECTIONS.length} — {SECTIONS[sectionIndex].hint}
+        </p>
       </div>
 
       {section === "personal" ? (
         <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <Field label="Date of Birth">
               <Input type="date" value={form.dateOfBirth ?? ""} onChange={(e) => set("dateOfBirth", e.target.value)} />
             </Field>
@@ -347,7 +505,7 @@ export function HrAddEmployeeForm({ username }: Props) {
               list="hr-jobdesc"
               maxLength={150}
             />
-            <div className="flex items-end gap-4 pb-1">
+            <div className="flex h-9 items-center gap-5 self-end">
               <Check label="Handicapped" checked={!!form.handicapped} onChange={(v) => set("handicapped", v)} />
               <Check label="Is Director" checked={!!form.isDirector} onChange={(v) => set("isDirector", v)} />
             </div>
@@ -387,7 +545,7 @@ export function HrAddEmployeeForm({ username }: Props) {
 
       {section === "official" ? (
         <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             <Field label="Date of Joining" required>
               <Input
                 type="date"
@@ -432,7 +590,7 @@ export function HrAddEmployeeForm({ username }: Props) {
 
           <Group title="Salary & applicability">
             <Text label="CTC" value={form.ctc} onChange={(v) => set("ctc", v.replace(/[^\d.]/g, ""))} inputMode="decimal" />
-            <div className="flex items-end pb-1">
+            <div className="flex h-9 items-center self-end">
               <Check
                 label="Salary per day"
                 checked={!!form.isSalaryPerDay}
@@ -509,7 +667,7 @@ export function HrAddEmployeeForm({ username }: Props) {
       ) : null}
 
       {section === "bank" ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           <Field label="Payment Mode">
             <select
               value={form.paymentMode}
@@ -561,10 +719,42 @@ export function HrAddEmployeeForm({ username }: Props) {
         </div>
       ) : null}
 
+      {section === "docs" ? (
+        <DocsSection
+          username={username}
+          photo={photo}
+          setPhoto={setPhoto}
+          docs={docs}
+          setDocs={setDocs}
+          savedEmpCode={savedEmpCode}
+          retryEmpCode={retryEmpCode}
+          retrying={saving}
+          onRetry={() => void retryUploads()}
+        />
+      ) : null}
+
+      <div className="flex items-center justify-between gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={sectionIndex === 0}
+          onClick={() => goToSection(SECTIONS[sectionIndex - 1].id)}
+        >
+          <ChevronLeft className="h-4 w-4" /> Back
+        </Button>
+        {sectionIndex < SECTIONS.length - 1 ? (
+          <Button type="button" variant="outline" size="sm" onClick={() => goToSection(SECTIONS[sectionIndex + 1].id)}>
+            Next: {SECTIONS[sectionIndex + 1].label} <ChevronRight className="h-4 w-4" />
+          </Button>
+        ) : null}
+      </div>
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
         <p className="text-xs text-muted-foreground">
-          {missing.length > 0 ? `Still required: ${missing.join(", ")}.` : "Ready to save."} Photo / document
-          upload stays in ERP for now.
+          {missing.length > 0 ? `Still required: ${missing.join(", ")}.` : "Ready to save."}
+          {attachmentCount > 0 ? ` ${attachmentCount} file(s) will upload after save.` : ""}
         </p>
         <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
           <Button
@@ -576,6 +766,7 @@ export function HrAddEmployeeForm({ username }: Props) {
               setCodeTouched(false);
               setSameAddress(false);
               setSection("personal");
+              clearAttachments();
             }}
           >
             Clear
@@ -587,6 +778,314 @@ export function HrAddEmployeeForm({ username }: Props) {
         </div>
       </div>
     </section>
+  );
+}
+
+const FALLBACK_DOC_TYPES = [
+  "Aadhaar Card",
+  "PAN Card",
+  "Bank Passbook / Cheque",
+  "Educational Certificate",
+  "Experience / Relieving Letter",
+  "Resume",
+  "Offer / Appointment Letter",
+  "Address Proof",
+  "Other",
+];
+
+function DocsSection({
+  username,
+  photo,
+  setPhoto,
+  docs,
+  setDocs,
+  savedEmpCode,
+  retryEmpCode,
+  retrying,
+  onRetry,
+}: {
+  username: string;
+  photo: PendingPhoto | null;
+  setPhoto: (p: PendingPhoto | null) => void;
+  docs: PendingDoc[];
+  setDocs: (d: PendingDoc[]) => void;
+  savedEmpCode: string | null;
+  retryEmpCode: string | null;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const photoInput = useRef<HTMLInputElement>(null);
+  const docInput = useRef<HTMLInputElement>(null);
+  const [docType, setDocType] = useState("Aadhaar Card");
+  const [processingPhoto, setProcessingPhoto] = useState(false);
+
+  const typesQuery = useQuery({
+    queryKey: ["hr-employee-doc-types"],
+    queryFn: getHrEmployeeDocumentTypes,
+    staleTime: Infinity,
+  });
+  const docTypes = typesQuery.data?.length ? typesQuery.data : FALLBACK_DOC_TYPES;
+
+  const savedDocsQuery = useQuery({
+    queryKey: ["hr-employee-docs", savedEmpCode],
+    queryFn: () => getHrEmployeeDocuments(savedEmpCode!, username),
+    enabled: !!savedEmpCode && !!username,
+  });
+
+  async function pickPhoto(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Photo must be an image (JPG or PNG).");
+      return;
+    }
+    if (file.size > MAX_RAW_PHOTO_BYTES) {
+      toast.error("Photo is too large (max 15 MB before resizing).");
+      return;
+    }
+    setProcessingPhoto(true);
+    try {
+      const blob = await toErpJpeg(file);
+      if (photo) URL.revokeObjectURL(photo.previewUrl);
+      const base = file.name.replace(/\.[^.]+$/, "") || "photo";
+      setPhoto({ blob, name: `${base}.jpg`, previewUrl: URL.createObjectURL(blob) });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not process the photo.");
+    } finally {
+      setProcessingPhoto(false);
+    }
+  }
+
+  function pickDocs(files: FileList | null) {
+    if (!files?.length) return;
+    const added: PendingDoc[] = [];
+    for (const file of Array.from(files)) {
+      const okType = /\.(pdf|jpe?g|png)$/i.test(file.name) || /^(application\/pdf|image\/(jpeg|png))$/.test(file.type);
+      if (!okType) {
+        toast.error(`${file.name}: only PDF, JPG or PNG files are allowed.`);
+        continue;
+      }
+      if (file.size > MAX_DOC_BYTES) {
+        toast.error(`${file.name}: file is larger than 5 MB.`);
+        continue;
+      }
+      added.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, docType, file });
+    }
+    if (added.length) setDocs([...docs, ...added]);
+  }
+
+  async function removeSaved(docId: number) {
+    if (!savedEmpCode) return;
+    try {
+      await deleteHrEmployeeDocument(savedEmpCode, docId, username);
+      await queryClient.invalidateQueries({ queryKey: ["hr-employee-docs", savedEmpCode] });
+      toast.success("Document removed.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not remove document");
+    }
+  }
+
+  async function viewSaved(docId: number) {
+    if (!savedEmpCode) return;
+    try {
+      await openHrEmployeeDocument(savedEmpCode, docId, username);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not open document");
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {retryEmpCode ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
+          <span>
+            Employee <b>{retryEmpCode}</b> was saved, but the files below did not upload.
+          </span>
+          <Button type="button" size="sm" onClick={onRetry} disabled={retrying}>
+            {retrying ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Retry upload
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-[220px_1fr]">
+        <fieldset className="rounded-lg border border-border bg-muted/20 p-3">
+          <legend className="sr-only">Employee photo</legend>
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Employee photo</h4>
+          <div className="flex flex-col items-center gap-2">
+            <div className="flex h-44 w-36 items-center justify-center overflow-hidden rounded-md border border-dashed border-border bg-muted/40">
+              {photo ? (
+                <img src={photo.previewUrl} alt="Employee" className="h-full w-full object-cover" />
+              ) : processingPhoto ? (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              ) : (
+                <Camera className="h-8 w-8 text-muted-foreground" />
+              )}
+            </div>
+            <input
+              ref={photoInput}
+              type="file"
+              accept="image/jpeg,image/png"
+              className="hidden"
+              onChange={(e) => {
+                void pickPhoto(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            <div className="flex w-full gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="flex-1"
+                disabled={processingPhoto}
+                onClick={() => photoInput.current?.click()}
+              >
+                <Camera className="h-4 w-4" /> {photo ? "Change" : "Choose photo"}
+              </Button>
+              {photo ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  title="Remove photo"
+                  onClick={() => {
+                    URL.revokeObjectURL(photo.previewUrl);
+                    setPhoto(null);
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              ) : null}
+            </div>
+            <p className="text-center text-[11px] text-muted-foreground">
+              Saved to ERP (shows on the ERP employee form). Resized to JPG automatically.
+            </p>
+          </div>
+        </fieldset>
+
+        <fieldset className="min-w-0 rounded-lg border border-border bg-muted/20 p-3">
+          <legend className="sr-only">Documents</legend>
+          <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Documents</h4>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end [&>div:first-child]:sm:flex-1">
+            <Field label="Document type">
+              <select value={docType} onChange={(e) => setDocType(e.target.value)} className={selectClass}>
+                {docTypes.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <input
+              ref={docInput}
+              type="file"
+              multiple
+              accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
+              className="hidden"
+              onChange={(e) => {
+                pickDocs(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <Button type="button" variant="outline" onClick={() => docInput.current?.click()}>
+              <FileUp className="h-4 w-4" /> Add file
+            </Button>
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">PDF, JPG or PNG · up to 5 MB each.</p>
+
+          {docs.length > 0 ? (
+            <ul className="mt-3 divide-y divide-border rounded-md border border-border">
+              {docs.map((d) => (
+                <li key={d.id} className="flex items-center gap-2 px-3 py-2 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">{d.file.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {d.docType} · {formatBytes(d.file.size)}
+                    </div>
+                  </div>
+                  <select
+                    value={d.docType}
+                    onChange={(e) =>
+                      setDocs(docs.map((x) => (x.id === d.id ? { ...x, docType: e.target.value } : x)))
+                    }
+                    className="hidden h-8 rounded-md border border-border bg-background px-2 text-xs sm:block"
+                  >
+                    {docTypes.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    title="Remove"
+                    onClick={() => setDocs(docs.filter((x) => x.id !== d.id))}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-3 rounded-md border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
+              No documents added yet.
+            </p>
+          )}
+        </fieldset>
+      </div>
+
+      {savedEmpCode ? (
+        <fieldset className="rounded-lg border border-border bg-muted/20 p-3">
+          <legend className="sr-only">Uploaded for {savedEmpCode}</legend>
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Uploaded for {savedEmpCode}
+          </h4>
+          {savedDocsQuery.isLoading ? (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          ) : savedDocsQuery.data?.length ? (
+            <ul className="divide-y divide-border">
+              {savedDocsQuery.data.map((d) => (
+                <li key={d.docId} className="flex items-center gap-2 py-2 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium">{d.fileName}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {d.docType} · {formatBytes(d.fileSize)}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title="Open"
+                    onClick={() => void viewSaved(d.docId)}
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-destructive"
+                    title="Remove"
+                    onClick={() => void removeSaved(d.docId)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">No documents on file.</p>
+          )}
+        </fieldset>
+      ) : null}
+    </div>
   );
 }
 
@@ -688,9 +1187,9 @@ function Check({ label, checked, onChange }: { label: string; checked: boolean; 
 
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <fieldset className="rounded-lg border border-border px-3 pb-3 pt-1">
-      <legend className="px-1 text-sm font-medium">{title}</legend>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{children}</div>
-    </fieldset>
+    <section className="space-y-3 border-t border-border pt-4">
+      <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h4>
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{children}</div>
+    </section>
   );
 }

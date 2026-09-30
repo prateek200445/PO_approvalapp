@@ -29,6 +29,21 @@ ORDER BY submitted_on DESC";
         return await connection.QueryAsync<DailyReportEntity>(sql);
     }
 
+    public async Task<IReadOnlyList<DailyReportEntity>> GetReportsSubmittedBetweenAsync(DateTime from, DateTime to)
+    {
+        using var connection = _database.CreateLoginEntryConnection();
+        const string sql = @"
+SELECT
+    employee_name AS EmployeeName,
+    submitted_on AS SubmittedOn,
+    submitted_for_date AS SubmittedForDate,
+    content AS HtmlContent
+FROM DailyReportLogs WITH (NOLOCK)
+WHERE submitted_on >= @From AND submitted_on < @To
+ORDER BY employee_name, submitted_on";
+        return (await connection.QueryAsync<DailyReportEntity>(sql, new { From = from, To = to }, commandTimeout: 60)).ToList();
+    }
+
     public async Task<IReadOnlyList<string>> GetPeopleAsync(int? year = null, int? month = null)
     {
         using var connection = _database.CreateLoginEntryConnection();

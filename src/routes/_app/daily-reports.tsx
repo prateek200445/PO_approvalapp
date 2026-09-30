@@ -23,6 +23,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { DailyReportDigestCard } from "@/components/DailyReportDigestCard";
 
 export const Route = createFileRoute("/_app/daily-reports")({
   head: () => ({ meta: [{ title: "Daily Reports — PO Portal" }] }),
@@ -107,6 +108,8 @@ function DailyReportsPage() {
           {peopleQuery.isSuccess ? ` (${people.length} ${people.length === 1 ? "person" : "people"} this month)` : ""}.
         </p>
       </div>
+
+      <DailyReportDigestCard />
 
       <section className="card-3d rounded-2xl p-3 sm:p-4" aria-label="Daily report filters">
         <div className="grid gap-3 sm:grid-cols-2">

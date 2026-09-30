@@ -11,17 +11,23 @@ public class HrReportsController : ControllerBase
     private readonly HrSelfServiceService _selfService;
     private readonly HrAccessService _access;
     private readonly HrEmployeeMasterService _employeeMaster;
+    private readonly HrEmployeeDocumentService _documents;
+    private readonly HrAttendanceEditService _attendanceEdits;
 
     public HrReportsController(
         HrReportsService service,
         HrSelfServiceService selfService,
         HrAccessService access,
-        HrEmployeeMasterService employeeMaster)
+        HrEmployeeMasterService employeeMaster,
+        HrEmployeeDocumentService documents,
+        HrAttendanceEditService attendanceEdits)
     {
         _service = service;
         _selfService = selfService;
         _access = access;
         _employeeMaster = employeeMaster;
+        _documents = documents;
+        _attendanceEdits = attendanceEdits;
     }
 
     [HttpGet("access")]
@@ -80,7 +86,8 @@ public class HrReportsController : ControllerBase
         [FromQuery] string? company = null,
         [FromQuery] string? branch = null,
         [FromQuery] bool officeOnly = false,
-        [FromQuery] int take = 200)
+        [FromQuery] int take = 200,
+        [FromQuery] bool includeInactive = false)
     {
         try
         {
@@ -98,7 +105,7 @@ public class HrReportsController : ControllerBase
                 return Ok(self);
             }
 
-            var all = await _service.SearchEmployeesAsync(q, company, branch, officeOnly, take);
+            var all = await _service.SearchEmployeesAsync(q, company, branch, officeOnly, take, includeInactive);
             return Ok(all);
         }
         catch (Exception ex)
@@ -116,7 +123,8 @@ public class HrReportsController : ControllerBase
     {
         try
         {
-            await _access.EnsureCanAccessEmployeeAsync(username, empCode);
+            var access = await _access.EnsureCanAccessEmployeeAsync(username, empCode);
+            if (!access.CanModifyAttendance) applyHalfDayRule = true;
             var report = await _service.GetAttendanceReportAsync(empCode, yearMonth, applyHalfDayRule);
             return Ok(report);
         }
@@ -142,7 +150,9 @@ public class HrReportsController : ControllerBase
     {
         try
         {
-            await _access.EnsureCanAccessEmployeeAsync(username, empCode);
+            var access = await _access.EnsureCanAccessEmployeeAsync(username, empCode);
+            if (!access.CanModifyAttendance)
+                (monthlyBasic, dailyRate, workingDays, applyHalfDayRule) = (null, null, null, true);
             var report = await _service.GetSalaryReportAsync(
                 empCode,
                 yearMonth,
@@ -171,7 +181,8 @@ public class HrReportsController : ControllerBase
     {
         try
         {
-            await _access.EnsureCanAccessEmployeeAsync(username, empCode);
+            var access = await _access.EnsureCanAccessEmployeeAsync(username, empCode);
+            if (!access.CanModifyAttendance) applyHalfDayRule = true;
             var bytes = await _service.BuildAttendanceExcelAsync(empCode, yearMonth, applyHalfDayRule);
             var name = $"attendance-{empCode}-{yearMonth}.xlsx";
             return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", name);
@@ -198,7 +209,9 @@ public class HrReportsController : ControllerBase
     {
         try
         {
-            await _access.EnsureCanAccessEmployeeAsync(username, empCode);
+            var access = await _access.EnsureCanAccessEmployeeAsync(username, empCode);
+            if (!access.CanModifyAttendance)
+                (monthlyBasic, dailyRate, workingDays, applyHalfDayRule) = (null, null, null, true);
             var bytes = await _service.BuildSalaryExcelAsync(
                 empCode,
                 yearMonth,
@@ -451,8 +464,7 @@ public class HrReportsController : ControllerBase
     }
 
     /// <summary>
-    /// Employee: send verify request to HR. Full HR (grouphr / plastenehr / prakash): approve month-end.
-    /// Body.approve=true requires full access.
+    /// Employee: send verify request to HR. Attendance editors (grouphr / plastenehr): approve month-end.
     /// </summary>
     [HttpPost("attendance-ack")]
     public async Task<IActionResult> AttendanceAckVerify(
@@ -467,8 +479,8 @@ public class HrReportsController : ControllerBase
             var access = await _access.ResolveAsync(user);
             if (request.Approve)
             {
-                if (!access.HasFullAccess)
-                    return StatusCode(403, new { message = "Only HR can approve month-end verification." });
+                if (!access.CanModifyAttendance)
+                    return StatusCode(403, new { message = "Only grouphr / plastenehr can approve month-end attendance." });
                 return Ok(await _selfService.ApproveAttendanceVerifyAsync(
                     request.EmpCode,
                     request.YearMonth,
@@ -482,6 +494,87 @@ public class HrReportsController : ControllerBase
                 request.YearMonth,
                 user,
                 request.Note));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    [HttpPut("attendance/edit")]
+    public async Task<IActionResult> SaveAttendanceEdit(
+        [FromBody] HrAttendanceEditRequest request,
+        [FromQuery] string username = "")
+    {
+        try
+        {
+            var access = await _access.EnsureCanAccessEmployeeAsync(username, request.EmpCode);
+            if (!access.CanModifyAttendance)
+                return StatusCode(403, new { message = "Only grouphr / plastenehr can edit attendance." });
+
+            var date = (request.Date ?? "").Trim();
+            if (date.Length < 7)
+                return BadRequest(new { message = "Date must be yyyy-MM-dd." });
+            var report = await _service.GetAttendanceReportAsync(request.EmpCode, date[..7], true);
+            var day = report.Days.FirstOrDefault(d => d.Date == date);
+            if (day is null)
+                return BadRequest(new { message = "That date is outside the employee's attendance month." });
+
+            return Ok(await _attendanceEdits.SaveAsync(request, day.MachineStatus, username));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    [HttpDelete("attendance/edit")]
+    public async Task<IActionResult> RevertAttendanceEdit(
+        [FromQuery] string empCode,
+        [FromQuery] string date,
+        [FromQuery] string username = "")
+    {
+        try
+        {
+            var access = await _access.EnsureCanAccessEmployeeAsync(username, empCode);
+            if (!access.CanModifyAttendance)
+                return StatusCode(403, new { message = "Only grouphr / plastenehr can edit attendance." });
+            var removed = await _attendanceEdits.RevertAsync(empCode, date, username);
+            return Ok(new { reverted = removed });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    [HttpGet("attendance/edit-history")]
+    public async Task<IActionResult> AttendanceEditHistory(
+        [FromQuery] string empCode,
+        [FromQuery] string yearMonth,
+        [FromQuery] string username = "")
+    {
+        try
+        {
+            var access = await _access.EnsureCanAccessEmployeeAsync(username, empCode);
+            if (!access.HasFullAccess)
+                return StatusCode(403, new { message = "Only HR can view attendance edit history." });
+            if (!DateTime.TryParseExact(yearMonth, "yyyy-MM", System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var month))
+                return BadRequest(new { message = "yearMonth must be yyyy-MM." });
+            return Ok(await _attendanceEdits.GetHistoryAsync(empCode, month, month.AddMonths(1).AddDays(-1)));
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -540,6 +633,132 @@ public class HrReportsController : ControllerBase
         {
             return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
         }
+    }
+
+    [HttpGet("employee-form/document-types")]
+    public IActionResult EmployeeDocumentTypes() => Ok(HrEmployeeDocumentService.DocumentTypes);
+
+    [HttpGet("employees/{empCode}/photo")]
+    public async Task<IActionResult> EmployeePhoto(string empCode, [FromQuery] string username = "")
+    {
+        try
+        {
+            var access = await _access.ResolveAsync(username);
+            if (!access.HasFullAccess)
+                return StatusCode(403, new { message = "Only HR can view employee documents." });
+            var photo = await _documents.GetPhotoAsync(empCode);
+            return photo is null ? NotFound(new { message = "No photo on file." }) : File(photo.Value.Content, photo.Value.ContentType);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    [HttpPost("employees/{empCode}/photo")]
+    [RequestSizeLimit(HrEmployeeDocumentService.MaxPhotoBytes + 64 * 1024)]
+    public async Task<IActionResult> UploadEmployeePhoto(string empCode, IFormFile? file, [FromQuery] string username = "")
+    {
+        try
+        {
+            var access = await _access.ResolveAsync(username);
+            if (!access.HasFullAccess)
+                return StatusCode(403, new { message = "Only HR can upload employee documents." });
+            if (file is null || file.Length == 0)
+                return BadRequest(new { message = "Choose a photo to upload." });
+            var message = await _documents.SavePhotoAsync(empCode, await ReadAllAsync(file));
+            return Ok(new { message });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    [HttpGet("employees/{empCode}/documents")]
+    public async Task<IActionResult> EmployeeDocuments(string empCode, [FromQuery] string username = "")
+    {
+        try
+        {
+            var access = await _access.ResolveAsync(username);
+            if (!access.HasFullAccess)
+                return StatusCode(403, new { message = "Only HR can view employee documents." });
+            return Ok(await _documents.ListDocumentsAsync(empCode));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    [HttpPost("employees/{empCode}/documents")]
+    [RequestSizeLimit(HrEmployeeDocumentService.MaxDocumentBytes + 64 * 1024)]
+    public async Task<IActionResult> UploadEmployeeDocument(
+        string empCode,
+        IFormFile? file,
+        [FromForm] string docType,
+        [FromQuery] string username = "")
+    {
+        try
+        {
+            var access = await _access.ResolveAsync(username);
+            if (!access.HasFullAccess)
+                return StatusCode(403, new { message = "Only HR can upload employee documents." });
+            if (file is null || file.Length == 0)
+                return BadRequest(new { message = "Choose a file to upload." });
+            var saved = await _documents.SaveDocumentAsync(
+                empCode, docType, file.FileName, await ReadAllAsync(file), username.Trim());
+            return Ok(saved);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    [HttpGet("employees/{empCode}/documents/{docId:int}/file")]
+    public async Task<IActionResult> EmployeeDocumentFile(string empCode, int docId, [FromQuery] string username = "")
+    {
+        try
+        {
+            var access = await _access.ResolveAsync(username);
+            if (!access.HasFullAccess)
+                return StatusCode(403, new { message = "Only HR can view employee documents." });
+            var doc = await _documents.GetDocumentAsync(empCode, docId);
+            return doc is null
+                ? NotFound(new { message = "Document not found." })
+                : File(doc.Value.Content, doc.Value.ContentType, doc.Value.FileName);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    [HttpDelete("employees/{empCode}/documents/{docId:int}")]
+    public async Task<IActionResult> DeleteEmployeeDocument(string empCode, int docId, [FromQuery] string username = "")
+    {
+        try
+        {
+            var access = await _access.ResolveAsync(username);
+            if (!access.HasFullAccess)
+                return StatusCode(403, new { message = "Only HR can delete employee documents." });
+            return await _documents.DeleteDocumentAsync(empCode, docId, username.Trim())
+                ? Ok(new { message = "Document removed." })
+                : NotFound(new { message = "Document not found." });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = PayrollSqlErrors.UserMessage(ex) });
+        }
+    }
+
+    private static async Task<byte[]> ReadAllAsync(IFormFile file)
+    {
+        await using var stream = file.OpenReadStream();
+        using var buffer = new MemoryStream((int)Math.Min(file.Length, int.MaxValue));
+        await stream.CopyToAsync(buffer);
+        return buffer.ToArray();
     }
 
     private static string FirstNonEmpty(params string?[] values)

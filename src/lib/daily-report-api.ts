@@ -95,6 +95,54 @@ export async function getDailyReports(filters: {
   }));
 }
 
+export type DailyReportDigestStatus = {
+  date: string;
+  sendTime: string;
+  recipients: string[];
+  reportCount?: number | null;
+  sentAt?: string | null;
+  sentTo?: string | null;
+  lastError?: string | null;
+  triggeredBy?: string | null;
+};
+
+async function readMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const data = (await response.json()) as { message?: string };
+    if (data?.message) return data.message;
+  } catch {
+    /* ignore */
+  }
+  return fallback;
+}
+
+export async function getDailyReportDigestStatus(date: string): Promise<DailyReportDigestStatus> {
+  const response = await fetch(getApiUrl(`/api/DailyReport/digest/status?date=${encodeURIComponent(date)}`));
+  if (!response.ok) throw new Error(await readMessage(response, "Failed to load PDF status"));
+  return (await response.json()) as DailyReportDigestStatus;
+}
+
+export async function downloadDailyReportDigestPdf(date: string): Promise<void> {
+  const response = await fetch(getApiUrl(`/api/DailyReport/digest/pdf?date=${encodeURIComponent(date)}`));
+  if (!response.ok) throw new Error(await readMessage(response, "Failed to build the PDF"));
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Daily-Reports-${date}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+export async function sendDailyReportDigest(date: string, username: string): Promise<{ sentTo?: string; reportCount?: number }> {
+  const params = new URLSearchParams({ date, username });
+  const response = await fetch(getApiUrl(`/api/DailyReport/digest/send?${params}`), { method: "POST" });
+  if (!response.ok) throw new Error(await readMessage(response, "WhatsApp send failed"));
+  return (await response.json()) as { sentTo?: string; reportCount?: number };
+}
+
 export function currentMonthValue(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }

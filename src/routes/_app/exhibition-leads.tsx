@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/lib/auth-context";
 import {
   downloadExhibitionLeadsExcel,
   formatLeadTime,
@@ -27,18 +28,21 @@ function ExhibitionLeadsPage() {
 }
 
 function LeadSection({ title, formType }: { title: string; formType: ExhibitionFormType }) {
+  const { user } = useAuth();
+  const username = user?.username ?? "";
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const query = useQuery({
-    queryKey: ["exhibition-leads", formType],
-    queryFn: () => listExhibitionLeads(formType),
+    queryKey: ["exhibition-leads", formType, username],
+    queryFn: () => listExhibitionLeads(formType, username),
+    enabled: !!username,
   });
 
   async function exportExcel() {
     setExportError("");
     setExporting(true);
     try {
-      await downloadExhibitionLeadsExcel(formType);
+      await downloadExhibitionLeadsExcel(formType, username);
     } catch (err) {
       setExportError(err instanceof Error ? err.message : "Could not download Excel.");
     } finally {

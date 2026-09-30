@@ -15,6 +15,13 @@ public sealed class HrReportsOptions
     /// Everyone else uses employee self-service for their own EmpCode.
     /// </summary>
     public List<string> FullAccessUsers { get; set; } = [];
+
+    /// <summary>
+    /// Portal usernames allowed to change attendance results: salary / working-day overrides,
+    /// switching off the late / 9-hour half-day rule, and approving month-end attendance.
+    /// Everyone else sees attendance with the standard rule and ERP rates only.
+    /// </summary>
+    public List<string> AttendanceEditors { get; set; } = [];
 }
 
 public sealed class HrAccessDto
@@ -23,6 +30,7 @@ public sealed class HrAccessDto
     public string? EmpCode { get; set; }
     public string? FullName { get; set; }
     public bool HasFullAccess { get; set; }
+    public bool CanModifyAttendance { get; set; }
     /// <summary>True when EmpCode is linked — view own attendance + request month-end verify.</summary>
     public bool CanUseSelfService { get; set; }
     /// <summary>Employees cannot apply leave/WFH or credit PL/CL.</summary>
@@ -48,6 +56,16 @@ public sealed class HrAccessService
         if (user.Length == 0) return false;
         return _options.FullAccessUsers.Any(u =>
             string.Equals(u?.Trim(), user, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static readonly string[] DefaultAttendanceEditors = ["grouphr", "plastenehr"];
+
+    public bool CanModifyAttendance(string? username)
+    {
+        var user = (username ?? "").Trim();
+        if (user.Length == 0) return false;
+        var editors = _options.AttendanceEditors.Count > 0 ? _options.AttendanceEditors : [.. DefaultAttendanceEditors];
+        return editors.Any(u => string.Equals(u?.Trim(), user, StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task<HrAccessDto> ResolveAsync(string? username)
@@ -165,6 +183,7 @@ ORDER BY CASE WHEN ISNULL(IsHOEmp,0)=1 THEN 0 ELSE 1 END,
                 EmpCode = empCode,
                 FullName = fullName,
                 HasFullAccess = true,
+                CanModifyAttendance = CanModifyAttendance(user),
                 CanUseSelfService = !string.IsNullOrWhiteSpace(empCode),
                 IsViewOnly = false,
                 Mode = "full",

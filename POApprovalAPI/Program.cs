@@ -66,7 +66,17 @@ builder.Services.AddScoped<DailyReportService>();
 builder.Services.AddScoped<HtmlParserService>();
 builder.Services.AddScoped<MessageFormatterService>();
 builder.Services.AddScoped<ManagerService>();
-builder.Services.AddScoped<IWhatsAppService, WhatsAppService>();
+builder.Services.Configure<GupshupOptions>(builder.Configuration.GetSection(GupshupOptions.SectionName));
+builder.Services.PostConfigure<GupshupOptions>(o =>
+{
+    var key = Environment.GetEnvironmentVariable("GUPSHUP_API_KEY");
+    if (!string.IsNullOrWhiteSpace(key))
+        o.ApiKey = key;
+});
+builder.Services.AddHttpClient<IWhatsAppService, WhatsAppService>(client => client.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.Configure<DailyReportDigestOptions>(builder.Configuration.GetSection(DailyReportDigestOptions.SectionName));
+builder.Services.AddScoped<DailyReportDigestService>();
+builder.Services.AddHostedService<DailyReportDigestBackgroundService>();
 builder.Services.AddScoped<DailyReportProcessorService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<PoApprovalService>();
@@ -104,6 +114,8 @@ builder.Services.AddScoped<HrAccessService>();
 builder.Services.AddScoped<HrReportsService>();
 builder.Services.AddScoped<HrSelfServiceService>();
 builder.Services.AddScoped<HrEmployeeMasterService>();
+builder.Services.AddScoped<HrEmployeeDocumentService>();
+builder.Services.AddScoped<HrAttendanceEditService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();

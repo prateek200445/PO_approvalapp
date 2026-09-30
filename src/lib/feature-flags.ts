@@ -45,12 +45,63 @@ export function isHrPortalOnlyUser(username?: string | null): boolean {
   return HR_PORTAL_ONLY_USERS.some((u) => u.toLowerCase() === key);
 }
 
+/**
+ * Only these logins can change attendance results (salary / working-day overrides,
+ * turning off the late / 9-hour rule, approving month-end).
+ * Keep in sync with POApprovalAPI appsettings.json → HrReports:AttendanceEditors.
+ */
+export const HR_ATTENDANCE_EDITORS = ["grouphr", "plastenehr"] as const;
+
+export function isHrAttendanceEditor(username?: string | null): boolean {
+  if (!username) return false;
+  const key = username.trim().toLowerCase();
+  return HR_ATTENDANCE_EDITORS.some((u) => u.toLowerCase() === key);
+}
+
+/**
+ * Can press "Send on WhatsApp now" for the day's daily-reports PDF.
+ * Keep in sync with POApprovalAPI appsettings.json → DailyReportDigest:AdminUsers.
+ */
+export const DAILY_REPORT_DIGEST_ADMINS = ["prakash"] as const;
+
+export function isDailyReportDigestAdmin(username?: string | null): boolean {
+  if (!username) return false;
+  const key = username.trim().toLowerCase();
+  return DAILY_REPORT_DIGEST_ADMINS.some((u) => u.toLowerCase() === key);
+}
+
 export function isHrReportsFullAccessUser(username?: string | null): boolean {
   if (!username) return false;
   const key = username.trim().toLowerCase();
   return HR_REPORTS_FULL_ACCESS_USERS.some((u) => u.toLowerCase() === key);
 }
 
-export function hrHomePath(username?: string | null): "/hr-reports" | "/dashboard" {
-  return isHrPortalOnlyUser(username) ? "/hr-reports" : "/dashboard";
+/**
+ * Only these logins see Exhibition Leads, and their portal shows nothing else.
+ * Keep in sync with POApprovalAPI appsettings.json → ExhibitionLeads:AllowedUsers.
+ * The public exhibition forms (/exhibition/dealer, /exhibition/product) stay open to visitors.
+ */
+export const EXHIBITION_LEADS_USERS = ["umesh"] as const;
+
+export function canAccessExhibitionLeads(username?: string | null): boolean {
+  if (!username) return false;
+  const key = username.trim().toLowerCase();
+  return EXHIBITION_LEADS_USERS.some((u) => u.toLowerCase() === key);
+}
+
+export function isExhibitionOnlyUser(username?: string | null): boolean {
+  return canAccessExhibitionLeads(username);
+}
+
+/** Path prefixes a restricted login may open; null = no restriction. */
+export function allowedPathsFor(username?: string | null): string[] | null {
+  if (isHrPortalOnlyUser(username)) return ["/hr-reports", "/profile"];
+  if (isExhibitionOnlyUser(username)) return ["/exhibition-leads", "/profile"];
+  return null;
+}
+
+export function hrHomePath(username?: string | null): "/hr-reports" | "/exhibition-leads" | "/dashboard" {
+  if (isHrPortalOnlyUser(username)) return "/hr-reports";
+  if (isExhibitionOnlyUser(username)) return "/exhibition-leads";
+  return "/dashboard";
 }

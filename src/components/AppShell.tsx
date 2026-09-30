@@ -33,7 +33,15 @@ import { formatBadgeCount, useApprovalInbox, type InboxKind } from "@/hooks/useA
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { GlobalCommandPalette, SearchTrigger } from "@/components/GlobalCommandPalette";
 import { AssistantShellSkeleton } from "@/components/chat/AssistantShellSkeleton";
-import { BILL_PAYMENT_ENTRY_ENABLED, canAccessOrderBookSummary, isHrPortalOnlyUser } from "@/lib/feature-flags";
+import {
+  allowedPathsFor,
+  BILL_PAYMENT_ENTRY_ENABLED,
+  canAccessExhibitionLeads,
+  canAccessOrderBookSummary,
+  hrHomePath,
+  isExhibitionOnlyUser,
+  isHrPortalOnlyUser,
+} from "@/lib/feature-flags";
 
 type AppPath =
   | "/dashboard"
@@ -74,6 +82,9 @@ export function AppShell() {
   const routerState = useRouterState();
   const path = routerState.location.pathname;
   const hrOnly = isHrPortalOnlyUser(user?.username);
+  const exhibitionOnly = isExhibitionOnlyUser(user?.username);
+  // Single-section logins (HR, Exhibition Leads) skip approvals inbox, search and prefetches.
+  const restricted = hrOnly || exhibitionOnly;
   const fullScreenReport =
     path.includes("export-bill-overdue") || path.includes("order-book-summary");
   const wideContent = path.startsWith("/bank-statement-import");
@@ -86,21 +97,23 @@ export function AppShell() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // HR-only logins skip the 5 approval inbox calls — biggest win for load time
-  const inbox = useApprovalInbox(hrOnly ? undefined : user?.username);
+  const inbox = useApprovalInbox(restricted ? undefined : user?.username);
 
   useEffect(() => {
-    if (hrOnly) return;
+    if (restricted) return;
     void router.preloadRoute({ to: "/assistant" });
-  }, [router, hrOnly]);
+  }, [router, restricted]);
 
   useEffect(() => {
-    if (!hrOnly || !user?.username) return;
-    const allowed =
-      path.startsWith("/hr-reports") || path.startsWith("/profile");
-    if (!allowed) {
-      void navigate({ to: "/hr-reports", replace: true });
+    if (!user?.username) return;
+    const allowedPaths = allowedPathsFor(user.username);
+    const blocked =
+      (allowedPaths && !allowedPaths.some((p) => path.startsWith(p))) ||
+      (path.startsWith("/exhibition-leads") && !canAccessExhibitionLeads(user.username));
+    if (blocked) {
+      void navigate({ to: hrHomePath(user.username), replace: true });
     }
-  }, [hrOnly, path, user?.username, navigate]);
+  }, [path, user?.username, navigate]);
   useEffect(() => {
     const stored = localStorage.getItem("po-theme");
     if (stored === "dark" || (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
@@ -153,6 +166,13 @@ export function AppShell() {
   function toggleSidebar() {
     setSidebarCollapsed((prev) => !prev);
   }
+
+  const exhibitionNavItem: NavItem = {
+    to: "/exhibition-leads",
+    icon: QrCode,
+    label: "Exhibition Leads",
+    match: (p) => p.startsWith("/exhibition-leads"),
+  };
 
   const approvalNav: NavItem[] = [
     {
@@ -279,12 +299,7 @@ export function AppShell() {
       label: "HR Reports",
       match: (p) => p.startsWith("/hr-reports"),
     },
-    {
-      to: "/exhibition-leads",
-      icon: QrCode,
-      label: "Exhibition Leads",
-      match: (p) => p.startsWith("/exhibition-leads"),
-    },
+    ...(canAccessExhibitionLeads(user?.username) ? [exhibitionNavItem] : []),
     { to: "/bom", icon: Layers, label: "BOM Report", match: (p) => p.startsWith("/bom") },
   ];
 
@@ -292,7 +307,12 @@ export function AppShell() {
     { to: "/profile", icon: User, label: "Profile", match: (p) => p.startsWith("/profile") },
   ];
 
-  const desktopGroups: { title: string; items: NavItem[] }[] = hrOnly
+  const desktopGroups: { title: string; items: NavItem[] }[] = exhibitionOnly
+    ? [
+        { title: "Exhibition", items: [exhibitionNavItem] },
+        { title: "Account", items: accountNav },
+      ]
+    : hrOnly
     ? [
         {
           title: "HR",
@@ -494,13 +514,13 @@ export function AppShell() {
             >
               <div className="truncate text-sm font-semibold">HCP</div>
               <div className="truncate text-[11px] text-muted-foreground">
-                {hrOnly ? "HR Portal" : "Approvals Portal"}
+                {hrOnly ? "HR Portal" : exhibitionOnly ? "Exhibition Leads" : "Approvals Portal"}
               </div>
             </div>
           </div>
 
           <nav className="flex-1 space-y-4 overflow-x-hidden overflow-y-auto px-2 py-4">
-            {!hrOnly ? (
+            {!restricted ? (
               <div className={cn(sidebarCollapsed ? "px-0" : "px-1")}>
                 <SearchTrigger collapsed={sidebarCollapsed} />
               </div>
@@ -620,7 +640,7 @@ export function AppShell() {
           </SheetHeader>
 
           <nav className="flex-1 space-y-4 overflow-y-auto px-2 py-4">
-            {!hrOnly ? (
+            {!restricted ? (
               <div className="px-1" onClick={() => setMenuOpen(false)}>
                 <SearchTrigger />
               </div>
@@ -666,7 +686,7 @@ export function AppShell() {
           </div>
         </SheetContent>
       </Sheet>
-      {!hrOnly ? <GlobalCommandPalette /> : null}
+      {!restricted ? <GlobalCommandPalette /> : null}
     </div>
   );
 }

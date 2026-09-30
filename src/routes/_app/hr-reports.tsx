@@ -1,15 +1,28 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Download, Loader2, Search, Users } from "lucide-react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  BookOpen,
+  CalendarCheck,
+  CalendarDays,
+  ClipboardCheck,
+  Download,
+  House,
+  Loader2,
+  Pencil,
+  Search,
+  UserPlus,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { HrAddEmployeeForm } from "@/components/HrAddEmployeeForm";
+import { HrAttendanceEditDialog } from "@/components/HrAttendanceEditDialog";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
-import { HR_REPORTS_FULL_ACCESS_USERS } from "@/lib/feature-flags";
+import { HR_REPORTS_FULL_ACCESS_USERS, isHrAttendanceEditor } from "@/lib/feature-flags";
 import {
   currentYearMonth,
   downloadHrAttendanceExcel,
@@ -67,6 +80,7 @@ function HrReportsPage() {
   const [company, setCompany] = useState("");
   const [branch, setBranch] = useState("");
   const [officeOnly, setOfficeOnly] = useState(true);
+  const [includeInactive, setIncludeInactive] = useState(true);
   const [applyHalfDayRule, setApplyHalfDayRule] = useState(true);
   const [selected, setSelected] = useState<HrEmployeeOption | null>(null);
   const [monthlyBasic, setMonthlyBasic] = useState("");
@@ -101,8 +115,43 @@ function HrReportsPage() {
     HR_REPORTS_FULL_ACCESS_USERS.some(
       (u) => u.toLowerCase() === username.trim().toLowerCase(),
     );
+  const canModifyAttendance = access?.canModifyAttendance ?? isHrAttendanceEditor(username);
   const isSelfMode = access?.mode === "self" && !isFullAccess;
   const isViewOnly = !isFullAccess;
+
+  useEffect(() => {
+    if (canModifyAttendance) return;
+    setApplyHalfDayRule(true);
+    setMonthlyBasic("");
+    setDailyRate("");
+    setWorkingDays("");
+  }, [canModifyAttendance]);
+
+  const halfDayRuleControl = canModifyAttendance ? (
+    <label className="flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm">
+      <input
+        type="checkbox"
+        checked={applyHalfDayRule}
+        onChange={(e) => setApplyHalfDayRule(e.target.checked)}
+        className="h-4 w-4"
+      />
+      <span>
+        Max late 10:30 / 9 hours
+        <span className="mt-0.5 block text-xs text-muted-foreground">
+          {applyHalfDayRule
+            ? "On — Present if in ≤ 10:30 AM or worked ≥ 9 hours; else Half Day"
+            : "Off — punch in + out = full Present (1 day)"}
+        </span>
+      </span>
+    </label>
+  ) : (
+    <div className="w-fit rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm">
+      Max late 10:30 / 9 hours rule applies
+      <span className="mt-0.5 block text-xs text-muted-foreground">
+        Present if in ≤ 10:30 AM or worked ≥ 9 hours; else Half Day. Only grouphr / plastenehr can change attendance.
+      </span>
+    </div>
+  );
 
   const companiesQuery = useQuery({
     queryKey: ["hr-companies", username],
@@ -125,6 +174,7 @@ function HrReportsPage() {
       company,
       branch,
       officeOnly,
+      includeInactive,
       username,
       access?.mode,
     ],
@@ -134,6 +184,7 @@ function HrReportsPage() {
         company: company || undefined,
         branch: branch || undefined,
         officeOnly,
+        includeInactive,
         username,
         take: 50,
       }),
@@ -183,6 +234,10 @@ function HrReportsPage() {
   useEffect(() => {
     if (!isFullAccess && (tab === "policy" || tab === "employee")) setTab("attendance");
   }, [isFullAccess, tab]);
+
+  const queryClient = useQueryClient();
+  const [editingDay, setEditingDay] = useState<HrAttendanceDay | null>(null);
+  const today = todayIso();
 
   const attendanceQuery = useQuery({
     queryKey: ["hr-attendance", selected?.empCode, yearMonth, applyHalfDayRule, username],
@@ -369,6 +424,7 @@ function HrReportsPage() {
         PL: "bg-violet-500/15 text-violet-900 dark:text-violet-200",
         CL: "bg-sky-500/15 text-sky-900 dark:text-sky-200",
         WFH: "bg-teal-500/15 text-teal-900 dark:text-teal-200",
+        Holiday: "bg-rose-500/15 text-rose-900 dark:text-rose-200",
         Absent: "bg-slate-500/15 text-slate-700 dark:text-slate-200",
       }) as Record<string, string>,
     [],
@@ -571,20 +627,22 @@ function HrReportsPage() {
             <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm">
               <input
                 type="checkbox"
-                checked={applyHalfDayRule}
-                onChange={(e) => setApplyHalfDayRule(e.target.checked)}
+                checked={includeInactive}
+                onChange={(e) => {
+                  setIncludeInactive(e.target.checked);
+                  setSelected(null);
+                }}
                 className="h-4 w-4"
               />
               <span>
-                Max late 10:30 / 9 hours
+                Include inactive employees
                 <span className="mt-0.5 block text-xs text-muted-foreground">
-                  {applyHalfDayRule
-                    ? "On — Present if in ≤ 10:30 AM or worked ≥ 9 hours; else Half Day"
-                    : "Off — any punch = full Present (1 day)"}
+                  Left / deactivated staff, listed after active ones
                 </span>
               </span>
             </label>
           </div>
+          <div className="flex items-end">{halfDayRuleControl}</div>
         </div>
 
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
@@ -630,6 +688,11 @@ function HrReportsPage() {
                             HO
                           </span>
                         ) : null}
+                        {emp.isActive && emp.isActive.toLowerCase() !== "yes" ? (
+                          <span className="ml-2 rounded bg-slate-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-200">
+                            Inactive
+                          </span>
+                        ) : null}
                       </span>
                       <span className="text-xs text-muted-foreground">
                         {[emp.designation, emp.department, emp.companyName, emp.branch]
@@ -654,59 +717,58 @@ function HrReportsPage() {
         ) : null}
         </>
         ) : (
-          <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-secondary/30 px-3 py-2 text-sm w-fit">
-            <input
-              type="checkbox"
-              checked={applyHalfDayRule}
-              onChange={(e) => setApplyHalfDayRule(e.target.checked)}
-              className="h-4 w-4"
-            />
-            <span>
-              Max late 10:30 / 9 hours
-              <span className="mt-0.5 block text-xs text-muted-foreground">
-                {applyHalfDayRule
-                  ? "On — Present if in ≤ 10:30 AM or worked ≥ 9 hours; else Half Day"
-                  : "Off — any punch = full Present (1 day)"}
-              </span>
-            </span>
-          </label>
+          halfDayRuleControl
         )}
       </section>
       ) : null}
 
       {username && access && access.mode !== "none" && (selected || isFullAccess) ? (
-        <>
-          <div className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1 shadow-sm md:flex-wrap [&>button]:shrink-0 [&>button]:whitespace-nowrap">
+        <div className="space-y-5">
+          <nav
+            aria-label="HR sections"
+            className="flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1.5 shadow-sm md:flex-wrap md:overflow-visible"
+          >
             {(
               [
-                { id: "attendance" as const, label: "Attendance & salary" },
+                { id: "attendance" as const, label: "Attendance & salary", icon: CalendarDays },
                 {
                   id: "leave" as const,
                   label: isFullAccess ? "Approvals" : "Leave apply",
+                  icon: ClipboardCheck,
                 },
                 ...(isFullAccess
-                  ? [{ id: "policy" as const, label: "Leave policy" }]
-                  : [{ id: "wfh" as const, label: "Work from home" }]),
-                { id: "verify" as const, label: "Month-end verify" },
-                ...(isFullAccess ? [{ id: "employee" as const, label: "Add employee" }] : []),
+                  ? [{ id: "policy" as const, label: "Leave policy", icon: BookOpen }]
+                  : [{ id: "wfh" as const, label: "Work from home", icon: House }]),
+                { id: "verify" as const, label: "Month-end verify", icon: CalendarCheck },
+                ...(isFullAccess ? [{ id: "employee" as const, label: "Add employee", icon: UserPlus }] : []),
               ]
-            ).map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={cn(
-                  "rounded-lg px-3 py-1.5 text-sm transition",
-                  tab === t.id
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-secondary/60",
-                )}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+            ).map((t) => {
+              const Icon = t.icon;
+              const active = tab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={(e) => {
+                    setTab(t.id);
+                    e.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
+                  }}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm transition",
+                    active
+                      ? "bg-primary font-medium text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {t.label}
+                </button>
+              );
+            })}
+          </nav>
 
+          <div className="min-w-0 space-y-5">
           {tab === "employee" && isFullAccess ? <HrAddEmployeeForm username={username} /> : null}
 
           {tab === "attendance" ? (
@@ -824,9 +886,20 @@ function HrReportsPage() {
                     {attendanceQuery.data.dataNote}
                   </p>
                 ) : null}
+                {canModifyAttendance ? (
+                  <p className="text-xs text-muted-foreground">
+                    Use <Pencil className="inline h-3 w-3" /> on a day to correct its status or punch times. Edited
+                    days are marked and count in salary.
+                  </p>
+                ) : null}
               <ul className="space-y-2 md:hidden">
                 {(attendanceQuery.data?.days ?? []).map((day) => (
-                  <AttendanceDayCard key={day.date} day={day} tone={statusTone[day.status]} />
+                  <AttendanceDayCard
+                    key={day.date}
+                    day={day}
+                    tone={statusTone[day.status]}
+                    onEdit={canModifyAttendance && day.date <= today ? () => setEditingDay(day) : undefined}
+                  />
                 ))}
               </ul>
               <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
@@ -840,11 +913,15 @@ function HrReportsPage() {
                       <th className="px-3 py-2 font-medium text-right">Hours</th>
                       <th className="px-3 py-2 font-medium">Status</th>
                       <th className="px-3 py-2 font-medium text-right">Payable</th>
+                      {canModifyAttendance ? <th className="w-12 px-2 py-2" aria-label="Edit" /> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {(attendanceQuery.data?.days ?? []).map((day) => (
-                      <tr key={day.date} className="border-t border-border/70">
+                      <tr
+                        key={day.date}
+                        className={cn("border-t border-border/70", day.isEdited && "bg-primary/5")}
+                      >
                         <td className="px-3 py-1.5 tabular-nums">{day.date}</td>
                         <td className="px-3 py-1.5">{day.dayName}</td>
                         <td className="px-3 py-1.5 tabular-nums">{day.punchIn ?? "—"}</td>
@@ -861,8 +938,25 @@ function HrReportsPage() {
                           >
                             {day.status}
                           </span>
+                          {day.isEdited ? <EditedBadge day={day} /> : null}
                         </td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{day.payableDay}</td>
+                        {canModifyAttendance ? (
+                          <td className="px-2 py-1 text-right">
+                            {day.date <= today ? (
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7"
+                                title={`Edit ${day.date}`}
+                                onClick={() => setEditingDay(day)}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            ) : null}
+                          </td>
+                        ) : null}
                       </tr>
                     ))}
                   </tbody>
@@ -870,6 +964,19 @@ function HrReportsPage() {
               </div>
               </>
             )}
+            {canModifyAttendance && selected ? (
+              <HrAttendanceEditDialog
+                day={editingDay}
+                empCode={selected.empCode}
+                empName={selected.name}
+                username={username}
+                onClose={() => setEditingDay(null)}
+                onChanged={() => {
+                  void queryClient.invalidateQueries({ queryKey: ["hr-attendance"] });
+                  void queryClient.invalidateQueries({ queryKey: ["hr-salary"] });
+                }}
+              />
+            ) : null}
           </section>
 
           <section className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-sm">
@@ -891,8 +998,11 @@ function HrReportsPage() {
             </div>
             <p className="text-xs text-muted-foreground">
               Auto-loads monthly package from ERP <code className="text-[11px]">Salary</code> master
-              (or daily from <code className="text-[11px]">SalaryPerDay</code>). Leave fields blank to
-              use ERP; type a value to override. Working days default = calendar days excluding Sundays.
+              (or daily from <code className="text-[11px]">SalaryPerDay</code>).
+              {canModifyAttendance
+                ? " Leave fields blank to use ERP; type a value to override."
+                : " Overrides can only be changed by grouphr / plastenehr."}{" "}
+              Working days default = calendar days excluding Sundays.
             </p>
             {salaryQuery.data?.rateSource ? (
               <p className="rounded-lg border border-border bg-secondary/30 px-3 py-2 text-xs">
@@ -910,6 +1020,7 @@ function HrReportsPage() {
                 ) : null}
               </p>
             ) : null}
+            {canModifyAttendance ? (
             <div className="grid gap-3 sm:grid-cols-3">
               <div>
                 <Label htmlFor="hr-basic">Monthly salary override</Label>
@@ -956,6 +1067,7 @@ function HrReportsPage() {
                 />
               </div>
             </div>
+            ) : null}
 
             {salaryQuery.isLoading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -1451,6 +1563,7 @@ function HrReportsPage() {
                   >
                     Log pending request
                   </Button>
+                  {canModifyAttendance ? (
                   <Button
                     type="button"
                     disabled={busy === "approve-ack" || ackQuery.data?.verified}
@@ -1473,12 +1586,22 @@ function HrReportsPage() {
                     {busy === "approve-ack" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                     Approve this month (HR)
                   </Button>
+                  ) : (
+                    <p className="self-center text-xs text-muted-foreground">
+                      Only grouphr / plastenehr can approve month-end attendance.
+                    </p>
+                  )}
                 </div>
               )}
 
               {isFullAccess ? (
                 <div className="space-y-2 pt-2">
                   <h3 className="text-sm font-semibold">Pending verify requests</h3>
+                  {!canModifyAttendance ? (
+                    <p className="text-xs text-muted-foreground">
+                      View only — grouphr / plastenehr approve these.
+                    </p>
+                  ) : null}
                   {pendingAckQuery.isLoading ? (
                     <p className="text-sm text-muted-foreground">Loading…</p>
                   ) : (pendingAckQuery.data?.length ?? 0) === 0 ? (
@@ -1501,15 +1624,17 @@ function HrReportsPage() {
                             Requested {row.requestedAt ?? row.verifiedAt ?? "—"} by{" "}
                             {row.requestedBy ?? row.verifiedBy ?? "—"}
                           </p>
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="mt-2 w-full"
-                            disabled={busy === `approve-${row.empCode}-${row.yearMonth}`}
-                            onClick={() => void approveVerifyRequest(row)}
-                          >
-                            Approve
-                          </Button>
+                          {canModifyAttendance ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="mt-2 w-full"
+                              disabled={busy === `approve-${row.empCode}-${row.yearMonth}`}
+                              onClick={() => void approveVerifyRequest(row)}
+                            >
+                              Approve
+                            </Button>
+                          ) : null}
                         </li>
                       ))}
                     </ul>
@@ -1535,14 +1660,16 @@ function HrReportsPage() {
                               <td className="px-3 py-1.5">{row.requestedAt ?? row.verifiedAt ?? "—"}</td>
                               <td className="px-3 py-1.5">{row.requestedBy ?? row.verifiedBy ?? "—"}</td>
                               <td className="px-3 py-1.5 text-right">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  disabled={busy === `approve-${row.empCode}-${row.yearMonth}`}
-                                  onClick={() => void approveVerifyRequest(row)}
-                                >
-                                  Approve
-                                </Button>
+                                {canModifyAttendance ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    disabled={busy === `approve-${row.empCode}-${row.yearMonth}`}
+                                    onClick={() => void approveVerifyRequest(row)}
+                                  >
+                                    Approve
+                                  </Button>
+                                ) : null}
                               </td>
                             </tr>
                           ))}
@@ -1561,6 +1688,7 @@ function HrReportsPage() {
               <h2 className="text-lg font-semibold">Leave policy & confirmation</h2>
               <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
                 <li>Present if first punch ≤ 10:30 AM <strong>or</strong> worked ≥ 9 hours; else Half Day (0.5).</li>
+                <li>Missing punch-in or punch-out = Absent (HR can correct the day with Edit).</li>
                 <li>
                   Approval flow: Employee applies leave/WFH → Pending → HR Approvals tab Approve/Reject →
                   attendance & balances update. Month-end verify: employee sends request → HR approves.
@@ -1670,7 +1798,8 @@ function HrReportsPage() {
               </div>
             </section>
           ) : null}
-        </>
+          </div>
+        </div>
       ) : username && access?.mode === "full" ? (
         <div className="rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-10 text-center text-sm text-muted-foreground">
           Search and select an employee to load attendance and self-service actions.
@@ -1680,17 +1809,61 @@ function HrReportsPage() {
   );
 }
 
-function AttendanceDayCard({ day, tone }: { day: HrAttendanceDay; tone?: string }) {
+function EditedBadge({ day }: { day: HrAttendanceDay }) {
+  const detail = [
+    `Machine: ${day.machineStatus || "—"}`,
+    day.editReason ? `Reason: ${day.editReason}` : null,
+    `By ${day.editedBy ?? "HR"}${day.editedAt ? ` on ${day.editedAt}` : ""}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
   return (
-    <li className="rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-sm">
+    <span
+      title={detail}
+      className="ml-1.5 inline-flex cursor-help rounded-md border border-primary/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary"
+    >
+      Edited
+    </span>
+  );
+}
+
+function AttendanceDayCard({
+  day,
+  tone,
+  onEdit,
+}: {
+  day: HrAttendanceDay;
+  tone?: string;
+  onEdit?: () => void;
+}) {
+  return (
+    <li
+      className={cn(
+        "rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-sm",
+        day.isEdited && "border-primary/40 bg-primary/5",
+      )}
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium tabular-nums">
           {day.date} <span className="text-muted-foreground">{day.dayName}</span>
         </span>
-        <span className={cn("inline-flex rounded-md px-2 py-0.5 text-xs font-medium", tone ?? "bg-secondary")}>
-          {day.status}
+        <span className="flex items-center gap-1">
+          <span className={cn("inline-flex rounded-md px-2 py-0.5 text-xs font-medium", tone ?? "bg-secondary")}>
+            {day.status}
+          </span>
+          {onEdit ? (
+            <Button type="button" size="icon" variant="ghost" className="h-7 w-7" title="Edit" onClick={onEdit}>
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
         </span>
       </div>
+      {day.isEdited ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          <span className="font-semibold text-primary">Edited</span> from {day.machineStatus || "—"}
+          {day.editReason ? ` · ${day.editReason}` : ""} · by {day.editedBy ?? "HR"}
+        </p>
+      ) : null}
       <div className="mt-1 grid grid-cols-4 gap-2 text-xs text-muted-foreground">
         <div>
           In

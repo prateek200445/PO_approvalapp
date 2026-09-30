@@ -68,8 +68,8 @@ export async function createExhibitionLead(body: ExhibitionLeadCreate): Promise<
   return { id: Number(payload.id ?? 0), createdAt: asString(payload.createdAt) };
 }
 
-export async function listExhibitionLeads(formType: ExhibitionFormType): Promise<ExhibitionLead[]> {
-  const params = new URLSearchParams({ formType });
+export async function listExhibitionLeads(formType: ExhibitionFormType, username: string): Promise<ExhibitionLead[]> {
+  const params = new URLSearchParams({ formType, username });
   const response = await fetch(getApiUrl(`/api/ExhibitionLeads?${params}`));
   if (!response.ok) throw new Error(await readError(response, "Could not load submissions."));
   const payload = (await response.json()) as unknown[];
@@ -93,8 +93,8 @@ export async function listExhibitionLeads(formType: ExhibitionFormType): Promise
   });
 }
 
-export async function downloadExhibitionLeadsExcel(formType: ExhibitionFormType): Promise<void> {
-  const params = new URLSearchParams({ formType });
+export async function downloadExhibitionLeadsExcel(formType: ExhibitionFormType, username: string): Promise<void> {
+  const params = new URLSearchParams({ formType, username });
   const response = await fetch(getApiUrl(`/api/ExhibitionLeads/excel?${params}`));
   if (!response.ok) throw new Error(await readError(response, "Could not download Excel."));
   const blob = await response.blob();

@@ -14,10 +14,12 @@ public sealed class HrReportsService
     public static readonly TimeSpan FullDayWorked = TimeSpan.FromHours(9);
 
     private readonly DatabaseService _database;
+    private readonly HrAttendanceEditService _edits;
 
-    public HrReportsService(DatabaseService database)
+    public HrReportsService(DatabaseService database, HrAttendanceEditService edits)
     {
         _database = database;
+        _edits = edits;
     }
 
     public async Task<IReadOnlyList<string>> GetCompaniesAsync()
@@ -67,7 +69,8 @@ ORDER BY
         string? company = null,
         string? branch = null,
         bool officeOnly = false,
-        int take = 80)
+        int take = 80,
+        bool includeInactive = false)
     {
         // Office/HO list is small (~140); allow full set. Otherwise keep search results bounded.
         take = officeOnly ? Math.Clamp(take, 1, 500) : Math.Clamp(take, 1, 200);
@@ -88,9 +91,10 @@ SELECT TOP (@Take)
     LTRIM(RTRIM(e.isactive)) AS IsActive
 FROM empinfo e WITH (NOLOCK)
 WHERE ISNULL(LTRIM(RTRIM(e.EmpCode)), '') <> ''
-  AND ISNULL(LTRIM(RTRIM(e.Name)), '') <> ''
-  AND LOWER(LTRIM(RTRIM(ISNULL(e.isactive,'')))) = 'yes'";
+  AND ISNULL(LTRIM(RTRIM(e.Name)), '') <> ''";
 
+        if (!includeInactive)
+            sql += " AND LOWER(LTRIM(RTRIM(ISNULL(e.isactive,'')))) = 'yes'";
         if (companyFilter.Length > 0)
             sql += " AND LOWER(LTRIM(RTRIM(e.CompanyName))) = LOWER(@Company)";
         if (branchFilter.Length > 0)
@@ -114,6 +118,8 @@ WHERE ISNULL(LTRIM(RTRIM(e.EmpCode)), '') <> ''
 
         sql += @"
 ORDER BY
+  CASE WHEN @TermLen > 0 AND e.EmpCode = @Exact THEN 0 ELSE 1 END,
+  CASE WHEN LOWER(LTRIM(RTRIM(ISNULL(e.isactive,'')))) = 'yes' THEN 0 ELSE 1 END,
   CASE WHEN ISNULL(e.IsHOEmp, 0) = 1 THEN 0 ELSE 1 END,
   CASE WHEN @TermLen > 0 AND e.EmpCode = @Exact THEN 0
        WHEN @TermLen > 0 AND e.EmpCode LIKE @Prefix THEN 1
@@ -288,13 +294,19 @@ ORDER BY FromDate DESC",
                 commandTimeout: 30);
         }
 
+        var edits = await _edits.GetEditsAsync(empCode, from, to);
+
         var days = new List<HrAttendanceDayDto>();
         for (var d = from; d <= to; d = d.AddDays(1))
         {
             punchesByDay.TryGetValue(d, out var dayPunches);
-            var firstIn = dayPunches?.Where(x => x.InTime.HasValue).OrderBy(x => x.InTime).FirstOrDefault();
+            // Payroll stores a missing punch as 00:00, so a midnight time counts as no punch.
+            var firstIn = dayPunches?
+                .Where(x => x.InTime.HasValue && x.InTime.Value.TimeOfDay != TimeSpan.Zero)
+                .OrderBy(x => x.InTime)
+                .FirstOrDefault();
             var lastOut = dayPunches?
-                .Where(x => x.OutTime.HasValue)
+                .Where(x => x.OutTime.HasValue && x.OutTime.Value.TimeOfDay != TimeSpan.Zero)
                 .OrderByDescending(x => x.OutTime)
                 .FirstOrDefault();
 
@@ -312,7 +324,7 @@ ORDER BY FromDate DESC",
             }
             else
             {
-                status = Classify(firstIn?.InTime, lastOut?.OutTime, applyHalfDayRule);
+                status = Classify(firstIn?.InTime, lastOut?.OutTime, applyHalfDayRule, outPending: d == DateTime.Today);
                 payable = status switch
                 {
                     "Present" => 1m,
@@ -321,17 +333,40 @@ ORDER BY FromDate DESC",
                 };
             }
 
-            days.Add(new HrAttendanceDayDto
+            var machineIn = firstIn?.InTime?.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            var machineOut = lastOut?.OutTime?.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            var day = new HrAttendanceDayDto
             {
                 Date = d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
                 DayName = d.ToString("ddd", CultureInfo.InvariantCulture),
-                PunchIn = firstIn?.InTime?.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
-                PunchOut = lastOut?.OutTime?.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+                PunchIn = machineIn,
+                PunchOut = machineOut,
                 WorkedHours = workedHours,
                 Branch = firstIn?.Branch ?? lastOut?.Branch,
                 Status = status,
                 PayableDay = payable,
-            });
+                MachineStatus = status,
+                MachinePunchIn = machineIn,
+                MachinePunchOut = machineOut,
+            };
+
+            if (edits.TryGetValue(d, out var edit))
+            {
+                day.IsEdited = true;
+                day.Status = edit.Status;
+                day.PayableDay = HrAttendanceEditService.Statuses.TryGetValue(edit.Status, out var p) ? p : payable;
+                day.EditReason = edit.Reason;
+                day.EditedBy = edit.EditedBy;
+                day.EditedAt = edit.EditedAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+                if (edit.PunchIn is TimeSpan ein)
+                    day.PunchIn = ein.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
+                if (edit.PunchOut is TimeSpan eout)
+                    day.PunchOut = eout.ToString(@"hh\:mm\:ss", CultureInfo.InvariantCulture);
+                if (edit.PunchIn is TimeSpan i2 && edit.PunchOut is TimeSpan o2 && o2 > i2)
+                    day.WorkedHours = Math.Round((decimal)(o2 - i2).TotalHours, 2, MidpointRounding.AwayFromZero);
+            }
+
+            days.Add(day);
         }
 
         var present = days.Count(x => x.Status == "Present");
@@ -661,7 +696,7 @@ ORDER BY FromDate DESC",
         ws.Cell(7, 8).Value = "Branch";
         ws.Cell(7, 9).Value = "Rule";
         ws.Range(7, 1, 7, 9).Style.Font.SetBold();
-        ws.Cell(6, 1).Value = "Rule: Present if in ≤ 10:30 AM OR worked ≥ 9 hours; else Half Day (0.5).";
+        ws.Cell(6, 1).Value = "Rule: Present if in ≤ 10:30 AM OR worked ≥ 9 hours; else Half Day (0.5). Missing punch-in or punch-out = Absent.";
 
         var r = 8;
         foreach (var day in report.Days)
@@ -671,7 +706,7 @@ ORDER BY FromDate DESC",
             ws.Cell(r, 3).Value = day.PunchIn ?? "";
             ws.Cell(r, 4).Value = day.PunchOut ?? "";
             ws.Cell(r, 5).Value = day.WorkedHours?.ToString("0.##") ?? "";
-            ws.Cell(r, 6).Value = day.Status;
+            ws.Cell(r, 6).Value = day.IsEdited ? $"{day.Status} (edited by HR)" : day.Status;
             ws.Cell(r, 7).Value = day.PayableDay;
             ws.Cell(r, 8).Value = day.Branch ?? "";
             ws.Cell(r, 9).Value = report.HalfDayAfter;
@@ -743,7 +778,7 @@ ORDER BY FromDate DESC",
             ws.Cell(r, 3).Value = day.PunchIn ?? "";
             ws.Cell(r, 4).Value = day.PunchOut ?? "";
             ws.Cell(r, 5).Value = day.WorkedHours?.ToString("0.##") ?? "";
-            ws.Cell(r, 6).Value = day.Status;
+            ws.Cell(r, 6).Value = day.IsEdited ? $"{day.Status} (edited by HR)" : day.Status;
             ws.Cell(r, 7).Value = day.PayableDay;
             r++;
         }
@@ -756,11 +791,18 @@ ORDER BY FromDate DESC",
 
     /// <summary>
     /// Present if first punch ≤ 10:30 AM <b>or</b> worked duration ≥ 9 hours.
-    /// Otherwise a punched day is Half Day; no punch = Absent.
+    /// Otherwise a punched day is Half Day. Missing punch-in or punch-out = Absent,
+    /// except today (<paramref name="outPending"/>) when the employee may not have left yet.
     /// </summary>
-    public static string Classify(DateTime? inTime, DateTime? outTime = null, bool applyHalfDayRule = true)
+    public static string Classify(
+        DateTime? inTime,
+        DateTime? outTime = null,
+        bool applyHalfDayRule = true,
+        bool outPending = false)
     {
         if (inTime is null) return "Absent";
+        var hasOut = outTime is DateTime o && o > inTime.Value;
+        if (!hasOut && !outPending) return "Absent";
         if (!applyHalfDayRule) return "Present";
 
         var inTod = inTime.Value.TimeOfDay;
@@ -857,6 +899,14 @@ public sealed class HrAttendanceDayDto
     public string Status { get; set; } = "";
     public decimal PayableDay { get; set; }
     public string? Branch { get; set; }
+    /// <summary>Status from punches / approved leave, before any HR correction.</summary>
+    public string MachineStatus { get; set; } = "";
+    public string? MachinePunchIn { get; set; }
+    public string? MachinePunchOut { get; set; }
+    public bool IsEdited { get; set; }
+    public string? EditReason { get; set; }
+    public string? EditedBy { get; set; }
+    public string? EditedAt { get; set; }
 }
 
 public sealed class HrAttendanceSummaryDto
