@@ -122,12 +122,17 @@ public sealed class DailyReportDigestService
         };
 
         var sentTo = new List<string>();
+        var messageIds = new List<string>();
         var errors = new List<string>();
         foreach (var recipient in Recipients)
         {
             var result = await _whatsApp.SendDocumentAsync(recipient, url, fileName, caption, ct);
             if (result.Success)
+            {
                 sentTo.Add(recipient);
+                if (!string.IsNullOrWhiteSpace(result.MessageId))
+                    messageIds.Add(result.MessageId.Trim());
+            }
             else
                 errors.Add($"{recipient}: {result.Error}");
         }
@@ -138,7 +143,11 @@ public sealed class DailyReportDigestService
                 """
                 UPDATE dbo.DailyReportDigest
                 SET SentAt = CASE WHEN @AnySent = 1 THEN GETDATE() ELSE SentAt END,
-                    SentTo = @SentTo, LastError = @LastError, TriggeredBy = @TriggeredBy, Attempts = Attempts + 1
+                    SentTo = @SentTo, LastError = @LastError, TriggeredBy = @TriggeredBy, Attempts = Attempts + 1,
+                    MessageId = CASE WHEN @AnySent = 1 THEN @MessageIds ELSE MessageId END,
+                    DeliveryStatus = CASE WHEN @AnySent = 1 THEN 'submitted' ELSE DeliveryStatus END,
+                    DeliveryError = CASE WHEN @AnySent = 1 THEN NULL ELSE DeliveryError END,
+                    DeliveryUpdatedAt = CASE WHEN @AnySent = 1 THEN GETDATE() ELSE DeliveryUpdatedAt END
                 WHERE DigestDate = @DigestDate
                 """,
                 new
@@ -148,6 +157,7 @@ public sealed class DailyReportDigestService
                     SentTo = sentTo.Count > 0 ? string.Join(", ", sentTo) : null,
                     LastError = errors.Count > 0 ? Truncate(string.Join(" | ", errors), 1000) : null,
                     TriggeredBy = Truncate(triggeredBy, 100),
+                    MessageIds = messageIds.Count > 0 ? Truncate(string.Join(",", messageIds), 500) : null,
                 });
         }
 
@@ -163,10 +173,63 @@ public sealed class DailyReportDigestService
         using var connection = _database.CreateConnection();
         return await connection.QueryFirstOrDefaultAsync<DailyReportDigestStatusDto>(
             """
-            SELECT DigestDate, Token, ReportCount, CreatedAt, SentAt, SentTo, LastError, TriggeredBy, Attempts
+            SELECT DigestDate, Token, ReportCount, CreatedAt, SentAt, SentTo, LastError, TriggeredBy, Attempts,
+                   MessageId, DeliveryStatus, DeliveryError, DeliveryUpdatedAt
             FROM dbo.DailyReportDigest WHERE DigestDate = @DigestDate
             """,
             new { DigestDate = date.Date });
+    }
+
+    /// <summary>
+    /// One overall state for the UI: scheduled, not_sent, sent, delivered, read or failed.
+    /// "sent" means Gupshup accepted it; delivered/read come from the Gupshup delivery callback.
+    /// </summary>
+    public string ResolveState(DateTime date, DailyReportDigestStatusDto? status)
+    {
+        if (status?.SentAt is null)
+        {
+            var sendAt = date.Date + SendTime;
+            return LocalNow < sendAt ? "scheduled" : "not_sent";
+        }
+        return (status.DeliveryStatus ?? "").ToLowerInvariant() switch
+        {
+            "read" => "read",
+            "delivered" => "delivered",
+            "failed" => "failed",
+            _ => "sent",
+        };
+    }
+
+    private static readonly string[] DeliveryRank = ["submitted", "enqueued", "sent", "delivered", "read"];
+
+    /// <summary>Applies a Gupshup/WhatsApp delivery event to the digest whose send produced <paramref name="messageId"/>.</summary>
+    public async Task<bool> ApplyDeliveryEventAsync(string messageId, string eventType, string? error)
+    {
+        var id = (messageId ?? "").Trim();
+        var type = (eventType ?? "").Trim().ToLowerInvariant();
+        if (id.Length is 0 or > 200 || !id.All(c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.' or '=' or ':'))
+            return false;
+        if (type != "failed" && Array.IndexOf(DeliveryRank, type) < 0)
+            return false;
+
+        await EnsureTableAsync();
+        using var connection = _database.CreateConnection();
+        var rows = await connection.ExecuteAsync(
+            """
+            UPDATE dbo.DailyReportDigest
+            SET DeliveryStatus = @Type,
+                DeliveryError = CASE WHEN @Type = 'failed' THEN @Error ELSE NULL END,
+                DeliveryUpdatedAt = GETDATE()
+            WHERE CHARINDEX(',' + @Id + ',', ',' + ISNULL(MessageId, '') + ',') > 0
+              AND (
+                    (@Type = 'failed' AND ISNULL(DeliveryStatus, '') NOT IN ('delivered', 'read'))
+                 OR (@Type <> 'failed' AND @Rank > CASE ISNULL(DeliveryStatus, '')
+                        WHEN 'submitted' THEN 0 WHEN 'enqueued' THEN 1 WHEN 'sent' THEN 2
+                        WHEN 'delivered' THEN 3 WHEN 'read' THEN 4 ELSE -1 END)
+                  )
+            """,
+            new { Id = id, Type = type, Rank = Array.IndexOf(DeliveryRank, type), Error = Truncate(error, 500) });
+        return rows > 0;
     }
 
     public async Task<(byte[] Pdf, DateTime Date)?> GetPdfByTokenAsync(string token)
@@ -204,6 +267,14 @@ public sealed class DailyReportDigestService
               );
               CREATE UNIQUE INDEX UX_DailyReportDigest_Token ON dbo.DailyReportDigest (Token);
             END
+            IF COL_LENGTH('dbo.DailyReportDigest', 'MessageId') IS NULL
+              ALTER TABLE dbo.DailyReportDigest ADD MessageId nvarchar(500) NULL;
+            IF COL_LENGTH('dbo.DailyReportDigest', 'DeliveryStatus') IS NULL
+              ALTER TABLE dbo.DailyReportDigest ADD DeliveryStatus varchar(30) NULL;
+            IF COL_LENGTH('dbo.DailyReportDigest', 'DeliveryError') IS NULL
+              ALTER TABLE dbo.DailyReportDigest ADD DeliveryError nvarchar(500) NULL;
+            IF COL_LENGTH('dbo.DailyReportDigest', 'DeliveryUpdatedAt') IS NULL
+              ALTER TABLE dbo.DailyReportDigest ADD DeliveryUpdatedAt datetime NULL;
             """);
         _tableReady = true;
     }
@@ -240,6 +311,10 @@ public sealed class DailyReportDigestStatusDto
     public string? LastError { get; set; }
     public string? TriggeredBy { get; set; }
     public int Attempts { get; set; }
+    public string? MessageId { get; set; }
+    public string? DeliveryStatus { get; set; }
+    public string? DeliveryError { get; set; }
+    public DateTime? DeliveryUpdatedAt { get; set; }
 }
 
 /// <summary>Sends the day's combined daily-report PDF on WhatsApp at the configured time (default 19:00 IST).</summary>

@@ -71,6 +71,10 @@ public class DailyReportController : ControllerBase
                 sentTo = status?.SentTo,
                 lastError = status?.LastError,
                 triggeredBy = status?.TriggeredBy,
+                state = _digest.ResolveState(day, status),
+                deliveryStatus = status?.DeliveryStatus,
+                deliveryError = status?.DeliveryError,
+                deliveryUpdatedAt = status?.DeliveryUpdatedAt,
             });
         }
         catch (FormatException ex)
@@ -110,6 +114,79 @@ public class DailyReportController : ControllerBase
         catch (Exception ex)
         {
             return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>Gupshup verifies the callback URL with a GET before saving it.</summary>
+    [HttpGet("digest/gupshup-callback")]
+    public IActionResult GupshupCallbackPing() => Ok();
+
+    /// <summary>
+    /// Public Gupshup delivery callback (set in Gupshup app → Webhooks). Handles Gupshup v2 "message-event"
+    /// payloads and Meta-format (v3) "statuses" payloads. Always answers 200 so Gupshup does not retry forever.
+    /// </summary>
+    [HttpPost("digest/gupshup-callback")]
+    public async Task<IActionResult> GupshupCallback()
+    {
+        try
+        {
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(Request.Body);
+            foreach (var (ids, type, error) in ReadDeliveryEvents(doc.RootElement))
+            {
+                foreach (var id in ids.Where(i => !string.IsNullOrWhiteSpace(i)).Distinct())
+                {
+                    if (await _digest.ApplyDeliveryEventAsync(id!, type, error))
+                        break;
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Non-JSON test pings from Gupshup.
+        }
+        return Ok();
+    }
+
+    private static IEnumerable<(string?[] Ids, string Type, string? Error)> ReadDeliveryEvents(System.Text.Json.JsonElement root)
+    {
+        static string? Str(System.Text.Json.JsonElement e, string name) =>
+            e.ValueKind == System.Text.Json.JsonValueKind.Object && e.TryGetProperty(name, out var v)
+                ? v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : v.ToString()
+                : null;
+
+        if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
+            yield break;
+
+        if (string.Equals(Str(root, "type"), "message-event", StringComparison.OrdinalIgnoreCase)
+            && root.TryGetProperty("payload", out var p))
+        {
+            string? error = null;
+            if (p.TryGetProperty("payload", out var inner))
+                error = Str(inner, "reason") ?? Str(inner, "code");
+            yield return (new[] { Str(p, "gsId"), Str(p, "id") }, Str(p, "type") ?? "", error);
+            yield break;
+        }
+
+        if (!root.TryGetProperty("entry", out var entries) || entries.ValueKind != System.Text.Json.JsonValueKind.Array)
+            yield break;
+        foreach (var entry in entries.EnumerateArray())
+        {
+            if (!entry.TryGetProperty("changes", out var changes) || changes.ValueKind != System.Text.Json.JsonValueKind.Array)
+                continue;
+            foreach (var change in changes.EnumerateArray())
+            {
+                if (!change.TryGetProperty("value", out var value)
+                    || !value.TryGetProperty("statuses", out var statuses)
+                    || statuses.ValueKind != System.Text.Json.JsonValueKind.Array)
+                    continue;
+                foreach (var s in statuses.EnumerateArray())
+                {
+                    string? error = null;
+                    if (s.TryGetProperty("errors", out var errs) && errs.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        error = string.Join("; ", errs.EnumerateArray().Select(e => Str(e, "title") ?? Str(e, "message")).Where(x => x != null));
+                    yield return (new[] { Str(s, "gs_id"), Str(s, "id") }, Str(s, "status") ?? "", error);
+                }
+            }
         }
     }
 

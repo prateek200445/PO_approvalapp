@@ -104,7 +104,14 @@ export type DailyReportDigestStatus = {
   sentTo?: string | null;
   lastError?: string | null;
   triggeredBy?: string | null;
+  state?: DailyReportDigestState;
+  deliveryStatus?: string | null;
+  deliveryError?: string | null;
+  deliveryUpdatedAt?: string | null;
 };
+
+/** scheduled → not yet 7 PM; sent → accepted by Gupshup; delivered/read → confirmed by WhatsApp. */
+export type DailyReportDigestState = "scheduled" | "not_sent" | "sent" | "delivered" | "read" | "failed";
 
 async function readMessage(response: Response, fallback: string): Promise<string> {
   try {

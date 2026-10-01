@@ -9,10 +9,10 @@ import { useAuth } from "@/lib/auth-context";
 import { isDailyReportDigestAdmin } from "@/lib/feature-flags";
 import {
   downloadDailyReportDigestPdf,
-  formatReportDateTime,
   getDailyReportDigestStatus,
   sendDailyReportDigest,
 } from "@/lib/daily-report-api";
+import { DigestStatusPill, digestStatusDetail } from "@/components/DailyReportDigestStatus";
 
 function todayIso() {
   const d = new Date();
@@ -104,14 +104,14 @@ export function DailyReportDigestCard() {
           ) : null}
         </div>
       </div>
-      {status?.sentAt ? (
-        <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
-          Sent {formatReportDateTime(status.sentAt)} to {status.sentTo}
-          {status.reportCount != null ? ` · ${status.reportCount} report(s)` : ""}
-          {status.triggeredBy ? ` · by ${status.triggeredBy}` : ""}
-        </p>
-      ) : status?.lastError ? (
-        <p className="mt-2 text-xs text-destructive">Last send failed: {status.lastError}</p>
+      {status ? (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <DigestStatusPill status={status} />
+          <span className="text-xs text-muted-foreground">
+            {digestStatusDetail(status)}
+            {status.sentAt && status.triggeredBy ? ` · by ${status.triggeredBy}` : ""}
+          </span>
+        </div>
       ) : null}
     </section>
   );

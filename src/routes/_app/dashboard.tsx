@@ -20,7 +20,8 @@ import { setApprovalListNav, type ApprovalListKind } from "@/lib/approval-list-n
 import { formatShortDate } from "@/lib/utils";
 import { useApprovalInbox, type InboxItem, type InboxKind } from "@/hooks/useApprovalInbox";
 import type { POStatus } from "@/lib/mock-data";
-import { BILL_PAYMENT_ENTRY_ENABLED } from "@/lib/feature-flags";
+import { BILL_PAYMENT_ENTRY_ENABLED, isDailyReportDigestAdmin } from "@/lib/feature-flags";
+import { DailyReportDigestDashboardStrip } from "@/components/DailyReportDigestStatus";
 
 export const Route = createFileRoute("/_app/dashboard")({
   head: () => ({ meta: [{ title: "Dashboard — PO Approval Portal" }] }),
@@ -241,6 +242,8 @@ function Dashboard() {
           </p>
         )}
       </div>
+
+      {isDailyReportDigestAdmin(user?.username) && <DailyReportDigestDashboardStrip />}
 
       {!inbox.isLoading && inbox.counts.total > 0 && (
         <div className="grid min-w-0 grid-cols-2 gap-3 md:grid-cols-3">
