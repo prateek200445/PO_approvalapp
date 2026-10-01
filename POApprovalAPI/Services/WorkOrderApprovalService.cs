@@ -150,15 +150,38 @@ public class WorkOrderApprovalService
             if (intermediateRows <= 0)
                 return Fail(transId, poNo, "Update did not affect any rows (may already be processed)");
 
+            // Last approver (any authority) completes the work order: '*' once nothing is pending or rejected.
+            var fullyApproved = await connection.ExecuteScalarAsync<int>(
+                @"SELECT CASE WHEN EXISTS (
+                           SELECT 1 FROM ApproveWorkOrder
+                           WHERE PoNo = @PoNo
+                             AND (Status = 'Pending' OR Status LIKE 'Reject%'))
+                         THEN 0 ELSE 1 END",
+                new { PoNo = approvalData.PoNo }) == 1;
+
             await connection.ExecuteAsync(
                 @"UPDATE PurchasePayment
-                  SET PoSignal = '#',
+                  SET PoSignal = @Signal,
                       ApprovalRemarks = CASE
                           WHEN NULLIF(LTRIM(RTRIM(@Remarks)), '') IS NULL THEN ApprovalRemarks
                           ELSE LEFT(LTRIM(RTRIM(@Remarks)), 1000)
                       END
                   WHERE PurchaseCode = @PoNo",
-                new { PoNo = approvalData.PoNo, Remarks = remarks });
+                new { PoNo = approvalData.PoNo, Remarks = remarks, Signal = fullyApproved ? "*" : "#" });
+
+            if (fullyApproved && !string.IsNullOrWhiteSpace(approvalData.Email))
+            {
+                await _emailService.SendMail(
+                    approvalData.Email,
+                    $"Work Order {approvalData.PoNo} Approved",
+                    $"Dear Sir,\n\n" +
+                    $"Work Order: {approvalData.PoNo}\n" +
+                    $"Approved By: {approvalData.ApprovalName}\n" +
+                    $"Remarks: {(string.IsNullOrWhiteSpace(remarks) ? "(none)" : remarks)}\n\n" +
+                    $"Regards,\n" +
+                    $"{approvalData.ApprovalName}"
+                );
+            }
 
             return Ok(transId, approvalData.PoNo);
         }
