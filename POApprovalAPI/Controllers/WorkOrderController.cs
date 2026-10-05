@@ -33,7 +33,8 @@ public class WorkOrderController : ControllerBase
         using var connection = _database.CreateConnection();
 
         var data = await connection.QueryAsync(
-            @"SELECT
+            @"WITH pending AS (
+              SELECT
                 a.PoNo,
                 a.ApprovalName,
                 a.Status,
@@ -42,7 +43,8 @@ public class WorkOrderController : ControllerBase
                 a.TransId,
                 MAX(ISNULL(j.TotalAmount,0)) AS Total,
                 MAX(v.FirmName) AS FirmName,
-                MAX(NULLIF(LTRIM(RTRIM(j.ApprovalRemarks)), '')) AS ApprovalRemarks
+                MAX(NULLIF(LTRIM(RTRIM(j.ApprovalRemarks)), '')) AS ApprovalRemarks,
+                MAX(NULLIF(LTRIM(RTRIM(v.CompanyName)), N'')) AS CompanyName
               FROM ApproveWorkOrder a
              LEFT JOIN PurchasePayment j
     ON a.PoNo = j.PurchaseCode
@@ -69,7 +71,10 @@ public class WorkOrderController : ControllerBase
         OR (@filterType = 'lte' AND MAX(ISNULL(j.TotalAmount, 0)) <= @amount)
     )
 )
-              ORDER BY a.PODate DESC",
+              )
+              SELECT x.*, g.GroupName
+              FROM pending x" + GroupCompanySql.OuterApply("x.CompanyName") + @"
+              ORDER BY x.PODate DESC",
             new
             {
                 username,

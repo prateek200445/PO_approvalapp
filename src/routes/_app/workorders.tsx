@@ -12,6 +12,12 @@ import { SkeletonPendingList } from "@/components/SkeletonLoader";
 import { toast } from "sonner";
 import { setApprovalListNav } from "@/lib/approval-list-nav";
 import { formatShortDate } from "@/lib/utils";
+import {
+  ALL_GROUPS,
+  groupCompanyLabel,
+  groupCompanyOptions,
+  matchesGroupCompany,
+} from "@/lib/group-company";
 
 export const Route = createFileRoute("/_app/workorders")({
   head: () => ({ meta: [{ title: "Pending Work Orders — Approval Portal" }] }),
@@ -26,6 +32,7 @@ function PendingList() {
   const [amount, setAmount] = useState("");
   const [filterType, setFilterType] = useState("gte");
   const [status, setStatus] = useState<"All" | POStatus>("Pending");
+  const [group, setGroup] = useState(ALL_GROUPS);
   const [sortDesc, setSortDesc] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
@@ -63,6 +70,7 @@ function PendingList() {
   });
 
   const pendingPOs = Array.isArray(pendingPOsData) ? pendingPOsData : [];
+  const groupOptions = useMemo(() => groupCompanyOptions(pendingPOs), [pendingPOs]);
 
   const filtered = pendingPOs
     .filter((p) => {
@@ -72,6 +80,7 @@ function PendingList() {
         p.PoNo?.toLowerCase().includes(search) ||
         p.ApprovalName?.toLowerCase().includes(search) ||
         p.Status?.toLowerCase().includes(search) ||
+        String(p.CompanyName ?? "").toLowerCase().includes(search) ||
         workOrderRemarks(p).toLowerCase().includes(search) ||
         String(p.Total || "").includes(search);
 
@@ -87,7 +96,7 @@ function PendingList() {
             ? workOrderAmount >= enteredAmount
             : workOrderAmount <= enteredAmount;
 
-      return matchesSearch && matchesStatus && matchesAmount;
+      return matchesSearch && matchesStatus && matchesAmount && matchesGroupCompany(p, group);
     })
     .sort((a, b) =>
       sortDesc
@@ -97,7 +106,13 @@ function PendingList() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [q, amount, status, filterType, sortDesc]);
+  }, [q, amount, status, group, filterType, sortDesc]);
+
+  useEffect(() => {
+    if (group !== ALL_GROUPS && !groupOptions.includes(group)) {
+      setGroup(ALL_GROUPS);
+    }
+  }, [group, groupOptions]);
 
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -562,6 +577,18 @@ function PendingList() {
             <option value="gte">≥</option>
             <option value="lte">≤</option>
           </select>
+          <select
+            value={group}
+            onChange={(e) => setGroup(e.target.value)}
+            className="h-10 min-w-0 max-w-xs rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+            aria-label="Filter by group company"
+          >
+            {groupOptions.map((name) => (
+              <option key={name} value={name}>
+                {groupCompanyLabel(name)}
+              </option>
+            ))}
+          </select>
           <div className="relative">
             <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <select
@@ -598,27 +625,19 @@ function PendingList() {
           />
         </div>
 
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
-            {status !== "All" && (
-              <button
-                onClick={() => setStatus("All")}
-                className="inline-flex items-center gap-1 rounded-full bg-primary/20 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/30 transition"
-              >
-                {status}
-                <X className="h-3 w-3" />
-              </button>
-            )}
-            {amount && (
-              <button
-                onClick={() => setAmount("")}
-                className="inline-flex items-center gap-1 rounded-full bg-primary/20 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/30 transition"
-              >
-                {filterType} ₹{amount}
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <select
+            value={group}
+            onChange={(e) => setGroup(e.target.value)}
+            className="h-10 min-w-0 flex-1 truncate rounded-md border border-input bg-surface px-2 text-xs font-medium outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+            aria-label="Filter by group company"
+          >
+            {groupOptions.map((name) => (
+              <option key={name} value={name}>
+                {groupCompanyLabel(name)}
+              </option>
+            ))}
+          </select>
 
           <button
             onClick={() => setShowFilterSheet(true)}
@@ -641,6 +660,29 @@ function PendingList() {
             {sortDesc ? "Newest" : "Oldest"}
           </button>
         </div>
+
+        {(status !== "All" || amount) && (
+          <div className="flex min-w-0 flex-wrap gap-1">
+            {status !== "All" && (
+              <button
+                onClick={() => setStatus("All")}
+                className="inline-flex items-center gap-1 rounded-full bg-primary/20 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/30 transition"
+              >
+                {status}
+                <X className="h-3 w-3" />
+              </button>
+            )}
+            {amount && (
+              <button
+                onClick={() => setAmount("")}
+                className="inline-flex items-center gap-1 rounded-full bg-primary/20 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/30 transition"
+              >
+                {filterType} ₹{amount}
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Mobile cards */}

@@ -30,7 +30,8 @@ public class IndentController : ControllerBase
         using var connection = _database.CreateConnection();
 
         var data = await connection.QueryAsync(
-            @"SELECT
+            @"WITH pending AS (
+          SELECT
             IndentNo,
             MAX(IndentDate) AS IndentDate,
             COUNT(*) AS TotalItems,
@@ -39,7 +40,15 @@ public class IndentController : ControllerBase
           WHERE ApprovalName = @username
             AND Status = 'Pending'
           GROUP BY IndentNo
-          ORDER BY MAX(IndentDate) DESC",
+          )
+          SELECT x.*, c.CompanyName, g.GroupName
+          FROM pending x
+          OUTER APPLY (
+            SELECT TOP 1 NULLIF(LTRIM(RTRIM(s.CompanyName)), N'') AS CompanyName
+            FROM vw_storedeptt s
+            WHERE s.Expr1 = x.IndentNo
+          ) c" + GroupCompanySql.OuterApply("c.CompanyName") + @"
+          ORDER BY x.IndentDate DESC",
             new { username });
 
         return Ok(data);

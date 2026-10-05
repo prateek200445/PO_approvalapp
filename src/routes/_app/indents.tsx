@@ -1,12 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { getApiUrl } from "@/lib/api-config";
-import {  useState, useEffect } from "react";
+import {  useState, useEffect, useMemo } from "react";
 import { Search, ArrowUpDown, Filter, X } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 import { setApprovalListNav } from "@/lib/approval-list-nav";
 import { formatShortDate } from "@/lib/utils";
+import {
+  ALL_GROUPS,
+  groupCompanyLabel,
+  groupCompanyOptions,
+  matchesGroupCompany,
+} from "@/lib/group-company";
 
 export const Route = createFileRoute("/_app/indents")({
   head: () => ({ meta: [{ title: "Pending Indents — Approval Portal" }] }),
@@ -47,24 +53,35 @@ function PendingList() {
 
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("Pending");
+  const [group, setGroup] = useState(ALL_GROUPS);
   const [sortDesc, setSortDesc] = useState(true);
   const [selectedIndents, setSelectedIndents] = useState<string[]>([]);
 
+  const groupOptions = useMemo(
+    () => groupCompanyOptions(Array.isArray(pendingPOs) ? pendingPOs : []),
+    [pendingPOs],
+  );
 
+  useEffect(() => {
+    if (group !== ALL_GROUPS && !groupOptions.includes(group)) {
+      setGroup(ALL_GROUPS);
+    }
+  }, [group, groupOptions]);
 
-  const filtered = pendingPOs
+  const filtered = (Array.isArray(pendingPOs) ? pendingPOs : [])
   .filter((p) => {
     const search = q.toLowerCase();
 
     const matchesSearch =
       p.IndentNo?.toLowerCase().includes(search) ||
+      String(p.CompanyName ?? "").toLowerCase().includes(search) ||
       String(p.TotalItems || "").includes(search);
 
     const matchesStatus =
       status === "All" ||
       (p.Status ?? p.status ?? "Pending") === status;
 
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesGroupCompany(p, group);
   })
   .sort((a, b) =>
     sortDesc
@@ -105,6 +122,18 @@ function PendingList() {
           />
         </div>
         <div className="flex flex-wrap gap-2">
+          <select
+            value={group}
+            onChange={(e) => setGroup(e.target.value)}
+            className="h-10 min-w-0 max-w-xs rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+            aria-label="Filter by group company"
+          >
+            {groupOptions.map((name) => (
+              <option key={name} value={name}>
+                {groupCompanyLabel(name)}
+              </option>
+            ))}
+          </select>
           <div className="relative">
             <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <select
@@ -143,19 +172,19 @@ function PendingList() {
         </div>
 
         {/* Active Filters + Filter Button Row */}
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {/* Active Filter Chips */}
-          <div className="flex flex-wrap gap-1 flex-1">
-            {status !== "All" && (
-              <button
-                onClick={() => setStatus("All")}
-                className="inline-flex items-center gap-1 rounded-full bg-primary/20 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/30 transition"
-              >
-                {status}
-                <X className="h-3 w-3" />
-              </button>
-            )}
-          </div>
+        <div className="flex min-w-0 items-center gap-2">
+          <select
+            value={group}
+            onChange={(e) => setGroup(e.target.value)}
+            className="h-10 min-w-0 flex-1 truncate rounded-md border border-input bg-surface px-2 text-xs font-medium outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+            aria-label="Filter by group company"
+          >
+            {groupOptions.map((name) => (
+              <option key={name} value={name}>
+                {groupCompanyLabel(name)}
+              </option>
+            ))}
+          </select>
 
           {/* Filter Button */}
           <button
@@ -211,6 +240,7 @@ function PendingList() {
                     <div className="truncate font-semibold">{p.IndentNo}</div>
                     <div className="mt-0.5 truncate text-sm text-muted-foreground">
                       {p.TotalItems} item{Number(p.TotalItems) === 1 ? "" : "s"}
+                      {p.CompanyName ? ` · ${p.CompanyName}` : ""}
                     </div>
                   </div>
                   <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
@@ -235,6 +265,7 @@ function PendingList() {
               <th className="px-4 py-3 font-medium">Indent No</th>
 <th className="px-4 py-3 font-medium">Date</th>
 <th className="px-4 py-3 font-medium">Items</th>
+<th className="px-4 py-3 font-medium">Company</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -262,6 +293,10 @@ function PendingList() {
 
   <td className="px-4 py-3">
     {p.TotalItems}
+  </td>
+
+  <td className="px-4 py-3 text-muted-foreground">
+    {p.CompanyName || "—"}
   </td>
 </tr>
             ))}

@@ -12,6 +12,12 @@ import { SkeletonPendingList } from "@/components/SkeletonLoader";
 import { toast } from "sonner";
 import { setApprovalListNav } from "@/lib/approval-list-nav";
 import { formatShortDate } from "@/lib/utils";
+import {
+  ALL_GROUPS,
+  groupCompanyLabel,
+  groupCompanyOptions,
+  matchesGroupCompany,
+} from "@/lib/group-company";
 
 export const Route = createFileRoute("/_app/pending")({
   head: () => ({ meta: [{ title: "Pending POs — Approval Portal" }] }),
@@ -26,6 +32,7 @@ function PendingList() {
   const [amount, setAmount] = useState("");
   const [filterType, setFilterType] = useState("gte");
   const [status, setStatus] = useState<"All" | POStatus>("Pending");
+  const [group, setGroup] = useState(ALL_GROUPS);
   const [company, setCompany] = useState("All");
   const [sortDesc, setSortDesc] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
@@ -66,14 +73,17 @@ function PendingList() {
 
   const pendingPOs = Array.isArray(pendingPOsData) ? pendingPOsData : [];
 
+  const groupOptions = useMemo(() => groupCompanyOptions(pendingPOs), [pendingPOs]);
+
   const companyOptions = useMemo(() => {
     const names = new Set<string>();
     for (const row of pendingPOs) {
+      if (!matchesGroupCompany(row, group)) continue;
       const name = String(row.CompanyName ?? row.companyName ?? "").trim();
       if (name) names.add(name);
     }
     return ["All", ...Array.from(names).sort((a, b) => a.localeCompare(b))];
-  }, [pendingPOs]);
+  }, [pendingPOs, group]);
 
   const filtered = pendingPOs
     .filter((p) => {
@@ -88,7 +98,8 @@ function PendingList() {
         p.Status?.toLowerCase().includes(search) ||
         String(p.Total || "").includes(search);
       const matchesStatus = status === "All" || p.Status === status;
-      const matchesCompany = company === "All" || rowCompany === company;
+      const matchesCompany =
+        matchesGroupCompany(p, group) && (company === "All" || rowCompany === company);
 
       const poAmount = Number(p.Total || 0);
       const enteredAmount = Number(amount || 0);
@@ -110,7 +121,13 @@ function PendingList() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [q, amount, status, company, filterType, sortDesc]);
+  }, [q, amount, status, group, company, filterType, sortDesc]);
+
+  useEffect(() => {
+    if (group !== ALL_GROUPS && !groupOptions.includes(group)) {
+      setGroup(ALL_GROUPS);
+    }
+  }, [group, groupOptions]);
 
   useEffect(() => {
     if (company !== "All" && !companyOptions.includes(company)) {
@@ -595,6 +612,18 @@ function PendingList() {
             <option value="lte">≤</option>
           </select>
           <select
+            value={group}
+            onChange={(e) => setGroup(e.target.value)}
+            className="h-10 w-full min-w-0 rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 md:max-w-xs"
+            aria-label="Filter by group company"
+          >
+            {groupOptions.map((name) => (
+              <option key={name} value={name}>
+                {groupCompanyLabel(name)}
+              </option>
+            ))}
+          </select>
+          <select
             value={company}
             onChange={(e) => setCompany(e.target.value)}
             className="h-10 w-full min-w-0 rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 md:max-w-xs"
@@ -643,8 +672,47 @@ function PendingList() {
           />
         </div>
 
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <select
+            value={group}
+            onChange={(e) => {
+              setGroup(e.target.value);
+              setCompany("All");
+            }}
+            className="h-10 min-w-0 flex-1 truncate rounded-md border border-input bg-surface px-2 text-xs font-medium outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+            aria-label="Filter by group company"
+          >
+            {groupOptions.map((name) => (
+              <option key={name} value={name}>
+                {groupCompanyLabel(name)}
+              </option>
+            ))}
+          </select>
+
+          <button
+            onClick={() => setShowFilterSheet(true)}
+            className="inline-flex h-10 items-center gap-2 rounded-md border border-input bg-surface px-3 text-sm font-medium hover:bg-secondary whitespace-nowrap"
+          >
+            <Filter className="h-4 w-4" />
+            <span className="text-xs">Filters</span>
+            {(status !== "All" || company !== "All" || amount) && (
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
+                {(status !== "All" ? 1 : 0) + (company !== "All" ? 1 : 0) + (amount ? 1 : 0)}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => setSortDesc((v) => !v)}
+            className="inline-flex h-10 items-center gap-1.5 rounded-md border border-input bg-surface px-2 text-xs font-medium hover:bg-secondary whitespace-nowrap"
+          >
+            <ArrowUpDown className="h-3.5 w-3.5" />
+            {sortDesc ? "Newest" : "Oldest"}
+          </button>
+        </div>
+
+        {(status !== "All" || company !== "All" || amount) && (
+          <div className="flex min-w-0 flex-wrap gap-1">
             {status !== "All" && (
               <button
                 onClick={() => setStatus("All")}
@@ -673,28 +741,7 @@ function PendingList() {
               </button>
             )}
           </div>
-
-          <button
-            onClick={() => setShowFilterSheet(true)}
-            className="inline-flex h-10 items-center gap-2 rounded-md border border-input bg-surface px-3 text-sm font-medium hover:bg-secondary whitespace-nowrap"
-          >
-            <Filter className="h-4 w-4" />
-            <span className="text-xs">Filters</span>
-            {(status !== "All" || company !== "All" || amount) && (
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-                {(status !== "All" ? 1 : 0) + (company !== "All" ? 1 : 0) + (amount ? 1 : 0)}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setSortDesc((v) => !v)}
-            className="inline-flex h-10 items-center gap-1.5 rounded-md border border-input bg-surface px-2 text-xs font-medium hover:bg-secondary whitespace-nowrap"
-          >
-            <ArrowUpDown className="h-3.5 w-3.5" />
-            {sortDesc ? "Newest" : "Oldest"}
-          </button>
-        </div>
+        )}
       </div>
 
       {/* Mobile cards */}

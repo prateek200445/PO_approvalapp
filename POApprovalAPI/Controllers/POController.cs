@@ -33,6 +33,7 @@ public async Task<IActionResult> GetPending(
     using var connection = _database.CreateConnection();
 
     var sql = @"
+WITH pending AS (
 SELECT
     a.PoNo,
     a.ApprovalName,
@@ -92,8 +93,11 @@ GROUP BY
     a.PODate,
     a.ApprovalDate,
     a.TransId
-
-ORDER BY PODate DESC;";
+)
+SELECT x.*, g.GroupName
+FROM pending x
+" + GroupCompanySql.OuterApply("x.CompanyName") + @"
+ORDER BY x.PODate DESC;";
 
     var data = await connection.QueryAsync(
     sql,
