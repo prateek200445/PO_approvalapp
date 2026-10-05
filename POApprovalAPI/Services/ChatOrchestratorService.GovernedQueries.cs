@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace POApprovalAPI.Services;
@@ -1611,6 +1612,9 @@ public partial class ChatOrchestratorService
             filters.Add(BuildStockItemNameLikeFilter(itemNameFrag));
         }
 
+        if (TryParseStockAsOnDate(message) is { } asOn)
+            return TryBuildHistoricalBookStockSql(company, asOn, itemCode, itemNameFrag, materialFrags, out sql, out warning);
+
         if (TryExtractStockWarehouseFragment(message) is { } whFrag)
             filters.Add($"(Warehousename LIKE '%{EscapeSqlLiteral(whFrag)}%' OR WareHouseName LIKE '%{EscapeSqlLiteral(whFrag)}%')");
 
@@ -1650,7 +1654,7 @@ public partial class ChatOrchestratorService
                              || m.Contains("current stock")
                              || m.Contains("stock of")
                              || m.Contains("stock for")
-                             || (m.Contains("stock") && (m.Contains("how much") || m.Contains("what is")))
+                             || (m.Contains("stock") && (m.Contains("how much") || m.Contains("what is") || m.Contains("what was")))
                              || (m.Contains("inventory") && (m.Contains("how much") || m.Contains("what is")))
                              || Regex.IsMatch(m, @"\b[\w/]+(?:/[\w]+)+\s+stock\b");
 
@@ -1749,9 +1753,105 @@ public partial class ChatOrchestratorService
         return w;
     }
 
+    private static bool TryBuildHistoricalBookStockSql(
+        string company,
+        DateTime asOn,
+        string? itemCode,
+        string? itemNameFrag,
+        List<string> materialFrags,
+        out string sql,
+        out string warning)
+    {
+        var companyLit = EscapeSqlLiteral(company);
+        var rollTo = asOn.AddDays(1).ToString("yyyy-MM-dd");
+        var asOnLit = asOn.ToString("yyyy-MM-dd");
+        var fromFn = $"dbo.FN_STOCKANALYSIS_RPT_ALL_OP('{companyLit}', '{rollTo}', 0, 0)";
+
+        if (!string.IsNullOrWhiteSpace(itemCode))
+        {
+            var code = EscapeSqlLiteral(itemCode);
+            sql = $"""
+                SELECT
+                    '{companyLit}' AS CompanyName,
+                    MAX(ItemName) AS ItemName,
+                    '{code}' AS ItemCode,
+                    ISNULL(SUM(CASE WHEN [Type] = 'Op.Factory Owned' THEN BalanceQty END), 0) AS BookQty,
+                    CAST('{asOnLit}' AS date) AS AsOnDate
+                FROM {fromFn}
+                WHERE itemcode = '{code}'
+                """;
+            warning = $"Governed book stock on FN_STOCKANALYSIS_RPT_ALL_OP for {company} item {itemCode} as on {asOn:dd-MMM-yyyy}. Not live godown stock.";
+            return true;
+        }
+
+        string nameFilter;
+        if (materialFrags.Count > 1)
+            nameFilter = BuildMultiMaterialStockFilter(materialFrags);
+        else if (materialFrags.Count == 1)
+            nameFilter = BuildStockItemNameLikeFilter(materialFrags[0]);
+        else
+            nameFilter = BuildStockItemNameLikeFilter(itemNameFrag!);
+
+        sql = $"""
+            SELECT TOP 50
+                CompanyName,
+                ItemName,
+                itemcode AS ItemCode,
+                BalanceQty AS BookQty,
+                CAST('{asOnLit}' AS date) AS AsOnDate
+            FROM {fromFn}
+            WHERE [Type] = 'Op.Factory Owned'
+              AND {nameFilter}
+            ORDER BY BalanceQty DESC
+            """;
+        warning = $"Governed book stock on FN_STOCKANALYSIS_RPT_ALL_OP for {company} as on {asOn:dd-MMM-yyyy}. Not live godown stock.";
+        return true;
+    }
+
+    /// <summary>
+    /// Stock-analysis opening is the position at the start of the passed date, so the caller adds one day.
+    /// </summary>
+    private static DateTime? TryParseStockAsOnDate(string message)
+    {
+        var numeric = TryParseAsOnDate(message);
+        if (numeric != null)
+            return numeric;
+
+        var m = Regex.Match(
+            message,
+            @"\b(?:on|as\s+on|as\s+at)\s+(\d{1,2})(?:st|nd|rd|th)?\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{4})\b",
+            RegexOptions.IgnoreCase);
+        if (!m.Success)
+            return null;
+
+        var text = $"{m.Groups[1].Value} {NormalizeStockMonth(m.Groups[2].Value)} {m.Groups[3].Value}";
+        return DateTime.TryParseExact(text, "d MMM yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out var dt)
+            ? dt.Date
+            : null;
+    }
+
+    private static string NormalizeStockMonth(string month)
+    {
+        var m = month.ToLowerInvariant();
+        if (m.StartsWith("jan")) return "Jan";
+        if (m.StartsWith("feb")) return "Feb";
+        if (m.StartsWith("mar")) return "Mar";
+        if (m.StartsWith("apr")) return "Apr";
+        if (m == "may") return "May";
+        if (m.StartsWith("jun")) return "Jun";
+        if (m.StartsWith("jul")) return "Jul";
+        if (m.StartsWith("aug")) return "Aug";
+        if (m.StartsWith("sep")) return "Sep";
+        if (m.StartsWith("oct")) return "Oct";
+        if (m.StartsWith("nov")) return "Nov";
+        return "Dec";
+    }
+
     private static bool IsGovernedStockInHandSql(string sql)
     {
         if (string.IsNullOrWhiteSpace(sql)) return false;
+        if (sql.Contains("FN_STOCKANALYSIS_RPT_ALL_OP", StringComparison.OrdinalIgnoreCase))
+            return true;
         var hasStockTable = sql.Contains("vw_itemwiseStock", StringComparison.OrdinalIgnoreCase)
                             || (sql.Contains("WareHouse", StringComparison.OrdinalIgnoreCase)
                                 && sql.Contains("StkInHand", StringComparison.OrdinalIgnoreCase));
@@ -1763,6 +1863,8 @@ public partial class ChatOrchestratorService
 
     private static bool ShouldForceStockInHandGovernedRewrite(string sql, int rowCount)
     {
+        if (sql.Contains("FN_STOCKANALYSIS_RPT_ALL_OP", StringComparison.OrdinalIgnoreCase))
+            return false;
         if (IsGovernedStockInHandSql(sql) && rowCount > 0) return false;
         if (rowCount == 0) return true;
         if (Regex.IsMatch(sql, @"\bItemName\s*=\s*'", RegexOptions.IgnoreCase)) return true;

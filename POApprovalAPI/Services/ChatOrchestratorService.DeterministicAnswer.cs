@@ -77,6 +77,9 @@ public partial class ChatOrchestratorService
         if (rows.Count == 1 && LooksLikeStitcherAttendanceRow(rows[0]))
             return BuildStitcherAttendanceBody(rows[0]);
 
+        if (rows.Count >= 1 && LooksLikeBookStockRow(rows[0]))
+            return BuildBookStockBody(rows);
+
         if (rows.Count >= 1 && LooksLikeStockInHandRow(rows[0]))
             return BuildStockInHandBody(rows);
 
@@ -285,6 +288,13 @@ public partial class ChatOrchestratorService
             }
 
             if (group.Key.Equals("Inventory", StringComparison.OrdinalIgnoreCase)
+                && LooksLikeBookStockRow(sectionRows[0]))
+            {
+                parts.Add($"**{group.Key}:** {BuildBookStockBody(sectionRows)}");
+                continue;
+            }
+
+            if (group.Key.Equals("Inventory", StringComparison.OrdinalIgnoreCase)
                 && LooksLikeStockInHandRow(sectionRows[0]))
             {
                 parts.Add($"**{group.Key}:** {BuildStockInHandBody(sectionRows)}");
@@ -317,6 +327,34 @@ public partial class ChatOrchestratorService
         var dateNote = TryFormatRowDate(dateRaw) is { } d ? $" on **{d}**" : "";
         var label = count == 1 ? "stitcher/sewer was" : "stitchers/sewers were";
         return $"**{count:N0}** {label} present{dateNote} (machine punch with intime).";
+    }
+
+    private static bool LooksLikeBookStockRow(Dictionary<string, object?> row)
+    {
+        var keys = row.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return keys.Contains("BookQty") && keys.Contains("AsOnDate");
+    }
+
+    private static string BuildBookStockBody(List<Dictionary<string, object?>> rows)
+    {
+        var company = GetRowString(rows[0], "CompanyName");
+        var atCompany = string.IsNullOrWhiteSpace(company) ? "" : $" at **{company}**";
+        var asOn = TryFormatRowDate(GetRowString(rows[0], "AsOnDate")) ?? GetRowString(rows[0], "AsOnDate");
+        var onDate = string.IsNullOrWhiteSpace(asOn) ? "" : $" on **{asOn}**";
+
+        if (rows.Count == 1)
+        {
+            var item = GetRowString(rows[0], "ItemName") ?? GetRowString(rows[0], "ItemCode") ?? "Item";
+            var code = GetRowString(rows[0], "ItemCode");
+            var codeNote = string.IsNullOrWhiteSpace(code) || item.Contains(code, StringComparison.OrdinalIgnoreCase)
+                ? ""
+                : $" ({code})";
+            var qty = GetRowDecimal(rows[0], "BookQty");
+            return $"**{item}**{codeNote}{atCompany} had book stock of **{FormatQty(qty)}**{onDate}. This is the stock-analysis quantity, not the live godown balance.";
+        }
+
+        var total = rows.Sum(r => GetRowDecimal(r, "BookQty") ?? 0m);
+        return $"**{rows.Count:N0}** item(s){atCompany} had book stock totalling **{FormatQty(total)}**{onDate}. This is the stock-analysis quantity, not the live godown balance.";
     }
 
     private static bool LooksLikeStockInHandRow(Dictionary<string, object?> row)
