@@ -25,6 +25,7 @@ import {
   Globe2,
   Users,
   QrCode,
+  Package,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useLayoutEffect, useState, type ComponentType } from "react";
@@ -56,6 +57,7 @@ type AppPath =
   | "/cma"
   | "/intercompany"
   | "/ledgers"
+  | "/item-stock"
   | "/export-bill-overdue"
   | "/daily-production"
   | "/daily-reports"
@@ -264,6 +266,12 @@ export function AppShell() {
       icon: Building2,
       label: "Intercompany",
       match: (p) => p.startsWith("/intercompany"),
+    },
+    {
+      to: "/item-stock",
+      icon: Package,
+      label: "Item Stock",
+      match: (p) => p.startsWith("/item-stock"),
     },
     {
       to: "/ledgers",

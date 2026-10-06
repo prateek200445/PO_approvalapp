@@ -1,0 +1,412 @@
+/*
+  Read-only item stock summary for a date range.
+
+  Same shape as a ledger:
+    opening
+    + each movement in the range
+    = closing
+
+  Opening is dbo.usp_StockInHandAsOn on @DateFrom (stock at the start of that day).
+  Movements use the same sources and signs as that procedure, which match
+  Cl.Factory Owned in SP_STOCKANALYSIS_RPT_ALL.
+  Recd For JW (Others) / JBIN-OT is left out.
+
+  Closing = Opening + Inward − Outward.
+  Does not INSERT, UPDATE, or DELETE any ERP table.
+
+  Result 1: opening, one total per movement type, closing.
+  Result 2: one row per document, with a running balance.
+
+  Example:
+    EXEC dbo.usp_ItemStockSummary
+         @CompanyName = N'HCP Plastene Bulkpack Ltd',
+         @ItemCode    = N'RAW06013',
+         @DateFrom    = '2026-09-01',
+         @DateTo      = '2026-10-06';
+*/
+CREATE OR ALTER PROCEDURE dbo.usp_ItemStockSummary
+    @CompanyName varchar(150),
+    @ItemCode    varchar(50),
+    @DateFrom    date,
+    @DateTo      date
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @Company varchar(150) = LTRIM(RTRIM(@CompanyName));
+    DECLARE @Item varchar(50) = NULLIF(LTRIM(RTRIM(@ItemCode)), '');
+    DECLARE @From datetime = CAST(@DateFrom AS datetime);
+    DECLARE @ToEnd datetime = DATEADD(day, 1, CAST(@DateTo AS datetime));
+
+    IF @Item IS NULL
+    BEGIN
+        RAISERROR('Pass an item code.', 16, 1);
+        RETURN;
+    END;
+
+    IF @DateTo < @DateFrom
+    BEGIN
+        RAISERROR('Date to is before date from.', 16, 1);
+        RETURN;
+    END;
+
+    CREATE TABLE #open (
+        CompanyName       varchar(150),
+        ItemCode          varchar(50),
+        ItemName          varchar(200),
+        AsOnDate          date,
+        CurrentQty        decimal(18, 3),
+        NetMovementAfter  decimal(18, 3),
+        StockAsOn         decimal(18, 3)
+    );
+
+    INSERT #open
+    EXEC dbo.usp_StockInHandAsOn
+         @CompanyName = @Company,
+         @AsOnDate    = @DateFrom,
+         @ItemCode    = @Item;
+
+    DECLARE @ItemName varchar(200) = (SELECT MAX(ItemName) FROM #open);
+    DECLARE @Opening decimal(18, 3) = ISNULL((SELECT SUM(StockAsOn) FROM #open), 0);
+
+    IF @ItemName IS NULL
+        SELECT @ItemName = MAX(ItemName)
+        FROM Item WITH (NOLOCK)
+        WHERE CompanyName = @Company
+          AND ItemCode = @Item;
+
+    CREATE TABLE #txn (
+        TxnDate       date,
+        MovementType  varchar(50),
+        DocNo         varchar(100),
+        InwardQty     decimal(18, 3),
+        OutwardQty    decimal(18, 3)
+    );
+
+    /* Purchase, branch receipt, and job-work receipt from the MRN. JBIN-OT is excluded. */
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(sysdate AS date),
+        CASE
+            WHEN FirmGSTIn = VendorGST THEN 'Branch Tfr Recd'
+            WHEN Categoryseries = 'JBIN-SE' THEN 'Recd from JW (Own)'
+            ELSE 'Purchase'
+        END,
+        ISNULL(MRNo, ''),
+        SUM(CASE WHEN unit <> 'KGS' THEN ISNULL(netwt, 0) ELSE ISNULL(acceptedqty, 0) END),
+        0
+    FROM Vw_StoreInwards WITH (NOLOCK)
+    WHERE CompanyName = @Company
+      AND ItemCode = @Item
+      AND Cancel <> 'Cancelled'
+      AND itemDeptt IN ('RM', 'SF', 'FG', 'RM Consumables')
+      AND sysdate > @From
+      AND sysdate < @ToEnd
+      AND ISNULL(Categoryseries, '') <> 'JBIN-OT'
+    GROUP BY
+        CAST(sysdate AS date),
+        CASE
+            WHEN FirmGSTIn = VendorGST THEN 'Branch Tfr Recd'
+            WHEN Categoryseries = 'JBIN-SE' THEN 'Recd from JW (Own)'
+            ELSE 'Purchase'
+        END,
+        ISNULL(MRNo, '');
+
+    /* Godown post that is not the MRN itself. */
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(v.InwardDate AS date),
+        'Warehouse Inwards',
+        '',
+        SUM(v.qty),
+        0
+    FROM WareHouseInwards v WITH (NOLOCK)
+    INNER JOIN WareHouse w WITH (NOLOCK)
+        ON w.ItemCode = v.ItemCode
+       AND w.CompanyName = v.CompanyName
+       AND w.WareHouseName = v.ToWareHouse
+    WHERE v.transid = 0
+      AND v.CompanyName = @Company
+      AND w.ItemCode = @Item
+      AND w.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
+      AND v.InwardDate > @From
+      AND v.InwardDate < @ToEnd
+    GROUP BY CAST(v.InwardDate AS date);
+
+    /* Purchase voucher only when that MRN is not already in Vw_StoreInwards. */
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(pv.SysDate AS date),
+        'Purchase',
+        ISNULL(pv.StoreInwardNo, ''),
+        SUM(CASE WHEN pvi.Per <> 'KGS' THEN ISNULL(pvi.netwt, 0) ELSE ISNULL(pvi.ActualQty, 0) END),
+        0
+    FROM PurchaseVoucherItem pvi WITH (NOLOCK)
+    INNER JOIN Item WITH (NOLOCK)
+        ON Item.CompanyName = pvi.CompanyName
+       AND Item.ItemCode = pvi.ItemCode
+    INNER JOIN PurchaseVoucher pv WITH (NOLOCK)
+        ON pv.StoreInwardNo = pvi.StoreInwardNo
+       AND pv.CompanyName = pvi.CompanyName
+    WHERE pv.CompanyName = @Company
+      AND pvi.ItemCode = @Item
+      AND pv.SysDate > @From
+      AND pv.SysDate < @ToEnd
+      AND Item.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
+      AND NOT EXISTS (
+            SELECT 1
+            FROM Vw_StoreInwards s WITH (NOLOCK)
+            WHERE s.Cancel <> 'Cancelled'
+              AND s.SrNo = pv.StoreInwardNo
+              AND s.CompanyName = pv.CompanyName
+              AND s.ItemCode = pvi.ItemCode
+      )
+    GROUP BY CAST(pv.SysDate AS date), ISNULL(pv.StoreInwardNo, '');
+
+    /* Qty-difference debit note reduces purchase. */
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(v.Sysdate AS date),
+        'Purchase',
+        ISNULL(v.DebitNoteNumber, ''),
+        0,
+        SUM(v.QtyDifference)
+    FROM vw_DebitNote v WITH (NOLOCK)
+    INNER JOIN Item w WITH (NOLOCK)
+        ON w.ItemCode = v.ItemCode
+       AND w.CompanyName = v.CompanyName
+    WHERE v.CompanyName = @Company
+      AND v.ItemCode = @Item
+      AND v.Sysdate > @From
+      AND v.Sysdate < @ToEnd
+      AND w.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
+      AND v.DebitType = 'Qty Difference'
+    GROUP BY CAST(v.Sysdate AS date), ISNULL(v.DebitNoteNumber, '');
+
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(s.InvDate AS date),
+        'Sales',
+        ISNULL(s.InvNo, ''),
+        0,
+        SUM(i.Netwt)
+    FROM SalesVoucher s WITH (NOLOCK)
+    INNER JOIN SalesVoucherItem i WITH (NOLOCK)
+        ON s.companyId = i.companyId
+       AND s.CompanyName = i.CompanyName
+       AND s.InvNo = i.InvNo
+       AND s.InvDate = i.InvDate
+       AND s.InvYear = i.Invyear
+    INNER JOIN Item c WITH (NOLOCK)
+        ON c.CompanyName = i.CompanyName
+       AND c.ItemCode = i.ItemCode
+    WHERE s.CompanyName = @Company
+      AND i.ItemCode = @Item
+      AND s.InvDate > @From
+      AND s.InvDate < @ToEnd
+      AND c.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
+      AND s.VoucherType <> 'Job Invoice'
+    GROUP BY CAST(s.InvDate AS date), ISNULL(s.InvNo, '');
+
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(sysdate AS date),
+        CASE
+            WHEN NewGSTNo = factoryGSTNo THEN 'Br Transfer Sent'
+            ELSE 'Sent for JW (Own)'
+        END,
+        ISNULL(ChallanNo, ''),
+        0,
+        SUM(ItemQty)
+    FROM Despatch.dbo.vw_challan5a WITH (NOLOCK)
+    WHERE companyname = @Company
+      AND ItemCode = @Item
+      AND sysdate > @From
+      AND sysdate < @ToEnd
+      AND Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
+      AND (iscancel IS NULL OR iscancel = '')
+    GROUP BY
+        CAST(sysdate AS date),
+        CASE
+            WHEN NewGSTNo = factoryGSTNo THEN 'Br Transfer Sent'
+            ELSE 'Sent for JW (Own)'
+        END,
+        ISNULL(ChallanNo, '');
+
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(sysdate AS date),
+        'Total Production Own+JW',
+        '',
+        SUM(qty),
+        0
+    FROM vw_production_stk_FG WITH (NOLOCK)
+    WHERE companyname = @Company
+      AND ItemCode = @Item
+      AND sysdate > @From
+      AND sysdate < @ToEnd
+      AND Deptt IN ('RM', 'SF', 'FG')
+    GROUP BY CAST(sysdate AS date);
+
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(v.Date AS date),
+        'Production Of JW',
+        ISNULL(v.MainChallanNo, ''),
+        0,
+        SUM(v.Qty)
+    FROM Despatch.dbo.vw_SubChallanListMulti v WITH (NOLOCK)
+    INNER JOIN Despatch.dbo.vw_subsidiaryChallanItem o WITH (NOLOCK)
+        ON o.ProcessorName = v.ProcessorName
+       AND o.MainChallanDate = v.MainChallanDate
+       AND o.MainChallanNo = v.MainChallanNo
+    WHERE v.ProcessorName = @Company
+      AND v.ItemCode = @Item
+      AND v.Date > @From
+      AND v.Date < @ToEnd
+      AND o.Itemcode <> v.ItemCode
+      AND ISNULL(o.isfreeze, 0) = 0
+      AND (
+            (v.Deptt = 'RM' AND o.SubGroupName <> v.SubGroupName)
+         OR v.Deptt IN ('SF', 'FG', 'RM Consumables')
+      )
+    GROUP BY CAST(v.Date AS date), ISNULL(v.MainChallanNo, '');
+
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(sysdate AS date),
+        'Total Consumption Own+JW',
+        '',
+        0,
+        SUM(qty)
+    FROM vw_consumption_stk_FG WITH (NOLOCK)
+    WHERE companyname = @Company
+      AND ItemCode = @Item
+      AND sysdate > @From
+      AND sysdate < @ToEnd
+      AND Deptt IN ('RM', 'SF', 'FG')
+    GROUP BY CAST(sysdate AS date);
+
+    /* Added back so net consumption = total consumption − consumption of JW. */
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(v.Date AS date),
+        'Consumption of JW',
+        ISNULL(v.MainChallanNo, ''),
+        SUM(v.Qty),
+        0
+    FROM Despatch.dbo.vw_SubChallanListMulti v WITH (NOLOCK)
+    INNER JOIN Despatch.dbo.vw_subsidiaryChallanItem o WITH (NOLOCK)
+        ON o.ProcessorName = v.ProcessorName
+       AND o.MainChallanDate = v.MainChallanDate
+       AND o.MainChallanNo = v.MainChallanNo
+       AND v.commodityname = o.commodityname
+    WHERE v.ProcessorName = @Company
+      AND o.ItemCode = @Item
+      AND v.Date > @From
+      AND v.Date < @ToEnd
+      AND o.SubGroupName <> v.SubGroupName
+      AND o.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
+      AND ISNULL(o.isfreeze, 0) = 0
+    GROUP BY CAST(v.Date AS date), ISNULL(v.MainChallanNo, '');
+
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(p.dSysdate AS date),
+        'Stock Adjustment Entry',
+        '',
+        0,
+        SUM(p.fPendingQty)
+    FROM Prod_RMD_InOut p WITH (NOLOCK)
+    INNER JOIN Item i WITH (NOLOCK)
+        ON i.ItemCode = p.FGITEMCODE
+       AND i.CompanyName = p.vCompanyName
+    WHERE p.vCompanyName = @Company
+      AND p.FGITEMCODE = @Item
+      AND p.dSysdate > @From
+      AND p.dSysdate < @ToEnd
+      AND p.vToGodown = 'Stock Adjustment Entry'
+      AND i.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
+    GROUP BY CAST(p.dSysdate AS date);
+
+    INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+    SELECT
+        CAST(v.Sysdate AS date),
+        'Stock Adjustment Entry',
+        '',
+        0,
+        SUM(v.qty)
+    FROM WarehousetoWareHouse v WITH (NOLOCK)
+    INNER JOIN WareHouse w WITH (NOLOCK)
+        ON w.ItemCode = v.ItemCode
+       AND w.CompanyName = v.CompanyName
+       AND w.WareHouseName = v.ToWareHouse
+    WHERE v.CompanyName = @Company
+      AND v.ItemCode = @Item
+      AND v.Sysdate > @From
+      AND v.Sysdate < @ToEnd
+      AND v.ToWareHouse = 'Stock Adjustment Entry'
+      AND w.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
+    GROUP BY CAST(v.Sysdate AS date);
+
+    DECLARE @Inward decimal(18, 3) = ISNULL((SELECT SUM(InwardQty) FROM #txn), 0);
+    DECLARE @Outward decimal(18, 3) = ISNULL((SELECT SUM(OutwardQty) FROM #txn), 0);
+    DECLARE @Closing decimal(18, 3) = @Opening + @Inward - @Outward;
+
+    SELECT
+        @Company AS CompanyName,
+        @Item AS ItemCode,
+        @ItemName AS ItemName,
+        @DateFrom AS DateFrom,
+        @DateTo AS DateTo,
+        LineType,
+        MovementType,
+        InwardQty,
+        OutwardQty,
+        Balance
+    FROM (
+        SELECT
+            0 AS SortNo,
+            'Opening' AS LineType,
+            '' AS MovementType,
+            CAST(0 AS decimal(18, 3)) AS InwardQty,
+            CAST(0 AS decimal(18, 3)) AS OutwardQty,
+            @Opening AS Balance
+        UNION ALL
+        SELECT
+            1,
+            'Movement',
+            MovementType,
+            SUM(InwardQty),
+            SUM(OutwardQty),
+            SUM(InwardQty) - SUM(OutwardQty)
+        FROM #txn
+        GROUP BY MovementType
+        UNION ALL
+        SELECT
+            2,
+            'Closing',
+            '',
+            @Inward,
+            @Outward,
+            @Closing
+    ) summary
+    ORDER BY SortNo, MovementType;
+
+    SELECT
+        @Company AS CompanyName,
+        @Item AS ItemCode,
+        @ItemName AS ItemName,
+        TxnDate,
+        MovementType,
+        DocNo,
+        InwardQty,
+        OutwardQty,
+        @Opening + SUM(InwardQty - OutwardQty) OVER (
+            ORDER BY TxnDate, MovementType, DocNo
+            ROWS UNBOUNDED PRECEDING
+        ) AS Balance
+    FROM #txn
+    ORDER BY TxnDate, MovementType, DocNo;
+END
+GO
