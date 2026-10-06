@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Download, Loader2, Search, X } from "lucide-react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, Download, Loader2, RefreshCw, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,8 @@ const HEADCOUNT_BY: { id: HeadcountBy; label: string; column: string }[] = [
   { id: "companies", label: "Company", column: "Company" },
   { id: "originStates", label: "Origin state", column: "State" },
 ];
+
+const PAGE_SIZE = 200;
 
 const selectClass =
   "h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20";
@@ -65,6 +67,9 @@ export function HrEmployeeMaster({ username }: { username: string }) {
   const [headcountBy, setHeadcountBy] = useState<HeadcountBy>("designations");
   const [headcountFilter, setHeadcountFilter] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -73,21 +78,42 @@ export function HrEmployeeMaster({ username }: { username: string }) {
 
   const filters = { company, status, designation, department, search: debouncedSearch };
 
+  useEffect(() => {
+    setLimit(PAGE_SIZE);
+  }, [company, status, designation, department, debouncedSearch]);
+
   const companiesQuery = useQuery({
     queryKey: ["hr-master-companies", username],
     queryFn: () => getHrMasterCompanies(username),
     enabled: !!username,
-    staleTime: 10 * 60_000,
+    staleTime: 30 * 60_000,
+    gcTime: 60 * 60_000,
   });
 
   const reportQuery = useQuery({
-    queryKey: ["hr-master", username, filters],
-    queryFn: () => getHrMasterReport(filters, username),
+    queryKey: ["hr-master", username, filters, limit],
+    queryFn: () => getHrMasterReport(filters, username, limit),
     enabled: !!username,
     placeholderData: keepPreviousData,
-    staleTime: 2 * 60_000,
+    staleTime: 10 * 60_000,
+    gcTime: 60 * 60_000,
   });
   const report = reportQuery.data;
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      const fresh = await getHrMasterReport(filters, username, limit, true);
+      queryClient.removeQueries({ queryKey: ["hr-master"] });
+      queryClient.setQueryData(["hr-master", username, filters, limit], fresh);
+      void queryClient.invalidateQueries({ queryKey: ["hr-master-companies"] });
+      toast.success("HR data reloaded from the ERP");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Refresh failed");
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const headcountRows = useMemo(() => {
     const rows: HrHeadcountRow[] = report?.[headcountBy] ?? [];
@@ -130,11 +156,35 @@ export function HrEmployeeMaster({ username }: { username: string }) {
               Personal details, origin, joining and exit, salary and increments, PF/ESIC, headcount and
               attrition from the ERP{report ? ` · ${report.fyLabel}` : ""}.
             </p>
+            {report?.dataAsOf ? (
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Data as of{" "}
+                {new Date(report.dataAsOf).toLocaleString("en-IN", {
+                  day: "2-digit",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}{" "}
+                · refreshes automatically every 30 minutes
+              </p>
+            ) : null}
           </div>
-          <Button onClick={handleExport} disabled={exporting || !report} className="shrink-0 gap-2">
-            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            Download full Excel
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={refreshing || !report}
+              className="gap-2"
+              title="Reload the latest data from the ERP"
+            >
+              <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+              Refresh
+            </Button>
+            <Button onClick={handleExport} disabled={exporting || !report} className="gap-2">
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Download full Excel
+            </Button>
+          </div>
         </div>
 
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -405,8 +455,8 @@ export function HrEmployeeMaster({ username }: { username: string }) {
             <div className="space-y-2 rounded-xl border border-border bg-card p-4 shadow-sm">
               {report.employeeTotal > report.employees.length ? (
                 <p className="text-xs text-muted-foreground">
-                  Showing first {num(report.employees.length)} of {num(report.employeeTotal)}. Narrow the search or
-                  download the Excel for the full list.
+                  Showing first {num(report.employees.length)} of {num(report.employeeTotal)}. Use Show more below,
+                  narrow the search, or download the Excel for the full list.
                 </p>
               ) : null}
               <div className="overflow-x-auto">
@@ -490,6 +540,19 @@ export function HrEmployeeMaster({ username }: { username: string }) {
               </div>
               {report.employees.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-foreground">No employees match these filters.</p>
+              ) : null}
+              {report.employeeTotal > report.employees.length ? (
+                <div className="flex justify-center pt-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setLimit((l) => Math.min(l + 500, 5000))}
+                    disabled={reportQuery.isFetching || limit >= 5000}
+                    className="gap-2"
+                  >
+                    {reportQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Show more ({num(report.employeeTotal - report.employees.length)} remaining)
+                  </Button>
+                </div>
               ) : null}
             </div>
           ) : null}

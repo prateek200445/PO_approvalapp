@@ -17,13 +17,17 @@ public class HrMasterController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> Get([FromQuery] HrMasterQuery query, [FromQuery] string username = "", [FromQuery] int limit = 1000)
+    public async Task<IActionResult> Get(
+        [FromQuery] HrMasterQuery query,
+        [FromQuery] string username = "",
+        [FromQuery] int limit = 200,
+        [FromQuery] bool refresh = false)
     {
         try
         {
             var denied = await DenyUnlessFullAccess(username);
             if (denied != null) return denied;
-            return Ok(await _service.GetReportAsync(query, Math.Clamp(limit, 1, 5000)));
+            return Ok(await _service.GetReportAsync(query, Math.Clamp(limit, 1, 5000), refresh));
         }
         catch (Exception ex)
         {
