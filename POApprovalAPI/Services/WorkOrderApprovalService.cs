@@ -61,7 +61,15 @@ public class WorkOrderApprovalService
                   FROM ApproveWorkOrder wo
                   LEFT JOIN PurchasePayment pp ON pp.PurchaseCode = wo.PoNo
                   LEFT JOIN loginentry..loginrights lr ON lr.NAME = pp.LOGINNAME
-                  LEFT JOIN poallocation pa ON pa.username = wo.ApprovalName
+                  OUTER APPLY (
+                      SELECT TOP 1 x.authority
+                      FROM poallocation x
+                      WHERE x.username = wo.ApprovalName
+                      ORDER BY CASE WHEN x.CompanyName = pp.CompanyName THEN 0
+                                    WHEN x.CompanyName = '*' THEN 1
+                                    ELSE 2 END,
+                               x.authority
+                  ) pa
                   WHERE wo.TransId = @transId",
                 new { transId });
 
@@ -161,7 +169,7 @@ public class WorkOrderApprovalService
 
             await connection.ExecuteAsync(
                 @"UPDATE PurchasePayment
-                  SET PoSignal = @Signal,
+                  SET PoSignal = CASE WHEN PoSignal = '*' THEN '*' ELSE @Signal END,
                       ApprovalRemarks = CASE
                           WHEN NULLIF(LTRIM(RTRIM(@Remarks)), '') IS NULL THEN ApprovalRemarks
                           ELSE LEFT(LTRIM(RTRIM(@Remarks)), 1000)
