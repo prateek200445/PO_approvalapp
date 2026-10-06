@@ -90,6 +90,7 @@ export type HrMasterEmployee = {
 
 export type HrMasterReport = {
   generatedAt: string;
+  dataAsOf: string;
   fyLabel: string;
   summary: HrMasterSummary;
   designations: HrHeadcountRow[];
@@ -124,9 +125,15 @@ async function readError(res: Response): Promise<string> {
   return `Request failed (${res.status})`;
 }
 
-export async function getHrMasterReport(filters: HrMasterFilters, username: string): Promise<HrMasterReport> {
+export async function getHrMasterReport(
+  filters: HrMasterFilters,
+  username: string,
+  limit = 200,
+  refresh = false,
+): Promise<HrMasterReport> {
   const params = buildParams(filters, username);
-  params.set("limit", "1000");
+  params.set("limit", String(limit));
+  if (refresh) params.set("refresh", "true");
   const res = await fetch(getApiUrl(`/api/hr/master?${params}`));
   if (!res.ok) throw new Error(await readError(res));
   return (await res.json()) as HrMasterReport;

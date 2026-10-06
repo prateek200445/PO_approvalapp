@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
@@ -14,36 +15,44 @@ namespace POApprovalAPI.Services;
 public sealed class HrMasterService
 {
     private const int WageDaysPerMonth = 26;
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
-    private static readonly SemaphoreSlim CacheLock = new(1, 1);
-    private static (DateTime LoadedAt, List<Employee> Employees)? _cache;
+
+    // Requests inside FreshFor are served from memory; older data (up to ServeStaleFor) is still returned instantly
+    // while one background reload runs, so users only wait for the ERP on a cold start.
+    private static readonly TimeSpan FreshFor = TimeSpan.FromMinutes(35);
+    private static readonly TimeSpan ServeStaleFor = TimeSpan.FromHours(12);
+    private static readonly object RefreshGate = new();
+    private static Snapshot? _snapshot;
+    private static Task<Snapshot>? _refreshTask;
 
     private readonly DatabaseService _database;
+    private readonly ILogger<HrMasterService> _logger;
 
-    public HrMasterService(DatabaseService database)
+    public HrMasterService(DatabaseService database, ILogger<HrMasterService> logger)
     {
         _database = database;
+        _logger = logger;
     }
 
-    public async Task<HrMasterReportDto> GetReportAsync(HrMasterQuery query, int employeeLimit = 1000)
+    public async Task<HrMasterReportDto> GetReportAsync(HrMasterQuery query, int employeeLimit = 200, bool refresh = false)
     {
-        var all = await LoadAsync();
-        var scoped = ApplyScope(all, query);
+        var snap = await GetSnapshotAsync(refresh);
         var fy = ResolveFy(query.FyStartYear);
-        var listed = FilterList(scoped, query, fy).ToList();
+        var stats = StatsFor(snap, query, fy);
+        var listed = FilterList(stats.Scoped, query, fy).ToList();
 
         return new HrMasterReportDto
         {
             GeneratedAt = DateTime.Now,
+            DataAsOf = snap.LoadedAt,
             FyLabel = fy.Label,
-            Summary = BuildSummary(scoped, fy),
-            Designations = Headcount(scoped, e => e.Designation),
-            Departments = Headcount(scoped, e => e.Department),
-            Companies = Headcount(scoped, e => e.Company),
-            OriginStates = Headcount(scoped, e => e.OriginState),
-            Attrition = BuildAttrition(scoped, fy),
-            AttritionByCompany = AttritionByGroup(scoped, fy, e => e.Company),
-            AttritionByDepartment = AttritionByGroup(scoped, fy, e => e.Department),
+            Summary = stats.Summary,
+            Designations = stats.Designations,
+            Departments = stats.Departments,
+            Companies = stats.Companies,
+            OriginStates = stats.OriginStates,
+            Attrition = stats.Attrition,
+            AttritionByCompany = stats.AttritionByCompany,
+            AttritionByDepartment = stats.AttritionByDepartment,
             EmployeeTotal = listed.Count,
             Employees = listed.Take(Math.Max(1, employeeLimit)).Select(ToDto).ToList(),
         };
@@ -51,20 +60,26 @@ public sealed class HrMasterService
 
     public async Task<IReadOnlyList<string>> GetCompaniesAsync()
     {
-        var all = await LoadAsync();
-        return all.Where(e => e.IsCurrent).Select(e => e.Company)
-            .Where(c => c != "—").Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList();
+        var snap = await GetSnapshotAsync();
+        return snap.CompanyNames;
+    }
+
+    /// <summary>Reloads from the ERP and precomputes the default (all companies, current FY) view.</summary>
+    public async Task WarmAsync()
+    {
+        var snap = await RefreshAsync();
+        StatsFor(snap, new HrMasterQuery(), ResolveFy(null));
     }
 
     public async Task<byte[]> BuildExcelAsync(HrMasterQuery query)
     {
-        var all = await LoadAsync();
-        var scoped = ApplyScope(all, query);
+        var snap = await GetSnapshotAsync();
         var fy = ResolveFy(query.FyStartYear);
+        var stats = StatsFor(snap, query, fy);
+        var scoped = stats.Scoped;
         var listed = FilterList(scoped, query, fy).ToList();
-        var summary = BuildSummary(scoped, fy);
-        var attrition = BuildAttrition(scoped, fy);
+        var summary = stats.Summary;
+        var attrition = stats.Attrition;
 
         using var wb = new XLWorkbook();
 
@@ -238,9 +253,9 @@ public sealed class HrMasterService
         at.Cell(r, 7).Value = summary.AttritionFyPct;
         at.Row(r).Style.Font.SetBold();
         r += 2;
-        r = WriteAttritionGroup(at, r, "Company", AttritionByGroup(scoped, fy, e => e.Company));
+        r = WriteAttritionGroup(at, r, "Company", stats.AttritionByCompany);
         r += 1;
-        WriteAttritionGroup(at, r, "Department", AttritionByGroup(scoped, fy, e => e.Department));
+        WriteAttritionGroup(at, r, "Department", stats.AttritionByDepartment);
         at.Columns().AdjustToContents(1, 40);
 
         var lv = wb.AddWorksheet($"Leavers {fy.Label}".Replace("/", "-"));
@@ -320,13 +335,12 @@ public sealed class HrMasterService
             : rows.OrderBy(e => e.Company).ThenBy(e => e.Name);
     }
 
-    private static HrMasterSummaryDto BuildSummary(List<Employee> scoped, Fy fy)
+    private static HrMasterSummaryDto BuildSummary(List<Employee> scoped, Fy fy, List<HrAttritionMonthDto> months)
     {
         var today = DateTime.Today;
         var current = scoped.Where(e => e.IsCurrent).ToList();
         var leavers = scoped.Count(e => e.ExitDate >= fy.Start && e.ExitDate < fy.EndExclusive);
         var joiners = scoped.Count(e => e.DateOfJoining >= fy.Start && e.DateOfJoining < fy.EndExclusive);
-        var months = BuildAttrition(scoped, fy);
         var avgHeadcount = months.Count == 0 ? 0 : months.Average(m => m.AvgHeadcount);
         var tenures = current.Select(e => e.TenureYears(today)).Where(t => t != null).Select(t => t!.Value).ToList();
         var ages = current.Select(e => e.Age(today)).Where(a => a is > 14 and < 90).Select(a => a!.Value).ToList();
@@ -433,20 +447,65 @@ public sealed class HrMasterService
         return new Fy(start, start.AddYears(1), $"FY {y}-{(y + 1) % 100:00}");
     }
 
-    private async Task<List<Employee>> LoadAsync()
+    private static ScopeStats StatsFor(Snapshot snap, HrMasterQuery q, Fy fy)
     {
-        if (_cache is { } hit && DateTime.UtcNow - hit.LoadedAt < CacheTtl) return hit.Employees;
-        await CacheLock.WaitAsync();
+        var key = $"{(q.Company ?? "").Trim()}|{(q.Branch ?? "").Trim()}|{fy.Start.Year}";
+        return snap.Stats.GetOrAdd(key, _ => new Lazy<ScopeStats>(() =>
+        {
+            var scoped = ApplyScope(snap.Employees, q);
+            var attrition = BuildAttrition(scoped, fy);
+            return new ScopeStats(
+                scoped,
+                BuildSummary(scoped, fy, attrition),
+                Headcount(scoped, e => e.Designation),
+                Headcount(scoped, e => e.Department),
+                Headcount(scoped, e => e.Company),
+                Headcount(scoped, e => e.OriginState),
+                attrition,
+                AttritionByGroup(scoped, fy, e => e.Company),
+                AttritionByGroup(scoped, fy, e => e.Department));
+        })).Value;
+    }
+
+    private async Task<Snapshot> GetSnapshotAsync(bool forceRefresh = false)
+    {
+        var snap = _snapshot;
+        if (!forceRefresh && snap != null)
+        {
+            var age = DateTime.UtcNow - snap.LoadedAt;
+            if (age < FreshFor) return snap;
+            if (age < ServeStaleFor)
+            {
+                _ = RefreshAsync().ContinueWith(
+                    t => _logger.LogWarning(t.Exception, "HR master background refresh failed."),
+                    TaskContinuationOptions.OnlyOnFaulted);
+                return snap;
+            }
+        }
+        return await RefreshAsync();
+    }
+
+    private Task<Snapshot> RefreshAsync()
+    {
+        lock (RefreshGate)
+        {
+            return _refreshTask ??= LoadSnapshotAsync();
+        }
+    }
+
+    private async Task<Snapshot> LoadSnapshotAsync()
+    {
         try
         {
-            if (_cache is { } again && DateTime.UtcNow - again.LoadedAt < CacheTtl) return again.Employees;
+            await Task.Yield();
             var employees = await LoadFromErpAsync();
-            _cache = (DateTime.UtcNow, employees);
-            return employees;
+            var snap = new Snapshot(DateTime.UtcNow, employees);
+            _snapshot = snap;
+            return snap;
         }
         finally
         {
-            CacheLock.Release();
+            lock (RefreshGate) _refreshTask = null;
         }
     }
 
@@ -747,6 +806,34 @@ WHERE ISNULL(LTRIM(RTRIM(EmpCode)), '') <> '' AND FromDate IS NOT NULL", command
 
     private sealed record Fy(DateTime Start, DateTime EndExclusive, string Label);
 
+    private sealed class Snapshot
+    {
+        public Snapshot(DateTime loadedAt, List<Employee> employees)
+        {
+            LoadedAt = loadedAt;
+            Employees = employees;
+            CompanyNames = employees.Where(e => e.IsCurrent).Select(e => e.Company)
+                .Where(c => c != "—").Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(c => c, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        public DateTime LoadedAt { get; }
+        public List<Employee> Employees { get; }
+        public IReadOnlyList<string> CompanyNames { get; }
+        public ConcurrentDictionary<string, Lazy<ScopeStats>> Stats { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed record ScopeStats(
+        List<Employee> Scoped,
+        HrMasterSummaryDto Summary,
+        List<HrHeadcountRowDto> Designations,
+        List<HrHeadcountRowDto> Departments,
+        List<HrHeadcountRowDto> Companies,
+        List<HrHeadcountRowDto> OriginStates,
+        List<HrAttritionMonthDto> Attrition,
+        List<HrAttritionGroupDto> AttritionByCompany,
+        List<HrAttritionGroupDto> AttritionByDepartment);
+
     private sealed record Increment(DateTime Date, decimal Amount, decimal? Pct);
 
     private sealed class SalaryBand
@@ -984,6 +1071,7 @@ public sealed class HrMasterQuery
 public sealed class HrMasterReportDto
 {
     public DateTime GeneratedAt { get; set; }
+    public DateTime DataAsOf { get; set; }
     public string FyLabel { get; set; } = "";
     public HrMasterSummaryDto Summary { get; set; } = new();
     public List<HrHeadcountRowDto> Designations { get; set; } = new();
