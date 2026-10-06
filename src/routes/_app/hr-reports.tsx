@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowLeft,
   BookOpen,
   CalendarCheck,
+  ChevronRight,
   CalendarDays,
   ClipboardCheck,
   Download,
@@ -22,7 +24,11 @@ import { HrAddEmployeeForm } from "@/components/HrAddEmployeeForm";
 import { HrAttendanceEditDialog } from "@/components/HrAttendanceEditDialog";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
-import { HR_REPORTS_FULL_ACCESS_USERS, isHrAttendanceEditor } from "@/lib/feature-flags";
+import {
+  HR_REPORTS_FULL_ACCESS_USERS,
+  isHrAttendanceEditor,
+  isHrReportsFullAccessUser,
+} from "@/lib/feature-flags";
 import {
   currentYearMonth,
   downloadHrAttendanceExcel,
@@ -53,12 +59,114 @@ import {
   type HrLeaveApplication,
 } from "@/lib/hr-reports-api";
 
-type HrTab = "attendance" | "leave" | "wfh" | "verify" | "policy" | "employee";
+const HR_TABS = ["attendance", "leave", "wfh", "verify", "policy", "employee"] as const;
+type HrTab = (typeof HR_TABS)[number];
 
 export const Route = createFileRoute("/_app/hr-reports")({
   head: () => ({ meta: [{ title: "HR Reports — PO Portal" }] }),
-  component: HrReportsPage,
+  validateSearch: (search: Record<string, unknown>): { tab?: HrTab } =>
+    typeof search.tab === "string" && (HR_TABS as readonly string[]).includes(search.tab)
+      ? { tab: search.tab as HrTab }
+      : {},
+  component: HrReportsRoute,
 });
+
+function HrReportsRoute() {
+  const { tab } = Route.useSearch();
+  const { user } = useAuth();
+  if (!tab && isHrReportsFullAccessUser(user?.username)) return <HrReportsHub />;
+  return <HrReportsPage key={tab ?? "default"} initialTab={tab} />;
+}
+
+function HrReportsHub() {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">HR Reports</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Attendance, leave, month-end verification, new employees and the employee master from the ERP.
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <HubCard
+          tab="attendance"
+          icon={CalendarDays}
+          title="Attendance & Salary"
+          description="Pick an employee to see month attendance, punches and the salary payable, with Excel downloads."
+        />
+        <HubCard
+          tab="leave"
+          icon={ClipboardCheck}
+          title="Leave Approvals"
+          description="Approve or reject pending leave and work-from-home requests; balances and attendance update."
+        />
+        <HubCard
+          tab="policy"
+          icon={BookOpen}
+          title="Leave Policy & PL Credit"
+          description="Attendance rules, monthly PL credit for head-office staff and employee confirmation (CL credit)."
+        />
+        <HubCard
+          tab="verify"
+          icon={CalendarCheck}
+          title="Month-end Verify"
+          description="Review and approve employees' month-end attendance verification requests."
+        />
+        <HubCard
+          tab="employee"
+          icon={UserPlus}
+          title="Add Employee"
+          description="Create a new employee in the ERP with personal, official, bank, PF/ESIC details and documents."
+        />
+        <HubCard
+          to="/hr-reports/employee-master"
+          icon={Users}
+          title="Employee Master"
+          description="One click for headcount by designation, attrition, joining/exit, salary increments, PF/ESIC and origin, with a full Excel."
+        />
+      </div>
+    </div>
+  );
+}
+
+function HubCard({
+  tab,
+  to,
+  icon: Icon,
+  title,
+  description,
+}: {
+  tab?: HrTab;
+  to?: "/hr-reports/employee-master";
+  icon: typeof BookOpen;
+  title: string;
+  description: string;
+}) {
+  const body = (
+    <>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Icon className="h-5 w-5" />
+        </div>
+        <ChevronRight className="h-5 w-5 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-foreground" />
+      </div>
+      <h2 className="mt-4 text-lg font-semibold">{title}</h2>
+      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{description}</p>
+    </>
+  );
+  const className =
+    "group rounded-xl border border-border bg-card p-5 shadow-sm transition hover:border-primary/40 hover:bg-secondary/30";
+  return to ? (
+    <Link to={to} className={className}>
+      {body}
+    </Link>
+  ) : (
+    <Link to="/hr-reports" search={{ tab }} className={className}>
+      {body}
+    </Link>
+  );
+}
 
 function todayIso() {
   const d = new Date();
@@ -71,7 +179,7 @@ function plusDaysIso(n: number) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function HrReportsPage() {
+function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
   const { user } = useAuth();
   const username = user?.username ?? "";
   const [yearMonth, setYearMonth] = useState(currentYearMonth);
@@ -87,7 +195,7 @@ function HrReportsPage() {
   const [dailyRate, setDailyRate] = useState("");
   const [workingDays, setWorkingDays] = useState("");
   const [exporting, setExporting] = useState<"att" | "sal" | null>(null);
-  const [tab, setTab] = useState<HrTab>("leave");
+  const [tab, setTab] = useState<HrTab>(initialTab ?? "leave");
   const [leaveType, setLeaveType] = useState("LWP");
   const [leaveFrom, setLeaveFrom] = useState(todayIso);
   const [leaveTo, setLeaveTo] = useState(todayIso);
@@ -467,10 +575,20 @@ function HrReportsPage() {
   return (
     <div className="space-y-5 pb-8">
       <div>
-        <div className="flex items-center gap-2 text-primary">
-          <Users className="h-5 w-5" />
-          <p className="text-xs font-semibold uppercase tracking-wide">HR</p>
-        </div>
+        {isFullAccess ? (
+          <Link
+            to="/hr-reports"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-primary hover:underline"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            HR Reports
+          </Link>
+        ) : (
+          <div className="flex items-center gap-2 text-primary">
+            <Users className="h-5 w-5" />
+            <p className="text-xs font-semibold uppercase tracking-wide">HR</p>
+          </div>
+        )}
         <h1 className="mt-1 text-2xl font-semibold tracking-tight md:text-3xl">HR Reports</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           {isFullAccess

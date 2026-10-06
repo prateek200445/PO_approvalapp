@@ -116,6 +116,7 @@ builder.Services.AddScoped<HrSelfServiceService>();
 builder.Services.AddScoped<HrEmployeeMasterService>();
 builder.Services.AddScoped<HrEmployeeDocumentService>();
 builder.Services.AddScoped<HrAttendanceEditService>();
+builder.Services.AddScoped<HrMasterService>();
 builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();
