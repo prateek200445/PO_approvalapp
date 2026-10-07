@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { getApiUrl } from "@/lib/api-config";
 import { useState, useEffect, useMemo, useRef } from "react";
 import type { MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from "react";
-import { Search, ArrowUpDown, Filter, X, CheckSquare, Loader2 } from "lucide-react";
+import { Search, ArrowUpDown, Filter, X, CheckSquare, Loader2, Building2 } from "lucide-react";
 import { formatINR, type POStatus } from "@/lib/mock-data";
 import { useAuth } from "@/lib/auth-context";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -19,6 +19,27 @@ import {
   matchesGroupCompany,
 } from "@/lib/group-company";
 
+type VendorType = "all" | "intercompany" | "external";
+
+const VENDOR_TYPE_OPTIONS: { id: VendorType; label: string }[] = [
+  { id: "all", label: "All vendors" },
+  { id: "intercompany", label: "Intercompany only" },
+  { id: "external", label: "Exclude intercompany" },
+];
+
+// The API flags a PO as intercompany when its vendor is an ERP ledger with IsInterCompany = 'yes'.
+function isIntercompany(p: { IsInterCompany?: number | boolean | null }) {
+  return Number(p.IsInterCompany ?? 0) === 1 || p.IsInterCompany === true;
+}
+
+function IntercompanyBadge() {
+  return (
+    <span className="mr-1.5 inline-flex items-center rounded bg-sky-500/15 px-1.5 py-0.5 align-middle text-[10px] font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+      Intercompany
+    </span>
+  );
+}
+
 export const Route = createFileRoute("/_app/pending")({
   head: () => ({ meta: [{ title: "Pending POs — Approval Portal" }] }),
   component: PendingList,
@@ -34,6 +55,7 @@ function PendingList() {
   const [status, setStatus] = useState<"All" | POStatus>("Pending");
   const [group, setGroup] = useState(ALL_GROUPS);
   const [company, setCompany] = useState("All");
+  const [vendorType, setVendorType] = useState<VendorType>("all");
   const [sortDesc, setSortDesc] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [showFilterSheet, setShowFilterSheet] = useState(false);
@@ -42,6 +64,8 @@ function PendingList() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+  const [bulkIds, setBulkIds] = useState<number[]>([]);
+  const [bulkIsIntercompany, setBulkIsIntercompany] = useState(false);
   const [bulkRemarks, setBulkRemarks] = useState("");
   const [isBulkApproving, setIsBulkApproving] = useState(false);
   const [isTouchSelecting, setIsTouchSelecting] = useState(false);
@@ -100,6 +124,8 @@ function PendingList() {
       const matchesStatus = status === "All" || p.Status === status;
       const matchesCompany =
         matchesGroupCompany(p, group) && (company === "All" || rowCompany === company);
+      const matchesVendorType =
+        vendorType === "all" || (vendorType === "intercompany") === isIntercompany(p);
 
       const poAmount = Number(p.Total || 0);
       const enteredAmount = Number(amount || 0);
@@ -111,7 +137,7 @@ function PendingList() {
             ? poAmount >= enteredAmount
             : poAmount <= enteredAmount;
 
-      return matchesSearch && matchesStatus && matchesCompany && matchesAmount;
+      return matchesSearch && matchesStatus && matchesCompany && matchesVendorType && matchesAmount;
     })
     .sort((a, b) =>
       sortDesc
@@ -121,7 +147,7 @@ function PendingList() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [q, amount, status, group, company, filterType, sortDesc]);
+  }, [q, amount, status, group, company, vendorType, filterType, sortDesc]);
 
   useEffect(() => {
     if (group !== ALL_GROUPS && !groupOptions.includes(group)) {
@@ -152,6 +178,14 @@ function PendingList() {
     () =>
       filtered
         .filter((p) => p.Status === "Pending" && (p.TransId ?? p.Transid))
+        .map((p) => Number(p.TransId ?? p.Transid)),
+    [filtered]
+  );
+
+  const intercompanyIds = useMemo(
+    () =>
+      filtered
+        .filter((p) => p.Status === "Pending" && (p.TransId ?? p.Transid) && isIntercompany(p))
         .map((p) => Number(p.TransId ?? p.Transid)),
     [filtered]
   );
@@ -484,8 +518,15 @@ function PendingList() {
     }
   }
 
+  function openBulkConfirm(ids: number[], intercompany: boolean) {
+    if (ids.length === 0) return;
+    setBulkIds(ids);
+    setBulkIsIntercompany(intercompany);
+    setShowBulkConfirm(true);
+  }
+
   async function runBulkApprove() {
-    if (!user?.username || selected.size === 0 || isBulkApproving) return;
+    if (!user?.username || bulkIds.length === 0 || isBulkApproving) return;
 
     setIsBulkApproving(true);
     try {
@@ -493,7 +534,7 @@ function PendingList() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          transIds: Array.from(selected),
+          transIds: bulkIds,
           remarks: bulkRemarks,
           userName: user.username,
         }),
@@ -522,6 +563,7 @@ function PendingList() {
       }
 
       exitSelectMode();
+      setBulkIds([]);
       void queryClient.invalidateQueries({ queryKey: ["pending-list"] });
       void queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
       void queryClient.invalidateQueries({ queryKey: ["pending-list-dashboard"] });
@@ -545,10 +587,22 @@ function PendingList() {
           </p>
         </div>
         <div className="flex w-full shrink-0 flex-wrap items-center justify-start gap-2 md:w-auto md:justify-end">
+          {!selectMode && intercompanyIds.length > 0 && (
+            <button
+              type="button"
+              onClick={() => openBulkConfirm(intercompanyIds, true)}
+              disabled={isBulkApproving}
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              title="Approve every pending PO whose vendor is a group company (intercompany ledger in the ERP)"
+            >
+              <Building2 className="h-4 w-4" />
+              Approve intercompany ({intercompanyIds.length})
+            </button>
+          )}
           {selectMode && selected.size > 0 && (
             <button
               type="button"
-              onClick={() => setShowBulkConfirm(true)}
+              onClick={() => openBulkConfirm(Array.from(selected), false)}
               disabled={isBulkApproving}
               className="hidden h-10 items-center rounded-md bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:inline-flex"
             >
@@ -635,6 +689,18 @@ function PendingList() {
               </option>
             ))}
           </select>
+          <select
+            value={vendorType}
+            onChange={(e) => setVendorType(e.target.value as VendorType)}
+            className="h-10 w-full min-w-0 rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 md:w-auto"
+            aria-label="Filter by vendor type"
+          >
+            {VENDOR_TYPE_OPTIONS.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.label}
+              </option>
+            ))}
+          </select>
           <div className="relative flex-1 md:flex-none">
             <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <select
@@ -695,9 +761,12 @@ function PendingList() {
           >
             <Filter className="h-4 w-4" />
             <span className="text-xs">Filters</span>
-            {(status !== "All" || company !== "All" || amount) && (
+            {(status !== "All" || company !== "All" || vendorType !== "all" || amount) && (
               <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-                {(status !== "All" ? 1 : 0) + (company !== "All" ? 1 : 0) + (amount ? 1 : 0)}
+                {(status !== "All" ? 1 : 0) +
+                  (company !== "All" ? 1 : 0) +
+                  (vendorType !== "all" ? 1 : 0) +
+                  (amount ? 1 : 0)}
               </span>
             )}
           </button>
@@ -711,8 +780,17 @@ function PendingList() {
           </button>
         </div>
 
-        {(status !== "All" || company !== "All" || amount) && (
+        {(status !== "All" || company !== "All" || vendorType !== "all" || amount) && (
           <div className="flex min-w-0 flex-wrap gap-1">
+            {vendorType !== "all" && (
+              <button
+                onClick={() => setVendorType("all")}
+                className="inline-flex items-center gap-1 rounded-full bg-primary/20 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/30 transition"
+              >
+                {VENDOR_TYPE_OPTIONS.find((o) => o.id === vendorType)?.label}
+                <X className="h-3 w-3" />
+              </button>
+            )}
             {status !== "All" && (
               <button
                 onClick={() => setStatus("All")}
@@ -788,6 +866,7 @@ function PendingList() {
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-semibold">{p.PoNo}</div>
                           <div className="mt-0.5 truncate text-sm text-muted-foreground">
+                            {isIntercompany(p) ? <IntercompanyBadge /> : null}
                             {p.FirmName || p.ApprovalName || "—"}
                           </div>
                         </div>
@@ -829,6 +908,7 @@ function PendingList() {
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold">{p.PoNo}</div>
                     <div className="mt-0.5 truncate text-sm text-muted-foreground">
+                      {isIntercompany(p) ? <IntercompanyBadge /> : null}
                       {p.FirmName || p.ApprovalName || "—"}
                     </div>
                   </div>
@@ -926,7 +1006,10 @@ function PendingList() {
                         </Link>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground">{p.FirmName || p.ApprovalName}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {isIntercompany(p) ? <IntercompanyBadge /> : null}
+                      {p.FirmName || p.ApprovalName}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">
                       {p.CompanyName || p.companyName || "—"}
                     </td>
@@ -1044,7 +1127,7 @@ function PendingList() {
             </div>
             <button
               type="button"
-              onClick={() => setShowBulkConfirm(true)}
+              onClick={() => openBulkConfirm(Array.from(selected), false)}
               disabled={isBulkApproving}
               className="h-11 shrink-0 rounded-md bg-primary px-5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
@@ -1064,8 +1147,13 @@ function PendingList() {
             className="w-full max-w-sm rounded-xl bg-card p-5 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-semibold">Approve {selected.size} PO{selected.size === 1 ? "" : "s"}?</h3>
+            <h3 className="text-base font-semibold">
+              Approve {bulkIds.length} {bulkIsIntercompany ? "intercompany " : ""}PO{bulkIds.length === 1 ? "" : "s"}?
+            </h3>
             <p className="mt-2 text-sm text-muted-foreground">
+              {bulkIsIntercompany
+                ? "Approves every pending PO in the current list whose vendor is a group company (intercompany ledger in the ERP). "
+                : ""}
               Each PO is approved with the same rules as single approve. Already-processed rows will be
               reported as failed without stopping the rest.
             </p>
@@ -1159,6 +1247,24 @@ function PendingList() {
             </div>
 
             <div className="mb-5 space-y-2">
+              <label className="text-sm font-medium" htmlFor="mobile-po-vendor-type">
+                Vendor
+              </label>
+              <select
+                id="mobile-po-vendor-type"
+                value={vendorType}
+                onChange={(e) => setVendorType(e.target.value as VendorType)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20"
+              >
+                {VENDOR_TYPE_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mb-5 space-y-2">
               <label className="text-sm font-medium">Amount</label>
               <div className="flex gap-2">
                 <input
@@ -1211,6 +1317,7 @@ function PendingList() {
                   setFilterType("gte");
                   setStatus("All");
                   setCompany("All");
+                  setVendorType("all");
                   setSortDesc(true);
                   setCurrentPage(1);
                 }}

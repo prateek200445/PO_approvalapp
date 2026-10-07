@@ -94,7 +94,12 @@ GROUP BY
     a.ApprovalDate,
     a.TransId
 )
-SELECT x.*, g.GroupName
+SELECT x.*, g.GroupName,
+    CASE WHEN EXISTS (
+        SELECT 1 FROM CommonLedgerMaster l WITH (NOLOCK)
+        WHERE LTRIM(RTRIM(l.IsInterCompany)) = 'yes'
+          AND LTRIM(RTRIM(l.LedgerName)) = LTRIM(RTRIM(x.FirmName))
+    ) THEN 1 ELSE 0 END AS IsInterCompany
 FROM pending x
 " + GroupCompanySql.OuterApply("x.CompanyName") + @"
 ORDER BY x.PODate DESC;";
