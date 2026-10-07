@@ -52,5 +52,6 @@ public class GstBillRecoRow
 
 public class GstBillRecoExportRequest
 {
+    public string? Username { get; set; }
     public List<GstBillRecoRow> Rows { get; set; } = [];
 }

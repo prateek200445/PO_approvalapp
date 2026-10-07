@@ -21,6 +21,15 @@ export function canAccessOrderBookSummary(username?: string | null): boolean {
   return ORDER_BOOK_SUMMARY_ALLOWED_USERS.some((u) => u.toLowerCase() === key);
 }
 
+/** GST Bill Reconciliation. Keep in sync with appsettings.json → GstBillReco:AllowedUsers. */
+export const GST_BILL_RECO_ALLOWED_USERS = ["prakash"] as const;
+
+export function canAccessGstBillReco(username?: string | null): boolean {
+  if (!username) return false;
+  const key = username.trim().toLowerCase();
+  return GST_BILL_RECO_ALLOWED_USERS.some((u) => u.toLowerCase() === key);
+}
+
 /**
  * HR Reports full access (see all employees / leave approve / leave credit / policy).
  * Keep in sync with POApprovalAPI appsettings.json → HrReports:FullAccessUsers.

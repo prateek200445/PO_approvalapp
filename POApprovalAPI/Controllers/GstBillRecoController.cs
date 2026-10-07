@@ -9,15 +9,19 @@ namespace POApprovalAPI.Controllers;
 public class GstBillRecoController : ControllerBase
 {
     private readonly GstBillRecoService _service;
+    private readonly IConfiguration _configuration;
 
-    public GstBillRecoController(GstBillRecoService service)
+    public GstBillRecoController(GstBillRecoService service, IConfiguration configuration)
     {
         _service = service;
+        _configuration = configuration;
     }
 
     [HttpGet("companies")]
-    public async Task<IActionResult> Companies(CancellationToken ct)
+    public async Task<IActionResult> Companies([FromQuery] string username, CancellationToken ct)
     {
+        if (!IsAllowed(username))
+            return StatusCode(403, new { message = "GST Bill Reconciliation is only available to Prakash." });
         try
         {
             return Ok(await _service.GetCompaniesAsync(ct));
@@ -38,8 +42,11 @@ public class GstBillRecoController : ControllerBase
         [FromForm] DateTime dateFrom,
         [FromForm] DateTime dateTo,
         [FromForm] decimal amountTolerance,
+        [FromForm] string username,
         CancellationToken ct)
     {
+        if (!IsAllowed(username))
+            return StatusCode(403, new { message = "GST Bill Reconciliation is only available to Prakash." });
         try
         {
             if (file == null || file.Length == 0)
@@ -68,6 +75,8 @@ public class GstBillRecoController : ControllerBase
     [HttpPost("export")]
     public IActionResult Export([FromBody] GstBillRecoExportRequest request)
     {
+        if (!IsAllowed(request.Username))
+            return StatusCode(403, new { message = "GST Bill Reconciliation is only available to Prakash." });
         try
         {
             var bytes = _service.Export(request.Rows ?? []);
@@ -82,5 +91,12 @@ public class GstBillRecoController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+    }
+
+    private bool IsAllowed(string? username)
+    {
+        var allowed = _configuration.GetSection("GstBillReco:AllowedUsers").Get<string[]>() ?? [];
+        var name = (username ?? "").Trim();
+        return name.Length > 0 && allowed.Any(user => string.Equals(user?.Trim(), name, StringComparison.OrdinalIgnoreCase));
     }
 }

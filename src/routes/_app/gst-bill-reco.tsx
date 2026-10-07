@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, Loader2, Search, Square, X, XCircle } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from "recharts";
@@ -8,6 +8,8 @@ import { DatePickerField } from "@/components/DatePickerField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAuth } from "@/lib/auth-context";
+import { canAccessGstBillReco } from "@/lib/feature-flags";
 import { cn } from "@/lib/utils";
 import {
   exportGstBillReco,
@@ -62,6 +64,9 @@ function statusClass(status: string) {
 }
 
 function GstBillRecoPage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const allowed = canAccessGstBillReco(user?.username);
   const queryClient = useQueryClient();
   const [company, setCompany] = useState("");
   const [dateFrom, setDateFrom] = useState(monthStartIso);
@@ -74,6 +79,7 @@ function GstBillRecoPage() {
     dateFrom: string;
     dateTo: string;
     amountTolerance: number;
+    username: string;
   } | null>(null);
   const [searchNonce, setSearchNonce] = useState(0);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("issues");
@@ -85,8 +91,9 @@ function GstBillRecoPage() {
   const [selected, setSelected] = useState<GstBillRecoRow | null>(null);
 
   const companiesQuery = useQuery({
-    queryKey: ["gst-bill-companies"],
-    queryFn: getGstBillCompanies,
+    queryKey: ["gst-bill-companies", user?.username],
+    queryFn: () => getGstBillCompanies(user?.username ?? ""),
+    enabled: allowed,
     staleTime: 30 * 60_000,
   });
 
@@ -128,6 +135,7 @@ function GstBillRecoPage() {
       dateFrom,
       dateTo,
       amountTolerance: Number(tolerance) || 0,
+      username: user?.username ?? "",
     });
     setSearchNonce((value) => value + 1);
   }
@@ -139,7 +147,7 @@ function GstBillRecoPage() {
   async function download(current: GstBillRecoResult) {
     setExporting(true);
     try {
-      const blob = await exportGstBillReco(current.rows);
+      const blob = await exportGstBillReco(current.rows, user?.username ?? "");
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -155,6 +163,18 @@ function GstBillRecoPage() {
 
   const loading = recoQuery.isFetching;
   const errorMessage = recoQuery.error && !isAbortError(recoQuery.error) ? (recoQuery.error as Error).message : "";
+
+  if (!allowed) {
+    return (
+      <div className="mx-auto max-w-lg space-y-3 rounded-xl border border-border bg-card p-6 text-center">
+        <h1 className="text-xl font-semibold">Restricted</h1>
+        <p className="text-sm text-muted-foreground">GST Bill Reconciliation is only available to Prakash.</p>
+        <Button variant="outline" onClick={() => navigate({ to: "/ledgers" })}>
+          Back to ledgers
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">

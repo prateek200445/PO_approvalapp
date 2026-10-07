@@ -1,5 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeftRight, BookOpen, ChevronRight, LineChart, Package } from "lucide-react";
+import { useAuth } from "@/lib/auth-context";
+import { canAccessGstBillReco } from "@/lib/feature-flags";
 
 export const Route = createFileRoute("/_app/ledgers")({
   head: () => ({ meta: [{ title: "Ledgers — PO Portal" }] }),
@@ -7,6 +9,8 @@ export const Route = createFileRoute("/_app/ledgers")({
 });
 
 function LedgersHubPage() {
+  const { user } = useAuth();
+  const showGstBillReco = canAccessGstBillReco(user?.username);
   return (
     <div className="space-y-5">
       <div>
@@ -47,12 +51,14 @@ function LedgersHubPage() {
           title="Ledger Reconciliation"
           description="Upload two company Excel ledgers and match Bill No + Bill Date (with voucher-date fallback)."
         />
-        <HubCard
-          to="/gst-bill-reco"
-          icon={ArrowLeftRight}
-          title="GST Bill Reconciliation"
-          description="Upload the monthly GSTR-2B file and match bill number, bill date, and GSTIN with the ERP GST summary."
-        />
+        {showGstBillReco && (
+          <HubCard
+            to="/gst-bill-reco"
+            icon={ArrowLeftRight}
+            title="GST Bill Reconciliation"
+            description="Upload the monthly GSTR-2B file and match bill number, bill date, and GSTIN with the ERP GST summary."
+          />
+        )}
       </div>
     </div>
   );

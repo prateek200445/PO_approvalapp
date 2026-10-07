@@ -116,8 +116,8 @@ async function readError(response: Response): Promise<string> {
   return "GST bill reconciliation failed.";
 }
 
-export async function getGstBillCompanies(): Promise<string[]> {
-  const response = await fetch(getApiUrl("/api/gst-bill-reco/companies"));
+export async function getGstBillCompanies(username: string): Promise<string[]> {
+  const response = await fetch(getApiUrl(`/api/gst-bill-reco/companies?username=${encodeURIComponent(username)}`));
   if (!response.ok) throw new Error(await readError(response));
   const payload = (await response.json()) as unknown;
   return Array.isArray(payload) ? payload.map((name) => str(name).trim()).filter(Boolean) : [];
@@ -130,10 +130,12 @@ export async function runGstBillReco(
     dateFrom: string;
     dateTo: string;
     amountTolerance: number;
+    username: string;
   },
   signal?: AbortSignal,
 ): Promise<GstBillRecoResult> {
   const body = new FormData();
+  body.append("username", input.username);
   body.append("file", input.file);
   body.append("companyName", input.companyName);
   body.append("dateFrom", input.dateFrom);
@@ -162,11 +164,11 @@ export async function runGstBillReco(
   };
 }
 
-export async function exportGstBillReco(rows: GstBillRecoRow[]): Promise<Blob> {
+export async function exportGstBillReco(rows: GstBillRecoRow[], username: string): Promise<Blob> {
   const response = await fetch(getApiUrl("/api/gst-bill-reco/export"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rows }),
+    body: JSON.stringify({ rows, username }),
   });
   if (!response.ok) throw new Error(await readError(response));
   return response.blob();
