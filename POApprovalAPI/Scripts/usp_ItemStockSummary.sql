@@ -6,9 +6,9 @@
     + each movement in the range
     = closing
 
-  Opening is dbo.usp_StockInHandAsOn on @DateFrom (stock at the start of that day).
-  Movements use the same sources and signs as that procedure, which match
-  Cl.Factory Owned in SP_STOCKANALYSIS_RPT_ALL.
+  Opening is today's WareHouse.StkInHand minus every movement after @DateFrom,
+  the same figure as dbo.usp_StockInHandAsOn. Each source is read once.
+  Signs match Cl.Factory Owned in SP_STOCKANALYSIS_RPT_ALL.
   Recd For JW (Others) / JBIN-OT is left out.
 
   Closing = Opening + Inward − Outward.
@@ -36,7 +36,6 @@ BEGIN
     DECLARE @Company varchar(150) = LTRIM(RTRIM(@CompanyName));
     DECLARE @Item varchar(50) = NULLIF(LTRIM(RTRIM(@ItemCode)), '');
     DECLARE @From datetime = CAST(@DateFrom AS datetime);
-    DECLARE @ToEnd datetime = DATEADD(day, 1, CAST(@DateTo AS datetime));
 
     IF @Item IS NULL
     BEGIN
@@ -50,30 +49,12 @@ BEGIN
         RETURN;
     END;
 
-    CREATE TABLE #open (
-        CompanyName       varchar(150),
-        ItemCode          varchar(50),
-        ItemName          varchar(200),
-        AsOnDate          date,
-        CurrentQty        decimal(18, 3),
-        NetMovementAfter  decimal(18, 3),
-        StockAsOn         decimal(18, 3)
-    );
-
-    INSERT #open
-    EXEC dbo.usp_StockInHandAsOn
-         @CompanyName = @Company,
-         @AsOnDate    = @DateFrom,
-         @ItemCode    = @Item;
-
-    DECLARE @ItemName varchar(200) = (SELECT MAX(ItemName) FROM #open);
-    DECLARE @Opening decimal(18, 3) = ISNULL((SELECT SUM(StockAsOn) FROM #open), 0);
-
-    IF @ItemName IS NULL
-        SELECT @ItemName = MAX(ItemName)
+    DECLARE @ItemName varchar(200) = (
+        SELECT MAX(ItemName)
         FROM Item WITH (NOLOCK)
         WHERE CompanyName = @Company
-          AND ItemCode = @Item;
+          AND ItemCode = @Item
+    );
 
     CREATE TABLE #txn (
         TxnDate       date,
@@ -101,7 +82,6 @@ BEGIN
       AND Cancel <> 'Cancelled'
       AND itemDeptt IN ('RM', 'SF', 'FG', 'RM Consumables')
       AND sysdate > @From
-      AND sysdate < @ToEnd
       AND ISNULL(Categoryseries, '') <> 'JBIN-OT'
     GROUP BY
         CAST(sysdate AS date),
@@ -130,7 +110,6 @@ BEGIN
       AND w.ItemCode = @Item
       AND w.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
       AND v.InwardDate > @From
-      AND v.InwardDate < @ToEnd
     GROUP BY CAST(v.InwardDate AS date);
 
     /* Purchase voucher only when that MRN is not already in Vw_StoreInwards. */
@@ -151,7 +130,6 @@ BEGIN
     WHERE pv.CompanyName = @Company
       AND pvi.ItemCode = @Item
       AND pv.SysDate > @From
-      AND pv.SysDate < @ToEnd
       AND Item.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
       AND NOT EXISTS (
             SELECT 1
@@ -178,7 +156,6 @@ BEGIN
     WHERE v.CompanyName = @Company
       AND v.ItemCode = @Item
       AND v.Sysdate > @From
-      AND v.Sysdate < @ToEnd
       AND w.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
       AND v.DebitType = 'Qty Difference'
     GROUP BY CAST(v.Sysdate AS date), ISNULL(v.DebitNoteNumber, '');
@@ -203,7 +180,6 @@ BEGIN
     WHERE s.CompanyName = @Company
       AND i.ItemCode = @Item
       AND s.InvDate > @From
-      AND s.InvDate < @ToEnd
       AND c.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
       AND s.VoucherType <> 'Job Invoice'
     GROUP BY CAST(s.InvDate AS date), ISNULL(s.InvNo, '');
@@ -222,7 +198,6 @@ BEGIN
     WHERE companyname = @Company
       AND ItemCode = @Item
       AND sysdate > @From
-      AND sysdate < @ToEnd
       AND Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
       AND (iscancel IS NULL OR iscancel = '')
     GROUP BY
@@ -244,7 +219,6 @@ BEGIN
     WHERE companyname = @Company
       AND ItemCode = @Item
       AND sysdate > @From
-      AND sysdate < @ToEnd
       AND Deptt IN ('RM', 'SF', 'FG')
     GROUP BY CAST(sysdate AS date);
 
@@ -263,7 +237,6 @@ BEGIN
     WHERE v.ProcessorName = @Company
       AND v.ItemCode = @Item
       AND v.Date > @From
-      AND v.Date < @ToEnd
       AND o.Itemcode <> v.ItemCode
       AND ISNULL(o.isfreeze, 0) = 0
       AND (
@@ -283,7 +256,6 @@ BEGIN
     WHERE companyname = @Company
       AND ItemCode = @Item
       AND sysdate > @From
-      AND sysdate < @ToEnd
       AND Deptt IN ('RM', 'SF', 'FG')
     GROUP BY CAST(sysdate AS date);
 
@@ -304,7 +276,6 @@ BEGIN
     WHERE v.ProcessorName = @Company
       AND o.ItemCode = @Item
       AND v.Date > @From
-      AND v.Date < @ToEnd
       AND o.SubGroupName <> v.SubGroupName
       AND o.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
       AND ISNULL(o.isfreeze, 0) = 0
@@ -324,7 +295,6 @@ BEGIN
     WHERE p.vCompanyName = @Company
       AND p.FGITEMCODE = @Item
       AND p.dSysdate > @From
-      AND p.dSysdate < @ToEnd
       AND p.vToGodown = 'Stock Adjustment Entry'
       AND i.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
     GROUP BY CAST(p.dSysdate AS date);
@@ -344,10 +314,23 @@ BEGIN
     WHERE v.CompanyName = @Company
       AND v.ItemCode = @Item
       AND v.Sysdate > @From
-      AND v.Sysdate < @ToEnd
       AND v.ToWareHouse = 'Stock Adjustment Entry'
       AND w.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
     GROUP BY CAST(v.Sysdate AS date);
+
+    DECLARE @Current decimal(18, 3) = ISNULL((
+        SELECT SUM(ISNULL(w.StkInHand, 0))
+        FROM WareHouse w WITH (NOLOCK)
+        INNER JOIN Item i WITH (NOLOCK)
+            ON i.ItemCode = w.ItemCode
+           AND i.CompanyName = w.CompanyName
+        WHERE w.CompanyName = @Company
+          AND w.ItemCode = @Item
+          AND i.Deptt IN ('RM', 'SF', 'FG', 'RM Consumables')
+    ), 0);
+    DECLARE @Opening decimal(18, 3) = @Current - ISNULL((SELECT SUM(InwardQty - OutwardQty) FROM #txn), 0);
+
+    DELETE FROM #txn WHERE TxnDate > @DateTo;
 
     DECLARE @Inward decimal(18, 3) = ISNULL((SELECT SUM(InwardQty) FROM #txn), 0);
     DECLARE @Outward decimal(18, 3) = ISNULL((SELECT SUM(OutwardQty) FROM #txn), 0);

@@ -92,29 +92,50 @@ ORDER BY Name";
             }
         }
 
-        await using (var rollCmd = connection.CreateCommand())
-        {
-            rollCmd.CommandText = "dbo.usp_RollStockAsOn";
-            rollCmd.CommandType = CommandType.StoredProcedure;
-            rollCmd.CommandTimeout = TimeoutSeconds;
-            rollCmd.Parameters.Add("@CompanyName", SqlDbType.VarChar, 150).Value = company;
-            rollCmd.Parameters.Add("@AsOnDate", SqlDbType.Date).Value = request.DateTo.Date;
-            rollCmd.Parameters.Add("@ItemCode", SqlDbType.VarChar, 50).Value = item;
+        return result;
+    }
 
-            await using var reader = await rollCmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
+    public async Task<ItemStockResult> QueryRollsAsync(ItemStockQueryRequest request, CancellationToken ct = default)
+    {
+        var company = (request.CompanyName ?? "").Trim();
+        var item = (request.ItemCode ?? "").Trim();
+        if (company.Length == 0)
+            throw new ArgumentException("Company is required.");
+        if (item.Length == 0)
+            throw new ArgumentException("Item code is required.");
+
+        var result = new ItemStockResult
+        {
+            CompanyName = company,
+            ItemCode = item,
+            DateTo = request.DateTo.Date,
+        };
+
+        if (item.StartsWith("RAW", StringComparison.OrdinalIgnoreCase))
+            return result;
+
+        await using var connection = _database.CreateConnection();
+        await using var rollCmd = connection.CreateCommand();
+        rollCmd.CommandText = "dbo.usp_RollStockAsOn";
+        rollCmd.CommandType = CommandType.StoredProcedure;
+        rollCmd.CommandTimeout = TimeoutSeconds;
+        rollCmd.Parameters.Add("@CompanyName", SqlDbType.VarChar, 150).Value = company;
+        rollCmd.Parameters.Add("@AsOnDate", SqlDbType.Date).Value = request.DateTo.Date;
+        rollCmd.Parameters.Add("@ItemCode", SqlDbType.VarChar, 50).Value = item;
+
+        await using var reader = await rollCmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            result.Rolls.Add(new ItemRollLine
             {
-                result.Rolls.Add(new ItemRollLine
-                {
-                    Godown = Str(reader, "vToGodown"),
-                    RollNo = Str(reader, "RollNo"),
-                    ItemName = Str(reader, "FGItemname"),
-                    NetWt = Dec(reader, "NetWt"),
-                    ProducedOn = reader.IsDBNull(reader.GetOrdinal("Sysdate"))
-                        ? null
-                        : reader.GetDateTime(reader.GetOrdinal("Sysdate")),
-                });
-            }
+                Godown = Str(reader, "vToGodown"),
+                RollNo = Str(reader, "RollNo"),
+                ItemName = Str(reader, "FGItemname"),
+                NetWt = Dec(reader, "NetWt"),
+                ProducedOn = reader.IsDBNull(reader.GetOrdinal("Sysdate"))
+                    ? null
+                    : reader.GetDateTime(reader.GetOrdinal("Sysdate")),
+            });
         }
 
         result.RollCount = result.Rolls.Count;

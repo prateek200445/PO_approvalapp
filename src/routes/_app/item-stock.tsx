@@ -11,6 +11,7 @@ import {
   formatQty,
   getItemStockCompanies,
   queryItemStock,
+  queryItemRolls,
   type ItemStockResult,
 } from "@/lib/item-stock-api";
 
@@ -72,6 +73,16 @@ function ItemStockPage() {
     refetchOnReconnect: false,
   });
 
+  const wantsRolls = !!submitted && !submitted.itemCode.toUpperCase().startsWith("RAW");
+  const rollsQuery = useQuery({
+    queryKey: ["item-stock-rolls", submitted, searchNonce],
+    queryFn: ({ signal }) => queryItemRolls(submitted!, signal),
+    enabled: wantsRolls,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
   const companies = companiesQuery.data ?? [];
   const result = stockQuery.data;
 
@@ -85,11 +96,11 @@ function ItemStockPage() {
   }, [result, txnFilter]);
 
   const rolls = useMemo(() => {
-    const rows = result?.rolls ?? [];
+    const rows = rollsQuery.data?.rolls ?? [];
     const q = rollFilter.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((row) => `${row.rollNo} ${row.godown}`.toLowerCase().includes(q));
-  }, [result, rollFilter]);
+  }, [rollsQuery.data, rollFilter]);
 
   function onSearch() {
     const code = itemCode.trim();
@@ -109,6 +120,7 @@ function ItemStockPage() {
 
   function onAbort() {
     void queryClient.cancelQueries({ queryKey: ["item-stock"] });
+    void queryClient.cancelQueries({ queryKey: ["item-stock-rolls"] });
   }
 
   return (
@@ -156,11 +168,11 @@ function ItemStockPage() {
           <Input id="item-stock-to" className="bg-background shadow-sm" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
         </div>
         <div className="flex flex-wrap gap-2 md:col-span-2 xl:col-span-1 xl:pb-px">
-          <Button type="button" onClick={onSearch} disabled={stockQuery.isFetching}>
+          <Button type="button" onClick={onSearch} disabled={stockQuery.isFetching || rollsQuery.isFetching}>
             {stockQuery.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
             Show stock
           </Button>
-          {stockQuery.isFetching && (
+          {(stockQuery.isFetching || rollsQuery.isFetching) && (
             <Button type="button" variant="outline" onClick={onAbort}>
               <Square className="mr-2 h-4 w-4" />
               Abort
@@ -173,7 +185,22 @@ function ItemStockPage() {
         <p className="text-sm text-destructive">{(stockQuery.error as Error).message}</p>
       )}
 
-      {result && <ItemStockTables result={result} txns={txns} rolls={rolls} txnFilter={txnFilter} rollFilter={rollFilter} onTxnFilter={setTxnFilter} onRollFilter={setRollFilter} />}
+      {result && (
+        <ItemStockTables
+          result={result}
+          txns={txns}
+          rolls={rolls}
+          rollCount={rollsQuery.data?.rollCount ?? 0}
+          rollNetWt={rollsQuery.data?.rollNetWt ?? 0}
+          rollNote={wantsRolls ? rollsQuery.data?.rollNote ?? null : "Raw materials are not stored as rolls."}
+          rollsLoading={wantsRolls && rollsQuery.isFetching}
+          rollsError={rollsQuery.isError && !isAbortError(rollsQuery.error) ? (rollsQuery.error as Error).message : ""}
+          txnFilter={txnFilter}
+          rollFilter={rollFilter}
+          onTxnFilter={setTxnFilter}
+          onRollFilter={setRollFilter}
+        />
+      )}
     </div>
   );
 }
@@ -250,6 +277,11 @@ function ItemStockTables({
   result,
   txns,
   rolls,
+  rollCount,
+  rollNetWt,
+  rollNote,
+  rollsLoading,
+  rollsError,
   txnFilter,
   rollFilter,
   onTxnFilter,
@@ -258,6 +290,11 @@ function ItemStockTables({
   result: ItemStockResult;
   txns: ItemStockResult["transactions"];
   rolls: ItemStockResult["rolls"];
+  rollCount: number;
+  rollNetWt: number;
+  rollNote: string | null;
+  rollsLoading: boolean;
+  rollsError: string;
   txnFilter: string;
   rollFilter: string;
   onTxnFilter: (value: string) => void;
@@ -369,12 +406,12 @@ function ItemStockTables({
             <h2 className="text-lg font-semibold tracking-tight">
               Rolls{" "}
               <span className="text-sm font-normal text-muted-foreground">
-                ({result.rollCount.toLocaleString("en-IN")} · {formatQty(result.rollNetWt)} kg)
+                {rollsLoading ? "loading" : `(${rollCount.toLocaleString("en-IN")} · ${formatQty(rollNetWt)} kg)`}
               </span>
             </h2>
-            {result.rollNote && <p className="mt-1 max-w-3xl text-xs text-muted-foreground">{result.rollNote}</p>}
+            {rollNote && <p className="mt-1 max-w-3xl text-xs text-muted-foreground">{rollNote}</p>}
           </div>
-          {result.rollCount > 0 && (
+          {rollCount > 0 && (
             <Input
               className="max-w-xs bg-background shadow-sm"
               placeholder="Filter roll number"
@@ -383,7 +420,14 @@ function ItemStockTables({
             />
           )}
         </div>
-        {result.rollCount === 0 ? (
+        {rollsLoading ? (
+          <p className="flex items-center gap-2 px-4 py-8 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading rolls
+          </p>
+        ) : rollsError ? (
+          <p className="px-4 py-8 text-sm text-destructive">{rollsError}</p>
+        ) : rollCount === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">No rolls for this item on the end date.</p>
         ) : rollPage.totalRows === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted-foreground">No rolls match that filter.</p>

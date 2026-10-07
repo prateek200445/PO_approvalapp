@@ -129,3 +129,40 @@ export async function queryItemStock(
     rollNote: str(payload.rollNote ?? payload.RollNote) || null,
   };
 }
+
+export async function queryItemRolls(
+  filters: {
+    companyName: string;
+    itemCode: string;
+    dateFrom: string;
+    dateTo: string;
+  },
+  signal?: AbortSignal,
+): Promise<Pick<ItemStockResult, "rolls" | "rollCount" | "rollNetWt" | "rollNote">> {
+  const response = await fetch(getApiUrl("/api/item-stock/rolls"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal,
+    body: JSON.stringify({
+      companyName: filters.companyName,
+      itemCode: filters.itemCode.trim(),
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+    }),
+  });
+  const payload = (await response.json()) as Record<string, unknown>;
+  if (!response.ok) throw new Error(str(payload.message) || "Roll stock query failed");
+  const rollRaw = (payload.rolls ?? payload.Rolls ?? []) as Array<Record<string, unknown>>;
+  return {
+    rolls: rollRaw.map((row) => ({
+      godown: str(row.godown ?? row.Godown),
+      rollNo: str(row.rollNo ?? row.RollNo),
+      itemName: str(row.itemName ?? row.ItemName),
+      netWt: num(row.netWt ?? row.NetWt),
+      producedOn: str(row.producedOn ?? row.ProducedOn) || null,
+    })),
+    rollCount: num(payload.rollCount ?? payload.RollCount),
+    rollNetWt: num(payload.rollNetWt ?? payload.RollNetWt),
+    rollNote: str(payload.rollNote ?? payload.RollNote) || null,
+  };
+}

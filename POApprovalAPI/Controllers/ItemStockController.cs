@@ -44,4 +44,21 @@ public class ItemStockController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    [HttpPost("rolls")]
+    public async Task<IActionResult> Rolls([FromBody] ItemStockQueryRequest request, CancellationToken ct)
+    {
+        try
+        {
+            return Ok(await _service.QueryRollsAsync(request, ct));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }
