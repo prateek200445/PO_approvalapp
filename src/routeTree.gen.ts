@@ -29,6 +29,7 @@ import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
 import { Route as AppHrReportsRouteImport } from './routes/_app/hr-reports'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
+import { Route as AppGstBillRecoRouteImport } from './routes/_app/gst-bill-reco'
 import { Route as AppFibcBuyersRouteImport } from './routes/_app/fibc-buyers'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
 import { Route as AppExhibitionLeadsRouteImport } from './routes/_app/exhibition-leads'
@@ -152,6 +153,11 @@ const AppHrReportsRoute = AppHrReportsRouteImport.update({
 const AppHistoryRoute = AppHistoryRouteImport.update({
   id: '/history',
   path: '/history',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGstBillRecoRoute = AppGstBillRecoRouteImport.update({
+  id: '/gst-bill-reco',
+  path: '/gst-bill-reco',
   getParentRoute: () => AppRoute,
 } as any)
 const AppFibcBuyersRoute = AppFibcBuyersRouteImport.update({
@@ -298,6 +304,7 @@ export interface FileRoutesByFullPath {
   '/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
+  '/gst-bill-reco': typeof AppGstBillRecoRoute
   '/history': typeof AppHistoryRoute
   '/hr-reports': typeof AppHrReportsRoute
   '/indents': typeof AppIndentsRoute
@@ -343,6 +350,7 @@ export interface FileRoutesByTo {
   '/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
+  '/gst-bill-reco': typeof AppGstBillRecoRoute
   '/history': typeof AppHistoryRoute
   '/hr-reports': typeof AppHrReportsRoute
   '/indents': typeof AppIndentsRoute
@@ -391,6 +399,7 @@ export interface FileRoutesById {
   '/_app/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/_app/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
+  '/_app/gst-bill-reco': typeof AppGstBillRecoRoute
   '/_app/history': typeof AppHistoryRoute
   '/_app/hr-reports': typeof AppHrReportsRoute
   '/_app/indents': typeof AppIndentsRoute
@@ -439,6 +448,7 @@ export interface FileRouteTypes {
     | '/exhibition-leads'
     | '/export-bill-overdue'
     | '/fibc-buyers'
+    | '/gst-bill-reco'
     | '/history'
     | '/hr-reports'
     | '/indents'
@@ -484,6 +494,7 @@ export interface FileRouteTypes {
     | '/exhibition-leads'
     | '/export-bill-overdue'
     | '/fibc-buyers'
+    | '/gst-bill-reco'
     | '/history'
     | '/hr-reports'
     | '/indents'
@@ -531,6 +542,7 @@ export interface FileRouteTypes {
     | '/_app/exhibition-leads'
     | '/_app/export-bill-overdue'
     | '/_app/fibc-buyers'
+    | '/_app/gst-bill-reco'
     | '/_app/history'
     | '/_app/hr-reports'
     | '/_app/indents'
@@ -710,6 +722,13 @@ declare module '@tanstack/react-router' {
       path: '/history'
       fullPath: '/history'
       preLoaderRoute: typeof AppHistoryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/gst-bill-reco': {
+      id: '/_app/gst-bill-reco'
+      path: '/gst-bill-reco'
+      fullPath: '/gst-bill-reco'
+      preLoaderRoute: typeof AppGstBillRecoRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/fibc-buyers': {
@@ -945,6 +964,7 @@ interface AppRouteChildren {
   AppExhibitionLeadsRoute: typeof AppExhibitionLeadsRoute
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
   AppFibcBuyersRoute: typeof AppFibcBuyersRouteWithChildren
+  AppGstBillRecoRoute: typeof AppGstBillRecoRoute
   AppHistoryRoute: typeof AppHistoryRoute
   AppHrReportsRoute: typeof AppHrReportsRoute
   AppIndentsRoute: typeof AppIndentsRoute
@@ -983,6 +1003,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppExhibitionLeadsRoute: AppExhibitionLeadsRoute,
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
   AppFibcBuyersRoute: AppFibcBuyersRouteWithChildren,
+  AppGstBillRecoRoute: AppGstBillRecoRoute,
   AppHistoryRoute: AppHistoryRoute,
   AppHrReportsRoute: AppHrReportsRoute,
   AppIndentsRoute: AppIndentsRoute,

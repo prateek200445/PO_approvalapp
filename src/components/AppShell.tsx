@@ -281,6 +281,7 @@ export function AppShell() {
         p.startsWith("/ledgers") ||
         p.startsWith("/ledger-summary") ||
         p.startsWith("/reconciliation") ||
+        p.startsWith("/gst-bill-reco") ||
         p.startsWith("/pnl"),
     },
     {

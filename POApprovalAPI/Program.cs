@@ -99,6 +99,7 @@ builder.Services.AddScoped<ExcelLedgerService>();
 builder.Services.AddScoped<BillWiseTransactionService>();
 builder.Services.AddScoped<LedgerSummaryService>();
 builder.Services.AddScoped<ItemStockService>();
+builder.Services.AddScoped<GstBillRecoService>();
 builder.Services.AddScoped<PnlService>();
 builder.Services.AddScoped<IntercompanyBalanceService>();
 builder.Services.AddScoped<BomService>();
@@ -171,6 +172,18 @@ app.UseSwaggerUI();
 app.MapControllers();
 app.MapGet("/", () => Results.Ok("PO Approval API is running!"));
 app.MapGet("/api/health", () => Results.Ok(new { ok = true, service = "PO Approval API" }));
+
+var importAt = Array.FindIndex(args, arg => arg.Equals("--import-2b", StringComparison.OrdinalIgnoreCase));
+if (importAt >= 0)
+{
+    var importPath = importAt + 1 < args.Length ? args[importAt + 1] : "";
+    using var scope = app.Services.CreateScope();
+    var importer = scope.ServiceProvider.GetRequiredService<GstBillRecoService>();
+    var saved = importer.ImportFileAsync(importPath).GetAwaiter().GetResult();
+    Console.WriteLine($"Saved {saved} 2B bills.");
+    return;
+}
+
 app.Run();
 
 static void LoadDotEnvFiles()

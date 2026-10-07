@@ -47,6 +47,12 @@ function LedgersHubPage() {
           title="Ledger Reconciliation"
           description="Upload two company Excel ledgers and match Bill No + Bill Date (with voucher-date fallback)."
         />
+        <HubCard
+          to="/gst-bill-reco"
+          icon={ArrowLeftRight}
+          title="GST Bill Reconciliation"
+          description="Upload the monthly GSTR-2B file and match bill number, bill date, and GSTIN with the ERP GST summary."
+        />
       </div>
     </div>
   );
