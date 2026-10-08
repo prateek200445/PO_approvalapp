@@ -298,6 +298,7 @@ function LedgerSummaryPage() {
               placeholder={loadingCompanies ? "Loading…" : "Select companies"}
               disabled={loadingCompanies}
               searchPlaceholder="Search company…"
+              selectAllLabel="All"
             />
           </label>
 
@@ -317,7 +318,6 @@ function LedgerSummaryPage() {
               disabled={companyValues.length === 0 || ledgersPending}
               searchPlaceholder="Search ledger…"
               emptyText="No ledgers for selected companies"
-              selectAllLabel="All"
             />
           </label>
 
