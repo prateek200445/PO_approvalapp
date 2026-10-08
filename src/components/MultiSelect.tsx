@@ -19,6 +19,7 @@ export function MultiSelect({
   disabled,
   searchPlaceholder = "Search…",
   emptyText = "No options",
+  selectAllLabel,
 }: {
   options: MultiSelectOption[];
   values: string[];
@@ -27,6 +28,7 @@ export function MultiSelect({
   disabled?: boolean;
   searchPlaceholder?: string;
   emptyText?: string;
+  selectAllLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -55,6 +57,12 @@ export function MultiSelect({
     else onChange([...values, value]);
   }
 
+  const allSelected = options.length > 0 && options.every((o) => valueSet.has(o.value));
+
+  function toggleAll() {
+    onChange(allSelected ? [] : options.map((o) => o.value));
+  }
+
   function clearAll(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
@@ -64,9 +72,11 @@ export function MultiSelect({
   const summary =
     selected.length === 0
       ? placeholder
-      : selected.length === 1
-        ? selected[0].label
-        : `${selected.length} selected`;
+      : allSelected && selectAllLabel
+        ? selectAllLabel
+        : selected.length === 1
+          ? selected[0].label
+          : `${selected.length} selected`;
 
   return (
     <Popover
@@ -122,6 +132,26 @@ export function MultiSelect({
           </div>
         </div>
         <div className="max-h-64 overflow-y-auto p-1">
+          {selectAllLabel && options.length > 0 && (
+            <button
+              type="button"
+              onClick={toggleAll}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium hover:bg-secondary",
+                allSelected && "bg-secondary/60",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-primary",
+                  allSelected && "bg-primary text-primary-foreground",
+                )}
+              >
+                {allSelected ? <Check className="h-3 w-3" /> : null}
+              </span>
+              <span className="min-w-0 truncate">{selectAllLabel}</span>
+            </button>
+          )}
           {filtered.length === 0 ? (
             <p className="px-2 py-6 text-center text-xs text-muted-foreground">{emptyText}</p>
           ) : (

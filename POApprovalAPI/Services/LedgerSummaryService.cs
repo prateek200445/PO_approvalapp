@@ -165,8 +165,6 @@ ORDER BY l.LedgerName",
             .ToList();
 
         var pairCount = companies.Count * ledgers.Count;
-        if (pairCount > 40)
-            throw new ArgumentException("Too many combinations (max 40). Narrow company or ledger selection.");
 
         var combined = new LedgerSummaryResultDto
         {

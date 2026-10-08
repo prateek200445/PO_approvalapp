@@ -154,10 +154,6 @@ function LedgerSummaryPage() {
       toast.error("Select at least one ledger");
       return;
     }
-    if (selectedCompanies.length * ledgerNames.length > 40) {
-      toast.error("Too many combinations (max 40). Narrow your selection.");
-      return;
-    }
 
     setLoading(true);
     try {
@@ -321,6 +317,7 @@ function LedgerSummaryPage() {
               disabled={companyValues.length === 0 || ledgersPending}
               searchPlaceholder="Search ledger…"
               emptyText="No ledgers for selected companies"
+              selectAllLabel="All"
             />
           </label>
 
@@ -347,7 +344,6 @@ function LedgerSummaryPage() {
           <p className="mt-2 text-[11px] text-muted-foreground">
             {companyValues.length} company × {ledgerNames.length} ledger ={" "}
             {ledgerNames.length} ledger table{ledgerNames.length === 1 ? "" : "s"}
-            {companyValues.length * ledgerNames.length > 40 ? " (query over limit — max 40 pairs)" : ""}
           </p>
         )}
       </div>
