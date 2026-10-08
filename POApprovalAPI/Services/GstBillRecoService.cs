@@ -349,6 +349,29 @@ END";
         return text.Length <= length ? text : text[..length];
     }
 
+    /// <summary>
+    /// Freight and C&amp;F (import and export) sit outside OtherAll. Their ERP sign is not the same as OtherAll,
+    /// so each amount is taken without its sign and then given OtherAll's sign.
+    /// </summary>
+    private static decimal TaxableWithFreight(decimal otherAll, SqlDataReader reader, int otherAllAt)
+    {
+        decimal charges = 0;
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            if (i == otherAllAt)
+                continue;
+            var name = Norm(reader.GetName(i));
+            if (name.Length == 0 || name == "OTHERALL")
+                continue;
+            if (!name.Contains("FREIGHT", StringComparison.Ordinal) && !name.Contains("C&F", StringComparison.Ordinal))
+                continue;
+            charges += Math.Abs(Money(reader, i) ?? 0);
+        }
+
+        var magnitude = Math.Abs(otherAll) + charges;
+        return otherAll < 0 ? -magnitude : magnitude;
+    }
+
     private static int FindColumn(SqlDataReader reader, string name)
     {
         for (var i = 0; i < reader.FieldCount; i++)
@@ -423,7 +446,7 @@ END";
                 Ledger = Text(reader, ordinal, "LEDGER"),
                 GrossAmount = MoneyAt(reader, ordinal, "GROSSAMOUNT"),
                 ValueAmount = MoneyAt(reader, ordinal, "VALUE"),
-                Taxable = Money(reader, otherAllAt) ?? 0,
+                Taxable = TaxableWithFreight(Money(reader, otherAllAt) ?? 0, reader, otherAllAt),
                 TotalC = MoneyAt(reader, ordinal, "TOTALC"),
                 OtherAll = Money(reader, otherAllAt),
                 Cgst = cgst,

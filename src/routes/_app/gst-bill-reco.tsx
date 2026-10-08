@@ -182,7 +182,7 @@ function GstBillRecoPage() {
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">GST Bill Reconciliation</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           Upload the monthly GSTR-2B workbook and compare it with the ERP GST summary. A bill matches only when bill
-          number, bill date, and GSTIN all agree. The portal taxable value is compared with ERP Other All. Each upload is saved. The summary can take a few minutes.
+          number, bill date, and GSTIN all agree. The portal taxable value is compared with ERP Other All together with freight and C&amp;F import and export, using the amounts without their column sign. Each upload is saved. The summary can take a few minutes.
         </p>
       </div>
 

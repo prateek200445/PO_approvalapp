@@ -860,13 +860,15 @@ function formatDateLong(value?: string | null) {
 }
 
 function normalizeCompanies(data: any[]): LedgerCompanyOption[] {
-  return (data ?? []).map((c: any) => ({
-    value: c.value ?? c.Value ?? "",
-    label: c.label ?? c.Label ?? "",
-    companyType: c.companyType ?? c.CompanyType ?? 2,
-    companyName: c.companyName ?? c.CompanyName ?? "",
-    companyId: c.companyId ?? c.CompanyId ?? 0,
-  }));
+  return (data ?? [])
+    .map((c: any) => ({
+      value: c.value ?? c.Value ?? "",
+      label: c.label ?? c.Label ?? "",
+      companyType: c.companyType ?? c.CompanyType ?? 2,
+      companyName: c.companyName ?? c.CompanyName ?? "",
+      companyId: c.companyId ?? c.CompanyId ?? 0,
+    }))
+    .filter((c) => c.companyType !== 1 && !c.value.startsWith("G-"));
 }
 
 function normalizeLedgers(data: any[]): LedgerNameOption[] {

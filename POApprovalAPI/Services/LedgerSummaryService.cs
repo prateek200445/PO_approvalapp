@@ -18,32 +18,13 @@ public class LedgerSummaryService
     {
         using var connection = _database.CreateConnection();
 
-        var companies = (await connection.QueryAsync<(int SrNo, string Name, string? GroupName)>(@"
-SELECT fi.srno AS SrNo, fi.Name, fi.GroupName
+        var companies = (await connection.QueryAsync<(int SrNo, string Name)>(@"
+SELECT fi.srno AS SrNo, fi.Name
 FROM FactoryInfo fi WITH (NOLOCK)
 WHERE ISNULL(fi.Name, '') <> ''
 ORDER BY fi.Name")).ToList();
 
         var options = new List<LedgerCompanyOption>();
-
-        var groups = companies
-            .Select(c => (c.GroupName ?? "").Trim())
-            .Where(g => g.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(g => g)
-            .ToList();
-
-        foreach (var group in groups)
-        {
-            options.Add(new LedgerCompanyOption
-            {
-                Value = $"G-{group}",
-                Label = $"{group} (Group)",
-                CompanyType = 1,
-                CompanyName = group,
-                CompanyId = 0,
-            });
-        }
 
         foreach (var c in companies)
         {
