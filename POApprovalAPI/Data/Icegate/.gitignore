@@ -1,0 +1,3 @@
+# ICEGATE uploads (store.json etc.) are runtime data; never commit them.
+*
+!.gitignore
