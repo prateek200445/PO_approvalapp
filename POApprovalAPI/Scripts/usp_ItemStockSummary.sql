@@ -6,9 +6,15 @@
     + each movement in the range
     = closing
 
-  Opening is today's WareHouse.StkInHand minus every movement after @DateFrom,
-  the same figure as dbo.usp_StockInHandAsOn. Each source is read once.
-  Signs match Cl.Factory Owned in SP_STOCKANALYSIS_RPT_ALL.
+  An item stored as rolls (approved loom rolls in vw_Prod_BeforeRMD) uses the
+  rolls themselves. Opening and closing are the roll weight on those dates.
+  A roll stays until it moves from a roll godown to despatch, cutting, or a
+  bag godown. Inward is rolls produced in the range. Outward is rolls that
+  left in the range. Weight is fPendingQty, which despatch does not reduce.
+
+  Any other item uses today's WareHouse.StkInHand minus every movement after
+  @DateFrom, the same figure as dbo.usp_StockInHandAsOn. Each source is read
+  once. Signs match Cl.Factory Owned in SP_STOCKANALYSIS_RPT_ALL.
   Recd For JW (Others) / JBIN-OT is left out.
 
   Closing = Opening + Inward − Outward.
@@ -63,6 +69,154 @@ BEGIN
         InwardQty     decimal(18, 3),
         OutwardQty    decimal(18, 3)
     );
+
+    DECLARE @ToEnd datetime = DATEADD(day, 1, CAST(@DateTo AS datetime));
+
+    /* Roll items: opening, produced, sent out, and closing are the rolls. */
+    IF EXISTS (
+        SELECT 1
+        FROM vw_Prod_BeforeRMD WITH (NOLOCK)
+        WHERE Companyname = @Company
+          AND FGItemCode = @Item
+          AND status = 'Loom'
+          AND vStatus = 'Approved'
+          AND ROUND(fPendingQty, 2) > 0
+    )
+    BEGIN
+        CREATE TABLE #roll (
+            RollKey varchar(100) COLLATE DATABASE_DEFAULT,
+            RollNo  varchar(100),
+            Sysdate datetime,
+            Wt      decimal(18, 3)
+        );
+
+        INSERT #roll (RollKey, RollNo, Sysdate, Wt)
+        SELECT
+            REPLACE(ISNULL(v.CuttingRollNo, v.RollNo), 'CUT', '') COLLATE DATABASE_DEFAULT,
+            ISNULL(v.CuttingRollNo, v.RollNo),
+            v.Sysdate,
+            CAST(v.fPendingQty AS decimal(18, 3))
+        FROM vw_Prod_BeforeRMD v WITH (NOLOCK)
+        WHERE v.Companyname = @Company
+          AND v.FGItemCode = @Item
+          AND v.Sysdate >= '2000-01-01'
+          AND v.Sysdate < @ToEnd
+          AND v.status = 'Loom'
+          AND v.vStatus = 'Approved'
+          AND (v.CuttingRollNo LIKE '%CUT' OR v.CuttingRollNo IS NULL)
+          AND ROUND(v.fPendingQty, 2) > 0;
+
+        CREATE TABLE #out (
+            RollKey  varchar(100) COLLATE DATABASE_DEFAULT NOT NULL,
+            FirstOut datetime
+        );
+
+        INSERT #out (RollKey, FirstOut)
+        SELECT x.vItemCode COLLATE DATABASE_DEFAULT, MIN(x.dSysdate)
+        FROM prod_rmd_inout x WITH (NOLOCK)
+        INNER JOIN #roll r
+            ON r.RollKey = x.vItemCode COLLATE DATABASE_DEFAULT
+        WHERE x.vCompanyName = @Company
+          AND x.vtype = 'Loom'
+          AND x.vFromGodown IN (
+                'Lamination Godown',
+                'Liner Bag Godown',
+                'Loom Godown',
+                'Needle Loom Godown',
+                'Roll Material Godown'
+              )
+          AND x.vToGodown IN (
+                'Despatch Godown',
+                'Stock Adjustment Entry',
+                'Cutting Godown',
+                'FIBC Bag Godown',
+                'Small Bag Godown'
+              )
+        GROUP BY x.vItemCode COLLATE DATABASE_DEFAULT;
+
+        DECLARE @RollOpening decimal(18, 3) = ISNULL((
+            SELECT SUM(r.Wt)
+            FROM #roll r
+            LEFT JOIN #out o ON o.RollKey = r.RollKey
+            WHERE r.Sysdate < @From
+              AND (o.FirstOut IS NULL OR o.FirstOut >= @From)
+        ), 0);
+
+        INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+        SELECT CAST(r.Sysdate AS date), 'Rolls produced', ISNULL(r.RollNo, ''), r.Wt, 0
+        FROM #roll r
+        WHERE r.Sysdate >= @From
+          AND r.Sysdate < @ToEnd;
+
+        INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)
+        SELECT CAST(o.FirstOut AS date), 'Rolls sent out', ISNULL(r.RollNo, ''), 0, r.Wt
+        FROM #roll r
+        INNER JOIN #out o ON o.RollKey = r.RollKey
+        WHERE o.FirstOut >= @From
+          AND o.FirstOut < @ToEnd;
+
+        DECLARE @RollInward decimal(18, 3) = ISNULL((SELECT SUM(InwardQty) FROM #txn), 0);
+        DECLARE @RollOutward decimal(18, 3) = ISNULL((SELECT SUM(OutwardQty) FROM #txn), 0);
+        DECLARE @RollClosing decimal(18, 3) = @RollOpening + @RollInward - @RollOutward;
+
+        SELECT
+            @Company AS CompanyName,
+            @Item AS ItemCode,
+            @ItemName AS ItemName,
+            @DateFrom AS DateFrom,
+            @DateTo AS DateTo,
+            LineType,
+            MovementType,
+            InwardQty,
+            OutwardQty,
+            Balance
+        FROM (
+            SELECT
+                0 AS SortNo,
+                'Opening' AS LineType,
+                '' AS MovementType,
+                CAST(0 AS decimal(18, 3)) AS InwardQty,
+                CAST(0 AS decimal(18, 3)) AS OutwardQty,
+                @RollOpening AS Balance
+            UNION ALL
+            SELECT
+                1,
+                'Movement',
+                MovementType,
+                SUM(InwardQty),
+                SUM(OutwardQty),
+                SUM(InwardQty) - SUM(OutwardQty)
+            FROM #txn
+            GROUP BY MovementType
+            UNION ALL
+            SELECT
+                2,
+                'Closing',
+                '',
+                @RollInward,
+                @RollOutward,
+                @RollClosing
+        ) summary
+        ORDER BY SortNo, MovementType;
+
+        SELECT
+            @Company AS CompanyName,
+            @Item AS ItemCode,
+            @ItemName AS ItemName,
+            TxnDate,
+            MovementType,
+            DocNo,
+            InwardQty,
+            OutwardQty,
+            @RollOpening + SUM(InwardQty - OutwardQty) OVER (
+                ORDER BY TxnDate, MovementType, DocNo
+                ROWS UNBOUNDED PRECEDING
+            ) AS Balance
+        FROM #txn
+        ORDER BY TxnDate, MovementType, DocNo;
+
+        RETURN;
+    END;
 
     /* Purchase, branch receipt, and job-work receipt from the MRN. JBIN-OT is excluded. */
     INSERT #txn (TxnDate, MovementType, DocNo, InwardQty, OutwardQty)

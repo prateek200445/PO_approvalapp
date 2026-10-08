@@ -142,7 +142,7 @@ ORDER BY Name";
         result.RollNetWt = result.Rolls.Sum(r => r.NetWt);
         if (result.RollCount > 0)
         {
-            result.RollNote = "Each roll weight is the weight left on that roll today. A past end date changes which rolls are listed, not the historical weight.";
+            result.RollNote = "A roll stays on the end date until it leaves the roll godown. Its weight is the weight stored on the roll. This total is the closing.";
         }
 
         return result;

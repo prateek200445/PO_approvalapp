@@ -1,17 +1,21 @@
 /*
-  Read-only roll list for one company and item, using the same rules as
-  dbo.SP_Roll_ITEM_Stock, but one row per roll instead of a summed total.
+  Read-only roll list for one company and item on one date.
 
-  Rolls for the item are collected first. Moved-out roll numbers are then
-  matched in one set, not once per row of the view.
+  A roll is included when it was produced on or before @AsOnDate and it had
+  not yet moved from a roll godown to despatch, cutting, or a bag godown.
+  The current godown is not used, because a later despatch changes it and
+  would hide the roll on an earlier date.
 
-  NetWt is fPendingQty, the weight left on the roll now.
+  NetWt is fPendingQty. Despatch does not reduce that weight.
+  The total matches the closing of dbo.usp_ItemStockSummary for a roll item
+  when @AsOnDate is that summary's end date.
+
   Does not INSERT, UPDATE, or DELETE any ERP table.
 
   Example:
     EXEC dbo.usp_RollStockAsOn
          @CompanyName = N'HCP Plastene Bulkpack Ltd',
-         @AsOnDate    = '2026-10-06',
+         @AsOnDate    = '2026-09-30',
          @ItemCode    = N'WIP00023';
 */
 CREATE OR ALTER PROCEDURE dbo.usp_RollStockAsOn
@@ -66,40 +70,57 @@ BEGIN
       AND v.status = 'Loom'
       AND (v.CuttingRollNo LIKE '%CUT' OR v.CuttingRollNo IS NULL)
       AND v.vStatus = 'Approved'
-      AND ROUND(v.fPendingQty, 2) > 0
-      AND (
-            CASE WHEN v.vToGodown IS NULL THEN v.Location ELSE v.vToGodown END
-          ) IN (
-            'Lamination Godown',
-            'Liner Bag Godown',
-            'Loom Godown',
-            'Needle Loom Godown',
-            'Roll Material Godown'
-          );
+      AND ROUND(v.fPendingQty, 2) > 0;
 
-    CREATE TABLE #moved (
-        vItemCode varchar(100) COLLATE DATABASE_DEFAULT NOT NULL
+    CREATE TABLE #out (
+        RollKey    varchar(100) COLLATE DATABASE_DEFAULT NOT NULL,
+        FirstOut   datetime,
+        FromGodown varchar(150)
     );
 
-    INSERT #moved (vItemCode)
-    SELECT DISTINCT x.vItemCode COLLATE DATABASE_DEFAULT
-    FROM prod_rmd_inout x WITH (NOLOCK)
-    INNER JOIN #rolls r
-        ON r.RollKey = x.vItemCode COLLATE DATABASE_DEFAULT
-    WHERE x.vtype = 'Loom'
-      AND x.vToGodown IN (
-            'Despatch Godown',
-            'Stock Adjustment Entry',
-            'Cutting Godown',
-            'FIBC Bag Godown',
-            'Small Bag Godown'
-          )
-      AND (x.dSysdate IS NULL OR x.dSysdate < @AsOnEnd);
+    INSERT #out (RollKey, FirstOut, FromGodown)
+    SELECT d.RollKey, d.dSysdate, d.vFromGodown
+    FROM (
+        SELECT
+            x.vItemCode COLLATE DATABASE_DEFAULT AS RollKey,
+            x.dSysdate,
+            x.vFromGodown,
+            ROW_NUMBER() OVER (
+                PARTITION BY x.vItemCode
+                ORDER BY x.dSysdate, x.iSrNo
+            ) AS rn
+        FROM prod_rmd_inout x WITH (NOLOCK)
+        INNER JOIN #rolls r
+            ON r.RollKey = x.vItemCode COLLATE DATABASE_DEFAULT
+        WHERE x.vCompanyName = @Company
+          AND x.vtype = 'Loom'
+          AND x.vFromGodown IN (
+                'Lamination Godown',
+                'Liner Bag Godown',
+                'Loom Godown',
+                'Needle Loom Godown',
+                'Roll Material Godown'
+              )
+          AND x.vToGodown IN (
+                'Despatch Godown',
+                'Stock Adjustment Entry',
+                'Cutting Godown',
+                'FIBC Bag Godown',
+                'Small Bag Godown'
+              )
+    ) d
+    WHERE d.rn = 1;
 
     SELECT
         r.Companyname,
-        r.vToGodown,
-        r.Godown,
+        CASE
+            WHEN o.FirstOut >= @AsOnEnd THEN o.FromGodown
+            ELSE r.Godown
+        END AS vToGodown,
+        CASE
+            WHEN o.FirstOut >= @AsOnEnd THEN o.FromGodown
+            ELSE r.Godown
+        END AS Godown,
         r.FGItemCode,
         r.FGItemname,
         r.RollNo,
@@ -107,9 +128,9 @@ BEGIN
         r.Sysdate,
         @AsOnDate AS AsOnDate
     FROM #rolls r
-    WHERE NOT EXISTS (
-        SELECT 1 FROM #moved m WHERE m.vItemCode = r.RollKey
-    )
+    LEFT JOIN #out o ON o.RollKey = r.RollKey
+    WHERE o.FirstOut IS NULL
+       OR o.FirstOut >= @AsOnEnd
     ORDER BY r.Companyname, r.vToGodown, r.FGItemCode, r.RollNo;
 END
 GO
