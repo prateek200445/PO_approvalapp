@@ -19,6 +19,7 @@ import { Route as AppReconciliationRouteImport } from './routes/_app/reconciliat
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
 import { Route as AppPnlResultRouteImport } from './routes/_app/pnl-result'
 import { Route as AppPnlRouteImport } from './routes/_app/pnl'
+import { Route as AppPlantConsumptionRouteImport } from './routes/_app/plant-consumption'
 import { Route as AppPendingRouteImport } from './routes/_app/pending'
 import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
 import { Route as AppOrderBookSummaryRouteImport } from './routes/_app/order-book-summary'
@@ -104,6 +105,11 @@ const AppPnlResultRoute = AppPnlResultRouteImport.update({
 const AppPnlRoute = AppPnlRouteImport.update({
   id: '/pnl',
   path: '/pnl',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPlantConsumptionRoute = AppPlantConsumptionRouteImport.update({
+  id: '/plant-consumption',
+  path: '/plant-consumption',
   getParentRoute: () => AppRoute,
 } as any)
 const AppPendingRoute = AppPendingRouteImport.update({
@@ -322,6 +328,7 @@ export interface FileRoutesByFullPath {
   '/order-book-summary': typeof AppOrderBookSummaryRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
+  '/plant-consumption': typeof AppPlantConsumptionRoute
   '/pnl': typeof AppPnlRoute
   '/pnl-result': typeof AppPnlResultRoute
   '/profile': typeof AppProfileRoute
@@ -369,6 +376,7 @@ export interface FileRoutesByTo {
   '/order-book-summary': typeof AppOrderBookSummaryRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
+  '/plant-consumption': typeof AppPlantConsumptionRoute
   '/pnl': typeof AppPnlRoute
   '/pnl-result': typeof AppPnlResultRoute
   '/profile': typeof AppProfileRoute
@@ -419,6 +427,7 @@ export interface FileRoutesById {
   '/_app/order-book-summary': typeof AppOrderBookSummaryRoute
   '/_app/payments': typeof AppPaymentsRoute
   '/_app/pending': typeof AppPendingRoute
+  '/_app/plant-consumption': typeof AppPlantConsumptionRoute
   '/_app/pnl': typeof AppPnlRoute
   '/_app/pnl-result': typeof AppPnlResultRoute
   '/_app/profile': typeof AppProfileRoute
@@ -469,6 +478,7 @@ export interface FileRouteTypes {
     | '/order-book-summary'
     | '/payments'
     | '/pending'
+    | '/plant-consumption'
     | '/pnl'
     | '/pnl-result'
     | '/profile'
@@ -516,6 +526,7 @@ export interface FileRouteTypes {
     | '/order-book-summary'
     | '/payments'
     | '/pending'
+    | '/plant-consumption'
     | '/pnl'
     | '/pnl-result'
     | '/profile'
@@ -565,6 +576,7 @@ export interface FileRouteTypes {
     | '/_app/order-book-summary'
     | '/_app/payments'
     | '/_app/pending'
+    | '/_app/plant-consumption'
     | '/_app/pnl'
     | '/_app/pnl-result'
     | '/_app/profile'
@@ -664,6 +676,13 @@ declare module '@tanstack/react-router' {
       path: '/pnl'
       fullPath: '/pnl'
       preLoaderRoute: typeof AppPnlRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/plant-consumption': {
+      id: '/_app/plant-consumption'
+      path: '/plant-consumption'
+      fullPath: '/plant-consumption'
+      preLoaderRoute: typeof AppPlantConsumptionRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/pending': {
@@ -995,6 +1014,7 @@ interface AppRouteChildren {
   AppOrderBookSummaryRoute: typeof AppOrderBookSummaryRoute
   AppPaymentsRoute: typeof AppPaymentsRoute
   AppPendingRoute: typeof AppPendingRoute
+  AppPlantConsumptionRoute: typeof AppPlantConsumptionRoute
   AppPnlRoute: typeof AppPnlRoute
   AppPnlResultRoute: typeof AppPnlResultRoute
   AppProfileRoute: typeof AppProfileRoute
@@ -1035,6 +1055,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppOrderBookSummaryRoute: AppOrderBookSummaryRoute,
   AppPaymentsRoute: AppPaymentsRoute,
   AppPendingRoute: AppPendingRoute,
+  AppPlantConsumptionRoute: AppPlantConsumptionRoute,
   AppPnlRoute: AppPnlRoute,
   AppPnlResultRoute: AppPnlResultRoute,
   AppProfileRoute: AppProfileRoute,

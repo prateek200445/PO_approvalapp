@@ -62,6 +62,7 @@ type AppPath =
   | "/item-stock"
   | "/export-bill-overdue"
   | "/daily-production"
+  | "/plant-consumption"
   | "/daily-reports"
   | "/hr-reports"
   | "/exhibition-leads"
@@ -303,6 +304,12 @@ export function AppShell() {
       icon: Factory,
       label: "Daily Production",
       match: (p) => p.startsWith("/daily-production"),
+    },
+    {
+      to: "/plant-consumption",
+      icon: Factory,
+      label: "Plant Consumption",
+      match: (p) => p.startsWith("/plant-consumption"),
     },
     {
       to: "/daily-reports",

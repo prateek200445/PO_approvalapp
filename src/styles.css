@@ -123,6 +123,15 @@
       linear-gradient(180deg, oklch(0.18 0.03 250), oklch(0.14 0.02 250));
   }
 
+  .dark input[type="date"] {
+    color-scheme: dark;
+  }
+
+  .dark input[type="date"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 1;
+  }
+
   h1, h2, h3 {
     letter-spacing: -0.02em;
   }
