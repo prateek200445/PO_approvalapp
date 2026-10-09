@@ -22,7 +22,7 @@ export function canAccessOrderBookSummary(username?: string | null): boolean {
 }
 
 /** GST Bill Reconciliation. Keep in sync with appsettings.json → GstBillReco:AllowedUsers. */
-export const GST_BILL_RECO_ALLOWED_USERS = ["prakash"] as const;
+export const GST_BILL_RECO_ALLOWED_USERS = ["prakash", "gstho"] as const;
 
 export function canAccessGstBillReco(username?: string | null): boolean {
   if (!username) return false;

@@ -350,15 +350,19 @@ END";
     }
 
     /// <summary>
-    /// Freight and C&amp;F (import and export) sit outside OtherAll. Their ERP sign is not the same as OtherAll,
-    /// so each amount is taken without its sign and then given OtherAll's sign.
+    /// OtherAll is used when its absolute value is above zero. A value that rounds to 0.00 counts as zero,
+    /// and OTHER ALL is used only in that case. Freight and C&amp;F are included by amount.
+    /// The sign follows the Other All column that was used.
     /// </summary>
-    private static decimal TaxableWithFreight(decimal otherAll, SqlDataReader reader, int otherAllAt)
+    private static decimal TaxableWithFreight(SqlDataReader reader, int camelAt, int capitalAt)
     {
+        var camel = camelAt >= 0 ? Money(reader, camelAt) ?? 0 : 0;
+        var capital = capitalAt >= 0 ? Money(reader, capitalAt) ?? 0 : 0;
+        var otherAll = Math.Abs(Math.Round(camel, 2)) > 0 ? camel : capital;
         decimal charges = 0;
         for (var i = 0; i < reader.FieldCount; i++)
         {
-            if (i == otherAllAt)
+            if (i == camelAt || i == capitalAt)
                 continue;
             var name = Norm(reader.GetName(i));
             if (name.Length == 0 || name == "OTHERALL")
@@ -370,6 +374,18 @@ END";
 
         var magnitude = Math.Abs(otherAll) + charges;
         return otherAll < 0 ? -magnitude : magnitude;
+    }
+
+    private static int FindOtherAllLedger(SqlDataReader reader, int camelAt)
+    {
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            if (i == camelAt)
+                continue;
+            if (Norm(reader.GetName(i)) == "OTHERALL")
+                return i;
+        }
+        return -1;
     }
 
     private static int FindColumn(SqlDataReader reader, string name)
@@ -407,8 +423,9 @@ END";
         if (!ordinal.ContainsKey("BILLNO") || !ordinal.ContainsKey("GSTNO"))
             throw new ArgumentException("GST summary did not return bill number and GST number columns.");
         var otherAllAt = FindColumn(reader, "OtherAll");
-        if (otherAllAt < 0)
-            throw new ArgumentException("GST summary did not return the OtherAll column.");
+        var otherAllLedgerAt = FindOtherAllLedger(reader, otherAllAt);
+        if (otherAllAt < 0 && otherAllLedgerAt < 0)
+            throw new ArgumentException("GST summary did not return an Other All column.");
 
         while (await reader.ReadAsync(ct))
         {
@@ -427,6 +444,11 @@ END";
             var ledgers = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
             foreach (var name in LedgerColumns)
             {
+                if (Norm(name) == "OTHERALL" && otherAllLedgerAt >= 0)
+                {
+                    ledgers[name] = Money(reader, otherAllLedgerAt);
+                    continue;
+                }
                 if (ordinal.TryGetValue(Norm(name), out var at))
                     ledgers[name] = Money(reader, at);
             }
@@ -446,9 +468,9 @@ END";
                 Ledger = Text(reader, ordinal, "LEDGER"),
                 GrossAmount = MoneyAt(reader, ordinal, "GROSSAMOUNT"),
                 ValueAmount = MoneyAt(reader, ordinal, "VALUE"),
-                Taxable = TaxableWithFreight(Money(reader, otherAllAt) ?? 0, reader, otherAllAt),
+                Taxable = TaxableWithFreight(reader, otherAllAt, otherAllLedgerAt),
                 TotalC = MoneyAt(reader, ordinal, "TOTALC"),
-                OtherAll = Money(reader, otherAllAt),
+                OtherAll = otherAllAt >= 0 ? Money(reader, otherAllAt) : null,
                 Cgst = cgst,
                 Sgst = sgst,
                 Igst = igst,
