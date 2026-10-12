@@ -253,7 +253,7 @@ export async function getHrAttendanceReport(
   return {
     yearMonth: String(raw.yearMonth ?? raw.YearMonth ?? yearMonth),
     periodLabel: String(raw.periodLabel ?? raw.PeriodLabel ?? ""),
-    halfDayAfter: String(raw.halfDayAfter ?? raw.HalfDayAfter ?? "inâ‰¤10:30 or â‰¥9h worked"),
+    halfDayAfter: String(raw.halfDayAfter ?? raw.HalfDayAfter ?? "in≤10:30 or ≥9h worked"),
     applyHalfDayRule: Boolean(raw.applyHalfDayRule ?? raw.ApplyHalfDayRule ?? applyHalfDayRule),
     employee: mapEmployee((raw.employee ?? raw.Employee ?? {}) as Record<string, unknown>),
     summary: {
