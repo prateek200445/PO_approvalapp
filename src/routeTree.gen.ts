@@ -46,6 +46,7 @@ import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
 import { Route as ExhibitionDealerRouteImport } from './routes/exhibition.dealer'
 import { Route as ExhibitionProductRouteImport } from './routes/exhibition.product'
 import { Route as AppAdvancePaymentPaymentNoRouteImport } from './routes/_app/advance-payment.$paymentNo'
+import { Route as AppBankRequirementsDocumentPackRouteImport } from './routes/_app/bank-requirements_.document-pack'
 import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
 import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
 import { Route as AppBomCreateRouteImport } from './routes/_app/bom.create'
@@ -244,6 +245,12 @@ const AppAdvancePaymentPaymentNoRoute =
     path: '/advance-payment/$paymentNo',
     getParentRoute: () => AppRoute,
   } as any)
+const AppBankRequirementsDocumentPackRoute =
+  AppBankRequirementsDocumentPackRouteImport.update({
+    id: '/bank-requirements_/document-pack',
+    path: '/bank-requirements/document-pack',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppBomIndexRoute = AppBomIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -344,6 +351,7 @@ export interface FileRoutesByFullPath {
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
+  '/bank-requirements/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/bom/$': typeof AppBomSplatRoute
   '/bom/create': typeof AppBomCreateRoute
   '/bom/customers': typeof AppBomCustomersRoute
@@ -393,6 +401,7 @@ export interface FileRoutesByTo {
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
+  '/bank-requirements/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/bom/$': typeof AppBomSplatRoute
   '/bom/create': typeof AppBomCreateRoute
   '/bom/customers': typeof AppBomCustomersRoute
@@ -445,6 +454,7 @@ export interface FileRoutesById {
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/_app/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
+  '/_app/bank-requirements_/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/_app/bom/$': typeof AppBomSplatRoute
   '/_app/bom/create': typeof AppBomCreateRoute
   '/_app/bom/customers': typeof AppBomCustomersRoute
@@ -497,6 +507,7 @@ export interface FileRouteTypes {
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/advance-payment/$paymentNo'
+    | '/bank-requirements/document-pack'
     | '/bom/$'
     | '/bom/create'
     | '/bom/customers'
@@ -546,6 +557,7 @@ export interface FileRouteTypes {
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/advance-payment/$paymentNo'
+    | '/bank-requirements/document-pack'
     | '/bom/$'
     | '/bom/create'
     | '/bom/customers'
@@ -597,6 +609,7 @@ export interface FileRouteTypes {
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/_app/advance-payment/$paymentNo'
+    | '/_app/bank-requirements_/document-pack'
     | '/_app/bom/$'
     | '/_app/bom/create'
     | '/_app/bom/customers'
@@ -879,6 +892,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdvancePaymentPaymentNoRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/bank-requirements_/document-pack': {
+      id: '/_app/bank-requirements_/document-pack'
+      path: '/bank-requirements/document-pack'
+      fullPath: '/bank-requirements/document-pack'
+      preLoaderRoute: typeof AppBankRequirementsDocumentPackRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/bom/': {
       id: '/_app/bom/'
       path: '/'
@@ -1041,6 +1061,7 @@ interface AppRouteChildren {
   AppSalesDashboardRoute: typeof AppSalesDashboardRoute
   AppWorkordersRoute: typeof AppWorkordersRoute
   AppAdvancePaymentPaymentNoRoute: typeof AppAdvancePaymentPaymentNoRoute
+  AppBankRequirementsDocumentPackRoute: typeof AppBankRequirementsDocumentPackRoute
   AppHrReportsDocumentsRoute: typeof AppHrReportsDocumentsRoute
   AppHrReportsEmployeeMasterRoute: typeof AppHrReportsEmployeeMasterRoute
   AppIndentIndentNoRoute: typeof AppIndentIndentNoRoute
@@ -1083,6 +1104,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSalesDashboardRoute: AppSalesDashboardRoute,
   AppWorkordersRoute: AppWorkordersRoute,
   AppAdvancePaymentPaymentNoRoute: AppAdvancePaymentPaymentNoRoute,
+  AppBankRequirementsDocumentPackRoute: AppBankRequirementsDocumentPackRoute,
   AppHrReportsDocumentsRoute: AppHrReportsDocumentsRoute,
   AppHrReportsEmployeeMasterRoute: AppHrReportsEmployeeMasterRoute,
   AppIndentIndentNoRoute: AppIndentIndentNoRoute,
