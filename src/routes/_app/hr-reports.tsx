@@ -10,9 +10,12 @@ import {
   ClipboardCheck,
   Download,
   House,
+  Library,
   Loader2,
   Pencil,
+  ReceiptIndianRupee,
   Search,
+  Sparkles,
   UserPlus,
   Users,
 } from "lucide-react";
@@ -22,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { HrAddEmployeeForm } from "@/components/HrAddEmployeeForm";
 import { HrAttendanceEditDialog } from "@/components/HrAttendanceEditDialog";
+import { HrPayslip } from "@/components/HrPayslip";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -58,8 +62,11 @@ import {
   type HrEmployeeOption,
   type HrLeaveApplication,
 } from "@/lib/hr-reports-api";
+import { HR_STATUS_STYLES, hrStatusChip, hrStatusDot } from "@/lib/hr-status-colors";
+import { HR_ACCENTS, type HrAccent } from "@/lib/hr-theme";
+import { HrHero } from "@/components/HrHero";
 
-const HR_TABS = ["attendance", "leave", "wfh", "verify", "policy", "employee"] as const;
+const HR_TABS = ["attendance", "payslip", "leave", "wfh", "verify", "policy", "employee"] as const;
 type HrTab = (typeof HR_TABS)[number];
 
 export const Route = createFileRoute("/_app/hr-reports")({
@@ -80,50 +87,70 @@ function HrReportsRoute() {
 
 function HrReportsHub() {
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">HR Reports</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Attendance, leave, month-end verification, new employees and the employee master from the ERP.
-        </p>
-      </div>
+    <div className="space-y-6">
+      <HrHero
+        icon={Sparkles}
+        eyebrow="HR Portal"
+        title="HR Reports"
+        description="Attendance, leave, month-end verification, new employees, the employee master and HR documents — all in one place."
+      />
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <HubCard
           tab="attendance"
+          accent="emerald"
           icon={CalendarDays}
           title="Attendance & Salary"
           description="Pick an employee to see month attendance, punches and the salary payable, with Excel downloads."
         />
         <HubCard
+          tab="payslip"
+          accent="orange"
+          icon={ReceiptIndianRupee}
+          title="Salary Slips"
+          description="Month-wise salary slips with the employee photo, earnings, deductions and net pay — view on screen or download as PDF."
+        />
+        <HubCard
           tab="leave"
+          accent="amber"
           icon={ClipboardCheck}
           title="Leave Approvals"
           description="Approve or reject pending leave and work-from-home requests; balances and attendance update."
         />
         <HubCard
           tab="policy"
+          accent="blue"
           icon={BookOpen}
           title="Leave Policy & PL Credit"
           description="Attendance rules, monthly PL credit for head-office staff and employee confirmation (CL credit)."
         />
         <HubCard
           tab="verify"
+          accent="violet"
           icon={CalendarCheck}
           title="Month-end Verify"
           description="Review and approve employees' month-end attendance verification requests."
         />
         <HubCard
           tab="employee"
+          accent="pink"
           icon={UserPlus}
           title="Add Employee"
           description="Create a new employee in the ERP with personal, official, bank, PF/ESIC details and documents."
         />
         <HubCard
           to="/hr-reports/employee-master"
+          accent="cyan"
           icon={Users}
           title="Employee Master"
           description="One click for headcount by designation, attrition, joining/exit, salary increments, PF/ESIC and origin, with a full Excel."
+        />
+        <HubCard
+          to="/hr-reports/documents"
+          accent="fuchsia"
+          icon={Library}
+          title="HR Policies & Documents"
+          description="Upload and publish HR policies, the code of conduct and the organogram for all companies or a single company."
         />
       </div>
     </div>
@@ -133,30 +160,39 @@ function HrReportsHub() {
 function HubCard({
   tab,
   to,
+  accent,
   icon: Icon,
   title,
   description,
 }: {
   tab?: HrTab;
-  to?: "/hr-reports/employee-master";
+  to?: "/hr-reports/employee-master" | "/hr-reports/documents";
+  accent: HrAccent;
   icon: typeof BookOpen;
   title: string;
   description: string;
 }) {
+  const a = HR_ACCENTS[accent];
   const body = (
     <>
+      <div className={cn("absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r", a.gradient)} />
       <div className="flex items-start justify-between gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <div className={cn("flex h-11 w-11 items-center justify-center rounded-xl shadow-md", a.tile)}>
           <Icon className="h-5 w-5" />
         </div>
-        <ChevronRight className="h-5 w-5 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-foreground" />
+        <span className={cn("flex h-8 w-8 items-center justify-center rounded-full transition", a.soft, a.text)}>
+          <ChevronRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+        </span>
       </div>
-      <h2 className="mt-4 text-lg font-semibold">{title}</h2>
+      <h2 className={cn("mt-4 text-lg font-semibold", a.text)}>{title}</h2>
       <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{description}</p>
     </>
   );
-  const className =
-    "group rounded-xl border border-border bg-card p-5 shadow-sm transition hover:border-primary/40 hover:bg-secondary/30";
+  const className = cn(
+    "group relative overflow-hidden rounded-2xl border bg-card p-5 pt-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg",
+    a.border,
+    a.shadow,
+  );
   return to ? (
     <Link to={to} className={className}>
       {body}
@@ -524,19 +560,11 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
 
   const summary = attendanceQuery.data?.summary;
 
-  const statusTone = useMemo(
-    () =>
-      ({
-        Present: "bg-emerald-500/15 text-emerald-800 dark:text-emerald-200",
-        "Half Day": "bg-amber-500/20 text-amber-900 dark:text-amber-100",
-        PL: "bg-violet-500/15 text-violet-900 dark:text-violet-200",
-        CL: "bg-sky-500/15 text-sky-900 dark:text-sky-200",
-        WFH: "bg-teal-500/15 text-teal-900 dark:text-teal-200",
-        Holiday: "bg-rose-500/15 text-rose-900 dark:text-rose-200",
-        Absent: "bg-slate-500/15 text-slate-700 dark:text-slate-200",
-      }) as Record<string, string>,
-    [],
-  );
+  const statusCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const d of attendanceQuery.data?.days ?? []) counts.set(d.status, (counts.get(d.status) ?? 0) + 1);
+    return counts;
+  }, [attendanceQuery.data?.days]);
 
   async function onExportAttendance() {
     if (!selected) return;
@@ -575,28 +603,41 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
   return (
     <div className="space-y-5 pb-8">
       <div>
-        {isFullAccess ? (
-          <Link
-            to="/hr-reports"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-primary hover:underline"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            HR Reports
-          </Link>
-        ) : (
-          <div className="flex items-center gap-2 text-primary">
-            <Users className="h-5 w-5" />
-            <p className="text-xs font-semibold uppercase tracking-wide">HR</p>
-          </div>
-        )}
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight md:text-3xl">HR Reports</h1>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          {isFullAccess
-            ? "Full HR access — approve leave/WFH, PL/CL credit, month-end. Employees apply their own leave; HR does not apply on behalf."
-            : isSelfMode
-              ? "Apply leave/WFH for yourself (Pending → HR approves). View attendance. Month-end verify sends a request to HR. You cannot credit PL/CL."
-              : "HR Reports access is limited by login."}
-        </p>
+        <HrHero
+          icon={Users}
+          eyebrow={
+            isFullAccess ? (
+              <Link to="/hr-reports" className="inline-flex items-center gap-1.5 hover:underline">
+                <ArrowLeft className="h-3.5 w-3.5" />
+                HR Portal
+              </Link>
+            ) : (
+              "HR"
+            )
+          }
+          title="HR Reports"
+          description={
+            isFullAccess
+              ? "Full HR access — approve leave/WFH, PL/CL credit, month-end. Employees apply their own leave; HR does not apply on behalf."
+              : isSelfMode
+                ? "Apply leave/WFH for yourself (Pending → HR approves). View attendance. Month-end verify sends a request to HR. You cannot credit PL/CL."
+                : "HR Reports access is limited by login."
+          }
+          actions={
+            username ? (
+              <Button
+                asChild
+                size="sm"
+                className="bg-white/95 text-fuchsia-700 shadow-md hover:bg-white dark:bg-white/95 dark:text-fuchsia-700"
+              >
+                <Link to="/hr-reports/documents">
+                  <Library className="h-4 w-4" />
+                  HR Policies & Documents
+                </Link>
+              </Button>
+            ) : null
+          }
+        />
         {access?.message ? (
           <p className="mt-2 text-xs text-muted-foreground">{access.message}</p>
         ) : null}
@@ -631,7 +672,8 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
       ) : null}
 
       {username && access && access.mode !== "none" && tab !== "employee" ? (
-      <section className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm">
+      <section className="relative space-y-4 overflow-hidden rounded-2xl border border-indigo-200 bg-card p-4 pt-5 shadow-sm dark:border-indigo-500/30">
+        <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-pink-500" />
         {isFullAccess ? (
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
           <div className="lg:col-span-2">
@@ -794,8 +836,9 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
                       type="button"
                       onClick={() => setSelected(emp)}
                       className={cn(
-                        "flex w-full flex-col gap-0.5 px-3 py-2.5 text-left text-sm transition hover:bg-secondary/50",
-                        active && "bg-primary/10",
+                        "flex w-full flex-col gap-0.5 border-l-4 border-transparent px-3 py-2.5 text-left text-sm transition hover:bg-indigo-50 dark:hover:bg-indigo-500/10",
+                        active &&
+                          "border-fuchsia-500 bg-gradient-to-r from-indigo-50 to-fuchsia-50 dark:from-indigo-500/15 dark:to-fuchsia-500/10",
                       )}
                     >
                       <span className="font-medium">
@@ -826,9 +869,9 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
         </div>
 
         {selected ? (
-          <p className="text-sm">
+          <p className="inline-flex flex-wrap items-center gap-1.5 rounded-full bg-gradient-to-r from-indigo-500/10 to-fuchsia-500/10 px-3 py-1 text-sm">
             Selected:{" "}
-            <span className="font-semibold">
+            <span className="font-semibold text-indigo-700 dark:text-indigo-200">
               {selected.name} ({selected.empCode})
             </span>
           </p>
@@ -848,21 +891,26 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
           >
             {(
               [
-                { id: "attendance" as const, label: "Attendance & salary", icon: CalendarDays },
+                { id: "attendance" as const, label: "Attendance & salary", icon: CalendarDays, accent: "emerald" as const },
+                { id: "payslip" as const, label: "Salary slip", icon: ReceiptIndianRupee, accent: "fuchsia" as const },
                 {
                   id: "leave" as const,
                   label: isFullAccess ? "Approvals" : "Leave apply",
                   icon: ClipboardCheck,
+                  accent: "amber" as const,
                 },
                 ...(isFullAccess
-                  ? [{ id: "policy" as const, label: "Leave policy", icon: BookOpen }]
-                  : [{ id: "wfh" as const, label: "Work from home", icon: House }]),
-                { id: "verify" as const, label: "Month-end verify", icon: CalendarCheck },
-                ...(isFullAccess ? [{ id: "employee" as const, label: "Add employee", icon: UserPlus }] : []),
+                  ? [{ id: "policy" as const, label: "Leave policy", icon: BookOpen, accent: "blue" as const }]
+                  : [{ id: "wfh" as const, label: "Work from home", icon: House, accent: "cyan" as const }]),
+                { id: "verify" as const, label: "Month-end verify", icon: CalendarCheck, accent: "violet" as const },
+                ...(isFullAccess
+                  ? [{ id: "employee" as const, label: "Add employee", icon: UserPlus, accent: "pink" as const }]
+                  : []),
               ]
             ).map((t) => {
               const Icon = t.icon;
               const active = tab === t.id;
+              const a = HR_ACCENTS[t.accent];
               return (
                 <button
                   key={t.id}
@@ -875,11 +923,11 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
                   className={cn(
                     "flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm transition",
                     active
-                      ? "bg-primary font-medium text-primary-foreground shadow-sm"
+                      ? cn("bg-gradient-to-r font-semibold text-white shadow-md", a.gradient)
                       : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground",
                   )}
                 >
-                  <Icon className="h-4 w-4 shrink-0" />
+                  <Icon className={cn("h-4 w-4 shrink-0", !active && a.text)} />
                   {t.label}
                 </button>
               );
@@ -889,6 +937,16 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
           <div className="min-w-0 space-y-5">
           {tab === "employee" && isFullAccess ? <HrAddEmployeeForm username={username} /> : null}
 
+          {tab === "payslip" ? (
+            selected ? (
+              <HrPayslip username={username} empCode={selected.empCode} />
+            ) : (
+              <p className="rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-8 text-center text-sm text-muted-foreground">
+                Select an employee to view the salary slip.
+              </p>
+            )
+          ) : null}
+
           {tab === "attendance" ? (
             !selected ? (
               <p className="rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-8 text-center text-sm text-muted-foreground">
@@ -897,27 +955,31 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
             ) : (
             <>
           <section className="grid grid-cols-2 gap-3 lg:grid-cols-4 xl:grid-cols-8">
-            <Stat label="Present" value={String(summary?.presentDays ?? "—")} />
+            <Stat label="Present" status="Present" value={String(summary?.presentDays ?? "—")} />
             <Stat
               label={applyHalfDayRule ? "Half day (late >10:30 & <9h)" : "Half day (off)"}
+              status="Half Day"
               value={String(summary?.halfDays ?? "—")}
             />
             {canApplyPlCl ? (
               <>
-                <Stat label="PL (month)" value={summary ? String(summary.plDays) : "—"} />
+                <Stat label="PL (month)" status="PL" value={summary ? String(summary.plDays) : "—"} />
                 {canApplyCl ? (
-                  <Stat label="CL (month)" value={summary ? String(summary.clDays) : "—"} />
+                  <Stat label="CL (month)" status="CL" value={summary ? String(summary.clDays) : "—"} />
                 ) : null}
               </>
             ) : null}
-            <Stat label="WFH (month)" value={summary ? String(summary.wfhDays) : "—"} />
-            <Stat label="Absent" value={String(summary?.absentDays ?? "—")} />
+            <Stat label="WFH (month)" status="WFH" value={summary ? String(summary.wfhDays) : "—"} />
+            <Stat label="Weekly Off" status="Weekly Off" value={summary ? String(summary.weeklyOffDays) : "—"} />
+            <Stat label="Absent" status="Absent" value={String(summary?.absentDays ?? "—")} />
             <Stat
               label="Payable days"
+              accent="indigo"
               value={summary ? String(summary.payableDays) : "—"}
             />
             {canApplyPlCl ? (
               <Stat
+                accent="fuchsia"
                 label={isConsultant ? "Avail PL" : "Avail PL / CL"}
                 value={
                   attendanceQuery.data?.leaveBalance
@@ -928,7 +990,7 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
                 }
               />
             ) : (
-              <Stat label={leaveLabel} value="N/A (<1 yr)" />
+              <Stat accent="fuchsia" label={leaveLabel} value="N/A (<1 yr)" />
             )}
           </section>
 
@@ -969,9 +1031,9 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
             </p>
           ) : null}
 
-          <section className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+          <section className="space-y-3 rounded-xl border border-t-4 border-border border-t-emerald-500 bg-card p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold">Attendance</h2>
+              <h2 className="text-lg font-semibold text-emerald-700 dark:text-emerald-300">Attendance</h2>
               <Button
                 type="button"
                 variant="outline"
@@ -1010,12 +1072,27 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
                     days are marked and count in salary.
                   </p>
                 ) : null}
+                {statusCounts.size > 0 ? (
+                  <div className="flex flex-wrap gap-1.5" aria-label="Status colours">
+                    {Object.entries(HR_STATUS_STYLES)
+                      .filter(([status]) => statusCounts.has(status))
+                      .map(([status, style]) => (
+                        <span
+                          key={status}
+                          className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium", style.chip)}
+                        >
+                          <span className={cn("h-2 w-2 rounded-full", style.dot)} />
+                          {style.label} · {statusCounts.get(status)}
+                        </span>
+                      ))}
+                  </div>
+                ) : null}
               <ul className="space-y-2 md:hidden">
                 {(attendanceQuery.data?.days ?? []).map((day) => (
                   <AttendanceDayCard
                     key={day.date}
                     day={day}
-                    tone={statusTone[day.status]}
+                    tone={hrStatusChip(day.status)}
                     onEdit={canModifyAttendance && day.date <= today ? () => setEditingDay(day) : undefined}
                   />
                 ))}
@@ -1040,7 +1117,12 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
                         key={day.date}
                         className={cn("border-t border-border/70", day.isEdited && "bg-primary/5")}
                       >
-                        <td className="px-3 py-1.5 tabular-nums">{day.date}</td>
+                        <td className="px-3 py-1.5 tabular-nums">
+                          <span className="flex items-center gap-2">
+                            <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", hrStatusDot(day.status))} />
+                            {day.date}
+                          </span>
+                        </td>
                         <td className="px-3 py-1.5">{day.dayName}</td>
                         <td className="px-3 py-1.5 tabular-nums">{day.punchIn ?? "—"}</td>
                         <td className="px-3 py-1.5 tabular-nums">{day.punchOut ?? "—"}</td>
@@ -1051,7 +1133,7 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
                           <span
                             className={cn(
                               "inline-flex rounded-md px-2 py-0.5 text-xs font-medium",
-                              statusTone[day.status] ?? "bg-secondary",
+                              hrStatusChip(day.status),
                             )}
                           >
                             {day.status}
@@ -1097,9 +1179,9 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
             ) : null}
           </section>
 
-          <section className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+          <section className="space-y-3 rounded-xl border border-t-4 border-border border-t-indigo-500 bg-card p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold">Salary calculation</h2>
+              <h2 className="text-lg font-semibold text-indigo-700 dark:text-indigo-300">Salary calculation</h2>
               <Button
                 type="button"
                 variant="outline"
@@ -1212,8 +1294,8 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
           ) : null}
 
           {tab === "leave" ? (
-            <section className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm">
-              <h2 className="text-lg font-semibold">
+            <section className="space-y-4 rounded-xl border border-t-4 border-border border-t-amber-500 bg-card p-4 shadow-sm">
+              <h2 className="text-lg font-semibold text-amber-700 dark:text-amber-300">
                 {isFullAccess
                   ? selected
                     ? `Leave history — ${selected.name} (${selected.empCode})`
@@ -1552,8 +1634,8 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
           ) : null}
 
           {tab === "wfh" ? (
-            <section className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm">
-              <h2 className="text-lg font-semibold">Work from home</h2>
+            <section className="space-y-4 rounded-xl border border-t-4 border-border border-t-cyan-500 bg-card p-4 shadow-sm">
+              <h2 className="text-lg font-semibold text-cyan-700 dark:text-cyan-300">Work from home</h2>
               <p className="text-xs text-muted-foreground">
                 Stored as leave type <code className="text-[11px]">WFH</code> in LeaveHistory (Pending).
                 Same 3-day start-date window as leave.
@@ -1606,8 +1688,8 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
           ) : null}
 
           {tab === "verify" ? (
-            <section className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm">
-              <h2 className="text-lg font-semibold">Month-end attendance verify</h2>
+            <section className="space-y-4 rounded-xl border border-t-4 border-border border-t-violet-500 bg-card p-4 shadow-sm">
+              <h2 className="text-lg font-semibold text-violet-700 dark:text-violet-300">Month-end attendance verify</h2>
               <p className="text-xs text-muted-foreground">
                 {isFullAccess
                   ? "Employees send a verify request to HR. Approve pending requests below, or approve the selected employee/month directly."
@@ -1802,8 +1884,8 @@ function HrReportsPage({ initialTab }: { initialTab?: HrTab }) {
           ) : null}
 
           {tab === "policy" ? (
-            <section className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm">
-              <h2 className="text-lg font-semibold">Leave policy & confirmation</h2>
+            <section className="space-y-4 rounded-xl border border-t-4 border-border border-t-blue-500 bg-card p-4 shadow-sm">
+              <h2 className="text-lg font-semibold text-blue-700 dark:text-blue-300">Leave policy & confirmation</h2>
               <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
                 <li>Present if first punch ≤ 10:30 AM <strong>or</strong> worked ≥ 9 hours; else Half Day (0.5).</li>
                 <li>Missing punch-in or punch-out = Absent (HR can correct the day with Edit).</li>
@@ -1957,8 +2039,9 @@ function AttendanceDayCard({
   return (
     <li
       className={cn(
-        "rounded-lg border border-border bg-card px-3 py-2 text-sm shadow-sm",
-        day.isEdited && "border-primary/40 bg-primary/5",
+        "rounded-lg border border-l-4 border-border bg-card px-3 py-2 text-sm shadow-sm",
+        HR_STATUS_STYLES[day.status]?.ring.split(" ")[0],
+        day.isEdited && "bg-primary/5",
       )}
     >
       <div className="flex items-center justify-between gap-2">
@@ -2045,11 +2128,38 @@ function LeaveCard({
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  status,
+  accent,
+}: {
+  label: string;
+  value: string;
+  status?: string;
+  accent?: HrAccent;
+}) {
+  if (accent) {
+    return (
+      <div className={cn("rounded-xl bg-gradient-to-br px-4 py-3 text-white shadow-md", HR_ACCENTS[accent].gradient)}>
+        <div className="text-xs font-medium text-white/85">{label}</div>
+        <div className="mt-1 text-xl font-bold tabular-nums">{value}</div>
+      </div>
+    );
+  }
   return (
-    <div className="rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold tabular-nums">{value}</div>
+    <div
+      className={cn(
+        "rounded-xl border border-border bg-card px-4 py-3 shadow-sm",
+        status && "border-l-4",
+        status && HR_STATUS_STYLES[status]?.ring,
+      )}
+    >
+      <div className="flex items-center gap-1.5 text-xs opacity-80">
+        {status ? <span className={cn("h-2 w-2 shrink-0 rounded-full", hrStatusDot(status))} /> : null}
+        {label}
+      </div>
+      <div className="mt-1 text-xl font-bold tabular-nums">{value}</div>
     </div>
   );
 }
