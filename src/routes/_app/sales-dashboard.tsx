@@ -325,6 +325,12 @@ function SalesDashboardPage() {
             }
             totalSales={kpis?.totalSales ?? 0}
             includeIntercompany={includeIntercompany}
+            pdfContext={{
+              company: companyFilter,
+              dateFrom: filters.dateFrom,
+              dateTo: filters.dateTo,
+              totalAmount: isPurchase ? kpis?.totalPurchase : kpis?.totalSales,
+            }}
           />
         </>
       )}

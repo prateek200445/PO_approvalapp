@@ -409,6 +409,42 @@ export async function getTopSuppliers(filters: {
   return mapRankedParties(payload);
 }
 
+export type SalesTopTenPdfSection = {
+  title: string;
+  subtitle?: string;
+  nameHeader: string;
+  baseAmount?: number;
+  rows: Array<{ rank: number; name: string; country?: string | null; amount: number }>;
+};
+
+export async function downloadSalesTopTenPdf(request: {
+  category: "Sales" | "Purchase";
+  company: string;
+  dateFrom: string;
+  dateTo: string;
+  includeIntercompany: boolean;
+  totalAmount?: number;
+  sections: SalesTopTenPdfSection[];
+}): Promise<void> {
+  const response = await fetch(getSalesApiUrl("/api/SalesDashboard/top10/pdf"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(payload.message || "Could not create the PDF");
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${request.category}_Top10_${request.dateFrom}_${request.dateTo}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function num(v: unknown): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;

@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
+using POApprovalAPI.Documents;
 using POApprovalAPI.Services;
+using QuestPDF.Fluent;
 
 namespace POApprovalAPI.Controllers;
 
@@ -55,6 +57,23 @@ public class SalesDashboardController : ControllerBase
                 dateFrom = from.ToString("yyyy-MM-dd"),
                 dateTo = to.ToString("yyyy-MM-dd"),
             });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("top10/pdf")]
+    public IActionResult TopTenPdf([FromBody] SalesTopTenPdfRequest request)
+    {
+        if (request.Sections.Count is 0 or > 6 || request.Sections.Any(s => s.Rows.Count > 50))
+            return BadRequest(new { message = "Nothing to export." });
+        try
+        {
+            var bytes = new SalesTopTenPdfDocument(request).GeneratePdf();
+            var kind = string.Equals(request.Category, "Purchase", StringComparison.OrdinalIgnoreCase) ? "Purchase" : "Sales";
+            return File(bytes, "application/pdf", $"{kind}_Top10_{request.DateFrom}_{request.DateTo}.pdf");
         }
         catch (Exception ex)
         {
