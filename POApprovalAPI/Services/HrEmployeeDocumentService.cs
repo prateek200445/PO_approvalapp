@@ -56,7 +56,10 @@ public sealed class HrEmployeeDocumentService
         empCode = NormalizeCode(empCode);
         using var connection = _database.CreatePayrollLoginEntryConnection();
         var bytes = await connection.QueryFirstOrDefaultAsync<byte[]?>(
-            "SELECT TOP 1 CAST(images AS varbinary(max)) FROM empinfo WITH (NOLOCK) WHERE LTRIM(RTRIM(EmpCode)) = @EmpCode",
+            """
+            SELECT TOP 1 CASE WHEN DATALENGTH(images) > 0 THEN CAST(images AS varbinary(max)) ELSE CAST(photo AS varbinary(max)) END
+            FROM empinfo WITH (NOLOCK) WHERE LTRIM(RTRIM(EmpCode)) = @EmpCode
+            """,
             new { EmpCode = empCode });
         if (bytes is null || bytes.Length == 0)
             return null;

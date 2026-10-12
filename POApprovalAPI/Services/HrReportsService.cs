@@ -375,6 +375,7 @@ ORDER BY FromDate DESC",
         var plDays = days.Where(x => x.Status == "PL").Sum(x => x.PayableDay);
         var clDays = days.Where(x => x.Status == "CL").Sum(x => x.PayableDay);
         var wfhDays = days.Where(x => x.Status == "WFH").Sum(x => x.PayableDay);
+        var weeklyOffDays = days.Count(x => x.Status == "Weekly Off");
         var payableDays = days.Sum(x => x.PayableDay);
 
         string? dataNote = null;
@@ -424,6 +425,7 @@ SELECT MAX(Sysdate) FROM tempattendance WITH (NOLOCK)", commandTimeout: 60);
                 PlDays = canApplyPlCl ? plDays : 0,
                 ClDays = canApplyCl ? clDays : 0,
                 WfhDays = wfhDays,
+                WeeklyOffDays = weeklyOffDays,
                 PayableDays = payableDays,
             },
         };
@@ -669,10 +671,10 @@ ORDER BY FromDate DESC",
         ws.Cell(3, 1).Value = report.PeriodLabel;
         var leaveLabel = report.IsConsultant ? "PL" : "PL/CL";
         ws.Cell(4, 1).Value = !report.CanApplyPlCl
-            ? $"Present {report.Summary.PresentDays} | Half {report.Summary.HalfDays} | WFH {report.Summary.WfhDays} | Absent {report.Summary.AbsentDays} | Payable {report.Summary.PayableDays} ({leaveLabel} N/A — under 1 year)"
+            ? $"Present {report.Summary.PresentDays} | Half {report.Summary.HalfDays} | WFH {report.Summary.WfhDays} | Weekly Off {report.Summary.WeeklyOffDays} | Absent {report.Summary.AbsentDays} | Payable {report.Summary.PayableDays} ({leaveLabel} N/A — under 1 year)"
             : report.IsConsultant
-                ? $"Present {report.Summary.PresentDays} | Half {report.Summary.HalfDays} | PL {report.Summary.PlDays} | WFH {report.Summary.WfhDays} | Absent {report.Summary.AbsentDays} | Payable {report.Summary.PayableDays} (Consultant — no CL)"
-                : $"Present {report.Summary.PresentDays} | Half {report.Summary.HalfDays} | PL {report.Summary.PlDays} | CL {report.Summary.ClDays} | WFH {report.Summary.WfhDays} | Absent {report.Summary.AbsentDays} | Payable {report.Summary.PayableDays}";
+                ? $"Present {report.Summary.PresentDays} | Half {report.Summary.HalfDays} | PL {report.Summary.PlDays} | WFH {report.Summary.WfhDays} | Weekly Off {report.Summary.WeeklyOffDays} | Absent {report.Summary.AbsentDays} | Payable {report.Summary.PayableDays} (Consultant — no CL)"
+                : $"Present {report.Summary.PresentDays} | Half {report.Summary.HalfDays} | PL {report.Summary.PlDays} | CL {report.Summary.ClDays} | WFH {report.Summary.WfhDays} | Weekly Off {report.Summary.WeeklyOffDays} | Absent {report.Summary.AbsentDays} | Payable {report.Summary.PayableDays}";
         if (report.CanApplyPlCl && report.LeaveBalance is not null)
         {
             ws.Cell(5, 1).Value = report.IsConsultant
@@ -707,6 +709,8 @@ ORDER BY FromDate DESC",
             ws.Cell(r, 4).Value = day.PunchOut ?? "";
             ws.Cell(r, 5).Value = day.WorkedHours?.ToString("0.##") ?? "";
             ws.Cell(r, 6).Value = day.IsEdited ? $"{day.Status} (edited by HR)" : day.Status;
+            if (StatusFill(day.Status) is { } fill)
+                ws.Cell(r, 6).Style.Fill.SetBackgroundColor(XLColor.FromHtml(fill));
             ws.Cell(r, 7).Value = day.PayableDay;
             ws.Cell(r, 8).Value = day.Branch ?? "";
             ws.Cell(r, 9).Value = report.HalfDayAfter;
@@ -718,6 +722,20 @@ ORDER BY FromDate DESC",
         wb.SaveAs(stream);
         return stream.ToArray();
     }
+
+    /// <summary>Same attendance palette as the HR dashboard (src/lib/hr-status-colors.ts).</summary>
+    private static string? StatusFill(string? status) => status switch
+    {
+        "Present" => "#D1FAE5",
+        "Absent" => "#FEE2E2",
+        "Half Day" => "#FEF3C7",
+        "PL" => "#DBEAFE",
+        "CL" => "#E0F2FE",
+        "WFH" => "#CCFBF1",
+        "Holiday" => "#EDE9FE",
+        "Weekly Off" => "#E5E7EB",
+        _ => null,
+    };
 
     public async Task<byte[]> BuildSalaryExcelAsync(
         string empCode,
@@ -779,6 +797,8 @@ ORDER BY FromDate DESC",
             ws.Cell(r, 4).Value = day.PunchOut ?? "";
             ws.Cell(r, 5).Value = day.WorkedHours?.ToString("0.##") ?? "";
             ws.Cell(r, 6).Value = day.IsEdited ? $"{day.Status} (edited by HR)" : day.Status;
+            if (StatusFill(day.Status) is { } fill)
+                ws.Cell(r, 6).Style.Fill.SetBackgroundColor(XLColor.FromHtml(fill));
             ws.Cell(r, 7).Value = day.PayableDay;
             r++;
         }
@@ -918,6 +938,7 @@ public sealed class HrAttendanceSummaryDto
     public decimal PlDays { get; set; }
     public decimal ClDays { get; set; }
     public decimal WfhDays { get; set; }
+    public int WeeklyOffDays { get; set; }
     public decimal PayableDays { get; set; }
 }
 

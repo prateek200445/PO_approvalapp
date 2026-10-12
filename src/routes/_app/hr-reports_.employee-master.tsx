@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Loader2, Users } from "lucide-react";
 import { HrEmployeeMaster } from "@/components/HrEmployeeMaster";
+import { HrHero } from "@/components/HrHero";
 import { useAuth } from "@/lib/auth-context";
 import { isHrReportsFullAccessUser } from "@/lib/feature-flags";
 import { getHrAccess } from "@/lib/hr-reports-api";
@@ -25,19 +26,17 @@ function HrEmployeeMasterPage() {
 
   return (
     <div className="space-y-5 pb-8">
-      <div>
-        <Link
-          to="/hr-reports"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-primary hover:underline"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          HR Reports
-        </Link>
-        <div className="mt-2 flex items-center gap-2">
-          <Users className="h-6 w-6 text-primary" />
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Employee Master</h1>
-        </div>
-      </div>
+      <HrHero
+        icon={Users}
+        eyebrow={
+          <Link to="/hr-reports" className="inline-flex items-center gap-1.5 hover:underline">
+            <ArrowLeft className="h-3.5 w-3.5" />
+            HR Reports
+          </Link>
+        }
+        title="Employee Master"
+        description="Headcount, attrition, joining and exits, salary increments, PF/ESIC and origin across companies."
+      />
 
       {!username ? (
         <div className="rounded-xl border border-dashed border-border bg-secondary/20 px-4 py-10 text-center text-sm text-muted-foreground">

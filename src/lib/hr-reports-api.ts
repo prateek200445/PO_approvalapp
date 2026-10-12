@@ -30,7 +30,7 @@ export type HrAttendanceDay = {
   editedAt?: string | null;
 };
 
-export const HR_ATTENDANCE_EDIT_STATUSES = ["Present", "Half Day", "Absent", "WFH", "Holiday"] as const;
+export const HR_ATTENDANCE_EDIT_STATUSES = ["Present", "Half Day", "Absent", "WFH", "Holiday", "Weekly Off"] as const;
 
 export type HrAttendanceEditInput = {
   empCode: string;
@@ -65,6 +65,7 @@ export type HrAttendanceSummary = {
   plDays: number;
   clDays: number;
   wfhDays: number;
+  weeklyOffDays: number;
   payableDays: number;
 };
 
@@ -252,7 +253,7 @@ export async function getHrAttendanceReport(
   return {
     yearMonth: String(raw.yearMonth ?? raw.YearMonth ?? yearMonth),
     periodLabel: String(raw.periodLabel ?? raw.PeriodLabel ?? ""),
-    halfDayAfter: String(raw.halfDayAfter ?? raw.HalfDayAfter ?? "in≤10:30 or ≥9h worked"),
+    halfDayAfter: String(raw.halfDayAfter ?? raw.HalfDayAfter ?? "inâ‰¤10:30 or â‰¥9h worked"),
     applyHalfDayRule: Boolean(raw.applyHalfDayRule ?? raw.ApplyHalfDayRule ?? applyHalfDayRule),
     employee: mapEmployee((raw.employee ?? raw.Employee ?? {}) as Record<string, unknown>),
     summary: {
@@ -263,6 +264,7 @@ export async function getHrAttendanceReport(
       plDays: Number(summary.plDays ?? summary.PlDays ?? 0),
       clDays: Number(summary.clDays ?? summary.ClDays ?? 0),
       wfhDays: Number(summary.wfhDays ?? summary.WfhDays ?? 0),
+      weeklyOffDays: Number(summary.weeklyOffDays ?? summary.WeeklyOffDays ?? 0),
       payableDays: Number(summary.payableDays ?? summary.PayableDays ?? 0),
     },
     leaveBalance: mapLeaveBalance(raw.leaveBalance ?? raw.LeaveBalance),
@@ -336,6 +338,7 @@ export async function getHrSalaryReport(args: {
       plDays: Number(summary.plDays ?? summary.PlDays ?? 0),
       clDays: Number(summary.clDays ?? summary.ClDays ?? 0),
       wfhDays: Number(summary.wfhDays ?? summary.WfhDays ?? 0),
+      weeklyOffDays: Number(summary.weeklyOffDays ?? summary.WeeklyOffDays ?? 0),
       payableDays: Number(summary.payableDays ?? summary.PayableDays ?? 0),
     },
     monthlyBasic: (raw.monthlyBasic ?? raw.MonthlyBasic) as number | null,

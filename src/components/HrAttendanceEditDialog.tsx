@@ -19,8 +19,17 @@ import {
   saveHrAttendanceEdit,
   type HrAttendanceDay,
 } from "@/lib/hr-reports-api";
+import { HR_STATUS_STYLES, hrStatusDot } from "@/lib/hr-status-colors";
+import { cn } from "@/lib/utils";
 
-const QUICK_REASONS = ["Forgot to punch", "Machine not working", "On official duty", "Client visit", "Company holiday"];
+const QUICK_REASONS = [
+  "Forgot to punch",
+  "Machine not working",
+  "On official duty",
+  "Client visit",
+  "Company holiday",
+  "Weekly off",
+];
 
 function toHhMm(value?: string | null) {
   return value ? value.slice(0, 5) : "";
@@ -127,12 +136,14 @@ export function HrAttendanceEditDialog({
                   key={s}
                   type="button"
                   onClick={() => setStatus(s)}
-                  className={
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition",
                     s === status
-                      ? "rounded-md border border-primary bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
-                      : "rounded-md border border-border bg-background px-3 py-1.5 text-sm hover:bg-secondary"
-                  }
+                      ? cn("border-2 font-semibold", HR_STATUS_STYLES[s]?.ring)
+                      : "border-border bg-background hover:bg-secondary",
+                  )}
                 >
+                  <span className={cn("h-2 w-2 rounded-full", hrStatusDot(s))} />
                   {s}
                 </button>
               ))}
