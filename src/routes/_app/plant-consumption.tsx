@@ -471,9 +471,9 @@ function PlantConsumptionPage() {
         </div>
       )}
 
-      {family === "loom" && <LoomPanel date={entryDate} shift={shift} onSaved={() => undefined} />}
-      {family === "needle" && <NeedlePanel date={entryDate} shift={shift} />}
-      {family === "lam-rolls" && <LaminationPanel date={entryDate} shift={shift} onContinue={openLaminationConsumption} />}
+      {family === "loom" && <LoomPanel date={entryDate} shift={shift} company={company} userName={user?.username ?? ""} onSaved={() => undefined} />}
+      {family === "needle" && <NeedlePanel date={entryDate} shift={shift} company={company} userName={user?.username ?? ""} />}
+      {family === "lam-rolls" && <LaminationPanel date={entryDate} shift={shift} company={company} userName={user?.username ?? ""} onContinue={openLaminationConsumption} />}
 
       {family === "consumption" && plant && (
       <>

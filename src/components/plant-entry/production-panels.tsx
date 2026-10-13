@@ -1,10 +1,25 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import {
+  deleteLoom,
+  deleteNeedle,
+  getLaminationRecent,
+  getLaminationRolls,
+  getLoomEntry,
+  getLoomRecent,
+  getLoomSetup,
+  getNeedleRecent,
+  saveLamination,
+  saveLoom,
+  saveNeedle,
+  type LoomSetupAllocation,
+} from "@/lib/plant-production-api";
 
 type LoomRoll = {
   key: string;
@@ -18,6 +33,8 @@ type LoomRoll = {
   order: string;
   warp: string;
   weft: string;
+  warpCode: string;
+  weftCode: string;
   warpQty: string;
   weftQty: string;
   fg: string;
@@ -32,7 +49,31 @@ type LoomRoll = {
   remarks: string;
 };
 
-type BobbinLine = { key: string; item: string; stock: number; qty: string };
+type BobbinSummary = { item: string; stock: number; qty: number };
+
+type LoomMaster = {
+  loom: string;
+  quality: string;
+  mesh: string;
+  gsm: string;
+  sector: string;
+  party: string;
+  order: string;
+  warp: string;
+  weft: string;
+  warpCode: string;
+  weftCode: string;
+  fg: string;
+  size: number;
+  warpMesh: number;
+  weftMesh: number;
+  warpDnr: number;
+  weftDnr: number;
+  rfWidth: number;
+  rfNo: number;
+  shrinkage: number;
+  tube: boolean;
+};
 
 type NeedleRow = {
   key: string;
@@ -82,10 +123,10 @@ type LamRoll = {
   checked: boolean;
 };
 
-const ALLOCATIONS = [
-  { loom: "12", quality: "Circular 160 UL", mesh: "10 x 10", gsm: "78", sector: "Food", party: "RP Production", order: "Self", warp: "PP Tape 1100 DTEX", weft: "PP Tape 900 DTEX", fg: "UL Fabric 160 GSM" },
-  { loom: "18", quality: "Circular 180 UL", mesh: "12 x 12", gsm: "90", sector: "Chemical", party: "ABC Polymers", order: "PO-4418", warp: "PP Tape 1200 DTEX", weft: "PP Tape 1000 DTEX", fg: "UL Fabric 180 GSM" },
-  { loom: "24", quality: "Circular 140 UL", mesh: "8 x 8", gsm: "65", sector: "Agro", party: "Self Production", order: "Self", warp: "PP Tape 900 DTEX", weft: "PP Tape 800 DTEX", fg: "UL Fabric 140 GSM" },
+const ALLOCATIONS: LoomMaster[] = [
+  { loom: "12", quality: "Circular 160 UL", mesh: "10 x 10", gsm: "78", sector: "Food", party: "RP Production", order: "Self", warp: "PP Tape 1100 DTEX", weft: "PP Tape 900 DTEX", warpCode: "", weftCode: "", fg: "UL Fabric 160 GSM", size: 160, warpMesh: 10, weftMesh: 10, warpDnr: 1100, weftDnr: 900, rfWidth: 0, rfNo: 0, shrinkage: 0.02, tube: false },
+  { loom: "18", quality: "Circular 180 UL", mesh: "12 x 12", gsm: "90", sector: "Chemical", party: "ABC Polymers", order: "PO-4418", warp: "PP Tape 1200 DTEX", weft: "PP Tape 1000 DTEX", warpCode: "", weftCode: "", fg: "UL Fabric 180 GSM", size: 180, warpMesh: 12, weftMesh: 12, warpDnr: 1200, weftDnr: 1000, rfWidth: 0, rfNo: 0, shrinkage: 0.02, tube: false },
+  { loom: "24", quality: "Circular 140 UL", mesh: "8 x 8", gsm: "65", sector: "Agro", party: "Self Production", order: "Self", warp: "PP Tape 900 DTEX", weft: "PP Tape 800 DTEX", warpCode: "", weftCode: "", fg: "UL Fabric 140 GSM", size: 140, warpMesh: 8, weftMesh: 8, warpDnr: 900, weftDnr: 800, rfWidth: 0, rfNo: 0, shrinkage: 0.02, tube: false },
 ];
 
 const BOBBIN_STOCK = [
@@ -172,12 +213,58 @@ function uid() {
   return crypto.randomUUID();
 }
 
-function allocation(loom: string) {
-  return ALLOCATIONS.find((row) => row.loom === loom) ?? ALLOCATIONS[0];
+function allocation(loom: string, masters: LoomMaster[] = ALLOCATIONS) {
+  return masters.find((row) => row.loom === loom) ?? masters[0] ?? ALLOCATIONS[0];
 }
 
-function loomRoll(loom = "12"): LoomRoll {
-  const row = allocation(loom);
+function round2(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function stockOf(item: string, stock = BOBBIN_STOCK) {
+  return stock.find((row) => row.item === item)?.stock ?? 0;
+}
+
+function calculateLoom(rolls: LoomRoll[], masters: LoomMaster[] = ALLOCATIONS, stock = BOBBIN_STOCK) {
+  const next = rolls.map((row) => ({ ...row }));
+  const consumed = new Map<string, number>();
+  for (const row of next) {
+    const metre = num(row.metre);
+    const net = num(row.net);
+    if (metre <= 0 || net <= 0) continue;
+    const master = allocation(row.loom, masters);
+    if (!row.warp) row.warp = master.warp;
+    if (!row.weft) row.weft = master.weft;
+    if (!row.warpCode) row.warpCode = master.warpCode;
+    if (!row.weftCode) row.weftCode = master.weftCode;
+    const shrinkage = master.shrinkage === 0 ? 1 : master.shrinkage;
+    const mul = master.tube ? 2 : 1;
+    const warpCon =
+      ((master.warpDnr / 9000) * (master.size / 2.54) * ((mul * metre * master.warpMesh * (1 + shrinkage)) / 1000)) +
+      ((master.warpDnr / 9000) * ((master.rfWidth * master.rfNo) / 2.54) * ((master.warpMesh * metre * (1 + shrinkage)) / 1000));
+    const weftCon = ((master.weftMesh / 2.54) * master.size * mul * (master.weftDnr / 9000) * (metre / 1000)) * (1 + shrinkage);
+    const total = warpCon + weftCon;
+    const warpQty = total > 0 ? round2((net / total) * warpCon) : 0;
+    const weftQty = round2(net - warpQty);
+    row.warpQty = warpQty.toFixed(2);
+    row.weftQty = weftQty.toFixed(2);
+    const gpm = round2((net / metre) * 1000);
+    const gsmBase = (master.size * mul) / 100;
+    row.gpm = gpm.toFixed(2);
+    row.actualGsm = (gsmBase > 0 ? round2(gpm / gsmBase) : 0).toFixed(2);
+    const req = num(row.gsm);
+    const ratio = req > 0 ? num(row.actualGsm) / req : 0;
+    row.logicGsm = ratio < 1.05 && ratio > 0.95 ? "0" : "1";
+    consumed.set(row.warp, round2((consumed.get(row.warp) ?? 0) + warpQty));
+    consumed.set(row.weft, round2((consumed.get(row.weft) ?? 0) + weftQty));
+  }
+  const summary: BobbinSummary[] = [...consumed.entries()].map(([item, qty]) => ({ item, stock: stockOf(item, stock), qty }));
+  const over = summary.find((line) => line.qty > line.stock);
+  return { rolls: next, summary, stockError: over ? `Consumption is above Loom Godown stock for ${over.item}.` : null };
+}
+
+function loomRoll(loom = "12", masters: LoomMaster[] = ALLOCATIONS): LoomRoll {
+  const row = allocation(loom, masters);
   return {
     key: uid(),
     ...row,
@@ -217,32 +304,51 @@ function needleRow(): NeedleRow {
 export function LoomPanel({
   date,
   shift,
+  company,
+  userName,
   onSaved,
 }: {
   date: string;
   shift: string;
+  company: string;
+  userName: string;
   onSaved: () => void;
 }) {
+  const [masters, setMasters] = useState<LoomMaster[]>(ALLOCATIONS);
+  const [stock, setStock] = useState<{ item: string; stock: number; itemCode?: string }[]>(BOBBIN_STOCK);
   const [loom, setLoom] = useState("12");
   const [rolls, setRolls] = useState<LoomRoll[]>([loomRoll()]);
-  const [bobbins, setBobbins] = useState<BobbinLine[]>([
-    { key: uid(), item: "PP Tape 1100 DTEX", stock: 842.5, qty: "" },
-    { key: uid(), item: "PP Tape 900 DTEX", stock: 610, qty: "" },
-  ]);
+  const [summary, setSummary] = useState<BobbinSummary[] | null>(null);
   const [savedId, setSavedId] = useState<string | null>(null);
-  const [recent, setRecent] = useState<LoomSaved[]>(seedLoomRecent(date, shift));
+  const [recent, setRecent] = useState<LoomSaved[]>(company ? [] : seedLoomRecent(date, shift));
 
-  const active = allocation(loom);
+  useEffect(() => {
+    if (!company) return;
+    let cancel = false;
+    getLoomSetup(company, date)
+      .then((data) => {
+        if (cancel || data.allocations.length === 0) return;
+        setMasters(data.allocations);
+        if (data.bobbins.length > 0) setStock(data.bobbins.map((row) => ({ item: row.item, stock: row.stock, itemCode: row.itemCode })));
+      })
+      .catch(() => undefined);
+    getLoomRecent(company, date)
+      .then((rows) => {
+        if (cancel) return;
+        setRecent(rows.map((row) => ({ id: String(row.id), date, shift: row.shift, loom: row.loom, rolls: row.rolls, net: row.net, bobbin: row.net, snapshot: [] })));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancel = true;
+    };
+  }, [company, date]);
+
+  const active = allocation(loom, masters);
   const rollNet = rolls.reduce((sum, row) => sum + num(row.net), 0);
-  const bobbinQty = bobbins.reduce((sum, row) => sum + num(row.qty), 0);
+  const bobbinQty = rolls.reduce((sum, row) => sum + num(row.warpQty) + num(row.weftQty), 0);
 
   function applyLoom(next: string) {
     setLoom(next);
-    const row = allocation(next);
-    setBobbins([
-      { key: uid(), item: row.warp, stock: BOBBIN_STOCK.find((b) => b.item === row.warp)?.stock ?? 0, qty: "" },
-      { key: uid(), item: row.weft, stock: BOBBIN_STOCK.find((b) => b.item === row.weft)?.stock ?? 0, qty: "" },
-    ]);
   }
 
   function patchRoll(key: string, patch: Partial<LoomRoll>) {
@@ -251,7 +357,7 @@ export function LoomPanel({
         if (row.key !== key) return row;
         const next = { ...row, ...patch };
         if (patch.loom) {
-          const filled = allocation(patch.loom);
+          const filled = allocation(patch.loom, masters);
           next.quality = filled.quality;
           next.mesh = filled.mesh;
           next.gsm = filled.gsm;
@@ -261,6 +367,8 @@ export function LoomPanel({
           next.order = filled.order;
           next.warp = filled.warp;
           next.weft = filled.weft;
+          next.warpCode = filled.warpCode;
+          next.weftCode = filled.weftCode;
           next.fg = filled.fg;
         }
         if ("gross" in patch || "tare" in patch || "cover" in patch) {
@@ -272,30 +380,140 @@ export function LoomPanel({
     );
   }
 
-  function save() {
-    if (rollNet <= 0) {
+  function runCalculate(show: boolean) {
+    const weighed = rolls.filter((row) => num(row.net) > 0);
+    if (weighed.length === 0) {
       toast.error("Enter at least one roll with a net weight.");
-      return;
+      return null;
     }
-    const id = savedId ?? `L-${recent.length + 1}`;
-    const entry: LoomSaved = { id, date, shift, loom, rolls: rolls.filter((row) => num(row.net) > 0).length, net: rollNet, bobbin: bobbinQty, snapshot: rolls, bobbins };
-    setRecent((rows) => [entry, ...rows.filter((row) => row.id !== id)]);
-    setSavedId(id);
-    toast.success(`Loom ${loom} kept on this screen. Database save comes next.`);
-    onSaved();
+    if (weighed.some((row) => num(row.metre) <= 0)) {
+      toast.error("Enter metre for every roll with a net weight.");
+      return null;
+    }
+    if (weighed.some((row) => row.fg.trim().length === 0)) {
+      toast.error("Select an FG code.");
+      return null;
+    }
+    const result = calculateLoom(rolls, masters, stock);
+    setRolls(result.rolls);
+    if (show) setSummary(result.summary);
+    if (result.stockError) toast.error(result.stockError);
+    const net = result.rolls.reduce((sum, row) => sum + num(row.net), 0);
+    const consumed = result.summary.reduce((sum, row) => sum + row.qty, 0);
+    if (Math.round(net * 1000) !== Math.round(consumed * 1000)) {
+      toast.error("Consumption does not match production.");
+      return null;
+    }
+    return result;
   }
 
-  function open(entry: LoomSaved) {
+  async function save() {
+    const result = runCalculate(true);
+    if (!result) return;
+    if (result.stockError) return;
+    const net = result.rolls.reduce((sum, row) => sum + num(row.net), 0);
+    const consumed = result.summary.reduce((sum, row) => sum + row.qty, 0);
+    const weighed = result.rolls.filter((row) => num(row.net) > 0);
+    if (!company) {
+      const id = savedId ?? `L-${recent.length + 1}`;
+      const entry: LoomSaved = { id, date, shift, loom, rolls: weighed.length, net, bobbin: consumed, snapshot: result.rolls };
+      setRecent((rows) => [entry, ...rows.filter((row) => row.id !== id)]);
+      setSavedId(id);
+      setSummary(result.summary);
+      toast.success(`Loom ${loom} kept on this screen.`);
+      onSaved();
+      return;
+    }
+    try {
+      const saved = await saveLoom({
+        company,
+        userName,
+        entryDate: date,
+        shift,
+        recordLogId: savedId && /^\d+$/.test(savedId) ? Number(savedId) : null,
+        rolls: weighed.map((row) => ({
+          loomNo: Number(row.loom) || 0,
+          rollNo: row.rollNo,
+          quality: row.quality,
+          mesh: row.mesh,
+          gsm: num(row.gsm),
+          sector: row.sector,
+          metre: num(row.metre),
+          gross: num(row.gross),
+          tare: num(row.tare),
+          cover: num(row.cover),
+          net: num(row.net),
+          gpm: num(row.gpm),
+          actualGsm: num(row.actualGsm),
+          remarks: row.remarks,
+          party: row.party,
+          order: row.order,
+          warpQty: num(row.warpQty),
+          weftQty: num(row.weftQty),
+          warpCode: row.warpCode,
+          weftCode: row.weftCode,
+          warpName: row.warp,
+          weftName: row.weft,
+          fgCode: row.fg,
+          logic: Number(row.logicGsm) || 0,
+        })),
+      });
+      setSavedId(String(saved.recordLogId));
+      const numbers = [...saved.rollNos];
+      setRolls(result.rolls.map((row) => (num(row.net) > 0 ? { ...row, rollNo: numbers.shift() || row.rollNo } : row)));
+      setSummary(result.summary);
+      const listed = await getLoomRecent(company, date);
+      setRecent(listed.map((row) => ({ id: String(row.id), date, shift: row.shift, loom: row.loom, rolls: row.rolls, net: row.net, bobbin: row.net, snapshot: [] })));
+      toast.success(`Loom entry saved. Record ${saved.recordLogId}.`);
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    }
+  }
+
+  async function open(entry: LoomSaved) {
     setSavedId(entry.id);
     setLoom(entry.loom);
-    setRolls(entry.snapshot);
-    setBobbins(entry.bobbins);
+    setSummary(null);
+    if (entry.snapshot.length > 0) {
+      setRolls(entry.snapshot);
+      return;
+    }
+    if (!company || !/^\d+$/.test(entry.id)) return;
+    try {
+      const rows = await getLoomEntry(company, Number(entry.id));
+      setRolls(rows.map((row) => ({
+        ...loomRoll(row.loom, masters),
+        rollNo: row.rollNo,
+        quality: row.quality,
+        mesh: row.mesh,
+        gsm: String(row.gsm),
+        sector: row.sector,
+        metre: String(row.metre),
+        gross: String(row.gross),
+        tare: String(row.tare),
+        cover: String(row.cover),
+        net: String(row.net),
+        gpm: String(row.gpm),
+        actualGsm: String(row.actualGsm),
+        remarks: row.remarks,
+        party: row.party,
+        order: row.order,
+        warpQty: String(row.warpQty),
+        weftQty: String(row.weftQty),
+        warpCode: row.warpCode,
+        weftCode: row.weftCode,
+        fg: row.fg,
+      })));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not open the entry");
+    }
   }
 
   function clear() {
     setSavedId(null);
-    setRolls([loomRoll(loom)]);
-    applyLoom(loom);
+    setRolls([loomRoll(loom, masters)]);
+    setSummary(null);
   }
 
   return (
@@ -304,11 +522,11 @@ export function LoomPanel({
         <div className="flex flex-wrap items-end justify-between gap-3 border-b border-border/70 px-4 py-4 md:px-5">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">Loom</p>
-            <h2 className="text-lg font-semibold tracking-tight">Rolls and bobbins</h2>
+            <h2 className="text-lg font-semibold tracking-tight">Rolls</h2>
           </div>
           <div className="w-40">
             <Field label="Loom number">
-              <Pick value={loom} onChange={applyLoom} options={ALLOCATIONS.map((row) => row.loom)} placeholder="Loom" />
+              <Pick value={loom} onChange={applyLoom} options={masters.map((row) => row.loom)} placeholder="Loom" />
             </Field>
           </div>
         </div>
@@ -344,7 +562,7 @@ export function LoomPanel({
                 const warn = num(row.actualGsm) > 0 && gap > 5;
                 return (
                   <tr key={row.key} className="border-b border-border/60 last:border-b-0">
-                    <td className="min-w-[5rem] px-2 py-2"><Pick value={row.loom} options={ALLOCATIONS.map((item) => item.loom)} placeholder="Loom" onChange={(loomNo) => patchRoll(row.key, { loom: loomNo })} /></td>
+                    <td className="min-w-[5rem] px-2 py-2"><Pick value={row.loom} options={masters.map((item) => item.loom)} placeholder="Loom" onChange={(loomNo) => patchRoll(row.key, { loom: loomNo })} /></td>
                     <td className="px-2 py-2"><Input className="h-8 min-w-[9rem] font-mono text-xs" value={row.rollNo} placeholder="On save" onChange={(e) => patchRoll(row.key, { rollNo: e.target.value })} /></td>
                     <td className="px-2 py-2"><Input className="h-8 min-w-[10rem]" value={row.quality} onChange={(e) => patchRoll(row.key, { quality: e.target.value })} /></td>
                     <td className="px-2 py-2"><Input className="h-8 w-24" value={row.mesh} onChange={(e) => patchRoll(row.key, { mesh: e.target.value })} /></td>
@@ -362,8 +580,8 @@ export function LoomPanel({
                     <td className="min-w-[8rem] px-2 py-2"><Pick value={row.order} options={NEEDLE_ORDERS[row.party] ?? []} placeholder="Invoice" onChange={(order) => patchRoll(row.key, { order })} /></td>
                     <td className="px-2 py-2"><Num value={row.warpQty} onChange={(warpQty) => patchRoll(row.key, { warpQty })} /></td>
                     <td className="px-2 py-2"><Num value={row.weftQty} onChange={(weftQty) => patchRoll(row.key, { weftQty })} /></td>
-                    <td className="min-w-[11rem] px-2 py-2"><Pick value={row.warp} options={BOBBIN_STOCK.map((item) => item.item)} placeholder="Warp bobbin" onChange={(warp) => patchRoll(row.key, { warp })} /></td>
-                    <td className="min-w-[11rem] px-2 py-2"><Pick value={row.weft} options={BOBBIN_STOCK.map((item) => item.item)} placeholder="Weft bobbin" onChange={(weft) => patchRoll(row.key, { weft })} /></td>
+                    <td className="min-w-[11rem] px-2 py-2"><Pick value={row.warp} options={stock.map((item) => item.item)} placeholder="Warp bobbin" onChange={(warp) => patchRoll(row.key, { warp, warpCode: stock.find((item) => item.item === warp)?.itemCode ?? "" })} /></td>
+                    <td className="min-w-[11rem] px-2 py-2"><Pick value={row.weft} options={stock.map((item) => item.item)} placeholder="Weft bobbin" onChange={(weft) => patchRoll(row.key, { weft, weftCode: stock.find((item) => item.item === weft)?.itemCode ?? "" })} /></td>
                     <td className="px-2 py-2"><Input className="h-8 min-w-[10rem]" value={row.fg} onChange={(e) => patchRoll(row.key, { fg: e.target.value })} /></td>
                     <td className="px-2 py-2"><Num value={row.logicGsm} onChange={(logicGsm) => patchRoll(row.key, { logicGsm })} /></td>
                     <td className="px-2 py-2 text-right">
@@ -375,57 +593,35 @@ export function LoomPanel({
             </tbody>
           </table>
         </GridFrame>
-        <div className="border-t border-border/70 px-4 py-3 md:px-5">
-          <div className="mb-2 flex items-center justify-between">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Bobbins from Loom Godown</p>
-            <Button type="button" variant="outline" size="sm" onClick={() => setRolls((rows) => [...rows, loomRoll(loom)])}>Add roll</Button>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 px-4 py-3 md:px-5">
+          <p className="text-xs text-muted-foreground">Calculate fills warp and weft from the loom allocation, then shows Loom Godown consumption.</p>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => setRolls((rows) => [...rows, loomRoll(loom, masters)])}>Add roll</Button>
+            <Button type="button" size="sm" onClick={() => runCalculate(true)}>Calculate</Button>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] text-sm">
-              <thead>
-                <tr>
-                  <th className={th("left", false)}>Item</th>
-                  <th className={th("right", false)}>Stock</th>
-                  <th className={th("right", false)}>Consumed</th>
-                  <th className={th("left", false)} />
-                </tr>
-              </thead>
-              <tbody>
-                {bobbins.map((row) => (
-                  <tr key={row.key} className="border-b border-border/60 last:border-b-0">
-                    <td className="px-3 py-2">
-                      <Pick
-                        value={row.item}
-                        placeholder="Bobbin"
-                        options={BOBBIN_STOCK.map((item) => item.item)}
-                        onChange={(item) =>
-                          setBobbins((rows) =>
-                            rows.map((line) =>
-                              line.key === row.key
-                                ? { ...line, item, stock: BOBBIN_STOCK.find((stock) => stock.item === item)?.stock ?? 0 }
-                                : line,
-                            ),
-                          )
-                        }
-                      />
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{money(row.stock)}</td>
-                    <td className="px-3 py-2">
-                      <Num
-                        value={row.qty}
-                        onChange={(qty) => setBobbins((rows) => rows.map((line) => (line.key === row.key ? { ...line, qty } : line)))}
-                      />
-                    </td>
-                    <td className="px-2 py-2 text-right">
-                      <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-muted-foreground" onClick={() => setBobbins((rows) => rows.filter((line) => line.key !== row.key))}>Remove</Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => setBobbins((rows) => [...rows, { key: uid(), item: "", stock: 0, qty: "" }])}>Add bobbin</Button>
         </div>
+        <Dialog open={summary !== null} onOpenChange={(open) => !open && setSummary(null)}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Bobbin consumption summary</DialogTitle>
+              <DialogDescription>Loom Godown stock against the quantity this entry will consume.</DialogDescription>
+            </DialogHeader>
+            <div className="overflow-hidden rounded-xl border border-border/70">
+              <div className="grid grid-cols-[1fr_6.5rem_6.5rem] bg-muted/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                <span>Item</span>
+                <span className="text-right">Stock</span>
+                <span className="text-right">Consumed</span>
+              </div>
+              {(summary ?? []).map((line) => (
+                <div key={line.item} className={cn("grid grid-cols-[1fr_6.5rem_6.5rem] border-t border-border/50 px-3 py-2.5 text-sm", line.qty > line.stock && "bg-destructive/10 text-destructive")}>
+                  <span className="min-w-0 truncate">{line.item}</span>
+                  <span className="text-right tabular-nums">{money(line.stock)}</span>
+                  <span className="text-right font-medium tabular-nums">{money(line.qty)}</span>
+                </div>
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
         <Totals
           stats={[
             ["Roll net", money(rollNet)],
@@ -437,10 +633,15 @@ export function LoomPanel({
           onClear={clear}
           onDelete={
             savedId
-              ? () => {
-                  setRecent((rows) => rows.filter((row) => row.id !== savedId));
-                  clear();
-                  toast.success("Removed from this screen.");
+              ? async () => {
+                  try {
+                    if (company && /^\d+$/.test(savedId)) await deleteLoom({ company, userName, entryDate: date, id: Number(savedId) });
+                    setRecent((rows) => rows.filter((row) => row.id !== savedId));
+                    clear();
+                    toast.success("Deleted.");
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Delete failed");
+                  }
                 }
               : undefined
           }
@@ -469,7 +670,6 @@ type LoomSaved = {
   net: number;
   bobbin: number;
   snapshot: LoomRoll[];
-  bobbins: BobbinLine[];
 };
 
 function seedLoomRecent(date: string, shift: string): LoomSaved[] {
@@ -479,32 +679,88 @@ function seedLoomRecent(date: string, shift: string): LoomSaved[] {
   roll.tare = "2";
   roll.cover = "0.4";
   roll.net = "187.60";
-  roll.actualGsm = "91";
-  return [{ id: "L-earlier", date, shift, loom: "18", rolls: 1, net: 187.6, bobbin: 188, snapshot: [roll], bobbins: [{ key: "b1", item: "PP Tape 1200 DTEX", stock: 455.25, qty: "110" }, { key: "b2", item: "PP Tape 1000 DTEX", stock: 388, qty: "78" }] }];
+  roll.warpQty = "109.60";
+  roll.weftQty = "78.00";
+  roll.gpm = "125.07";
+  roll.actualGsm = "69.48";
+  roll.logicGsm = "1";
+  return [{ id: "L-earlier", date, shift, loom: "18", rolls: 1, net: 187.6, bobbin: 187.6, snapshot: [roll] }];
 }
 
-export function NeedlePanel({ date, shift }: { date: string; shift: string }) {
+export function NeedlePanel({ date, shift, company, userName }: { date: string; shift: string; company: string; userName: string }) {
   const [rows, setRows] = useState<NeedleRow[]>([needleRow()]);
   const [savedId, setSavedId] = useState<string | null>(null);
-  const [recent, setRecent] = useState<NeedleSaved[]>([
+  const [recent, setRecent] = useState<NeedleSaved[]>(company ? [] : [
     { id: "N-earlier", date, shift, rolls: 2, net: 86.4, snapshot: [{ ...needleRow(), key: "n1", size: "40", gpm: "42", net: "44.2" }, { ...needleRow(), key: "n2", loom: "6", size: "25", fg: "PP Tie 25mm", quality: "PP Tie 25mm", net: "42.2" }] },
   ]);
   const net = rows.reduce((sum, row) => sum + num(row.net), 0);
+
+  useEffect(() => {
+    if (!company) return;
+    getNeedleRecent(company, date)
+      .then((list) => setRecent(list.map((row) => ({
+        id: String(row.id),
+        date,
+        shift: row.shift,
+        rolls: 1,
+        net: row.net,
+        snapshot: [{ ...needleRow(), key: String(row.id), loom: row.loom, rollNo: row.rollNo, net: String(row.net) }],
+      }))))
+      .catch(() => undefined);
+  }, [company, date]);
 
   function patch(key: string, next: Partial<NeedleRow>) {
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...next } : row)));
   }
 
-  function save() {
+  async function save() {
     if (net <= 0) {
       toast.error("Enter a net weight on at least one roll.");
       return;
     }
-    const id = savedId ?? `N-${recent.length + 1}`;
-    const entry: NeedleSaved = { id, date, shift, rolls: rows.filter((row) => num(row.net) > 0).length, net, snapshot: rows };
-    setRecent((list) => [entry, ...list.filter((row) => row.id !== id)]);
-    setSavedId(id);
-    toast.success("Needle loom rolls kept on this screen. Consumption matching comes with the database.");
+    const weighed = rows.filter((row) => num(row.net) > 0);
+    if (!company) {
+      const id = savedId ?? `N-${recent.length + 1}`;
+      setRecent((list) => [{ id, date, shift, rolls: weighed.length, net, snapshot: rows }, ...list.filter((row) => row.id !== id)]);
+      setSavedId(id);
+      toast.success("Needle loom rolls kept on this screen.");
+      return;
+    }
+    try {
+      const saved = await saveNeedle({
+        company,
+        userName,
+        entryDate: date,
+        shift,
+        rolls: weighed.map((row) => ({
+          transId: /^\d+$/.test(row.key) ? Number(row.key) : null,
+          loomNo: Number(row.loom) || 0,
+          rollNo: row.rollNo,
+          size: num(row.size),
+          reqGpm: num(row.gpm),
+          colour: row.colour,
+          marking: row.marking,
+          quality: row.quality,
+          net: num(row.net),
+          party: row.party,
+          order: row.order,
+          remarks: row.remarks,
+          fgCode: row.fg,
+          rollType: "PP Webbing & Tie",
+        })),
+      });
+      setRows(rows.map((row) => {
+        const match = saved.rolls.find((item) => item.rollNo && row.rollNo === item.rollNo);
+        const created = saved.rolls[weighed.indexOf(row)];
+        return created ? { ...row, key: String(created.transId), rollNo: created.rollNo || row.rollNo } : match ? { ...row, key: String(match.transId), rollNo: match.rollNo } : row;
+      }));
+      setSavedId(String(saved.rolls[0]?.transId ?? ""));
+      const listed = await getNeedleRecent(company, date);
+      setRecent(listed.map((row) => ({ id: String(row.id), date, shift: row.shift, rolls: 1, net: row.net, snapshot: [{ ...needleRow(), key: String(row.id), loom: row.loom, rollNo: row.rollNo, net: String(row.net) }] })));
+      toast.success("Needle loom rolls saved. Match this net in Needle Loom consumption before the rolls are closed.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    }
   }
 
   return (
@@ -577,11 +833,16 @@ export function NeedlePanel({ date, shift }: { date: string; shift: string }) {
           }}
           onDelete={
             savedId
-              ? () => {
-                  setRecent((list) => list.filter((row) => row.id !== savedId));
-                  setSavedId(null);
-                  setRows([needleRow()]);
-                  toast.success("Removed from this screen.");
+              ? async () => {
+                  try {
+                    if (company && /^\d+$/.test(savedId)) await deleteNeedle({ company, userName, entryDate: date, id: Number(savedId) });
+                    setRecent((list) => list.filter((row) => row.id !== savedId));
+                    setSavedId(null);
+                    setRows([needleRow()]);
+                    toast.success("Deleted.");
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Delete failed");
+                  }
                 }
               : undefined
           }
@@ -609,16 +870,36 @@ type NeedleSaved = { id: string; date: string; shift: string; rolls: number; net
 export function LaminationPanel({
   date,
   shift,
+  company,
+  userName,
   onContinue,
 }: {
   date: string;
   shift: string;
+  company: string;
+  userName: string;
   onContinue: () => void;
 }) {
   const [category, setCategory] = useState<"All" | "IN" | "OUT">("All");
   const [rows, setRows] = useState<LamRoll[]>(LAM_SEED);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [recent, setRecent] = useState<{ id: string; date: string; shift: string; rolls: number; source: number; laminated: number; snapshot: LamRoll[] }[]>([]);
+
+  useEffect(() => {
+    if (!company) return;
+    getLaminationRolls(company, date)
+      .then((list) => {
+        if (list.length === 0) return;
+        setRows(list.map((row) => {
+          const seeded = seedLam(row.category === "OUT" ? "OUT" : "IN", row.rollNo, String(row.metre), String(row.gross), String(row.tare), String(row.net), row.quality, row.party, row.order, row.ulCode, row.lamCode, "");
+          return { ...seeded, gsm: row.gsm, outsideRoll: row.outsideRoll, originalNet: String(row.originalNet), lamGsm: row.gsm };
+        }));
+      })
+      .catch(() => undefined);
+    getLaminationRecent(company, date)
+      .then((list) => setRecent(list.map((row) => ({ id: String(row.id), date, shift: row.shift, rolls: 1, source: row.source, laminated: row.laminated, snapshot: [] }))))
+      .catch(() => undefined);
+  }, [company, date]);
 
   const visible = rows.filter((row) => category === "All" || row.category === category);
   const chosen = rows.filter((row) => row.checked);
@@ -640,7 +921,7 @@ export function LaminationPanel({
     );
   }
 
-  function save() {
+  async function save() {
     if (chosen.length === 0) {
       toast.error("Tick the rolls to laminate.");
       return;
@@ -649,11 +930,55 @@ export function LaminationPanel({
       toast.error("Each ticked roll needs a laminated item and a laminated net weight.");
       return;
     }
-    const id = savedId ?? `LAM-${recent.length + 1}`;
-    setRecent((list) => [{ id, date, shift, rolls: chosen.length, source: sourceNet, laminated: lamNet, snapshot: rows }, ...list.filter((row) => row.id !== id)]);
-    setSavedId(id);
-    toast.success("Lamination rolls kept on this screen. Opening Lamination consumption for this date and shift.");
-    onContinue();
+    if (!company) {
+      const id = savedId ?? `LAM-${recent.length + 1}`;
+      setRecent((list) => [{ id, date, shift, rolls: chosen.length, source: sourceNet, laminated: lamNet, snapshot: rows }, ...list.filter((row) => row.id !== id)]);
+      setSavedId(id);
+      toast.success("Lamination rolls kept on this screen. Opening Lamination consumption for this date and shift.");
+      onContinue();
+      return;
+    }
+    try {
+      const saved = await saveLamination({
+        company,
+        userName,
+        entryDate: date,
+        shift,
+        rolls: chosen.map((row) => ({
+          sourceRoll: row.rollNo,
+          sourceMetre: num(row.metre),
+          sourceGross: num(row.gross),
+          sourceTare: num(row.tare),
+          sourceNet: num(row.net),
+          lamRoll: `${row.rollNo}L`,
+          lamSize: num(row.lamSize),
+          lamGsm: num(row.lamGsm),
+          colour: row.colour,
+          quality: row.lamQuality || row.quality,
+          category: row.category,
+          lamMetre: num(row.lamMetre),
+          lamGross: num(row.lamGross),
+          lamTare: num(row.lamTare),
+          lamNet: num(row.lamNet),
+          actualGpm: num(row.actualGpm),
+          actualGsm: num(row.actualGsm),
+          remarks: row.remarks,
+          sector: row.sector,
+          internalRoll: row.internalRoll,
+          party: row.party,
+          order: row.order,
+          ulCode: row.ulCode,
+          lamCode: row.lamCode,
+        })),
+      });
+      setSavedId(String(saved.rolls[0]?.transId ?? ""));
+      const listed = await getLaminationRecent(company, date);
+      setRecent(listed.map((row) => ({ id: String(row.id), date, shift: row.shift, rolls: 1, source: row.source, laminated: row.laminated, snapshot: [] })));
+      toast.success("Lamination rolls saved. Opening Lamination consumption for this date and shift.");
+      onContinue();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    }
   }
 
   return (
