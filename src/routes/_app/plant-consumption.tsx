@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { Boxes, Cable, ChevronLeft, Cylinder, Factory, Layers, Loader2, ScrollText, Spline } from "lucide-react";
 import { toast } from "sonner";
+import { LaminationPanel, LoomPanel, NeedlePanel } from "@/components/plant-entry/production-panels";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth-context";
+import { cn } from "@/lib/utils";
 import {
   deletePlantConsumption,
   getPlantCompanies,
@@ -19,14 +21,36 @@ import {
   loadPlantEntry,
   savePlantConsumption,
   type PlantLine,
+  type PlantMaterial,
 } from "@/lib/plant-consumption-api";
 
 export const Route = createFileRoute("/_app/plant-consumption")({
-  head: () => ({ meta: [{ title: "Plant Consumption — PO Portal" }] }),
+  head: () => ({ meta: [{ title: "Plant entry — PO Portal" }] }),
   component: PlantConsumptionPage,
 });
 
+type EntryFamily = "consumption" | "loom" | "needle" | "lam-rolls";
+type EntryBranch = "production" | "consumption";
+
+const SAMPLE_PLANTS = ["Tape Plant", "Filler", "Yarn", "Liner Roll Plant", "Lamination"];
+const SAMPLE_COMPANIES = ["K.P. WOVEN PRIVATE LIMITED", "Plastene India Limited"];
+const NO_NAMES: string[] = [];
+const EMPTY_MATERIALS: PlantMaterial[] = [];
+const SAMPLE_MATERIALS: PlantMaterial[] = [
+  { quality: "PP", grade: "PP Raffia Natural", itemCode: "RM-PP-01", stock: 2450 },
+  { quality: "PP", grade: "PP Raffia White", itemCode: "RM-PP-02", stock: 860 },
+  { quality: "Filler", grade: "CaCO3 Filler", itemCode: "RM-FL-01", stock: 1200 },
+  { quality: "Yarn", grade: "PP Yarn 1100", itemCode: "RM-YN-01", stock: 640 },
+];
+
+const PRODUCTION_TILES: { id: Exclude<EntryFamily, "consumption">; label: string; hint: string; icon: ComponentType<{ className?: string }> }[] = [
+  { id: "loom", label: "Loom", hint: "Rolls and bobbins", icon: Factory },
+  { id: "needle", label: "Needle loom", hint: "Webbing rolls", icon: Cable },
+  { id: "lam-rolls", label: "Lamination rolls", hint: "Unlaminated to laminated", icon: Layers },
+];
+
 const PP = new Set(["PP", "PP Granuals", "HD", "HDPE Granuals"]);
+const CONSUMPTION_RECENT = "minmax(7rem,1fr) 5.25rem minmax(8rem,1.4fr) 7.25rem 7.25rem minmax(8rem,1.2fr) 6.5rem";
 
 function todayIso() {
   const d = new Date();
@@ -94,6 +118,8 @@ function PlantConsumptionPage() {
   const [lines, setLines] = useState<PlantLine[]>([blankLine()]);
   const [groupSrNo, setGroupSrNo] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [branch, setBranch] = useState<EntryBranch | null>(null);
+  const [family, setFamily] = useState<EntryFamily | null>(null);
 
   const companies = useQuery({ queryKey: ["plant-companies"], queryFn: getPlantCompanies, staleTime: Infinity });
   const lookups = useQuery({
@@ -122,14 +148,20 @@ function PlantConsumptionPage() {
     enabled: company.length > 0 && plant.length > 0,
   });
 
-  useEffect(() => {
-    if (!company && companies.data?.[0]) setCompany(companies.data[0].name);
-  }, [companies.data, company]);
+  const livePlants = lookups.data?.plants ?? NO_NAMES;
+  const plants = lookups.isLoading ? NO_NAMES : livePlants.length > 0 ? livePlants : SAMPLE_PLANTS;
+  const companyNames = companies.data?.map((item) => item.name) ?? NO_NAMES;
+  const shownCompanies = companies.isLoading ? NO_NAMES : companyNames.length > 0 ? companyNames : SAMPLE_COMPANIES;
+  const connected = livePlants.includes(plant);
 
   useEffect(() => {
-    const next = lookups.data?.plants[0];
-    if (next && !lookups.data.plants.includes(plant)) setPlant(next);
-  }, [lookups.data, plant]);
+    if (!company && shownCompanies[0]) setCompany(shownCompanies[0]);
+  }, [company, shownCompanies]);
+
+  useEffect(() => {
+    if (family !== "consumption" || lookups.isLoading || plants.length === 0) return;
+    if (!plants.includes(plant)) setPlant(plants.find((name) => name.toLowerCase() === "tape plant") ?? plants[0]);
+  }, [family, lookups.isLoading, plant, plants]);
 
   useEffect(() => {
     if (!setup.data) return;
@@ -139,9 +171,10 @@ function PlantConsumptionPage() {
     if (!setup.data.products.includes(product)) setProduct(setup.data.products[0] ?? "");
   }, [setup.data, plantSub, fromWh, toWh, product]);
 
+  const materialRows = materials.data && materials.data.length > 0 ? materials.data : connected ? EMPTY_MATERIALS : SAMPLE_MATERIALS;
   const qualities = useMemo(
-    () => [...new Set((materials.data ?? []).map((m) => m.quality))].sort(),
-    [materials.data],
+    () => [...new Set(materialRows.map((m) => m.quality))].sort(),
+    [materialRows],
   );
   const buyerRow = lookups.data?.buyers.find((b) => b.name === buyer);
   const orders = buyerRow?.orders ?? [];
@@ -168,7 +201,7 @@ function PlantConsumptionPage() {
   }
 
   function onGrade(key: string, quality: string, grade: string) {
-    const match = (materials.data ?? []).find((m) => m.quality === quality && m.grade === grade);
+    const match = materialRows.find((m) => m.quality === quality && m.grade === grade);
     patchLine(key, { grade, itemCode: match?.itemCode ?? "", stock: match?.stock ?? 0 });
   }
 
@@ -227,7 +260,50 @@ function PlantConsumptionPage() {
     }
   }
 
+  function chooseBranch(next: EntryBranch) {
+    if (branch === next && family == null) return;
+    setBranch(next);
+    setFamily(null);
+    setPlant("");
+    clearForm();
+  }
+
+  function backToMaterials() {
+    setFamily(null);
+    setPlant("");
+  }
+
+  function chooseConsumption(name: string) {
+    if (family === "consumption" && plant === name) return;
+    setBranch("consumption");
+    setFamily("consumption");
+    setPlant(name);
+    clearForm();
+  }
+
+  function chooseProduction(next: Exclude<EntryFamily, "consumption">) {
+    if (family === next) return;
+    setBranch("production");
+    setFamily(next);
+  }
+
+  function openLaminationConsumption() {
+    const match = plants.find((name) => name.toLowerCase() === "lamination");
+    if (!match) return;
+    setBranch("consumption");
+    setFamily("consumption");
+    setPlant(match);
+    clearForm();
+  }
+
+  const step: 1 | 2 | 3 = branch == null ? 1 : family == null ? 2 : 3;
+  const productionLabel = PRODUCTION_TILES.find((tile) => tile.id === family)?.label;
+
   async function onSave() {
+    if (!connected) {
+      toast.success("Kept on this screen. Saving starts once this plant is loaded from the server.");
+      return;
+    }
     setBusy(true);
     try {
       const saved = await savePlantConsumption({
@@ -293,19 +369,24 @@ function PlantConsumptionPage() {
     }
   }
 
-  const noPlants = lookups.isSuccess && (lookups.data?.plants.length ?? 0) === 0;
-  const head = "border-b border-border bg-card px-3 py-2 text-left text-[11px] font-medium text-muted-foreground";
+  const head = "sticky top-0 z-10 border-b border-border/70 bg-card px-3 py-2 text-left text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground";
   const headRight = `${head} text-right`;
 
   return (
     <div className="space-y-5">
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground md:text-3xl">Plant Consumption</h1>
-
-      <section className="rounded-xl border bg-card p-4">
-        <h2 className="mb-3 text-sm font-semibold">Entry</h2>
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <header className="app-glass flex flex-col gap-4 rounded-2xl px-5 py-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">Plant entry</p>
+          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
+            {step === 1 ? "Plant entry" : step === 2 ? (branch === "production" ? "Production" : "Consumption") : productionLabel || plant || "Entry"}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {company ? `${company} · Shift ${shift}` : "Choose a company and a shift"}
+          </p>
+        </div>
+        <div className="grid w-full gap-3 sm:grid-cols-3 lg:w-[34rem]">
           <Field label="Company">
-            <Pick value={company} onChange={setCompany} options={(companies.data ?? []).map((c) => c.name)} placeholder="Company" />
+            <Pick value={company} onChange={setCompany} options={shownCompanies} placeholder="Company" />
           </Field>
           <Field label="Date">
             <Input type="date" max={todayIso()} value={entryDate} onChange={(e) => setEntryDate(e.target.value)} />
@@ -313,27 +394,94 @@ function PlantConsumptionPage() {
           <Field label="Shift">
             <Pick value={shift} onChange={setShift} options={["A", "B"]} placeholder="Shift" />
           </Field>
-          <Field label="Production type">
-            <Pick value={productionType} onChange={setProductionType} options={["Sell", "Job", "Outside Job"]} placeholder="Type" />
-          </Field>
-          <Field label="Time in">
-            <Input value={timeIn} onChange={(e) => setTimeIn(e.target.value)} />
-          </Field>
-          <Field label="Time out">
-            <Input value={timeOut} onChange={(e) => setTimeOut(e.target.value)} />
-          </Field>
         </div>
-      </section>
+      </header>
 
-      <section className="rounded-xl border bg-card p-4">
-        <h2 className="mb-3 text-sm font-semibold">Plant</h2>
-        {noPlants ? (
-          <p className="text-sm text-muted-foreground">This company has no plant.</p>
-        ) : (
-          <div className="grid gap-3 md:grid-cols-3">
-            <Field label="Plant">
-              <Pick value={plant} onChange={setPlant} options={lookups.data?.plants ?? []} placeholder="Plant" />
-            </Field>
+      <StepRail
+        step={step}
+        branch={branch}
+        material={step === 3 ? (family === "consumption" ? plant : productionLabel ?? "") : ""}
+        onType={() => {
+          setBranch(null);
+          setFamily(null);
+          setPlant("");
+        }}
+        onMaterial={backToMaterials}
+      />
+
+      {step === 1 && (
+        <section className="grid gap-4 md:grid-cols-2">
+          <button type="button" onClick={() => chooseBranch("production")} className="flex min-h-[16rem] items-center rounded-3xl p-8 text-left card-3d">
+            <TileBody large icon={Factory} label="Production" hint="Loom, needle loom, and lamination rolls" active={false} />
+          </button>
+          <button type="button" onClick={() => chooseBranch("consumption")} className="flex min-h-[16rem] items-center rounded-3xl p-8 text-left card-3d">
+            <TileBody large icon={Boxes} label="Consumption" hint="Tape plant, filler, yarn, liner, and lamination" active={false} />
+          </button>
+        </section>
+      )}
+
+      {step === 2 && branch === "consumption" && (
+        <section className="space-y-3">
+          <BackLink label="Production or consumption" onClick={() => { setBranch(null); setFamily(null); setPlant(""); }} />
+          {plants.length === 0 ? (
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+              {Array.from({ length: 5 }, (_, index) => (
+                <div key={index} className="min-h-[11rem] animate-pulse rounded-3xl bg-card" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+              {plants.map((name) => {
+                const meta = plantMeta(name);
+                return (
+                  <button key={name} type="button" onClick={() => chooseConsumption(name)} className="flex min-h-[11rem] items-center rounded-3xl p-6 text-left card-3d">
+                    <TileBody large icon={meta.icon} label={name} hint={meta.hint} active={false} />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+
+      {step === 2 && branch === "production" && (
+        <section className="space-y-3">
+          <BackLink label="Production or consumption" onClick={() => { setBranch(null); setFamily(null); setPlant(""); }} />
+          <div className="grid gap-4 md:grid-cols-3">
+            {PRODUCTION_TILES.map((tile) => (
+              <button key={tile.id} type="button" onClick={() => chooseProduction(tile.id)} className="flex min-h-[14rem] items-center rounded-3xl p-8 text-left card-3d">
+                <TileBody large icon={tile.icon} label={tile.label} hint={tile.hint} active={false} />
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {step === 3 && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-muted-foreground">
+            {branch === "production" ? "Production" : "Consumption"}
+            <span className="px-1.5 text-border">/</span>
+            <span className="font-medium text-foreground">{family === "consumption" ? plant : productionLabel}</span>
+          </p>
+          <button type="button" onClick={backToMaterials} className="inline-flex items-center gap-1 text-sm text-primary hover:underline">
+            <ChevronLeft className="h-4 w-4" />
+            Change material
+          </button>
+        </div>
+      )}
+
+      {family === "loom" && <LoomPanel date={entryDate} shift={shift} onSaved={() => undefined} />}
+      {family === "needle" && <NeedlePanel date={entryDate} shift={shift} />}
+      {family === "lam-rolls" && <LaminationPanel date={entryDate} shift={shift} onContinue={openLaminationConsumption} />}
+
+      {family === "consumption" && plant && (
+      <>
+      <section className="shadow-soft overflow-hidden rounded-2xl">
+        <div className="border-b border-border/70 px-4 py-4 md:px-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">{plant || "Consumption"}</p>
+          <h2 className="text-lg font-semibold tracking-tight">{plantHint(plant)}</h2>
+          <div className="mt-4 grid gap-3 md:grid-cols-3 xl:grid-cols-4">
             <Field label="Plant sub name">
               <Pick value={plantSub} onChange={setPlantSub} options={setup.data?.subs ?? []} placeholder="Sub name" />
             </Field>
@@ -349,14 +497,18 @@ function PlantConsumptionPage() {
             <Field label="To warehouse">
               <Pick value={toWh} onChange={setToWh} options={setup.data?.toWarehouses ?? []} placeholder="To warehouse" />
             </Field>
+            <Field label="Production type">
+              <Pick value={productionType} onChange={setProductionType} options={["Sell", "Job", "Outside Job"]} placeholder="Type" />
+            </Field>
+            <Field label="Time in">
+              <Input value={timeIn} onChange={(e) => setTimeIn(e.target.value)} />
+            </Field>
+            <Field label="Time out">
+              <Input value={timeOut} onChange={(e) => setTimeOut(e.target.value)} />
+            </Field>
           </div>
-        )}
-        {lookups.isError && <p className="mt-3 text-sm text-destructive">{(lookups.error as Error).message}</p>}
-      </section>
-
-      {!noPlants && (
-        <section className="rounded-xl border bg-card p-4">
-          <h2 className="mb-3 text-sm font-semibold">Buyer</h2>
+        </div>
+        <div className="border-b border-border/70 px-4 py-4 md:px-5">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <Field label="Buyer">
               <Pick
@@ -388,22 +540,20 @@ function PlantConsumptionPage() {
               <Pick value={invoice} onChange={setInvoice} options={invoices} placeholder="Invoice" />
             </Field>
           </div>
-        </section>
-      )}
-
-      <section className="overflow-hidden rounded-xl border bg-card">
-        <div className="flex items-center justify-between px-4 py-3">
+        </div>
+        <div className="flex items-center justify-between px-4 py-3 md:px-5">
           <h2 className="text-sm font-semibold">Raw material</h2>
-          <Button type="button" variant="outline" size="sm" onClick={() => setLines((rows) => [...rows, blankLine()])} disabled={noPlants}>
+          <Button type="button" variant="outline" size="sm" onClick={() => setLines((rows) => [...rows, blankLine()])} disabled={!plant}>
             Add row
           </Button>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[880px] border-t text-sm">
+        <div className="max-h-[32rem] overflow-auto border-t border-border/70">
+          <table className="w-full min-w-[880px] border-separate border-spacing-0 text-sm">
             <thead>
               <tr>
                 <th className={`${head} min-w-[11rem]`}>Quality</th>
                 <th className={`${head} min-w-[14rem]`}>Grade</th>
+                <th className={`${head} min-w-[8rem]`}>Item code</th>
                 <th className={`${headRight} w-28`}>Qty</th>
                 <th className={`${headRight} w-28`}>Stock</th>
                 <th className={`${headRight} w-20`}>Rate</th>
@@ -415,7 +565,7 @@ function PlantConsumptionPage() {
             </thead>
             <tbody>
               {lines.map((line) => {
-                const grades = (materials.data ?? []).filter(
+                const grades = materialRows.filter(
                   (m) => m.quality === line.quality && (m.stock > 0 || m.grade === line.grade),
                 );
                 const pp = PP.has(line.quality.trim());
@@ -428,12 +578,13 @@ function PlantConsumptionPage() {
                     <td className="px-3 py-2 align-middle">
                       <Pick value={line.grade} onChange={(value) => onGrade(line.key, line.quality, value)} options={grades.map((g) => g.grade)} placeholder="Grade" />
                     </td>
+                    <td className="px-3 py-2 align-middle font-mono text-xs text-muted-foreground">{line.itemCode || "—"}</td>
                     <td className="px-3 py-2 align-middle">
                       <Input className="text-right" value={line.qty} disabled={qtyLocked} onChange={(e) => patchLine(line.key, { qty: e.target.value })} />
                     </td>
-                    <td className="px-3 py-2 text-right align-middle tabular-nums text-muted-foreground">{money(line.stock)}</td>
-                    <td className="px-3 py-2 text-right align-middle tabular-nums text-muted-foreground">0.00</td>
-                    <td className="px-3 py-2 text-right align-middle tabular-nums text-muted-foreground">0.00</td>
+                    <td className="px-3 py-2 text-right align-middle"><span className="inline-flex h-8 w-full items-center justify-end tabular-nums text-muted-foreground">{money(line.stock)}</span></td>
+                    <td className="px-3 py-2 text-right align-middle"><span className="inline-flex h-8 w-full items-center justify-end tabular-nums text-muted-foreground">0.00</span></td>
+                    <td className="px-3 py-2 text-right align-middle"><span className="inline-flex h-8 w-full items-center justify-end tabular-nums text-muted-foreground">0.00</span></td>
                     {isTape && (
                       <td className="px-3 py-2 align-middle">
                         <Input
@@ -465,11 +616,7 @@ function PlantConsumptionPage() {
             </tbody>
           </table>
         </div>
-      </section>
-
-      <section className="rounded-xl border bg-card p-4">
-        <div className="grid gap-4 lg:grid-cols-[1fr_240px] lg:items-end">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 border-t border-border/70 px-4 py-4 sm:grid-cols-2 xl:grid-cols-3 md:px-5">
             <Field label="Wastage"><Input value={wastage} onChange={(e) => setWastage(e.target.value)} /></Field>
             {showExtra && (
               <Field label={isTape ? "Lumps Wastage" : "Triming Wastage"}>
@@ -489,28 +636,30 @@ function PlantConsumptionPage() {
                 <Input value={rollsQuery.isError ? "" : money(rolls)} readOnly />
               </Field>
             )}
+        </div>
+        <div className="flex flex-col gap-4 border-t border-border/70 bg-muted/20 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-5">
+          <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-3">
+            <Stat label="Total consumption" value={money(consumption)} />
+            <Stat label="Wastage" value={money(wasteTotal)} />
+            <Stat label="Net production" value={money(net)} />
           </div>
-          <div className="space-y-2 border-t pt-3 text-sm lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
-            <Row label="Total Consumption" value={money(consumption)} />
-            <Row label="Net Production" value={money(net)} />
-            {rollsQuery.isError && <p className="text-xs text-destructive">{(rollsQuery.error as Error).message}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            {groupSrNo && <span className="text-xs text-muted-foreground">Group {groupSrNo}</span>}
+            <button type="button" className="px-2 text-sm text-destructive hover:underline disabled:opacity-40" onClick={onDelete} disabled={busy || !groupSrNo}>Delete</button>
+            <Button type="button" variant="outline" onClick={clearForm} disabled={busy}>Clear</Button>
+            <Button type="button" onClick={onSave} disabled={busy || !plant}>
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {groupSrNo ? "Update" : "Save"}
+            </Button>
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
-          <Button type="button" onClick={onSave} disabled={busy || noPlants}>
-            {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {groupSrNo ? "Update" : "Save"}
-          </Button>
-          <Button type="button" variant="outline" onClick={clearForm} disabled={busy}>Clear</Button>
-          <Button type="button" variant="outline" onClick={onDelete} disabled={busy || !groupSrNo}>Delete</Button>
-          {groupSrNo && <span className="text-sm text-muted-foreground">Group {groupSrNo}</span>}
-        </div>
+        {rollsQuery.isError && <p className="px-5 pb-3 text-xs text-destructive">{(rollsQuery.error as Error).message}</p>}
       </section>
 
-      <section className="overflow-hidden rounded-xl border bg-card">
+      <section className="shadow-soft overflow-hidden rounded-2xl">
         <div className="flex flex-wrap items-end justify-between gap-3 px-4 py-3">
           <div>
-            <h2 className="text-sm font-semibold">Recent entries</h2>
+            <h2 className="text-sm font-semibold tracking-tight">Recent entries</h2>
             <p className="text-xs text-muted-foreground">Last 30 days up to the search date.</p>
           </div>
           <div className="w-44">
@@ -519,41 +668,162 @@ function PlantConsumptionPage() {
             </Field>
           </div>
         </div>
-        {!plant || noPlants ? (
-          <p className="border-t px-4 py-6 text-sm text-muted-foreground">Choose a plant to see saved entries.</p>
+        {!plant ? (
+          <p className="border-t border-border/70 px-5 py-10 text-center text-sm text-muted-foreground">Choose a plant to see saved entries.</p>
+        ) : !connected ? (
+          <p className="border-t border-border/70 px-5 py-10 text-center text-sm text-muted-foreground">No entries for this day. Saved history appears when the server is connected.</p>
         ) : recent.data?.length === 0 ? (
-          <p className="border-t px-4 py-6 text-sm text-muted-foreground">No entries in this range.</p>
+          <p className="border-t border-border/70 px-5 py-10 text-center text-sm text-muted-foreground">No entries for this day.</p>
         ) : (
-          <div className="overflow-x-auto border-t">
-            <table className="w-full min-w-[720px] text-sm">
-              <thead>
-                <tr>
-                  <th className={head}>Date</th>
-                  <th className={head}>Shift</th>
-                  <th className={head}>Product</th>
-                  <th className={headRight}>Consumption</th>
-                  <th className={headRight}>Net</th>
-                  <th className={head}>Buyer</th>
-                  <th className={head}>HOD</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(recent.data ?? []).map((row) => (
-                  <tr key={row.groupSrNo} className="cursor-pointer border-b last:border-b-0 hover:bg-muted/40" onClick={() => openRecent(row.groupSrNo)}>
-                    <td className="px-3 py-2">{row.entryDate}</td>
-                    <td className="px-3 py-2">{row.shift}</td>
-                    <td className="px-3 py-2">{row.product}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{money(row.consumption)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{money(row.netProduction)}</td>
-                    <td className="px-3 py-2">{row.buyer}</td>
-                    <td className="px-3 py-2">{row.hod}</td>
-                  </tr>
+          <div className="max-h-80 overflow-auto border-t border-border/70">
+            <div className="min-w-[48rem]">
+              <div className="sticky top-0 z-10 grid border-b border-border/70 bg-muted/95 px-2 backdrop-blur-sm" style={{ gridTemplateColumns: CONSUMPTION_RECENT }}>
+                {["Date", "Shift", "Product", "Consumption", "Net", "Buyer", "HOD"].map((column) => (
+                  <div key={column} className={cn("px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground", column === "Consumption" || column === "Net" ? "text-right" : "text-left")}>
+                    {column}
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+              {(recent.data ?? []).map((row) => (
+                <button
+                  key={row.groupSrNo}
+                  type="button"
+                  onClick={() => openRecent(row.groupSrNo)}
+                  className={cn(
+                    "grid w-full border-b border-border/40 px-2 text-left text-sm transition last:border-b-0 hover:bg-muted/40",
+                    groupSrNo === row.groupSrNo && "bg-primary/10",
+                  )}
+                  style={{ gridTemplateColumns: CONSUMPTION_RECENT }}
+                >
+                  <span className="flex items-center px-3 py-3 font-medium">{row.entryDate}</span>
+                  <span className="flex items-center px-3 py-3">
+                    <span className="rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">Shift {row.shift}</span>
+                  </span>
+                  <span className="flex min-w-0 items-center px-3 py-3"><span className="truncate">{row.product}</span></span>
+                  <span className="flex items-center justify-end px-3 py-3 font-medium tabular-nums">{money(row.consumption)}</span>
+                  <span className="flex items-center justify-end px-3 py-3 font-medium tabular-nums">{money(row.netProduction)}</span>
+                  <span className="flex min-w-0 items-center px-3 py-3"><span className="truncate">{row.buyer}</span></span>
+                  <span className="flex items-center px-3 py-3">
+                    <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", row.hod === "Approved" ? "bg-success/15 text-success" : "bg-warning/15 text-warning-foreground")}>{row.hod || "Pending"}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </section>
+      </>
+      )}
+    </div>
+  );
+}
+
+function StepRail({
+  step,
+  branch,
+  material,
+  onType,
+  onMaterial,
+}: {
+  step: 1 | 2 | 3;
+  branch: EntryBranch | null;
+  material: string;
+  onType: () => void;
+  onMaterial: () => void;
+}) {
+  const items = [
+    { n: 1 as const, label: "Type", detail: branch === "production" ? "Production" : branch === "consumption" ? "Consumption" : "Choose", onClick: step > 1 ? onType : undefined },
+    { n: 2 as const, label: "Material", detail: material || (step > 1 ? "Choose" : ""), onClick: step > 2 ? onMaterial : undefined },
+    { n: 3 as const, label: "Entry", detail: step === 3 ? "Form" : "", onClick: undefined },
+  ];
+  return (
+    <ol className="grid gap-2 sm:grid-cols-3">
+      {items.map((item) => {
+        const current = item.n === step;
+        const done = item.n < step;
+        const className = cn(
+          "flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left",
+          current ? "nav-3d-active" : done ? "card-3d" : "border border-dashed border-border/80 bg-card/40",
+        );
+        const body = (
+          <>
+            <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold", current ? "bg-white/20 text-primary-foreground" : done ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
+              {item.n}
+            </span>
+            <span className="min-w-0">
+              <span className={cn("block text-[11px] font-semibold uppercase tracking-[0.14em]", current ? "text-primary-foreground/80" : "text-muted-foreground")}>{item.label}</span>
+              {item.detail ? <span className="block truncate text-sm font-medium">{item.detail}</span> : null}
+            </span>
+          </>
+        );
+        return (
+          <li key={item.n}>
+            {item.onClick ? (
+              <button type="button" onClick={item.onClick} className={className}>{body}</button>
+            ) : (
+              <div className={className}>{body}</div>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function BackLink({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <ChevronLeft className="h-4 w-4" />
+      {label}
+    </button>
+  );
+}
+
+function plantMeta(name: string): { hint: string; icon: ComponentType<{ className?: string }> } {
+  const n = name.toLowerCase();
+  if (n === "tape plant") return { hint: "Bags, percent, and wastage", icon: Cylinder };
+  if (n.includes("filler")) return { hint: "Filler consumption", icon: Boxes };
+  if (n.includes("yarn")) return { hint: "Yarn consumption", icon: Spline };
+  if (n.includes("liner")) return { hint: "Rolls against consumption", icon: ScrollText };
+  if (n === "lamination") return { hint: "Film, fabric, and lumps", icon: Layers };
+  return { hint: "Quality, grade, and quantity", icon: Factory };
+}
+
+function plantHint(name: string) {
+  return plantMeta(name).hint;
+}
+
+function TileBody({
+  icon: Icon,
+  label,
+  hint,
+  active,
+  large,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  label: string;
+  hint: string;
+  active: boolean;
+  large?: boolean;
+}) {
+  return (
+    <span className={cn("flex items-start", large ? "gap-4" : "gap-3")}>
+      <span className={cn("icon-3d flex shrink-0 items-center justify-center", large ? "h-14 w-14 rounded-2xl" : "h-8 w-8 rounded-xl", active ? "bg-white/15 text-primary-foreground" : "bg-primary/10 text-primary")}>
+        <Icon className={large ? "h-7 w-7" : "h-4 w-4"} />
+      </span>
+      <span className="min-w-0">
+        <span className={cn("block font-semibold", large ? "text-xl" : "truncate text-sm")}>{label}</span>
+        <span className={cn("block", large ? "mt-1 text-sm" : "mt-0.5 truncate text-xs", active ? "text-primary-foreground/80" : "text-muted-foreground")}>{hint}</span>
+      </span>
+    </span>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+      <p className="text-xl font-semibold tracking-tight tabular-nums">{value}</p>
     </div>
   );
 }
@@ -588,11 +858,3 @@ function Pick({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium tabular-nums">{value}</span>
-    </div>
-  );
-}

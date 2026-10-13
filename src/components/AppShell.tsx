@@ -308,7 +308,7 @@ export function AppShell() {
     {
       to: "/plant-consumption",
       icon: Factory,
-      label: "Plant Consumption",
+      label: "Plant entry",
       match: (p) => p.startsWith("/plant-consumption"),
     },
     {
