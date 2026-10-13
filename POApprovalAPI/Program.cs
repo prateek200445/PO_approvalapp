@@ -91,6 +91,7 @@ builder.Services.AddScoped<DmsAttachmentService>();
 builder.Services.AddScoped<DmsRemoteFileService>();
 builder.Services.AddScoped<SalesDashboardService>();
 builder.Services.AddScoped<BankRequirementsService>();
+builder.Services.AddScoped<BankDocumentPackService>();
 builder.Services.Configure<OrderBookSummaryOptions>(
     builder.Configuration.GetSection(OrderBookSummaryOptions.SectionName));
 builder.Services.AddScoped<OrderBookSummaryService>();
@@ -129,6 +130,9 @@ builder.Services.AddHostedService<BomCacheWarmupService>();
 builder.Services.AddHostedService<SalesDashboardCacheWarmupService>();
 builder.Services.AddHostedService<ExportBillOverdueCacheWarmupService>();
 builder.Services.AddHostedService<HrMasterCacheWarmupService>();
+builder.Services.AddScoped<HrCelebrationService>();
+builder.Services.AddScoped<HrPolicyDocumentService>();
+builder.Services.AddScoped<HrPayslipService>();
 builder.Services.AddScoped<AgeingReportService>();
 builder.Services.AddScoped<LedgerStatementChatService>();
 builder.Services.AddScoped<ErpFinanceReportService>();

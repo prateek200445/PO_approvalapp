@@ -142,6 +142,115 @@ export async function downloadBankSalesPdf(company: string, months: string[]): P
   );
 }
 
+export interface BankPackParty {
+  rank: number;
+  name: string;
+  country?: string | null;
+  amountLakh: number;
+  sharePct: number;
+}
+
+export interface BankPackRanking {
+  label: string;
+  from: string;
+  to: string;
+  overseas: BankPackParty[];
+  domestic: BankPackParty[];
+  overseasTotalLakh: number;
+  domesticTotalLakh: number;
+}
+
+export interface BankPackMonth {
+  month: string;
+  label: string;
+  overseasGroupLakh: number;
+  overseasDirectLakh: number;
+  domesticGroupLakh: number;
+  domesticDirectLakh: number;
+  partialMonth: boolean;
+}
+
+export interface BankPackAgeingParty {
+  party: string;
+  isGroup: boolean;
+  overseas: boolean;
+  bucketsLakh: number[];
+  totalLakh: number;
+}
+
+export interface BankPackStockUnit {
+  unit: string;
+  valuesLakh: (number | null)[][];
+}
+
+export interface BankDocumentPack {
+  code: string;
+  companyName: string;
+  generatedAt: string;
+  today: string;
+  customerRankings: BankPackRanking[];
+  supplierRankings: BankPackRanking[];
+  monthlySales: BankPackMonth[];
+  monthlyPurchases: BankPackMonth[];
+  debtors: { asOf: string; parties: BankPackAgeingParty[] }[];
+  stock: { months: string[]; monthLabels: string[]; categories: string[]; units: BankPackStockUnit[] };
+}
+
+export interface BankPackDefaults {
+  companies: { code: string; displayName: string }[];
+  today: string;
+  ageingDates: string[];
+  stockFrom: string;
+  stockTo: string;
+}
+
+export interface BankPackParams {
+  company: string;
+  ageingDates: string[];
+  stockFrom: string;
+  stockTo: string;
+}
+
+export const AGEING_BUCKETS = [
+  "0-30",
+  "31-60",
+  "61-90",
+  "91-180",
+  "181-365",
+  ">365",
+  "On account",
+];
+
+function packQuery(p: BankPackParams, refresh = false): string {
+  const params = new URLSearchParams({ company: p.company });
+  if (p.ageingDates.length) params.set("ageingDates", p.ageingDates.join(","));
+  if (p.stockFrom) params.set("stockFrom", p.stockFrom);
+  if (p.stockTo) params.set("stockTo", p.stockTo);
+  if (refresh) params.set("refresh", "true");
+  return params.toString();
+}
+
+export async function getBankPackDefaults(): Promise<BankPackDefaults> {
+  const response = await fetch(getBankApiUrl("/api/BankRequirements/document-pack/defaults"));
+  if (!response.ok) throw new Error("Failed to load document pack defaults");
+  return (await response.json()) as BankPackDefaults;
+}
+
+export async function getBankDocumentPack(p: BankPackParams, refresh = false): Promise<BankDocumentPack> {
+  const response = await fetch(getBankApiUrl(`/api/BankRequirements/document-pack?${packQuery(p, refresh)}`));
+  const payload = (await response.json()) as BankDocumentPack & { message?: string };
+  if (!response.ok) throw new Error(payload.message || "Failed to build document pack");
+  return payload;
+}
+
+export async function downloadBankDocumentPack(p: BankPackParams): Promise<string> {
+  return downloadFile(
+    `/api/BankRequirements/document-pack/excel?${packQuery(p)}`,
+    `${p.company}_Bank_Document_Pack.xlsx`,
+    "Failed to download document pack",
+  );
+}
+
 export function formatMn(n: number): string {
   return new Intl.NumberFormat("en-IN", {
     minimumFractionDigits: 2,

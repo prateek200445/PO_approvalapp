@@ -1,8 +1,17 @@
+import { useState } from "react";
+import { FileDown, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import type {
   RankedPartyItem,
   SalesByCountryItem,
 } from "@/lib/sales-dashboard-types";
-import { formatCrores, formatSalesCurrency } from "@/lib/sales-dashboard-api";
+import {
+  downloadSalesTopTenPdf,
+  formatCrores,
+  formatSalesCurrency,
+  type SalesTopTenPdfSection,
+} from "@/lib/sales-dashboard-api";
+import { Button } from "@/components/ui/button";
 import {
   ChartContainer,
   ChartTooltip,
@@ -41,6 +50,12 @@ interface SalesSummaryTablesProps {
   suppliersLoading?: boolean;
   totalSales?: number;
   includeIntercompany?: boolean;
+  pdfContext?: {
+    company: string;
+    dateFrom: string;
+    dateTo: string;
+    totalAmount?: number;
+  };
 }
 
 function EmptyRow({ colSpan, message = "No data available" }: { colSpan: number; message?: string }) {
@@ -150,11 +165,72 @@ export function SalesSummaryTables({
   suppliersLoading = false,
   totalSales = 0,
   includeIntercompany = false,
+  pdfContext,
 }: SalesSummaryTablesProps) {
+  const [downloading, setDownloading] = useState(false);
   const icNote = includeIntercompany ? "Incl. intercompany" : "Excl. intercompany";
+  const exportSubtitle = includeIntercompany ? "Excl. India, including intercompany" : "Excl. India and intercompany";
+  const domesticSubtitle = includeIntercompany ? "India only, including intercompany" : "India only, excl. intercompany";
   const countryBase = totalSales > 0
     ? totalSales
     : byCountry.reduce((sum, c) => sum + (Number(c.salesAmount) || 0), 0);
+
+  const totalAmount = pdfContext?.totalAmount;
+  const pdfSections: SalesTopTenPdfSection[] = [
+    ...(isPurchase
+      ? []
+      : [
+          {
+            title: "Top 10 Export Customers",
+            subtitle: exportSubtitle,
+            nameHeader: "Customer",
+            baseAmount: totalAmount,
+            rows: exportCustomers,
+          },
+          {
+            title: "Top 10 Domestic Customers",
+            subtitle: domesticSubtitle,
+            nameHeader: "Customer",
+            baseAmount: totalAmount,
+            rows: domesticCustomers,
+          },
+          {
+            title: "Top 10 Countries by Sales",
+            subtitle: countryPeriodLabel ? `${exportSubtitle} · ${countryPeriodLabel}` : exportSubtitle,
+            nameHeader: "Country",
+            baseAmount: countryBase,
+            rows: byCountry.map((c) => ({ rank: c.rank, name: c.countryName, amount: Number(c.salesAmount) || 0 })),
+          },
+        ]),
+    {
+      title: "Top 10 Suppliers",
+      subtitle: icNote,
+      nameHeader: "Supplier",
+      baseAmount: isPurchase ? totalAmount : undefined,
+      rows: suppliers,
+    },
+  ];
+  const canDownload = !!pdfContext && !suppliersLoading && pdfSections.some((s) => s.rows.length > 0);
+
+  async function handleDownloadPdf() {
+    if (!pdfContext) return;
+    setDownloading(true);
+    try {
+      await downloadSalesTopTenPdf({
+        category: isPurchase ? "Purchase" : "Sales",
+        company: pdfContext.company,
+        dateFrom: pdfContext.dateFrom,
+        dateTo: pdfContext.dateTo,
+        includeIntercompany,
+        totalAmount: pdfContext.totalAmount,
+        sections: pdfSections.filter((s) => s.rows.length > 0),
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not create the PDF");
+    } finally {
+      setDownloading(false);
+    }
+  }
   const countryPieData = byCountry.map((c, i) => {
     const value = Number(c.salesAmount) || 0;
     const percentage = countryBase > 0 ? Math.round((value / countryBase) * 1000) / 10 : 0;
@@ -175,11 +251,22 @@ export function SalesSummaryTables({
 
   return (
     <div className="space-y-3 sm:space-y-4">
+      {pdfContext ? (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold sm:text-base">
+            {isPurchase ? "Top 10 purchase data" : "Top 10 sales data"}
+          </h2>
+          <Button size="sm" variant="outline" onClick={handleDownloadPdf} disabled={!canDownload || downloading}>
+            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+            Download PDF
+          </Button>
+        </div>
+      ) : null}
       <div className={cn("grid grid-cols-1 gap-3 sm:gap-4", isPurchase ? "lg:grid-cols-1" : "lg:grid-cols-2")}>
         {!isPurchase && (
           <RankingTable
             title="Top 10 Export Customers"
-            subtitle={includeIntercompany ? "Excl. India, including intercompany" : "Excl. India and intercompany"}
+            subtitle={exportSubtitle}
             nameHeader="Customer"
             items={exportCustomers}
             loading={suppliersLoading}
@@ -189,7 +276,7 @@ export function SalesSummaryTables({
         {!isPurchase && (
           <RankingTable
             title="Top 10 Domestic Customers"
-            subtitle={includeIntercompany ? "India only, including intercompany" : "India only, excl. intercompany"}
+            subtitle={domesticSubtitle}
             nameHeader="Customer"
             items={domesticCustomers}
             loading={suppliersLoading}

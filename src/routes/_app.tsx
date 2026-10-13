@@ -1,7 +1,8 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, isRedirect, redirect } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { AppShell } from "@/components/AppShell";
+import { HrCelebrationsPopup } from "@/components/HrCelebrationsPopup";
 import {
   getExportBillOverdueCompanies,
   getExportBillOverdueGroups,
@@ -38,7 +39,7 @@ export const Route = createFileRoute("/_app")({
         throw redirect({ to: hrHomePath(username) });
       }
     } catch (e) {
-      if (e && typeof e === "object" && "to" in e) throw e;
+      if (isRedirect(e)) throw e;
       localStorage.removeItem("po-portal-user");
       sessionStorage.removeItem("po-portal-user");
       throw redirect({ to: "/" });
@@ -81,5 +82,10 @@ function AppLayout() {
     });
   }, [queryClient]);
 
-  return <AppShell />;
+  return (
+    <>
+      <AppShell />
+      <HrCelebrationsPopup />
+    </>
+  );
 }

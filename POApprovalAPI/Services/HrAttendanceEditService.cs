@@ -18,6 +18,7 @@ public sealed class HrAttendanceEditService
             ["Absent"] = 0m,
             ["WFH"] = 1m,
             ["Holiday"] = 1m,
+            ["Weekly Off"] = 1m,
         };
 
     private readonly DatabaseService _database;
@@ -52,7 +53,7 @@ public sealed class HrAttendanceEditService
             throw new InvalidOperationException("Cannot edit attendance for a future date.");
 
         var status = Statuses.Keys.FirstOrDefault(k => string.Equals(k, (request.Status ?? "").Trim(), StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidOperationException("Choose a valid status (Present, Half Day, Absent, WFH, Holiday).");
+            ?? throw new InvalidOperationException("Choose a valid status (Present, Half Day, Absent, WFH, Holiday, Weekly Off).");
 
         var reason = (request.Reason ?? "").Trim();
         if (reason.Length < 3)

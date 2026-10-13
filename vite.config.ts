@@ -21,6 +21,11 @@ export default defineConfig({
 
   vite: {
     server: {
+      // The .NET API, its build outputs and scratch probes live inside this folder;
+      // watching them makes every `dotnet build` flood the dev server with file events.
+      watch: {
+        ignored: ["**/POApprovalAPI/**", "**/bin/**", "**/obj/**", "**/.vercel/**", "**/dist/**"],
+      },
       proxy: {
         "/api": {
           target: process.env.VITE_API_URL || "http://localhost:5115",
