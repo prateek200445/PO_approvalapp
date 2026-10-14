@@ -151,52 +151,90 @@ public sealed class GstLiabilityService
         if (!refresh && _cache.TryGetValue(key, out List<LedgerRow>? hit) && hit != null)
             return hit;
 
-        const string sql = """
-            WITH setoff AS (
-                SELECT DISTINCT CompanyName, VoucherType, VoucherNo, Date
-                FROM dbo.vw_LedgerSummary
-                WHERE Date >= @From AND Date < @ToExcl
-                  AND (UPPER(LTRIM(RTRIM(LedgerName))) IN ('GST PAYABLE A/C', 'GST RECEIVABLE') OR LedgerName LIKE '%For Gst%')
-            ),
-            l AS (
-                SELECT LTRIM(RTRIM(l.CompanyName)) AS Unit, UPPER(LTRIM(RTRIM(l.LedgerName))) AS Ledger, l.Date,
-                       CAST(l.amount AS decimal(18, 2)) AS Amount,
-                       CASE WHEN l.Date >= @From
-                             AND UPPER(LTRIM(RTRIM(l.LedgerName))) IN @SetOffLedgers
-                             AND EXISTS (SELECT 1 FROM setoff s WHERE s.CompanyName = l.CompanyName AND s.VoucherType = l.VoucherType
-                                                                 AND s.VoucherNo = l.VoucherNo AND s.Date = l.Date)
-                            THEN 1 ELSE 0 END AS IsSetOff
-                FROM dbo.vw_LedgerSummary l
-                WHERE l.Date < @ToExcl AND UPPER(LTRIM(RTRIM(l.LedgerName))) IN @Ledgers
-            )
-            SELECT l.Unit, l.Ledger,
-                   ISNULL(MAX(LTRIM(RTRIM(fi.NewGSTNo))), '') AS Gstin,
-                   ISNULL(MAX(LTRIM(RTRIM(fi.GroupName))), l.Unit) AS GroupName,
-                   SUM(CASE WHEN l.Date < @From THEN l.Amount ELSE 0 END) AS Opening,
-                   SUM(CASE WHEN l.Date >= @From AND l.IsSetOff = 0 AND l.Amount > 0 THEN l.Amount ELSE 0 END) AS Debit,
-                   SUM(CASE WHEN l.Date >= @From AND l.IsSetOff = 0 AND l.Amount < 0 THEN -l.Amount ELSE 0 END) AS Credit,
-                   SUM(CASE WHEN l.IsSetOff = 1 AND l.Amount > 0 THEN l.Amount ELSE 0 END) AS SetOffDebit,
-                   SUM(CASE WHEN l.IsSetOff = 1 AND l.Amount < 0 THEN -l.Amount ELSE 0 END) AS SetOffCredit
-            FROM l
-            LEFT JOIN dbo.FactoryInfo fi WITH (NOLOCK) ON LTRIM(RTRIM(fi.Name)) = l.Unit
-            GROUP BY l.Unit, l.Ledger
+        // Plain "LedgerName IN" (case-insensitive collation) lets SQL Server filter inside each branch of the view;
+        // the three reads run in parallel and set-off vouchers are matched here instead of with a correlated EXISTS.
+        const string openingSql = """
+            SELECT LTRIM(RTRIM(CompanyName)) AS Unit, UPPER(LTRIM(RTRIM(LedgerName))) AS Ledger,
+                   SUM(CAST(amount AS decimal(18, 2))) AS Amount
+            FROM dbo.vw_LedgerSummary
+            WHERE Date < @From AND LedgerName IN @Ledgers
+            GROUP BY LTRIM(RTRIM(CompanyName)), UPPER(LTRIM(RTRIM(LedgerName)))
+            """;
+        const string periodSql = """
+            SELECT LTRIM(RTRIM(CompanyName)) AS Unit, UPPER(LTRIM(RTRIM(LedgerName))) AS Ledger,
+                   VoucherType, VoucherNo, Date, SUM(CAST(amount AS decimal(18, 2))) AS Amount
+            FROM dbo.vw_LedgerSummary
+            WHERE Date >= @From AND Date < @ToExcl AND LedgerName IN @Ledgers
+            GROUP BY LTRIM(RTRIM(CompanyName)), UPPER(LTRIM(RTRIM(LedgerName))), VoucherType, VoucherNo, Date
+            """;
+        const string setOffSql = """
+            SELECT DISTINCT LTRIM(RTRIM(CompanyName)) AS Unit, VoucherType, VoucherNo, Date
+            FROM dbo.vw_LedgerSummary
+            WHERE Date >= @From AND Date < @ToExcl
+              AND LedgerName IN (SELECT DISTINCT LedgerName FROM dbo.LedgerMaster WITH (NOLOCK)
+                                 WHERE LedgerName IN ('GST PAYABLE A/C', 'GST RECEIVABLE') OR LedgerName LIKE '%For Gst%')
+            """;
+        const string unitSql = """
+            SELECT LTRIM(RTRIM(Name)) AS Unit, MAX(LTRIM(RTRIM(NewGSTNo))) AS Gstin, MAX(LTRIM(RTRIM(GroupName))) AS GroupName
+            FROM dbo.FactoryInfo WITH (NOLOCK) GROUP BY LTRIM(RTRIM(Name))
             """;
 
-        List<LedgerRow> rows;
-        using (var connection = _database.CreateConnection())
+        var args = new
         {
-            rows = (await connection.QueryAsync<LedgerRow>(sql, new
-            {
-                From = from,
-                ToExcl = toExclusive,
-                Ledgers = OutputLedgers.Concat(InputLedgers).Concat(LiabilityOtherLedgers).Concat(InputOtherLedgers).ToArray(),
-                SetOffLedgers = OutputLedgers.Concat(InputLedgers).ToArray(),
-            }, commandTimeout: QueryTimeoutSeconds)).ToList();
+            From = from,
+            ToExcl = toExclusive,
+            Ledgers = OutputLedgers.Concat(InputLedgers).Concat(LiabilityOtherLedgers).Concat(InputOtherLedgers).ToArray(),
+        };
+        async Task<List<T>> Query<T>(string sql)
+        {
+            using var connection = _database.CreateConnection();
+            return (await connection.QueryAsync<T>(sql, args, commandTimeout: QueryTimeoutSeconds)).ToList();
         }
+        var openingTask = Query<AmountRow>(openingSql);
+        var periodTask = Query<VoucherRow>(periodSql);
+        var setOffTask = Query<VoucherRow>(setOffSql);
+        var unitTask = Query<UnitRow>(unitSql);
+        await Task.WhenAll(openingTask, periodTask, setOffTask, unitTask);
+
+        var setOffKeys = setOffTask.Result
+            .Select(v => (v.Unit.ToUpperInvariant(), v.VoucherType, v.VoucherNo, v.Date))
+            .ToHashSet();
+        var units = unitTask.Result.ToDictionary(u => u.Unit, StringComparer.OrdinalIgnoreCase);
+        var setOffLedgers = OutputLedgers.Concat(InputLedgers).ToHashSet();
         var now = DateTime.Now;
-        foreach (var r in rows) r.LoadedAt = now;
-        _cache.Set(key, rows, TimeSpan.FromMinutes(20));
-        return rows;
+        var rows = new Dictionary<(string, string), LedgerRow>();
+        LedgerRow Row(string unit, string ledger)
+        {
+            var k = (unit.ToUpperInvariant(), ledger);
+            if (!rows.TryGetValue(k, out var r))
+            {
+                var u = units.GetValueOrDefault(unit);
+                rows[k] = r = new LedgerRow
+                {
+                    Unit = unit, Ledger = ledger, Gstin = u?.Gstin ?? "", GroupName = u?.GroupName ?? unit, LoadedAt = now,
+                };
+            }
+            return r;
+        }
+        foreach (var o in openingTask.Result) Row(o.Unit, o.Ledger).Opening += o.Amount;
+        foreach (var v in periodTask.Result)
+        {
+            var r = Row(v.Unit, v.Ledger);
+            var setOff = setOffLedgers.Contains(v.Ledger)
+                && setOffKeys.Contains((v.Unit.ToUpperInvariant(), v.VoucherType, v.VoucherNo, v.Date));
+            if (setOff)
+            {
+                if (v.Amount > 0) r.SetOffDebit += v.Amount; else r.SetOffCredit -= v.Amount;
+            }
+            else
+            {
+                if (v.Amount > 0) r.Debit += v.Amount; else r.Credit -= v.Amount;
+            }
+        }
+
+        var list = rows.Values.ToList();
+        _cache.Set(key, list, TimeSpan.FromHours(2));
+        return list;
     }
 
     private static int TaxOrder(string tax) => tax switch { "IGST" => 0, "CGST" => 1, "SGST" => 2, _ => 3 };
@@ -428,6 +466,30 @@ public sealed class GstLiabilityService
         DateTime.TryParse(iso, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
             ? d.ToString("dd-MMM-yyyy", CultureInfo.InvariantCulture)
             : iso;
+
+    private sealed class AmountRow
+    {
+        public string Unit { get; set; } = "";
+        public string Ledger { get; set; } = "";
+        public decimal Amount { get; set; }
+    }
+
+    private sealed class VoucherRow
+    {
+        public string Unit { get; set; } = "";
+        public string Ledger { get; set; } = "";
+        public string VoucherType { get; set; } = "";
+        public string VoucherNo { get; set; } = "";
+        public DateTime Date { get; set; }
+        public decimal Amount { get; set; }
+    }
+
+    private sealed class UnitRow
+    {
+        public string Unit { get; set; } = "";
+        public string? Gstin { get; set; }
+        public string? GroupName { get; set; }
+    }
 
     private sealed class LedgerRow
     {
