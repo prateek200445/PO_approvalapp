@@ -92,6 +92,7 @@ builder.Services.AddScoped<DmsRemoteFileService>();
 builder.Services.AddScoped<SalesDashboardService>();
 builder.Services.AddScoped<BankRequirementsService>();
 builder.Services.AddScoped<BankDocumentPackService>();
+builder.Services.AddScoped<GstLiabilityService>();
 builder.Services.Configure<OrderBookSummaryOptions>(
     builder.Configuration.GetSection(OrderBookSummaryOptions.SectionName));
 builder.Services.AddScoped<OrderBookSummaryService>();

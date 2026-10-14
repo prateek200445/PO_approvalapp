@@ -16,6 +16,7 @@ import {
   Loader2,
   ReceiptText,
   RefreshCw,
+  Scale,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -25,11 +26,12 @@ import {
 } from "@/lib/gst-api";
 import { cn } from "@/lib/utils";
 import { Gstr1Return } from "@/components/gst/Gstr1Return";
+import { GstLiability } from "@/components/gst/GstLiability";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-type GstView = "summary" | "gstr1";
+type GstView = "summary" | "gstr1" | "liability";
 
 interface GstSearch {
   view?: GstView;
@@ -39,7 +41,8 @@ interface GstSearch {
 export const Route = createFileRoute("/_app/gst")({
   head: () => ({ meta: [{ title: "GST Compliance — PO Portal" }] }),
   validateSearch: (search: Record<string, unknown>): GstSearch => ({
-    view: search.view === "gstr1" ? "gstr1" : search.view === "summary" ? "summary" : undefined,
+    view:
+      search.view === "gstr1" || search.view === "summary" || search.view === "liability" ? search.view : undefined,
     month: typeof search.month === "string" && /^\d{4}-\d{2}$/.test(search.month) ? search.month : undefined,
   }),
   component: GstCompliancePage,
@@ -61,6 +64,14 @@ const VIEWS: { key: GstView; label: string; title: string; description: string; 
     description:
       "Documents issued during the period (GSTR-1 Table 13) — series-wise from/to numbers, cancelled and net issued.",
     icon: ListOrdered,
+  },
+  {
+    key: "liability",
+    label: "GST Liability",
+    title: "GST Input / Output Liability",
+    description:
+      "Month-wise IGST / CGST / SGST output and input ledger balances per GST registration, with cash ledger balance and net payable.",
+    icon: Scale,
   },
 ];
 
@@ -112,6 +123,8 @@ function GstCompliancePage() {
 
       {view === "gstr1" ? (
         <Gstr1Return month={month} onMonthChange={(m) => update({ month: m })} />
+      ) : view === "liability" ? (
+        <GstLiability month={month} onMonthChange={(m) => update({ month: m })} />
       ) : (
         <GstDocumentSummaryPage month={month} onMonthChange={(m) => update({ month: m })} />
       )}
