@@ -59,7 +59,7 @@ public sealed class DailyReportDigestService
     public DateTime LocalNow => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Zone);
 
     public IReadOnlyList<string> Recipients =>
-        (_options.Recipients.Count > 0 ? _options.Recipients : new List<string> { "919879203799" })
+        (_options.Recipients.Count > 0 ? _options.Recipients : new List<string> { "919978222000" })
         .Select(r => r.Trim()).Where(r => r.Length > 0).Distinct().ToList();
 
     public bool IsAdmin(string? username)
