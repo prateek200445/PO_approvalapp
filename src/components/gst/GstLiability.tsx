@@ -43,17 +43,124 @@ const inputTotal = (c: GstLiabilityCompany) => c.inputIgst + c.inputCgst + c.inp
 
 const TH = "px-2.5 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground";
 const TD = "px-2.5 py-1.5 text-right tabular-nums";
-const GAP = "w-3 border-x border-border bg-muted/40 p-0";
-
 function Amount({ value, strong }: { value: number; strong?: boolean }) {
   return (
     <span className={cn(value < 0 && "text-red-600 dark:text-red-400", strong && "font-semibold")}>{fmt(value)}</span>
   );
 }
 
+const TONES = {
+  red: "border-l-red-500",
+  green: "border-l-emerald-500",
+  amber: "border-l-amber-500",
+} as const;
+
+function SummaryTile({
+  label,
+  hint,
+  value,
+  tone,
+  strong,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  tone: keyof typeof TONES;
+  strong?: boolean;
+}) {
+  return (
+    <div className={cn("rounded-xl border border-l-4 border-border bg-card px-4 py-3 shadow-sm", TONES[tone])}>
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p
+        className={cn(
+          "mt-1 tabular-nums",
+          strong ? "text-2xl font-bold" : "text-xl font-semibold",
+          value < 0 && "text-red-600 dark:text-red-400",
+        )}
+      >
+        ₹ {fmt(value)}
+      </p>
+      <p className="mt-0.5 text-[11px] text-muted-foreground">{hint}</p>
+    </div>
+  );
+}
+
+function PivotCard({
+  title,
+  subtitle,
+  accent,
+  coLabel,
+  columns,
+  rows,
+  totals,
+}: {
+  title: string;
+  subtitle: string;
+  accent: string;
+  coLabel: string;
+  columns: [string, string, string];
+  rows: { code: string; title: string; values: number[] }[];
+  totals: number[];
+}) {
+  const sum = (v: number[]) => v.reduce((s, x) => s + x, 0);
+  return (
+    <section className={cn("overflow-hidden rounded-xl border border-t-4 border-border bg-card shadow-sm", accent)}>
+      <header className="border-b border-border px-4 py-3">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        <p className="text-xs text-muted-foreground">{subtitle}</p>
+      </header>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border bg-secondary/40">
+              <th className={cn(TH, "w-[18%] text-left")}>{coLabel}</th>
+              {columns.map((c) => (
+                <th key={c} className={TH}>
+                  {c}
+                </th>
+              ))}
+              <th className={TH}>Grand Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.code} className="border-b border-border/60 even:bg-muted/20">
+                <td className="px-3 py-1.5 font-semibold" title={r.title}>
+                  {r.code}
+                </td>
+                {r.values.map((v, i) => (
+                  <td key={i} className={TD}>
+                    <Amount value={v} />
+                  </td>
+                ))}
+                <td className={TD}>
+                  <Amount value={sum(r.values)} strong />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t-2 border-border bg-secondary/50 font-semibold">
+              <td className="px-3 py-2">Grand Total</td>
+              {totals.map((v, i) => (
+                <td key={i} className={TD}>
+                  <Amount value={v} strong />
+                </td>
+              ))}
+              <td className={TD}>
+                <Amount value={sum(totals)} strong />
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export function GstLiability({ month, onMonthChange }: { month: string; onMonthChange: (month: string) => void }) {
   const [company, setCompany] = useState("");
-  const [excludeSetOff, setExcludeSetOff] = useState(false);
+  const [excludeSetOff, setExcludeSetOff] = useState(true);
   const [refreshToken, setRefreshToken] = useState(0);
   const [balances, setBalances] = useState<Balances>(() => loadBalances(month));
   const [source, setSource] = useState<SourceView>("output");
@@ -229,98 +336,116 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
       )}
 
       {data && (
-        <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
-          <table className="w-full min-w-[1500px] text-sm">
-            <thead>
-              <tr className="border-b border-border text-xs">
-                <th className="px-2.5 py-1.5 text-left font-semibold" colSpan={5}>
-                  Sum of Closing Balance <span className="font-normal text-muted-foreground">· Output</span>
-                </th>
-                <th className={GAP} />
-                <th className="bg-amber-50 px-2 py-1.5 text-center font-semibold dark:bg-amber-950/30">
-                  Payable in (−) / Balance (+)
-                </th>
-                <th className="bg-amber-50 px-2 py-1.5 text-center font-semibold dark:bg-amber-950/30" colSpan={3}>
-                  Balance
-                </th>
-                <th className={GAP} />
-                <th className="px-2.5 py-1.5 text-left font-semibold" colSpan={5}>
-                  Sum of Cl balance <span className="font-normal text-muted-foreground">· Input</span>
-                </th>
-              </tr>
-              <tr className="border-b border-border bg-secondary/40">
-                <th className={cn(TH, "text-left")}>Co</th>
-                <th className={TH}>IGST Output A/c</th>
-                <th className={TH}>CGST Output A/c</th>
-                <th className={TH}>SGST Output A/c</th>
-                <th className={TH}>Grand Total</th>
-                <th className={GAP} />
-                <th className={TH}>Net Balance</th>
-                <th className={TH}>IGST A/c</th>
-                <th className={TH}>CGST A/c</th>
-                <th className={TH}>SGST A/c</th>
-                <th className={GAP} />
-                <th className={cn(TH, "text-left")}>Co2</th>
-                <th className={TH}>IGST Input</th>
-                <th className={TH}>CGST Input</th>
-                <th className={TH}>SGST Input</th>
-                <th className={TH}>Grand Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((c) => (
-                <tr key={c.code} className="border-b border-border/60">
-                  <td className="px-2.5 py-1.5 font-semibold" title={`${c.gstin}\n${c.units.join("\n")}`}>
-                    {c.code}
-                  </td>
-                  <td className={TD}><Amount value={c.outputIgst} /></td>
-                  <td className={TD}><Amount value={c.outputCgst} /></td>
-                  <td className={TD}><Amount value={c.outputSgst} /></td>
-                  <td className={TD}><Amount value={outputTotal(c)} strong /></td>
-                  <td className={GAP} />
-                  <td className={cn(TD, "bg-amber-50/60 dark:bg-amber-950/20")}><Amount value={net(c)} strong /></td>
-                  {(["igst", "cgst", "sgst"] as const).map((f) => (
-                    <td key={f} className="bg-amber-50/60 px-1.5 py-1 dark:bg-amber-950/20">
-                      <Input
-                        inputMode="decimal"
-                        value={balances[c.code]?.[f] ?? ""}
-                        placeholder="0.00"
-                        onChange={(e) => setBalance(c.code, f, e.target.value)}
-                        className="h-8 w-28 text-right tabular-nums"
-                      />
-                    </td>
-                  ))}
-                  <td className={GAP} />
-                  <td className="px-2.5 py-1.5 font-semibold">{c.code}</td>
-                  <td className={TD}><Amount value={c.inputIgst} /></td>
-                  <td className={TD}><Amount value={c.inputCgst} /></td>
-                  <td className={TD}><Amount value={c.inputSgst} /></td>
-                  <td className={TD}><Amount value={inputTotal(c)} strong /></td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t border-border bg-secondary/40 font-semibold">
-                <td className="px-2.5 py-2">Grand Total</td>
-                <td className={TD}><Amount value={totals.oI} /></td>
-                <td className={TD}><Amount value={totals.oC} /></td>
-                <td className={TD}><Amount value={totals.oS} /></td>
-                <td className={TD}><Amount value={totals.oI + totals.oC + totals.oS} strong /></td>
-                <td className={GAP} />
-                <td className={TD}><Amount value={totals.net} strong /></td>
-                <td className={TD}><Amount value={totals.bI} /></td>
-                <td className={TD}><Amount value={totals.bC} /></td>
-                <td className={TD}><Amount value={totals.bS} /></td>
-                <td className={GAP} />
-                <td className="px-2.5 py-2">Grand Total</td>
-                <td className={TD}><Amount value={totals.iI} /></td>
-                <td className={TD}><Amount value={totals.iC} /></td>
-                <td className={TD}><Amount value={totals.iS} /></td>
-                <td className={TD}><Amount value={totals.iI + totals.iC + totals.iS} strong /></td>
-              </tr>
-            </tfoot>
-          </table>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <SummaryTile label="Output liability" hint="IGST + CGST + SGST Output A/c" value={totals.oI + totals.oC + totals.oS} tone="red" />
+          <SummaryTile label="Input credit" hint="Cl balance of IGST / CGST / SGST Input" value={totals.iI + totals.iC + totals.iS} tone="green" />
+          <SummaryTile label="Cash / credit ledger balance" hint="Entered below" value={totals.bI + totals.bC + totals.bS} tone="amber" />
+          <SummaryTile
+            label={totals.net < 0 ? "Net GST payable" : "Net balance"}
+            hint="Output + input + balance"
+            value={totals.net}
+            tone={totals.net < 0 ? "red" : "green"}
+            strong
+          />
         </div>
+      )}
+
+      {data && (
+        <PivotCard
+          title="Output liability"
+          subtitle="Sum of Closing Balance · GST Liabilities group"
+          accent="border-t-red-500"
+          coLabel="Co"
+          columns={["IGST Output A/c", "CGST Output A/c", "SGST Output A/c"]}
+          rows={shown.map((c) => ({ code: c.code, title: c.units.join("\n"), values: [c.outputIgst, c.outputCgst, c.outputSgst] }))}
+          totals={[totals.oI, totals.oC, totals.oS]}
+        />
+      )}
+
+      {data && (
+        <PivotCard
+          title="Input credit"
+          subtitle="Sum of Cl balance (debit − credit for the month) · GST Input Credits group"
+          accent="border-t-emerald-500"
+          coLabel="Co2"
+          columns={["IGST Input", "CGST Input", "SGST Input"]}
+          rows={shown.map((c) => ({ code: c.code, title: c.units.join("\n"), values: [c.inputIgst, c.inputCgst, c.inputSgst] }))}
+          totals={[totals.iI, totals.iC, totals.iS]}
+        />
+      )}
+
+      {data && (
+        <section className="overflow-hidden rounded-xl border border-t-4 border-border border-t-amber-500 bg-card shadow-sm">
+          <header className="border-b border-border px-4 py-3">
+            <h3 className="text-sm font-semibold">Net balance — payable (−) / balance (+)</h3>
+            <p className="text-xs text-muted-foreground">
+              Enter the IGST / CGST / SGST A/c balance from the GST portal cash / credit ledger. Net = output + input + balance.
+            </p>
+          </header>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-secondary/40">
+                  <th className={cn(TH, "text-left")}>Co</th>
+                  <th className={TH}>Output total</th>
+                  <th className={TH}>Input total</th>
+                  <th className={TH}>IGST A/c</th>
+                  <th className={TH}>CGST A/c</th>
+                  <th className={TH}>SGST A/c</th>
+                  <th className={TH}>Net balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((c) => {
+                  const n = net(c);
+                  return (
+                    <tr key={c.code} className="border-b border-border/60 even:bg-muted/20">
+                      <td className="px-3 py-1.5 font-semibold" title={`${c.gstin}\n${c.units.join("\n")}`}>
+                        {c.code}
+                      </td>
+                      <td className={TD}><Amount value={outputTotal(c)} /></td>
+                      <td className={TD}><Amount value={inputTotal(c)} /></td>
+                      {(["igst", "cgst", "sgst"] as const).map((f) => (
+                        <td key={f} className="px-2 py-1">
+                          <Input
+                            inputMode="decimal"
+                            value={balances[c.code]?.[f] ?? ""}
+                            placeholder="0.00"
+                            onChange={(e) => setBalance(c.code, f, e.target.value)}
+                            className="ml-auto h-8 w-full max-w-[150px] text-right tabular-nums"
+                          />
+                        </td>
+                      ))}
+                      <td className={TD}>
+                        <span
+                          className={cn(
+                            "inline-block rounded-md px-2 py-0.5 font-semibold",
+                            n < 0
+                              ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+                              : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+                          )}
+                        >
+                          {fmt(n)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-border bg-secondary/50 font-semibold">
+                  <td className="px-3 py-2">Grand Total</td>
+                  <td className={TD}><Amount value={totals.oI + totals.oC + totals.oS} strong /></td>
+                  <td className={TD}><Amount value={totals.iI + totals.iC + totals.iS} strong /></td>
+                  <td className={TD}><Amount value={totals.bI} strong /></td>
+                  <td className={TD}><Amount value={totals.bC} strong /></td>
+                  <td className={TD}><Amount value={totals.bS} strong /></td>
+                  <td className={TD}><Amount value={totals.net} strong /></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </section>
       )}
 
       {data && (
@@ -346,7 +471,7 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
             <span className="ml-auto text-xs text-muted-foreground">{sourceRows.length} rows</span>
           </div>
           <div className="max-h-[520px] overflow-auto">
-            <table className="w-full min-w-[1100px] text-sm">
+            <table className="w-full min-w-[900px] text-sm">
               <thead className="sticky top-0 bg-card">
                 <tr className="border-b border-border bg-secondary/40">
                   <th className={cn(TH, "text-left")}>Perticular</th>
