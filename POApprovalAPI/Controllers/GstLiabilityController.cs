@@ -18,7 +18,7 @@ public class GstLiabilityController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] string month,
-        [FromQuery] bool excludeSetOff = true,
+        [FromQuery] bool excludeSetOff = false,
         [FromQuery] bool refresh = false)
     {
         if (!DateTime.TryParseExact(month, "yyyy-MM", CultureInfo.InvariantCulture, DateTimeStyles.None, out var m))

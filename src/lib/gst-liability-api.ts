@@ -1,8 +1,8 @@
 import { getApiUrl } from "@/lib/api-config";
 
-export interface GstLiabilityRegistration {
-  gstin: string;
+export interface GstLiabilityCompany {
   code: string;
+  gstin: string;
   name: string;
   known: boolean;
   units: string[];
@@ -12,7 +12,7 @@ export interface GstLiabilityRegistration {
   inputIgst: number;
   inputCgst: number;
   inputSgst: number;
-  setOffExcluded: number;
+  setOff: number;
   moved: boolean;
 }
 
@@ -20,13 +20,16 @@ export interface GstLiabilityLedgerRow {
   unit: string;
   gstin: string;
   code: string;
+  known: boolean;
   ledger: string;
+  group: string;
   kind: "output" | "input" | "other";
   tax: string;
   opening: number;
   debit: number;
   credit: number;
   closing: number;
+  clBalance: number;
   setOff: number;
 }
 
@@ -36,12 +39,12 @@ export interface GstLiability {
   to: string;
   excludeSetOff: boolean;
   generatedAt: string;
-  registrations: GstLiabilityRegistration[];
+  companies: GstLiabilityCompany[];
   ledgers: GstLiabilityLedgerRow[];
 }
 
 export interface GstLiabilityBalance {
-  gstin: string;
+  code: string;
   igst: number;
   cgst: number;
   sgst: number;
@@ -59,7 +62,7 @@ export async function getGstLiability(month: string, excludeSetOff: boolean, ref
 export async function downloadGstLiabilityExcel(request: {
   month: string;
   excludeSetOff: boolean;
-  gstins: string[];
+  codes: string[];
   balances: GstLiabilityBalance[];
 }): Promise<string> {
   const response = await fetch(getApiUrl("/api/gst/liability/excel"), {

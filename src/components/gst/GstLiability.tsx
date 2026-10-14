@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, FileSpreadsheet, Loader2, RefreshCw } from "lucide-react";
+import { FileSpreadsheet, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,15 +10,20 @@ import {
   downloadGstLiabilityExcel,
   getGstLiability,
   type GstLiabilityBalance,
-  type GstLiabilityRegistration,
+  type GstLiabilityCompany,
+  type GstLiabilityLedgerRow,
 } from "@/lib/gst-liability-api";
 
 const money = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmt = (n: number) => money.format(n);
 
-type Balances = Record<string, { igst: string; cgst: string; sgst: string }>;
+const SELECT_CLASS =
+  "h-9 w-full rounded-md border border-border bg-background px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:opacity-50";
 
-const storageKey = (month: string) => `gst-liability-balances:${month}`;
+type Balances = Record<string, { igst: string; cgst: string; sgst: string }>;
+type SourceView = "output" | "input" | "other";
+
+const storageKey = (month: string) => `gst-liability-balances-v2:${month}`;
 
 function loadBalances(month: string): Balances {
   try {
@@ -33,11 +38,12 @@ const num = (s: string | undefined) => {
   return Number.isFinite(v) ? v : 0;
 };
 
-const outputTotal = (r: GstLiabilityRegistration) => r.outputIgst + r.outputCgst + r.outputSgst;
-const inputTotal = (r: GstLiabilityRegistration) => r.inputIgst + r.inputCgst + r.inputSgst;
+const outputTotal = (c: GstLiabilityCompany) => c.outputIgst + c.outputCgst + c.outputSgst;
+const inputTotal = (c: GstLiabilityCompany) => c.inputIgst + c.inputCgst + c.inputSgst;
 
 const TH = "px-2.5 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground";
 const TD = "px-2.5 py-1.5 text-right tabular-nums";
+const GAP = "w-3 border-x border-border bg-muted/40 p-0";
 
 function Amount({ value, strong }: { value: number; strong?: boolean }) {
   return (
@@ -46,11 +52,11 @@ function Amount({ value, strong }: { value: number; strong?: boolean }) {
 }
 
 export function GstLiability({ month, onMonthChange }: { month: string; onMonthChange: (month: string) => void }) {
-  const [excludeSetOff, setExcludeSetOff] = useState(true);
+  const [company, setCompany] = useState("");
+  const [excludeSetOff, setExcludeSetOff] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [balances, setBalances] = useState<Balances>(() => loadBalances(month));
-  const [included, setIncluded] = useState<Record<string, boolean>>({});
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [source, setSource] = useState<SourceView>("output");
   const [downloading, setDownloading] = useState(false);
   const bypassCacheRef = useRef(false);
 
@@ -69,51 +75,58 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
   });
   const data = query.data;
 
-  const isIncluded = (r: GstLiabilityRegistration) => included[r.gstin] ?? r.known;
-  const rows = data?.registrations ?? [];
-  const active = rows.filter(isIncluded);
+  const companies = data?.companies ?? [];
+  const known = companies.filter((c) => c.known);
+  const others = companies.filter((c) => !c.known);
+  const shown = company ? companies.filter((c) => c.code === company) : known;
+  const shownCodes = new Set(shown.map((c) => c.code));
+  const setOffPosted = shown.reduce((s, c) => s + c.setOff, 0);
 
-  function setBalance(gstin: string, field: "igst" | "cgst" | "sgst", value: string) {
+  function setBalance(code: string, field: "igst" | "cgst" | "sgst", value: string) {
     setBalances((prev) => {
-      const current = prev[gstin] ?? { igst: "", cgst: "", sgst: "" };
-      const next = { ...prev, [gstin]: { ...current, [field]: value } };
+      const current = prev[code] ?? { igst: "", cgst: "", sgst: "" };
+      const next = { ...prev, [code]: { ...current, [field]: value } };
       localStorage.setItem(storageKey(month), JSON.stringify(next));
       return next;
     });
   }
 
-  const balanceOf = (gstin: string) => {
-    const b = balances[gstin];
+  const balanceOf = (code: string) => {
+    const b = balances[code];
     return { igst: num(b?.igst), cgst: num(b?.cgst), sgst: num(b?.sgst) };
   };
-  const net = (r: GstLiabilityRegistration) => {
-    const b = balanceOf(r.gstin);
-    return outputTotal(r) + inputTotal(r) + b.igst + b.cgst + b.sgst;
+  const net = (c: GstLiabilityCompany) => {
+    const b = balanceOf(c.code);
+    return outputTotal(c) + inputTotal(c) + b.igst + b.cgst + b.sgst;
   };
 
   const totals = { oI: 0, oC: 0, oS: 0, iI: 0, iC: 0, iS: 0, bI: 0, bC: 0, bS: 0, net: 0 };
-  for (const r of active) {
-    const b = balanceOf(r.gstin);
-    totals.oI += r.outputIgst;
-    totals.oC += r.outputCgst;
-    totals.oS += r.outputSgst;
-    totals.iI += r.inputIgst;
-    totals.iC += r.inputCgst;
-    totals.iS += r.inputSgst;
+  for (const c of shown) {
+    const b = balanceOf(c.code);
+    totals.oI += c.outputIgst;
+    totals.oC += c.outputCgst;
+    totals.oS += c.outputSgst;
+    totals.iI += c.inputIgst;
+    totals.iC += c.inputCgst;
+    totals.iS += c.inputSgst;
     totals.bI += b.igst;
     totals.bC += b.cgst;
     totals.bS += b.sgst;
-    totals.net += net(r);
+    totals.net += net(c);
   }
+
+  const sourceRows: GstLiabilityLedgerRow[] = (data?.ledgers ?? []).filter(
+    (l) => l.kind === source && shownCodes.has(l.code),
+  );
 
   async function onDownload() {
     setDownloading(true);
     try {
-      const payload: GstLiabilityBalance[] = active.map((r) => ({ gstin: r.gstin, ...balanceOf(r.gstin) }));
+      const payload: GstLiabilityBalance[] = shown.map((c) => ({ code: c.code, ...balanceOf(c.code) }));
       const name = await downloadGstLiabilityExcel({
         month,
         excludeSetOff,
-        gstins: active.map((r) => r.gstin),
+        codes: shown.map((c) => c.code),
         balances: payload,
       });
       toast.success(`Downloaded ${name}`);
@@ -137,6 +150,31 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
             className="w-44"
           />
         </div>
+        <div className="w-64 space-y-1.5">
+          <Label htmlFor="gst-liability-company">Company</Label>
+          <select
+            id="gst-liability-company"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            className={SELECT_CLASS}
+          >
+            <option value="">All companies</option>
+            {known.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.code} · {c.name}
+              </option>
+            ))}
+            {others.length > 0 && (
+              <optgroup label="Other units with GST postings">
+                {others.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.code}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+          </select>
+        </div>
         <label className="flex h-9 items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -158,18 +196,22 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
             {query.isFetching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
             Refresh from ERP
           </Button>
-          <Button onClick={onDownload} disabled={downloading || !data || active.length === 0}>
+          <Button onClick={onDownload} disabled={downloading || !data || shown.length === 0}>
             {downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
             Download Excel
           </Button>
         </div>
         <p className="w-full text-xs text-muted-foreground">
-          Closing balances of the IGST / CGST / SGST output and input ledgers for each GST registration, from ERP
-          postings.{" "}
-          {excludeSetOff
-            ? "Month-end set-off journals (entries through GST Payable / GST Receivable / “For GST Balance Only”) are left out, so this shows the liability before set-off."
-            : "Set-off journals are included, so balances match the ERP Group Summary after set-off."}{" "}
-          Enter the cash / credit ledger balance (IGST / CGST / SGST A/c) to get the net payable. Negative = payable.
+          From the ERP Group Summary of <b>GST Liabilities</b> and <b>GST Input Credits</b> for the month. Output = closing
+          balance of the Output A/c ledgers; Input = Cl balance (debit − credit for the month) of the Input ledgers. Enter
+          the cash / credit ledger balance (IGST / CGST / SGST A/c) to get the net. Negative = payable.
+          {!excludeSetOff && setOffPosted > 0 && (
+            <span className="text-amber-700 dark:text-amber-400">
+              {" "}
+              Month-end set-off entries of {fmt(setOffPosted)} are already posted for this month — tick “Before month-end
+              set-off” to see the position before them.
+            </span>
+          )}
         </p>
       </div>
 
@@ -188,151 +230,158 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
 
       {data && (
         <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
-          <table className="w-full min-w-[1280px] text-sm">
+          <table className="w-full min-w-[1500px] text-sm">
             <thead>
-              <tr className="border-b border-border">
-                <th colSpan={2} />
-                <th colSpan={4} className="bg-red-50 px-2 py-1.5 text-center text-xs font-semibold dark:bg-red-950/30">
-                  Output
+              <tr className="border-b border-border text-xs">
+                <th className="px-2.5 py-1.5 text-left font-semibold" colSpan={5}>
+                  Sum of Closing Balance <span className="font-normal text-muted-foreground">· Output</span>
                 </th>
-                <th colSpan={4} className="bg-emerald-50 px-2 py-1.5 text-center text-xs font-semibold dark:bg-emerald-950/30">
-                  Input
+                <th className={GAP} />
+                <th className="bg-amber-50 px-2 py-1.5 text-center font-semibold dark:bg-amber-950/30">
+                  Payable in (−) / Balance (+)
                 </th>
-                <th colSpan={3} className="bg-indigo-50 px-2 py-1.5 text-center text-xs font-semibold dark:bg-indigo-950/30">
-                  Balance (cash / credit ledger)
+                <th className="bg-amber-50 px-2 py-1.5 text-center font-semibold dark:bg-amber-950/30" colSpan={3}>
+                  Balance
                 </th>
-                <th className="px-2 py-1.5 text-center text-xs font-semibold">Net</th>
+                <th className={GAP} />
+                <th className="px-2.5 py-1.5 text-left font-semibold" colSpan={5}>
+                  Sum of Cl balance <span className="font-normal text-muted-foreground">· Input</span>
+                </th>
               </tr>
               <tr className="border-b border-border bg-secondary/40">
                 <th className={cn(TH, "text-left")}>Co</th>
-                <th className={cn(TH, "text-left")}>GSTIN</th>
-                <th className={TH}>IGST</th>
-                <th className={TH}>CGST</th>
-                <th className={TH}>SGST</th>
-                <th className={TH}>Total</th>
-                <th className={TH}>IGST</th>
-                <th className={TH}>CGST</th>
-                <th className={TH}>SGST</th>
-                <th className={TH}>Total</th>
+                <th className={TH}>IGST Output A/c</th>
+                <th className={TH}>CGST Output A/c</th>
+                <th className={TH}>SGST Output A/c</th>
+                <th className={TH}>Grand Total</th>
+                <th className={GAP} />
+                <th className={TH}>Net Balance</th>
                 <th className={TH}>IGST A/c</th>
                 <th className={TH}>CGST A/c</th>
                 <th className={TH}>SGST A/c</th>
-                <th className={TH}>Payable (−) / Bal (+)</th>
+                <th className={GAP} />
+                <th className={cn(TH, "text-left")}>Co2</th>
+                <th className={TH}>IGST Input</th>
+                <th className={TH}>CGST Input</th>
+                <th className={TH}>SGST Input</th>
+                <th className={TH}>Grand Total</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => {
-                const on = isIncluded(r);
-                const open = expanded[r.gstin];
-                const ledgers = data.ledgers.filter((l) => l.gstin === r.gstin);
-                return (
-                  <Fragment key={r.gstin}>
-                    <tr className={cn("border-b border-border/60", !on && "opacity-45")}>
-                      <td className="px-2.5 py-1.5">
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            type="checkbox"
-                            className="h-3.5 w-3.5 accent-primary"
-                            checked={on}
-                            title="Include in totals and Excel"
-                            onChange={(e) => setIncluded((p) => ({ ...p, [r.gstin]: e.target.checked }))}
-                          />
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-0.5 font-semibold hover:text-primary"
-                            onClick={() => setExpanded((p) => ({ ...p, [r.gstin]: !p[r.gstin] }))}
-                          >
-                            {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                            {r.code}
-                          </button>
-                        </div>
-                      </td>
-                      <td className="px-2.5 py-1.5 font-mono text-xs text-muted-foreground" title={r.units.join("\n")}>
-                        {r.gstin}
-                      </td>
-                      <td className={TD}><Amount value={r.outputIgst} /></td>
-                      <td className={TD}><Amount value={r.outputCgst} /></td>
-                      <td className={TD}><Amount value={r.outputSgst} /></td>
-                      <td className={TD}><Amount value={outputTotal(r)} strong /></td>
-                      <td className={TD}><Amount value={r.inputIgst} /></td>
-                      <td className={TD}><Amount value={r.inputCgst} /></td>
-                      <td className={TD}><Amount value={r.inputSgst} /></td>
-                      <td className={TD}><Amount value={inputTotal(r)} strong /></td>
-                      {(["igst", "cgst", "sgst"] as const).map((f) => (
-                        <td key={f} className="px-1.5 py-1">
-                          <Input
-                            inputMode="decimal"
-                            value={balances[r.gstin]?.[f] ?? ""}
-                            placeholder="0.00"
-                            onChange={(e) => setBalance(r.gstin, f, e.target.value)}
-                            className="h-8 w-28 text-right tabular-nums"
-                          />
-                        </td>
-                      ))}
-                      <td className={TD}><Amount value={net(r)} strong /></td>
-                    </tr>
-                    {open && (
-                      <tr className="border-b border-border/60 bg-muted/30">
-                        <td colSpan={14} className="px-4 py-3">
-                          <p className="mb-2 text-xs text-muted-foreground">
-                            {r.name} · {r.units.length} unit{r.units.length === 1 ? "" : "s"}
-                            {r.setOffExcluded > 0 && ` · set-off entries left out: ${fmt(r.setOffExcluded)}`}
-                          </p>
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="text-muted-foreground">
-                                <th className="py-1 text-left font-medium">Unit</th>
-                                <th className="py-1 text-left font-medium">Ledger</th>
-                                <th className="py-1 text-right font-medium">Opening</th>
-                                <th className="py-1 text-right font-medium">Debit</th>
-                                <th className="py-1 text-right font-medium">Credit</th>
-                                <th className="py-1 text-right font-medium">Closing</th>
-                                <th className="py-1 text-right font-medium">Set-off left out</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {ledgers.map((l) => (
-                                <tr key={`${l.unit}|${l.ledger}`} className="border-t border-border/40">
-                                  <td className="py-1 pr-3">{l.unit}</td>
-                                  <td className="py-1 pr-3">{l.ledger}</td>
-                                  <td className="py-1 text-right tabular-nums"><Amount value={l.opening} /></td>
-                                  <td className="py-1 text-right tabular-nums">{fmt(l.debit)}</td>
-                                  <td className="py-1 text-right tabular-nums">{fmt(l.credit)}</td>
-                                  <td className="py-1 text-right tabular-nums"><Amount value={l.closing} strong /></td>
-                                  <td className="py-1 text-right tabular-nums text-muted-foreground">
-                                    {l.setOff ? fmt(l.setOff) : "–"}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
+              {shown.map((c) => (
+                <tr key={c.code} className="border-b border-border/60">
+                  <td className="px-2.5 py-1.5 font-semibold" title={`${c.gstin}\n${c.units.join("\n")}`}>
+                    {c.code}
+                  </td>
+                  <td className={TD}><Amount value={c.outputIgst} /></td>
+                  <td className={TD}><Amount value={c.outputCgst} /></td>
+                  <td className={TD}><Amount value={c.outputSgst} /></td>
+                  <td className={TD}><Amount value={outputTotal(c)} strong /></td>
+                  <td className={GAP} />
+                  <td className={cn(TD, "bg-amber-50/60 dark:bg-amber-950/20")}><Amount value={net(c)} strong /></td>
+                  {(["igst", "cgst", "sgst"] as const).map((f) => (
+                    <td key={f} className="bg-amber-50/60 px-1.5 py-1 dark:bg-amber-950/20">
+                      <Input
+                        inputMode="decimal"
+                        value={balances[c.code]?.[f] ?? ""}
+                        placeholder="0.00"
+                        onChange={(e) => setBalance(c.code, f, e.target.value)}
+                        className="h-8 w-28 text-right tabular-nums"
+                      />
+                    </td>
+                  ))}
+                  <td className={GAP} />
+                  <td className="px-2.5 py-1.5 font-semibold">{c.code}</td>
+                  <td className={TD}><Amount value={c.inputIgst} /></td>
+                  <td className={TD}><Amount value={c.inputCgst} /></td>
+                  <td className={TD}><Amount value={c.inputSgst} /></td>
+                  <td className={TD}><Amount value={inputTotal(c)} strong /></td>
+                </tr>
+              ))}
             </tbody>
             <tfoot>
               <tr className="border-t border-border bg-secondary/40 font-semibold">
-                <td className="px-2.5 py-2" colSpan={2}>
-                  Grand total ({active.length})
-                </td>
+                <td className="px-2.5 py-2">Grand Total</td>
                 <td className={TD}><Amount value={totals.oI} /></td>
                 <td className={TD}><Amount value={totals.oC} /></td>
                 <td className={TD}><Amount value={totals.oS} /></td>
                 <td className={TD}><Amount value={totals.oI + totals.oC + totals.oS} strong /></td>
+                <td className={GAP} />
+                <td className={TD}><Amount value={totals.net} strong /></td>
+                <td className={TD}><Amount value={totals.bI} /></td>
+                <td className={TD}><Amount value={totals.bC} /></td>
+                <td className={TD}><Amount value={totals.bS} /></td>
+                <td className={GAP} />
+                <td className="px-2.5 py-2">Grand Total</td>
                 <td className={TD}><Amount value={totals.iI} /></td>
                 <td className={TD}><Amount value={totals.iC} /></td>
                 <td className={TD}><Amount value={totals.iS} /></td>
                 <td className={TD}><Amount value={totals.iI + totals.iC + totals.iS} strong /></td>
-                <td className={TD}><Amount value={totals.bI} /></td>
-                <td className={TD}><Amount value={totals.bC} /></td>
-                <td className={TD}><Amount value={totals.bS} /></td>
-                <td className={TD}><Amount value={totals.net} strong /></td>
               </tr>
             </tfoot>
           </table>
+        </div>
+      )}
+
+      {data && (
+        <div className="rounded-xl border border-border bg-card shadow-sm">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+            <h3 className="mr-2 text-sm font-semibold">Group Summary (source for the pivot)</h3>
+            {(
+              [
+                ["output", "GST Liabilities · Output A/c"],
+                ["input", "GST Input Credits · Input"],
+                ["other", "GST Payable / RCM / non-eligible"],
+              ] as const
+            ).map(([key, label]) => (
+              <Button
+                key={key}
+                size="sm"
+                variant={source === key ? "default" : "outline"}
+                onClick={() => setSource(key)}
+              >
+                {label}
+              </Button>
+            ))}
+            <span className="ml-auto text-xs text-muted-foreground">{sourceRows.length} rows</span>
+          </div>
+          <div className="max-h-[520px] overflow-auto">
+            <table className="w-full min-w-[1100px] text-sm">
+              <thead className="sticky top-0 bg-card">
+                <tr className="border-b border-border bg-secondary/40">
+                  <th className={cn(TH, "text-left")}>Perticular</th>
+                  <th className={TH}>Opening Balance</th>
+                  <th className={TH}>Debit</th>
+                  <th className={TH}>Credit</th>
+                  {source === "input" && <th className={TH}>Cl balance</th>}
+                  <th className={TH}>Closing Balance</th>
+                  <th className={cn(TH, "text-left")}>Company</th>
+                  <th className={cn(TH, "text-left")}>Co</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sourceRows.map((l) => (
+                  <tr key={`${l.unit}|${l.ledger}`} className="border-b border-border/40">
+                    <td className="px-2.5 py-1.5">{l.ledger}</td>
+                    <td className={TD}><Amount value={l.opening} /></td>
+                    <td className={TD}>{fmt(l.debit)}</td>
+                    <td className={TD}>{fmt(l.credit)}</td>
+                    {source === "input" && <td className={TD}><Amount value={l.clBalance} strong /></td>}
+                    <td className={TD}><Amount value={l.closing} strong={source !== "input"} /></td>
+                    <td className="px-2.5 py-1.5 text-muted-foreground">{l.unit}</td>
+                    <td className="px-2.5 py-1.5 font-medium">{l.code}</td>
+                  </tr>
+                ))}
+                {sourceRows.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-6 text-center text-sm text-muted-foreground">
+                      No postings for this selection.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
