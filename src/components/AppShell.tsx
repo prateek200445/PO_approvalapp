@@ -27,6 +27,7 @@ import {
   QrCode,
   Package,
   ReceiptText,
+  FileSpreadsheet,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useLayoutEffect, useState, type ComponentType } from "react";
@@ -60,6 +61,7 @@ type AppPath =
   | "/ledgers"
   | "/gst"
   | "/item-stock"
+  | "/domestic-invoice"
   | "/export-bill-overdue"
   | "/daily-production"
   | "/plant-consumption"
@@ -275,6 +277,12 @@ export function AppShell() {
       icon: ReceiptText,
       label: "GST Compliance",
       match: (p) => p === "/gst" || p.startsWith("/gst/"),
+    },
+    {
+      to: "/domestic-invoice",
+      icon: FileSpreadsheet,
+      label: "Domestic Invoice",
+      match: (p) => p.startsWith("/domestic-invoice"),
     },
     {
       to: "/item-stock",

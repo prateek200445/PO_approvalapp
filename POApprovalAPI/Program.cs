@@ -100,6 +100,7 @@ builder.Services.AddScoped<ExcelLedgerService>();
 builder.Services.AddScoped<BillWiseTransactionService>();
 builder.Services.AddScoped<LedgerSummaryService>();
 builder.Services.AddScoped<ItemStockService>();
+builder.Services.AddScoped<DomesticInvoiceService>();
 builder.Services.AddScoped<PlantConsumptionService>();
 builder.Services.AddScoped<PlantProductionService>();
 builder.Services.AddScoped<GstBillRecoService>();

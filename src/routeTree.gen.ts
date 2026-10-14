@@ -35,6 +35,7 @@ import { Route as AppGstRouteImport } from './routes/_app/gst'
 import { Route as AppFibcBuyersRouteImport } from './routes/_app/fibc-buyers'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
 import { Route as AppExhibitionLeadsRouteImport } from './routes/_app/exhibition-leads'
+import { Route as AppDomesticInvoiceRouteImport } from './routes/_app/domestic-invoice'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppDailyReportsRouteImport } from './routes/_app/daily-reports'
 import { Route as AppDailyProductionRouteImport } from './routes/_app/daily-production'
@@ -189,6 +190,11 @@ const AppExhibitionLeadsRoute = AppExhibitionLeadsRouteImport.update({
   path: '/exhibition-leads',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDomesticInvoiceRoute = AppDomesticInvoiceRouteImport.update({
+  id: '/domestic-invoice',
+  path: '/domestic-invoice',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDashboardRoute = AppDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -326,6 +332,7 @@ export interface FileRoutesByFullPath {
   '/daily-production': typeof AppDailyProductionRoute
   '/daily-reports': typeof AppDailyReportsRoute
   '/dashboard': typeof AppDashboardRoute
+  '/domestic-invoice': typeof AppDomesticInvoiceRoute
   '/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
@@ -376,6 +383,7 @@ export interface FileRoutesByTo {
   '/daily-production': typeof AppDailyProductionRoute
   '/daily-reports': typeof AppDailyReportsRoute
   '/dashboard': typeof AppDashboardRoute
+  '/domestic-invoice': typeof AppDomesticInvoiceRoute
   '/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
@@ -429,6 +437,7 @@ export interface FileRoutesById {
   '/_app/daily-production': typeof AppDailyProductionRoute
   '/_app/daily-reports': typeof AppDailyReportsRoute
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/domestic-invoice': typeof AppDomesticInvoiceRoute
   '/_app/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/_app/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
@@ -482,6 +491,7 @@ export interface FileRouteTypes {
     | '/daily-production'
     | '/daily-reports'
     | '/dashboard'
+    | '/domestic-invoice'
     | '/exhibition-leads'
     | '/export-bill-overdue'
     | '/fibc-buyers'
@@ -532,6 +542,7 @@ export interface FileRouteTypes {
     | '/daily-production'
     | '/daily-reports'
     | '/dashboard'
+    | '/domestic-invoice'
     | '/exhibition-leads'
     | '/export-bill-overdue'
     | '/fibc-buyers'
@@ -584,6 +595,7 @@ export interface FileRouteTypes {
     | '/_app/daily-production'
     | '/_app/daily-reports'
     | '/_app/dashboard'
+    | '/_app/domestic-invoice'
     | '/_app/exhibition-leads'
     | '/_app/export-bill-overdue'
     | '/_app/fibc-buyers'
@@ -815,6 +827,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppExhibitionLeadsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/domestic-invoice': {
+      id: '/_app/domestic-invoice'
+      path: '/domestic-invoice'
+      fullPath: '/domestic-invoice'
+      preLoaderRoute: typeof AppDomesticInvoiceRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/dashboard': {
       id: '/_app/dashboard'
       path: '/dashboard'
@@ -1038,6 +1057,7 @@ interface AppRouteChildren {
   AppDailyProductionRoute: typeof AppDailyProductionRoute
   AppDailyReportsRoute: typeof AppDailyReportsRoute
   AppDashboardRoute: typeof AppDashboardRoute
+  AppDomesticInvoiceRoute: typeof AppDomesticInvoiceRoute
   AppExhibitionLeadsRoute: typeof AppExhibitionLeadsRoute
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
   AppFibcBuyersRoute: typeof AppFibcBuyersRouteWithChildren
@@ -1081,6 +1101,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDailyProductionRoute: AppDailyProductionRoute,
   AppDailyReportsRoute: AppDailyReportsRoute,
   AppDashboardRoute: AppDashboardRoute,
+  AppDomesticInvoiceRoute: AppDomesticInvoiceRoute,
   AppExhibitionLeadsRoute: AppExhibitionLeadsRoute,
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
   AppFibcBuyersRoute: AppFibcBuyersRouteWithChildren,
