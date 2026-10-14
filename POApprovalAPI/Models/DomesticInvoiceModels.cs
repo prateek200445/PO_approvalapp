@@ -160,7 +160,9 @@ public class DomesticInvoiceDto
     public decimal SheCess { get; set; }
     public string TaxType { get; set; } = "VAT";
     public decimal Vat { get; set; }
+    public decimal VatAmt { get; set; }
     public decimal AddVat { get; set; }
+    public decimal AddVatAmt { get; set; }
     public string ExciseApplicable { get; set; } = "NIL";
     public string VatApplicable { get; set; } = "NIL";
     public string ExciseNilRemarks { get; set; } = "";

@@ -52,7 +52,8 @@ public class DomesticInvoicePdfDocument : IDocument
                 row.RelativeItem(2).AlignCenter().Column(c =>
                 {
                     c.Item().AlignCenter().Text(title.ToUpperInvariant()).Bold().FontSize(11);
-                    c.Item().AlignCenter().Text("Under Section 31 of CGST Act 2017 and Rule 46 of the CGST Rules 2017").FontSize(6);
+                    if (!Fibco())
+                        c.Item().AlignCenter().Text("Under Section 31 of CGST Act 2017 and Rule 46 of the CGST Rules 2017").FontSize(6);
                 });
                 row.RelativeItem().AlignRight().AlignMiddle().Text(copy).Bold().FontSize(8);
             });
@@ -173,6 +174,7 @@ public class DomesticInvoicePdfDocument : IDocument
     {
         container.Table(table =>
         {
+            var fibco = Fibco();
             table.ColumnsDefinition(columns =>
             {
                 columns.ConstantColumn(36);
@@ -182,12 +184,20 @@ public class DomesticInvoicePdfDocument : IDocument
                 columns.ConstantColumn(42);
                 columns.ConstantColumn(48);
                 columns.ConstantColumn(52);
-                columns.ConstantColumn(28);
-                columns.ConstantColumn(40);
-                columns.ConstantColumn(28);
-                columns.ConstantColumn(40);
-                columns.ConstantColumn(28);
-                columns.ConstantColumn(40);
+                if (fibco)
+                {
+                    columns.ConstantColumn(42);
+                    columns.ConstantColumn(52);
+                }
+                else
+                {
+                    columns.ConstantColumn(28);
+                    columns.ConstantColumn(40);
+                    columns.ConstantColumn(28);
+                    columns.ConstantColumn(40);
+                    columns.ConstantColumn(28);
+                    columns.ConstantColumn(40);
+                }
             });
             table.Header(header =>
             {
@@ -198,21 +208,31 @@ public class DomesticInvoicePdfDocument : IDocument
                 Head(header, "Qty");
                 Head(header, "Rate (INR) / Unit");
                 Head(header, "Assessable Value (INR)");
-                Head(header, "CGST %");
-                Head(header, "CGST Amt");
-                Head(header, "SGST %");
-                Head(header, "SGST Amt");
-                Head(header, "IGST %");
-                Head(header, "IGST Amt");
+                if (fibco)
+                {
+                    Head(header, "VAT %");
+                    Head(header, "VAT Amt");
+                }
+                else
+                {
+                    Head(header, "CGST %");
+                    Head(header, "CGST Amt");
+                    Head(header, "SGST %");
+                    Head(header, "SGST Amt");
+                    Head(header, "IGST %");
+                    Head(header, "IGST Amt");
+                }
             });
 
+            var width = fibco ? 9 : 13;
             if (lines.Count == 0)
             {
-                for (var i = 0; i < 13; i++)
+                for (var i = 0; i < width; i++)
                     table.Cell().Border(0.3f).MinHeight(28).Text("");
                 return;
             }
 
+            var first = true;
             foreach (var line in lines)
             {
                 Cell(table, V(line, "NoofPkg"));
@@ -222,12 +242,21 @@ public class DomesticInvoicePdfDocument : IDocument
                 Cell(table, Num(V(line, "Qty"), "N3"));
                 Cell(table, Num(V(line, "Rate"), "N3"));
                 Cell(table, Num(V(line, "Amount"), "N2"));
-                Cell(table, Num(V(line, "CGSTrate"), "N2"));
-                Cell(table, Num(V(line, "CGSTamt"), "N2"));
-                Cell(table, Num(V(line, "SGSTRate"), "N2"));
-                Cell(table, Num(V(line, "SGSTAmt"), "N2"));
-                Cell(table, Num(V(line, "IGSTrate"), "N2"));
-                Cell(table, Num(V(line, "IGSTAmt"), "N2"));
+                if (fibco)
+                {
+                    Cell(table, first ? Num(VatPercent(), "N2") : "");
+                    Cell(table, first ? Num(VatAmount(lines).ToString(CultureInfo.InvariantCulture), "N2") : "");
+                    first = false;
+                }
+                else
+                {
+                    Cell(table, Num(V(line, "CGSTrate"), "N2"));
+                    Cell(table, Num(V(line, "CGSTamt"), "N2"));
+                    Cell(table, Num(V(line, "SGSTRate"), "N2"));
+                    Cell(table, Num(V(line, "SGSTAmt"), "N2"));
+                    Cell(table, Num(V(line, "IGSTrate"), "N2"));
+                    Cell(table, Num(V(line, "IGSTAmt"), "N2"));
+                }
             }
         });
     }
@@ -269,15 +298,23 @@ public class DomesticInvoicePdfDocument : IDocument
             row.ConstantItem(220).Padding(4).Column(c =>
             {
                 Money(c, Oel() ? "Assessable Value" : "Taxable Value", taxable);
-                Money(c, "Add : CGST", cgst);
-                Money(c, "Add : SGST", sgst);
-                Money(c, "Add : IGST", igst);
-                Money(c, "Tax Amount GST", cgst + sgst + igst);
-                c.Item().Row(r =>
+                if (Fibco())
                 {
-                    r.RelativeItem().Text("GST Payable on Reverse Charge :");
-                    r.ConstantItem(50).AlignRight().Text("N.A.");
-                });
+                    Money(c, "VAT %", Dec(VatPercent()));
+                    Money(c, "Add : VAT", VatAmount(lines));
+                }
+                else
+                {
+                    Money(c, "Add : CGST", cgst);
+                    Money(c, "Add : SGST", sgst);
+                    Money(c, "Add : IGST", igst);
+                    Money(c, "Tax Amount GST", cgst + sgst + igst);
+                    c.Item().Row(r =>
+                    {
+                        r.RelativeItem().Text("GST Payable on Reverse Charge :");
+                        r.ConstantItem(50).AlignRight().Text("N.A.");
+                    });
+                }
             });
         });
 
@@ -420,6 +457,19 @@ public class DomesticInvoicePdfDocument : IDocument
 
     private bool Oel() =>
         Text(F("CompanyName"), _invoice.CompanyName).Equals(DomesticInvoiceMath.OelCompany, StringComparison.OrdinalIgnoreCase);
+
+    private bool Fibco() =>
+        Text(F("CompanyName"), _invoice.CompanyName).Equals(DomesticInvoiceMath.FibcoCompany, StringComparison.OrdinalIgnoreCase);
+
+    private string VatPercent() => Text(F("vat"), _invoice.Vat.ToString(CultureInfo.InvariantCulture));
+
+    private decimal VatAmount(List<Dictionary<string, string?>> lines)
+    {
+        var stored = Dec(F("VatAmt"));
+        if (stored == 0 && _rows.Count == 0) stored = _invoice.VatAmt;
+        if (stored != 0) return stored;
+        return Math.Round(lines.Sum(l => Dec(V(l, "Amount"))) * Dec(VatPercent()) / 100m, 0, MidpointRounding.ToEven);
+    }
 
     private static byte[]? TryLoadLogo(bool oswal)
     {

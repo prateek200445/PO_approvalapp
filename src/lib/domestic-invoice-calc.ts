@@ -4,6 +4,7 @@ export const QTY_DIGITS = 3;
 export const RATE_DIGITS = 2;
 export const AMOUNT_DIGITS = 2;
 export const OEL_COMPANY = "Oswal Extrusion Limited (Unit-II)";
+export const FIBCO_COMPANY = "Fibco Plastic Industry LLC";
 
 export function roundAway(value: number, digits: number): number {
   const f = 10 ** digits;
@@ -28,10 +29,30 @@ function addDutyGst(duty: number, cgst: number, sgst: number, igst: number, rate
   };
 }
 
-/** Mirrors the desktop Calculation / CalculationGST paths. */
+/** Mirrors the desktop Calculation / CalculationGST paths. Fibco invoices stay on VAT after GST began. */
 export function calculateInvoice(invoice: DomesticInvoice): DomesticInvoice {
+  if (invoice.companyName === FIBCO_COMPANY) return calculateFibco(invoice);
   const gst = new Date(invoice.invDate) > new Date("2017-06-30");
   return gst ? calculateGst(invoice) : calculateLegacy(invoice);
+}
+
+function calculateFibco(invoice: DomesticInvoice): DomesticInvoice {
+  const lines = invoice.lines.map((line) => ({
+    ...line, cgstRate: 0, cgstAmt: 0, sgstRate: 0, sgstAmt: 0, igstRate: 0, igstAmt: 0,
+  }));
+  let goods = 0;
+  for (const line of lines) {
+    if (!line.commodity || !line.qty || !line.rate) continue;
+    line.qty = roundAway(line.qty, QTY_DIGITS);
+    line.rate = roundAway(line.rate, RATE_DIGITS);
+    line.amount = roundAway(line.qty * line.rate, AMOUNT_DIGITS);
+    goods = roundAway(goods + line.amount, AMOUNT_DIGITS);
+  }
+  const vatAmt = roundEven(goods * invoice.vat / 100, 0);
+  const addVatAmt = roundEven(goods * invoice.addVat / 100, 0);
+  let total = goods + vatAmt + addVatAmt + invoice.freight;
+  total += roundAway(total * invoice.tcsPercent / 100, AMOUNT_DIGITS);
+  return { ...invoice, lines, vatAmt, addVatAmt, grandTotal: roundAway(total, AMOUNT_DIGITS) };
 }
 
 function calculateGst(invoice: DomesticInvoice): DomesticInvoice {

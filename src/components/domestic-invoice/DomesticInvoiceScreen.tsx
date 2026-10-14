@@ -15,7 +15,7 @@ import {
   getInvoice, getInvoices, getLookups, getPackingLists, getPrint, getTcs, getUserCompany, getVendorAddress,
   previewInvoicePdf, saveInvoice, updateEway, updateInvoice, type DomesticInvoice, type InvoiceLine,
 } from "@/lib/domestic-invoice-api";
-import { blankLine, calculateInvoice, OEL_COMPANY } from "@/lib/domestic-invoice-calc";
+import { blankLine, calculateInvoice, FIBCO_COMPANY, OEL_COMPANY } from "@/lib/domestic-invoice-calc";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -79,7 +79,16 @@ export function DomesticInvoiceScreen() {
 
   useEffect(() => {
     if (!lockedCompany) return;
-    setInvoice((prev) => (prev.companyName === lockedCompany ? prev : { ...prev, companyName: lockedCompany, packingListNo: "" }));
+    setInvoice((prev) => {
+      if (prev.companyName === lockedCompany) return prev;
+      const fibco = lockedCompany === FIBCO_COMPANY;
+      return {
+        ...prev,
+        companyName: lockedCompany,
+        packingListNo: "",
+        ...(fibco ? { taxType: "VAT", vat: prev.vat || 5, vatApplicable: "AMOUNT" } : {}),
+      };
+    });
   }, [lockedCompany]);
 
   useEffect(() => {
@@ -111,6 +120,7 @@ export function DomesticInvoiceScreen() {
   const gstEra = new Date(invoice.invDate) > new Date("2017-06-30");
   const showPurchaseReturn = new Date(invoice.invDate) < new Date("2019-01-01");
   const oel = invoice.companyName === OEL_COMPANY;
+  const fibco = invoice.companyName === FIBCO_COMPANY;
   const L = lookups.data;
 
   function patch(partial: Partial<DomesticInvoice>) {
@@ -133,9 +143,9 @@ export function DomesticInvoiceScreen() {
         commodity: name,
         hsn: tax.tariffHeading,
         deptt: L?.commodities.find((c) => c.name === name)?.deptt ?? "",
-        cgstRate: invoice.merchantExport || !sameState ? 0 : tax.cgst,
-        sgstRate: invoice.merchantExport || !sameState ? 0 : tax.sgst,
-        igstRate: invoice.merchantExport || sameState ? 0 : tax.igst,
+        cgstRate: fibco || invoice.merchantExport || !sameState ? 0 : tax.cgst,
+        sgstRate: fibco || invoice.merchantExport || !sameState ? 0 : tax.sgst,
+        igstRate: fibco || invoice.merchantExport || sameState ? 0 : tax.igst,
       });
       if (!invoice.tariffHeading) patch({ tariffHeading: tax.tariffHeading });
     } catch (error) {
@@ -348,7 +358,7 @@ export function DomesticInvoiceScreen() {
       <div className="overflow-x-auto rounded-xl border">
         <table className="min-w-[1600px] w-full text-sm">
           <thead className="bg-muted/60 text-left">
-            <tr>{["Pkg", "Main group", "Group", "Sub group", "Item", "Commodity", "Description", "Deptt", "UOM", "HSN", "Qty", "Rate", "Total", "CGST %", "CGST", "SGST %", "SGST", "IGST %", "IGST", "Net", "Gross", "Non qty", "Qty remarks", "Commodity remarks"].map((h) => <th key={h} className="px-2 py-2 font-medium">{h}</th>)}</tr>
+            <tr>{["Pkg", "Main group", "Group", "Sub group", "Item", "Commodity", "Description", "Deptt", "UOM", "HSN", "Qty", "Rate", "Total", ...(fibco ? ["VAT %", "VAT"] : ["CGST %", "CGST", "SGST %", "SGST", "IGST %", "IGST"]), "Net", "Gross", "Non qty", "Qty remarks", "Commodity remarks"].map((h) => <th key={h} className="px-2 py-2 font-medium">{h}</th>)}</tr>
           </thead>
           <tbody>
             {invoice.lines.map((line, index) => (
@@ -375,12 +385,17 @@ export function DomesticInvoiceScreen() {
                 }} /></td>
                 <td><Input type="number" value={line.rate || ""} onChange={(e) => patchLine(index, { rate: Number(e.target.value) })} /></td>
                 <td className="px-2">{priced.lines[index]?.amount.toFixed(2)}</td>
-                <td><Input type="number" value={line.cgstRate || ""} onChange={(e) => patchLine(index, { cgstRate: Number(e.target.value) })} /></td>
-                <td className="px-2">{priced.lines[index]?.cgstAmt.toFixed(2)}</td>
-                <td><Input type="number" value={line.sgstRate || ""} onChange={(e) => patchLine(index, { sgstRate: Number(e.target.value) })} /></td>
-                <td className="px-2">{priced.lines[index]?.sgstAmt.toFixed(2)}</td>
-                <td><Input type="number" value={line.igstRate || ""} onChange={(e) => patchLine(index, { igstRate: Number(e.target.value) })} /></td>
-                <td className="px-2">{priced.lines[index]?.igstAmt.toFixed(2)}</td>
+                {fibco ? <>
+                  <td>{index === 0 ? <Input type="number" value={invoice.vat || ""} onChange={(e) => patch({ vat: Number(e.target.value), taxType: "VAT" })} /> : null}</td>
+                  <td className="px-2">{index === 0 ? priced.vatAmt.toFixed(2) : ""}</td>
+                </> : <>
+                  <td><Input type="number" value={line.cgstRate || ""} onChange={(e) => patchLine(index, { cgstRate: Number(e.target.value) })} /></td>
+                  <td className="px-2">{priced.lines[index]?.cgstAmt.toFixed(2)}</td>
+                  <td><Input type="number" value={line.sgstRate || ""} onChange={(e) => patchLine(index, { sgstRate: Number(e.target.value) })} /></td>
+                  <td className="px-2">{priced.lines[index]?.sgstAmt.toFixed(2)}</td>
+                  <td><Input type="number" value={line.igstRate || ""} onChange={(e) => patchLine(index, { igstRate: Number(e.target.value) })} /></td>
+                  <td className="px-2">{priced.lines[index]?.igstAmt.toFixed(2)}</td>
+                </>}
                 <td><Input type="number" value={line.netWt || ""} onChange={(e) => patchLine(index, { netWt: Number(e.target.value) })} /></td>
                 <td><Input type="number" value={line.grossWt || ""} onChange={(e) => patchLine(index, { grossWt: Number(e.target.value) })} /></td>
                 <td><Input type="number" value={line.nonDisplayQty || ""} onChange={(e) => patchLine(index, { nonDisplayQty: Number(e.target.value) })} /></td>
@@ -450,6 +465,7 @@ export function DomesticInvoiceScreen() {
           <Field label="Sec. hi. edu. cess %"><Input type="number" value={invoice.sheCess} onChange={(e) => patch({ sheCess: Number(e.target.value) })} /></Field>
           {!gstEra && <Field label="Type"><Combo id="taxtype" value={invoice.taxType} options={["VAT", "CST"]} onChange={(taxType) => patch({ taxType, addVat: taxType === "CST" ? 0 : invoice.addVat })} /></Field>}
           <Field label={invoice.taxType === "CST" ? "CST %" : "VAT %"}><Input type="number" value={invoice.vat} onChange={(e) => patch({ vat: Number(e.target.value) })} /></Field>
+          {fibco && <Field label="VAT amount"><Input readOnly value={priced.vatAmt.toFixed(2)} /></Field>}
           {!gstEra && invoice.taxType !== "CST" && <Field label="Add VAT %"><Input type="number" value={invoice.addVat} onChange={(e) => patch({ addVat: Number(e.target.value) })} /></Field>}
           <Field label="Excise"><Combo id="exapp" value={invoice.exciseApplicable} options={["NIL", "AMOUNT"]} onChange={(exciseApplicable) => patch({ exciseApplicable })} /></Field>
           <Field label="VAT"><Combo id="vatapp" value={invoice.vatApplicable} options={["NIL", "AMOUNT"]} onChange={(vatApplicable) => patch({ vatApplicable })} /></Field>

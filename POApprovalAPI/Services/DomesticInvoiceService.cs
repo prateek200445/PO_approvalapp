@@ -792,7 +792,7 @@ public class DomesticInvoiceService
               IsGSTAllowDuty3,IsNIllRated,MerchantExport,Notification,AdvanceLicense,isdispfrm,dispfrm,dispfrm_add)
             VALUES (
               '',@InvNo,@InvDate,@Terms,@BuyerOrder,@BuyerDate,@InvNo,@DespatchDate,@Vehicle,@Destination,
-              @Delivery,@Buyer,@ExDuty,@Edu,@She,@Vat,@AddVat,0,0,0,0,0,
+              @Delivery,@Buyer,@ExDuty,@Edu,@She,@Vat,@AddVat,0,0,0,@VatAmt,@AddVatAmt,
               0,@Total,@Words,@InvDt,@RemDt,@Type,@Challan,@ChallanDate,@Lr,@LrDate,@Login,
               @ExciseWord,@Transport,@Consignee,@Heading,@Insurance,@TaxType,@Remarks,@InsureFlag,@ExciseApp,@VatApp,@Freight,@TcsPer,0,
               @Suffix,@Deptt,'',@Company,@UtDetails,@Currency,@CurrencyValue,@Pla,@Rg23,@ConsigneeCode,NULL,'','',
@@ -808,7 +808,7 @@ public class DomesticInvoiceService
             UPDATE Despatch.dbo.DomesticInvoice SET
               BuyerName=@Buyer, InvDate=@InvDate, TermsOfPayment=@Terms, BuyerOrderNo=@BuyerOrder, BuyerDate=@BuyerDate,
               DespatchDate=@DespatchDate, VehicalNo=@Vehicle, Destination=@Destination, TermsOfDelivery=@Delivery,
-              ExDuty=@ExDuty, Educess=@Edu, SecHiEduCess=@She, vat=@Vat, Addvat=@AddVat, TotalAmt=@Total, TotalAmtWord=@Words,
+              ExDuty=@ExDuty, Educess=@Edu, SecHiEduCess=@She, vat=@Vat, Addvat=@AddVat, VatAmt=@VatAmt, AddVatAmt=@AddVatAmt, TotalAmt=@Total, TotalAmtWord=@Words,
               InvDateTime=@InvDt, RemDateTime=@RemDt, TypeOfInvoice=@Type, DelChallanNo=@Challan, DelChallanDate=@ChallanDate,
               LRNo=@Lr, LRDate=@LrDate, ExciseAmtWord=@ExciseWord, TransportName=@Transport, Consignee=@Consignee, Heading=@Heading,
               Insurance=@Insurance, Typevat=@TaxType, Remarks=@Remarks, CheckInsurance=@InsureFlag, Excisetype=@ExciseApp, VatType=@VatApp,
@@ -837,6 +837,7 @@ public class DomesticInvoiceService
         P("@Buyer", invoice.BuyerName),
         P("@ExDuty", invoice.ExDuty), P("@Edu", invoice.EduCess), P("@She", invoice.SheCess),
         P("@Vat", invoice.Vat), P("@AddVat", invoice.AddVat),
+        P("@VatAmt", invoice.VatAmt), P("@AddVatAmt", invoice.AddVatAmt),
         P("@Total", invoice.GrandTotal), P("@Words", words),
         P("@InvDt", ParseDate(string.IsNullOrWhiteSpace(invoice.InvoiceDateTime) ? invoice.InvDate : invoice.InvoiceDateTime)),
         P("@RemDt", ParseDate(string.IsNullOrWhiteSpace(invoice.RemovalDateTime) ? invoice.InvDate : invoice.RemovalDateTime)),
@@ -1007,7 +1008,9 @@ public class DomesticInvoiceService
         SheCess = Dec(r, "SecHiEduCess"),
         TaxType = S(r, "Typevat"),
         Vat = Dec(r, "vat"),
+        VatAmt = Dec(r, "VatAmt"),
         AddVat = Dec(r, "Addvat"),
+        AddVatAmt = Dec(r, "AddVatAmt"),
         ExciseApplicable = S(r, "Excisetype"),
         VatApplicable = S(r, "VatType"),
         ExciseNilRemarks = S(r, "ExciseNilRemarks"),

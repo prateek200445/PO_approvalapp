@@ -71,7 +71,9 @@ export interface DomesticInvoice extends Record<string, unknown> {
   sheCess: number;
   taxType: string;
   vat: number;
+  vatAmt: number;
   addVat: number;
+  addVatAmt: number;
   exciseApplicable: string;
   vatApplicable: string;
   exciseNilRemarks: string;
@@ -194,7 +196,7 @@ export function blankInvoice(company = "", suffix = ""): DomesticInvoice {
     state: "", mobileNo: "", invoiceDateTime: now, removalDateTime: now, buyerOrderNo: "", buyerOrderDate: now.slice(0, 10),
     termsOfPayment: "", department: "", accountHead: "", tariffHeading: "", insurance: false, insurancePolicyNo: "",
     purchaseReturn: false, advanceLicNo: "", utBondNo: "", are1No: "", directExport: false,
-    exDuty: 0, eduCess: 0, sheCess: 0, taxType: "VAT", vat: 0, addVat: 0, exciseApplicable: "NIL", vatApplicable: "NIL",
+    exDuty: 0, eduCess: 0, sheCess: 0, taxType: "VAT", vat: 0, vatAmt: 0, addVat: 0, addVatAmt: 0, exciseApplicable: "NIL", vatApplicable: "NIL",
     exciseNilRemarks: "", vatNilRemarks: "", freight: 0, tcsPercent: 0, gstAfterFreight: false, remarks: "", freightRemarks: "",
     rg23: "", igstNilNotification: false, currency: "", currencyValue: "", availBenefit: false,
     utBondDetails: "EXCISE : Goods cleared under notification no. 39/2001 dated: 31-7-2001",

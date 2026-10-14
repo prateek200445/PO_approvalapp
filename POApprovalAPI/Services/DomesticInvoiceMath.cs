@@ -12,14 +12,46 @@ public static class DomesticInvoiceMath
     public const int RateDigits = 2;
     public const int AmountDigits = 2;
     public const string OelCompany = "Oswal Extrusion Limited (Unit-II)";
+    public const string FibcoCompany = "Fibco Plastic Industry LLC";
 
     public static void Calculate(DomesticInvoiceDto invoice)
     {
+        if (invoice.CompanyName == FibcoCompany)
+        {
+            CalculateFibco(invoice);
+            return;
+        }
         var gst = DateTime.TryParse(invoice.InvDate, out var invDate) && invDate.Date > new DateTime(2017, 6, 30);
         if (gst)
             CalculateGst(invoice);
         else
             CalculateLegacy(invoice);
+    }
+
+    public static void CalculateFibco(DomesticInvoiceDto invoice)
+    {
+        decimal goods = 0;
+        foreach (var line in invoice.Lines)
+        {
+            line.CgstRate = 0;
+            line.CgstAmt = 0;
+            line.SgstRate = 0;
+            line.SgstAmt = 0;
+            line.IgstRate = 0;
+            line.IgstAmt = 0;
+            if (string.IsNullOrWhiteSpace(line.Commodity) || line.Qty == 0 || line.Rate == 0)
+                continue;
+            line.Qty = RoundAway(line.Qty, QtyDigits);
+            line.Rate = RoundAway(line.Rate, RateDigits);
+            line.Amount = RoundAway(line.Qty * line.Rate, AmountDigits);
+            goods = RoundAway(goods + line.Amount, AmountDigits);
+        }
+
+        invoice.VatAmt = RoundEven(goods * invoice.Vat / 100m, 0);
+        invoice.AddVatAmt = RoundEven(goods * invoice.AddVat / 100m, 0);
+        var total = goods + invoice.VatAmt + invoice.AddVatAmt + invoice.Freight;
+        total += RoundAway(total * invoice.TcsPercent / 100m, AmountDigits);
+        invoice.GrandTotal = RoundAway(total, AmountDigits);
     }
 
     public static void CalculateGst(DomesticInvoiceDto invoice)
