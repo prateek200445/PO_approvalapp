@@ -76,6 +76,10 @@ export type ComparisonSummary = {
   duplicates: number;
   potentialMatches: number;
   pendingRecords?: number;
+  closingA?: number;
+  closingB?: number;
+  closingDifference?: number;
+  closingKnown?: boolean;
 };
 
 export type ComparisonResult = {

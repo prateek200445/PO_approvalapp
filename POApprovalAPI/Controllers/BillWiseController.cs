@@ -32,14 +32,22 @@ public class BillWiseController : ControllerBase
         }
     }
 
-    /// <summary>Distinct ledger names for a company (cached per company).</summary>
+    /// <summary>
+    /// Ledger names for a company. Pass q (at least 1 character) for typeahead search.
+    /// </summary>
     [HttpGet("ledgers")]
-    public async Task<IActionResult> GetLedgers([FromQuery] string company)
+    public async Task<IActionResult> GetLedgers([FromQuery] string company, [FromQuery] string? q = null, [FromQuery] int take = 40)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(company))
                 return BadRequest(new { message = "company query parameter is required." });
+
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                var matches = await _billWise.SearchLedgersAsync(company, q, take);
+                return Ok(matches);
+            }
 
             var ledgers = await _billWise.GetLedgersAsync(company);
             return Ok(ledgers);
