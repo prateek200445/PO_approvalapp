@@ -12,15 +12,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/lib/auth-context";
 import {
   blankInvoice, checkPacking, getBuyerTax, getCommodityTax, getConsignees, getCurrencyValue, getInsurance,
-  getInvoice, getInvoices, getLookups, getPackingLists, getPrint, getTcs, getUserCompany, getVendorAddress,
+  getInvoice, getInvoices, getLookups, getPackingLists, getPrint, getTcs, getVendorAddress,
   previewInvoicePdf, saveInvoice, updateEway, updateInvoice, type DomesticInvoice, type InvoiceLine,
 } from "@/lib/domestic-invoice-api";
 import { blankLine, calculateInvoice, FIBCO_COMPANY, OEL_COMPANY } from "@/lib/domestic-invoice-calc";
 
+const card = "rounded-xl border border-border bg-card shadow-md";
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="grid gap-1 text-sm">
-      <span className="text-muted-foreground">{label}</span>
+    <label className="grid gap-1.5 text-sm">
+      <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
       {children}
     </label>
   );
@@ -37,14 +39,16 @@ function Combo({ id, value, options, onChange, disabled }: { id: string; value: 
 
 function DropDown({ value, options, onChange, placeholder }: { value: string; options: string[]; onChange: (v: string) => void; placeholder: string }) {
   const choices = value && !options.includes(value) ? [value, ...options] : options;
+  const optionStyle = { backgroundColor: "#171717", color: "#fafafa" };
   return (
     <select
-      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors hover:border-primary/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      style={{ colorScheme: "dark" }}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     >
-      <option value="">{placeholder}</option>
-      {choices.map((option) => <option key={option} value={option}>{option}</option>)}
+      <option value="" style={optionStyle}>{placeholder}</option>
+      {choices.map((option) => <option key={option} value={option} style={optionStyle}>{option}</option>)}
     </select>
   );
 }
@@ -60,13 +64,6 @@ export function DomesticInvoiceScreen() {
   const [consignees, setConsignees] = useState<{ code: string; name: string; city: string; address: string }[]>([]);
 
   const asOn = invoice.invDate.slice(0, 10);
-  const mine = useQuery({
-    queryKey: ["domestic-invoice-user-company", user?.username],
-    queryFn: () => getUserCompany(user?.username ?? ""),
-    enabled: Boolean(user?.username),
-  });
-  const lockedCompany = mine.data?.companyName
-    || (mine.data && /plastene/i.test(mine.data.message) ? "Plastene India Limited (Unit -II)" : "");
   const lookups = useQuery({
     queryKey: ["domestic-invoice-lookups", invoice.companyName, asOn],
     queryFn: () => getLookups(invoice.companyName, asOn),
@@ -76,24 +73,6 @@ export function DomesticInvoiceScreen() {
     queryFn: () => getInvoices(invoice.companyName, invoice.suffix, invoice.merchantExport),
     enabled: Boolean(invoice.companyName && invoice.suffix),
   });
-
-  useEffect(() => {
-    if (!lockedCompany) return;
-    setInvoice((prev) => {
-      if (prev.companyName === lockedCompany) return prev;
-      const fibco = lockedCompany === FIBCO_COMPANY;
-      return {
-        ...prev,
-        companyName: lockedCompany,
-        packingListNo: "",
-        ...(fibco ? { taxType: "VAT", vat: prev.vat || 5, vatApplicable: "AMOUNT" } : {}),
-      };
-    });
-  }, [lockedCompany]);
-
-  useEffect(() => {
-    if (mine.data && !lockedCompany && mine.data.message) toast.error(mine.data.message);
-  }, [mine.data, lockedCompany]);
 
   useEffect(() => {
     if (lookups.error instanceof Error) toast.error(lookups.error.message);
@@ -178,6 +157,32 @@ export function DomesticInvoiceScreen() {
     } catch {
       patch({ typeOfInvoice: "Retail Invoice" });
     }
+  }
+
+  function onYear(suffix: string) {
+    setEditing(false);
+    setLoadNo("");
+    setInvoice((prev) => ({ ...prev, suffix, invNo: 0, gstInvNo: "", invType: "", despatchNo: "" }));
+  }
+
+  function onCompany(companyName: string) {
+    setEditing(false);
+    setLoadNo("");
+    setConsignees([]);
+    setInvoice((prev) => ({
+      ...prev,
+      companyName,
+      buyerName: "",
+      consigneeName: "",
+      consigneeCode: "",
+      consigneeCity: "",
+      consigneeAddress: "",
+      packingListNo: "",
+      invNo: 0,
+      gstInvNo: "",
+      invType: "",
+      ...(companyName === FIBCO_COMPANY ? { taxType: "VAT", vat: prev.vat || 5, vatApplicable: "AMOUNT" } : {}),
+    }));
   }
 
   async function onBuyer(name: string) {
@@ -294,7 +299,8 @@ export function DomesticInvoiceScreen() {
     setLoadNo("");
     setConsignees([]);
     setInvoice({
-      ...blankInvoice(lockedCompany || invoice.companyName, L?.years[0] ?? invoice.suffix),
+      ...blankInvoice(invoice.companyName, L?.years[0] ?? invoice.suffix),
+      ...(invoice.companyName === FIBCO_COMPANY ? { taxType: "VAT", vat: 5, vatApplicable: "AMOUNT" } : {}),
       currency: L?.currencies[0] ?? "",
       transportName: L?.transporters[0] ?? "",
       exDuty: L?.exciseDuty ?? 0,
@@ -306,13 +312,44 @@ export function DomesticInvoiceScreen() {
     });
   }
 
+  const lineHeads: { label: string; width: number }[] = [
+    { label: "Pkg", width: 130 },
+    { label: "Main group", width: 180 },
+    { label: "Group", width: 170 },
+    { label: "Sub group", width: 170 },
+    { label: "Item", width: 240 },
+    { label: "Commodity", width: 220 },
+    { label: "Description", width: 280 },
+    { label: "Deptt", width: 150 },
+    { label: "UOM", width: 110 },
+    { label: "HSN", width: 140 },
+    { label: "Qty", width: 130 },
+    { label: "Rate", width: 150 },
+    { label: "Total", width: 160 },
+    ...(fibco
+      ? [{ label: "VAT %", width: 110 }, { label: "VAT", width: 150 }]
+      : [
+          { label: "CGST %", width: 110 },
+          { label: "CGST", width: 140 },
+          { label: "SGST %", width: 110 },
+          { label: "SGST", width: 140 },
+          { label: "IGST %", width: 110 },
+          { label: "IGST", width: 140 },
+        ]),
+    { label: "Net", width: 130 },
+    { label: "Gross", width: 130 },
+    { label: "Non qty", width: 130 },
+    { label: "Qty remarks", width: 220 },
+    { label: "Commodity remarks", width: 240 },
+  ];
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="space-y-5">
+      <header className={`${card} flex flex-wrap items-center justify-between gap-4 border-t-4 border-t-primary p-5`}>
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Domestic Invoice</h1>
-          <p className="text-sm text-muted-foreground">
-            Year {invoice.suffix || "—"} is taken from the latest financial year and stored with the invoice.
+          <p className="mt-1 text-sm text-muted-foreground">
+            Choose the invoice year before opening a saved invoice. It is stored with the invoice.
             {invoice.gstInvNo || invoice.invType ? ` Printed number ${invoice.gstInvNo || invoice.invType}.` : ""}
           </p>
         </div>
@@ -320,10 +357,11 @@ export function DomesticInvoiceScreen() {
           <Button variant="outline" disabled={busy} onClick={() => void preview()}><Printer className="mr-2 h-4 w-4" />Preview PDF</Button>
           <Button variant="outline" disabled={busy || !invoice.invNo} onClick={() => void recordPrint()}>Record print</Button>
         </div>
-      </div>
+      </header>
 
-      <div className="grid gap-3 rounded-xl border bg-card p-4 md:grid-cols-4">
-        <Field label="Company"><Input readOnly value={invoice.companyName} placeholder={mine.isLoading ? "Loading your company" : "No company on this login"} /></Field>
+      <div className={`${card} grid gap-4 p-5 md:grid-cols-4`}>
+        <Field label="Company"><DropDown value={invoice.companyName} options={L?.companies ?? []} placeholder={lookups.isFetching ? "Loading companies" : "Select company"} onChange={onCompany} /></Field>
+        <Field label="Year"><DropDown value={invoice.suffix} options={L?.years ?? []} placeholder={lookups.isFetching ? "Loading years" : "Select year"} onChange={onYear} /></Field>
         <Field label="Type of invoice"><Input readOnly value={invoice.typeOfInvoice} placeholder="Set when you choose the state" /></Field>
         <Field label="Buyer"><DropDown value={invoice.buyerName} options={L?.buyers ?? []} placeholder={lookups.isFetching ? "Loading buyers" : invoice.companyName ? "Select buyer" : "Company is required first"} onChange={(v) => void onBuyer(v)} /></Field>
         <Field label="Inv no">
@@ -352,17 +390,30 @@ export function DomesticInvoiceScreen() {
             <Button type="button" variant="secondary" onClick={() => void openPacking()}>Select</Button>
           </div>
         </Field>
-        <label className="flex items-center gap-2 text-sm"><Checkbox checked={invoice.directExport} onCheckedChange={(v) => patch({ directExport: v === true })} />Is direct export</label>
+        <label className="flex items-end gap-2 pb-2 text-sm"><Checkbox checked={invoice.directExport} onCheckedChange={(v) => patch({ directExport: v === true })} />Is direct export</label>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border">
-        <table className="min-w-[1600px] w-full text-sm">
-          <thead className="bg-muted/60 text-left">
-            <tr>{["Pkg", "Main group", "Group", "Sub group", "Item", "Commodity", "Description", "Deptt", "UOM", "HSN", "Qty", "Rate", "Total", ...(fibco ? ["VAT %", "VAT"] : ["CGST %", "CGST", "SGST %", "SGST", "IGST %", "IGST"]), "Net", "Gross", "Non qty", "Qty remarks", "Commodity remarks"].map((h) => <th key={h} className="px-2 py-2 font-medium">{h}</th>)}</tr>
+      <div className={`${card} overflow-x-auto`}>
+        <table className="w-max border-collapse text-sm [&_input]:h-8 [&_input]:!w-auto [&_input]:min-w-full [&_input]:text-center [&_input]:[field-sizing:content] [&_td]:px-1.5 [&_td]:py-1.5 [&_td]:text-center [&_td]:align-middle">
+          <colgroup>
+            {lineHeads.map((column) => <col key={column.label} style={{ width: column.width }} />)}
+          </colgroup>
+          <thead className="bg-muted">
+            <tr>
+              {lineHeads.map((column) => (
+                <th
+                  key={column.label}
+                  style={{ minWidth: column.width }}
+                  className="whitespace-nowrap border-b border-border bg-muted px-2 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                >
+                  {column.label}
+                </th>
+              ))}
+            </tr>
           </thead>
           <tbody>
             {invoice.lines.map((line, index) => (
-              <tr key={index} className="border-t">
+              <tr key={index} className="border-b border-border/70 odd:bg-background even:bg-muted/30 hover:bg-primary/5">
                 <td><Input value={line.noOfPkg} onChange={(e) => patchLine(index, { noOfPkg: e.target.value })} /></td>
                 <td><Combo id={`mg${index}`} value={line.mainGroup} options={L?.mainGroups ?? []} onChange={(mainGroup) => patchLine(index, { mainGroup })} /></td>
                 <td><Combo id={`g${index}`} value={line.groupName} options={(L?.groups ?? []).filter((g) => !line.mainGroup || g.deptt === line.mainGroup).map((g) => g.groupName)} onChange={(groupName) => patchLine(index, { groupName })} /></td>
@@ -384,17 +435,17 @@ export function DomesticInvoiceScreen() {
                   patchLine(index, line.uom.trim().toLowerCase() === "kgs" ? { qty, netWt: qty, grossWt: qty } : { qty });
                 }} /></td>
                 <td><Input type="number" value={line.rate || ""} onChange={(e) => patchLine(index, { rate: Number(e.target.value) })} /></td>
-                <td className="px-2">{priced.lines[index]?.amount.toFixed(2)}</td>
+                <td className="whitespace-nowrap px-2 text-center font-medium tabular-nums">{priced.lines[index]?.amount.toFixed(2)}</td>
                 {fibco ? <>
                   <td>{index === 0 ? <Input type="number" value={invoice.vat || ""} onChange={(e) => patch({ vat: Number(e.target.value), taxType: "VAT" })} /> : null}</td>
-                  <td className="px-2">{index === 0 ? priced.vatAmt.toFixed(2) : ""}</td>
+                  <td className="whitespace-nowrap px-2 text-center font-medium tabular-nums">{index === 0 ? priced.vatAmt.toFixed(2) : ""}</td>
                 </> : <>
                   <td><Input type="number" value={line.cgstRate || ""} onChange={(e) => patchLine(index, { cgstRate: Number(e.target.value) })} /></td>
-                  <td className="px-2">{priced.lines[index]?.cgstAmt.toFixed(2)}</td>
+                  <td className="whitespace-nowrap px-2 text-center tabular-nums">{priced.lines[index]?.cgstAmt.toFixed(2)}</td>
                   <td><Input type="number" value={line.sgstRate || ""} onChange={(e) => patchLine(index, { sgstRate: Number(e.target.value) })} /></td>
-                  <td className="px-2">{priced.lines[index]?.sgstAmt.toFixed(2)}</td>
+                  <td className="whitespace-nowrap px-2 text-center tabular-nums">{priced.lines[index]?.sgstAmt.toFixed(2)}</td>
                   <td><Input type="number" value={line.igstRate || ""} onChange={(e) => patchLine(index, { igstRate: Number(e.target.value) })} /></td>
-                  <td className="px-2">{priced.lines[index]?.igstAmt.toFixed(2)}</td>
+                  <td className="whitespace-nowrap px-2 text-center tabular-nums">{priced.lines[index]?.igstAmt.toFixed(2)}</td>
                 </>}
                 <td><Input type="number" value={line.netWt || ""} onChange={(e) => patchLine(index, { netWt: Number(e.target.value) })} /></td>
                 <td><Input type="number" value={line.grossWt || ""} onChange={(e) => patchLine(index, { grossWt: Number(e.target.value) })} /></td>
@@ -407,8 +458,9 @@ export function DomesticInvoiceScreen() {
         </table>
       </div>
 
+      <section className={`${card} p-5`}>
       <Tabs defaultValue="transport">
-        <TabsList className="h-auto flex-wrap">
+        <TabsList className="mb-4 h-auto flex-wrap bg-muted/80 p-1">
           <TabsTrigger value="transport">Transport</TabsTrigger>
           <TabsTrigger value="sales">Sales order</TabsTrigger>
           <TabsTrigger value="tax">Taxation</TabsTrigger>
@@ -418,7 +470,7 @@ export function DomesticInvoiceScreen() {
           <TabsTrigger value="other">Other tax</TabsTrigger>
           <TabsTrigger value="merchant">Merchant export</TabsTrigger>
         </TabsList>
-        <TabsContent value="transport" className="grid gap-3 rounded-xl border p-4 md:grid-cols-3">
+        <TabsContent value="transport" className="mt-0 grid gap-4 md:grid-cols-3">
           <Field label="Transporter"><Combo id="tr" value={invoice.transportName} options={L?.transporters ?? []} onChange={(transportName) => patch({ transportName })} /></Field>
           <Field label="Vehicle no"><Combo id="vh" value={invoice.vehicleNo} options={L?.vehicles ?? []} onChange={(vehicleNo) => patch({ vehicleNo })} /></Field>
           <Field label="Vehicle date"><Input type="date" value={invoice.vehicleDate.slice(0, 10)} onChange={(e) => patch({ vehicleDate: e.target.value })} /></Field>
@@ -431,7 +483,7 @@ export function DomesticInvoiceScreen() {
           <Field label="Date and time of invoice"><Input type="datetime-local" value={invoice.invoiceDateTime.slice(0, 16)} onChange={(e) => patch({ invoiceDateTime: e.target.value })} /></Field>
           <Field label="Date and time of removal"><Input type="datetime-local" value={invoice.removalDateTime.slice(0, 16)} onChange={(e) => patch({ removalDateTime: e.target.value })} /></Field>
         </TabsContent>
-        <TabsContent value="sales" className="grid gap-3 rounded-xl border p-4 md:grid-cols-3">
+        <TabsContent value="sales" className="mt-0 grid gap-4 md:grid-cols-3">
           <Field label="Buyer order no"><Input value={invoice.buyerOrderNo} onChange={(e) => patch({ buyerOrderNo: e.target.value })} /></Field>
           <Field label="Buyer order date"><Input type="date" value={invoice.buyerOrderDate.slice(0, 10)} onChange={(e) => patch({ buyerOrderDate: e.target.value })} /></Field>
           <Field label="Terms of payment"><Combo id="pay" value={invoice.termsOfPayment} options={L?.paymentTerms ?? []} onChange={(termsOfPayment) => patch({ termsOfPayment })} /></Field>
@@ -459,7 +511,7 @@ export function DomesticInvoiceScreen() {
             <Field label="ARE1 no"><Input value={invoice.are1No} onChange={(e) => patch({ are1No: e.target.value })} /></Field>
           </>}
         </TabsContent>
-        <TabsContent value="tax" className="grid gap-3 rounded-xl border p-4 md:grid-cols-3">
+        <TabsContent value="tax" className="mt-0 grid gap-4 md:grid-cols-3">
           <Field label="Ex. duty %"><Input type="number" value={invoice.exDuty} onChange={(e) => patch({ exDuty: Number(e.target.value) })} /></Field>
           <Field label="Edu cess %"><Input type="number" value={invoice.eduCess} onChange={(e) => patch({ eduCess: Number(e.target.value) })} /></Field>
           <Field label="Sec. hi. edu. cess %"><Input type="number" value={invoice.sheCess} onChange={(e) => patch({ sheCess: Number(e.target.value) })} /></Field>
@@ -475,12 +527,12 @@ export function DomesticInvoiceScreen() {
           <Field label="TCS %"><Input type="number" value={invoice.tcsPercent} onChange={(e) => patch({ tcsPercent: Number(e.target.value) })} /></Field>
           <label className="flex items-center gap-2 text-sm"><Checkbox checked={invoice.gstAfterFreight} onCheckedChange={(v) => patch({ gstAfterFreight: v === true })} />GST calculation after freight</label>
         </TabsContent>
-        <TabsContent value="remarks" className="grid gap-3 rounded-xl border p-4">
+        <TabsContent value="remarks" className="mt-0 grid gap-4">
           <Field label="Remarks"><Input value={invoice.remarks} onChange={(e) => patch({ remarks: e.target.value })} /></Field>
           <Field label="Freight remarks"><Input value={invoice.freightRemarks} onChange={(e) => patch({ freightRemarks: e.target.value })} /></Field>
           <label className="flex items-center gap-2 text-sm"><Checkbox checked={invoice.igstNilNotification} onCheckedChange={(v) => patch({ igstNilNotification: v === true })} />IGST nil against notification 33/2015-2020 dated 13.10.2017</label>
         </TabsContent>
-        <TabsContent value="currency" className="grid gap-3 rounded-xl border p-4 md:grid-cols-3">
+        <TabsContent value="currency" className="mt-0 grid gap-4 md:grid-cols-3">
           <Field label="Currency"><Combo id="cur" value={invoice.currency} options={L?.currencies ?? []} onChange={async (currency) => {
             const value = await getCurrencyValue(currency);
             patch({ currency, currencyValue: String(value.value) });
@@ -489,7 +541,7 @@ export function DomesticInvoiceScreen() {
           <label className="flex items-center gap-2 text-sm"><Checkbox checked={invoice.availBenefit} onCheckedChange={(v) => patch({ availBenefit: v === true })} />Avail benefit 39-A</label>
           {invoice.availBenefit && <Field label="UT bond details"><Input value={invoice.utBondDetails} onChange={(e) => patch({ utBondDetails: e.target.value })} /></Field>}
         </TabsContent>
-        <TabsContent value="consignee" className="grid gap-3 rounded-xl border p-4 md:grid-cols-2">
+        <TabsContent value="consignee" className="mt-0 grid gap-4 md:grid-cols-2">
           <Field label="Consignee"><Combo id="cn" value={invoice.consigneeName} options={consignees.map((c) => c.name)} onChange={(consigneeName) => {
             const row = consignees.find((c) => c.name === consigneeName);
             patch({ consigneeName, consigneeCode: row?.code ?? "", consigneeCity: row?.city ?? invoice.consigneeCity, consigneeAddress: row?.address ?? invoice.consigneeAddress });
@@ -506,16 +558,16 @@ export function DomesticInvoiceScreen() {
             <Field label="Address"><Input value={invoice.dispatchFromAddress} onChange={(e) => patch({ dispatchFromAddress: e.target.value })} /></Field>
           </>}
         </TabsContent>
-        <TabsContent value="other" className="grid gap-3 rounded-xl border p-4 md:grid-cols-3">
+        <TabsContent value="other" className="mt-0 grid gap-4 md:grid-cols-3">
           {([1, 2, 3] as const).map((n) => (
-            <div key={n} className="space-y-2 rounded-lg border p-3">
+            <div key={n} className="space-y-3 rounded-lg border border-border bg-muted/20 p-4 shadow-sm">
               <Field label={`Special duty remarks ${n}`}><Input value={invoice[`spDutyRemarks${n}`]} onChange={(e) => patch({ [`spDutyRemarks${n}`]: e.target.value })} /></Field>
               <Field label={`Special duty amount ${n}`}><Input type="number" value={invoice[`spDutyAmt${n}`]} onChange={(e) => patch({ [`spDutyAmt${n}`]: Number(e.target.value) })} /></Field>
               <label className="flex items-center gap-2 text-sm"><Checkbox checked={invoice[`gstOnSpDuty${n}`]} onCheckedChange={(v) => patch({ [`gstOnSpDuty${n}`]: v === true })} />GST on special duty {n}</label>
             </div>
           ))}
         </TabsContent>
-        <TabsContent value="merchant" className="grid gap-3 rounded-xl border p-4 md:grid-cols-3">
+        <TabsContent value="merchant" className="mt-0 grid gap-4 md:grid-cols-3">
           <label className="flex items-center gap-2 text-sm md:col-span-3"><Checkbox checked={invoice.merchantExport} onCheckedChange={(v) => patch({ merchantExport: v === true, notification: v === true ? "Supply to Merchant Exporter" : "" })} />Sales to merchant exporter</label>
           <Field label="Notification"><Input value={invoice.notification} onChange={(e) => patch({ notification: e.target.value })} /></Field>
           <Field label="Advance license no"><Input value={invoice.advanceLicense} onChange={(e) => patch({ advanceLicense: e.target.value })} /></Field>
@@ -532,8 +584,9 @@ export function DomesticInvoiceScreen() {
           </>}
         </TabsContent>
       </Tabs>
+      </section>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className={`${card} flex flex-wrap items-center gap-2 p-3`}>
         <Button variant="outline" disabled={lookups.isFetching} onClick={() => void lookups.refetch()}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
         <Button variant="outline" onClick={initialize}><RotateCcw className="mr-2 h-4 w-4" />Initialize</Button>
         <Button disabled={busy || editing || invoice.printed} onClick={() => void save()}>
@@ -543,7 +596,7 @@ export function DomesticInvoiceScreen() {
           {busy && editing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Update
         </Button>
         <Button variant="secondary" onClick={() => toast.message(`Grand total ${priced.grandTotal.toFixed(2)}`)}><Calculator className="mr-2 h-4 w-4" />Calculation</Button>
-        <span className="ml-auto text-sm font-medium">Grand total {priced.grandTotal.toFixed(2)}</span>
+        <span className="ml-auto rounded-lg bg-primary/10 px-3 py-1.5 text-sm font-semibold tabular-nums">Grand total {priced.grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
       </div>
 
       <Dialog open={packingOpen} onOpenChange={setPackingOpen}>
@@ -551,12 +604,12 @@ export function DomesticInvoiceScreen() {
           <DialogHeader><DialogTitle>Pending packing lists</DialogTitle></DialogHeader>
           <div className="max-h-96 overflow-auto">
             <table className="w-full text-sm">
-              <thead><tr><th /><th className="text-left">Packing list</th><th className="text-left">Party</th><th className="text-left">Date</th><th className="text-right">Net wt</th></tr></thead>
+              <thead><tr><th /><th className="px-2 py-2 text-center">Packing list</th><th className="px-2 py-2 text-center">Party</th><th className="px-2 py-2 text-center">Date</th><th className="px-2 py-2 text-center">Net wt</th></tr></thead>
               <tbody>
                 {packingRows.map((row, i) => (
                   <tr key={row.no + i} className="border-t">
                     <td><Checkbox checked={row.checked} onCheckedChange={(v) => setPackingRows((rows) => rows.map((r, j) => j === i ? { ...r, checked: v === true } : r))} /></td>
-                    <td>{row.no}</td><td>{row.party}</td><td>{row.date.slice(0, 10)}</td><td className="text-right">{row.net}</td>
+                    <td className="px-2 py-1.5 text-center">{row.no}</td><td className="px-2 py-1.5 text-center">{row.party}</td><td className="px-2 py-1.5 text-center">{row.date.slice(0, 10)}</td><td className="px-2 py-1.5 text-center tabular-nums">{row.net}</td>
                   </tr>
                 ))}
               </tbody>

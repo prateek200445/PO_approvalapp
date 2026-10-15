@@ -18,7 +18,7 @@ public class DomesticInvoiceController : ControllerBase
     }
 
     [HttpGet("lookups")]
-    public async Task<IActionResult> Lookups([FromQuery] string company, [FromQuery] string asOn, CancellationToken ct)
+    public async Task<IActionResult> Lookups([FromQuery] string? company, [FromQuery] string? asOn, CancellationToken ct)
     {
         try { return Ok(await _service.LookupsAsync(company ?? "", asOn ?? "", ct)); }
         catch (Exception ex) { return BadRequest(new { message = ex.Message }); }
