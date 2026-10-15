@@ -131,6 +131,7 @@ builder.Services.AddSingleton<BomEmailBackgroundService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<BomEmailBackgroundService>());
 builder.Services.AddHostedService<BomCacheWarmupService>();
 builder.Services.AddHostedService<SalesDashboardCacheWarmupService>();
+builder.Services.AddHostedService<GstLiabilityCacheWarmupService>();
 builder.Services.AddHostedService<ExportBillOverdueCacheWarmupService>();
 builder.Services.AddHostedService<HrMasterCacheWarmupService>();
 builder.Services.AddScoped<HrCelebrationService>();

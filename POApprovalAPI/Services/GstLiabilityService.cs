@@ -237,6 +237,14 @@ public sealed class GstLiabilityService
         return list;
     }
 
+    /// <summary>Reloads the previous and current month so the page opens from cache.</summary>
+    public async Task WarmAsync()
+    {
+        var thisMonth = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        foreach (var month in new[] { thisMonth.AddMonths(-1), thisMonth })
+            await LoadAsync(month, month.AddMonths(1), refresh: true);
+    }
+
     private static int TaxOrder(string tax) => tax switch { "IGST" => 0, "CGST" => 1, "SGST" => 2, _ => 3 };
 
     public async Task<byte[]> BuildExcelAsync(GstLiabilityExcelRequest request)
