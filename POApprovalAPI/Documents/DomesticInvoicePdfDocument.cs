@@ -19,7 +19,7 @@ public class DomesticInvoicePdfDocument : IDocument
         _invoice = invoice;
         _rows = rows;
         _copy = copy;
-        _logo = TryLoadLogo(Oel());
+        _logo = TryLoadLogo(LogoFile());
     }
 
     public DocumentMetadata GetMetadata() => DocumentMetadata.Default;
@@ -44,7 +44,7 @@ public class DomesticInvoicePdfDocument : IDocument
         var company = Text(F("CompanyName"), _invoice.CompanyName);
         var lines = LineRows();
 
-        container.Border(0.8f).Column(page =>
+        container.Border(0.8f).ExtendVertical().Column(page =>
         {
             page.Item().BorderBottom(0.6f).Padding(3).Row(row =>
             {
@@ -52,8 +52,7 @@ public class DomesticInvoicePdfDocument : IDocument
                 row.RelativeItem(2).AlignCenter().Column(c =>
                 {
                     c.Item().AlignCenter().Text(title.ToUpperInvariant()).Bold().FontSize(11);
-                    if (!Fibco())
-                        c.Item().AlignCenter().Text("Under Section 31 of CGST Act 2017 and Rule 46 of the CGST Rules 2017").FontSize(6);
+                    c.Item().AlignCenter().Text("Under Section 31 of CGST Act 2017 and Rule 46 of the CGST Rules 2017").FontSize(6);
                 });
                 row.RelativeItem().AlignRight().AlignMiddle().Text(copy).Bold().FontSize(8);
             });
@@ -127,8 +126,8 @@ public class DomesticInvoicePdfDocument : IDocument
             });
 
             page.Item().Element(c => LinesTable(c, lines));
-            page.Item().Element(c => Totals(c, lines));
-            page.Item().Element(c => Footer(c));
+            page.Item().Element(c => TaxSummary(c, lines));
+            page.Item().ExtendVertical().AlignBottom().Element(c => PageBottom(c, lines));
         });
     }
 
@@ -261,23 +260,15 @@ public class DomesticInvoicePdfDocument : IDocument
         });
     }
 
-    private void Totals(IContainer container, List<Dictionary<string, string?>> lines)
+    private void TaxSummary(IContainer container, List<Dictionary<string, string?>> lines)
     {
         var taxable = lines.Sum(l => Dec(V(l, "Amount")));
         var cgst = lines.Sum(l => Dec(V(l, "CGSTamt")));
         var sgst = lines.Sum(l => Dec(V(l, "SGSTAmt")));
         var igst = lines.Sum(l => Dec(V(l, "IGSTAmt")));
-        var qty = lines.Sum(l => Dec(V(l, "Qty")));
-        var headerQty = Dec(F("TotalQty"));
-        if (headerQty == 0) headerQty = qty;
-        var grand = Dec(F("TotalAmt"));
-        if (grand == 0) grand = _invoice.GrandTotal != 0 ? _invoice.GrandTotal : taxable + cgst + sgst + igst;
-        var words = Text(F("TotalAmtWord"), DomesticInvoiceMath.RupeesInWords(grand));
         var policy = Text(F("Insurance"), _invoice.InsurancePolicyNo);
 
-        container.Column(stack =>
-        {
-        stack.Item().Row(row =>
+        container.BorderBottom(0.8f).Row(row =>
         {
             row.RelativeItem().BorderRight(0.6f).Padding(4).Column(c =>
             {
@@ -317,67 +308,79 @@ public class DomesticInvoicePdfDocument : IDocument
                 }
             });
         });
-
-        stack.Item().BorderTop(0.6f).Row(row =>
-        {
-            row.RelativeItem().BorderRight(0.6f).Padding(3).Text(text =>
-            {
-                text.Span("Total Qty :  ").SemiBold();
-                text.Span(headerQty.ToString("N3", Indian)).Bold();
-            });
-            row.RelativeItem().Padding(3).Row(r =>
-            {
-                r.RelativeItem().Text(Oel() ? "Invoice Total" : "Invoice Total (INR) :").Bold();
-                r.ConstantItem(70).AlignRight().Text(grand.ToString("N2", Indian)).Bold();
-            });
-        });
-
-        if (Oel())
-            stack.Item().BorderTop(0.6f).Padding(3).Text("Insurance Policy No. :  " + policy);
-
-        stack.Item().BorderTop(0.6f).Padding(3).Row(row =>
-        {
-            row.RelativeItem().Text("Advance Payment Voucher No & DT :   NIL");
-            row.RelativeItem().Text(text =>
-            {
-                text.Span("Invoice Amount (In Words) Rs.  ").SemiBold();
-                text.Span(words);
-            });
-        });
-        stack.Item().PaddingHorizontal(3).PaddingBottom(3).Text("Advance Received Amount :   NIL");
-        });
     }
 
-    private void Footer(IContainer container)
+    private void PageBottom(IContainer container, List<Dictionary<string, string?>> lines)
     {
+        var taxable = lines.Sum(l => Dec(V(l, "Amount")));
+        var cgst = lines.Sum(l => Dec(V(l, "CGSTamt")));
+        var sgst = lines.Sum(l => Dec(V(l, "SGSTAmt")));
+        var igst = lines.Sum(l => Dec(V(l, "IGSTAmt")));
+        var qty = lines.Sum(l => Dec(V(l, "Qty")));
+        var headerQty = Dec(F("TotalQty"));
+        if (headerQty == 0) headerQty = qty;
+        var grand = Dec(F("TotalAmt"));
+        if (grand == 0) grand = _invoice.GrandTotal != 0 ? _invoice.GrandTotal : taxable + cgst + sgst + igst;
+        if (Fibco() && grand == taxable) grand = taxable + VatAmount(lines);
+        var words = Text(F("TotalAmtWord"), DomesticInvoiceMath.RupeesInWords(grand));
+        var policy = Text(F("Insurance"), _invoice.InsurancePolicyNo);
         var company = Text(F("CompanyName"), _invoice.CompanyName);
         var terms = Text(F("TermsNCondition"), "");
-        container.Column(stack =>
+
+        container.BorderBottom(0.8f).Column(stack =>
         {
-        stack.Item().BorderTop(0.6f).Row(row =>
-        {
-            row.RelativeItem().BorderRight(0.6f).Padding(3).Column(c =>
+            stack.Item().BorderTop(0.6f).Row(row =>
             {
-                c.Item().Text("Declaration").SemiBold();
-                c.Item().Text(Text(F("InvoiceDecl"), "")).FontSize(6);
+                row.RelativeItem().BorderRight(0.6f).Padding(3).Text(text =>
+                {
+                    text.Span("Total Qty :  ").SemiBold();
+                    text.Span(headerQty.ToString("N3", Indian)).Bold();
+                });
+                row.RelativeItem().Padding(3).Row(r =>
+                {
+                    r.RelativeItem().Text(Oel() ? "Invoice Total" : "Invoice Total (INR) :").Bold();
+                    r.ConstantItem(70).AlignRight().Text(grand.ToString("N2", Indian)).Bold();
+                });
             });
-            if (!Oel())
+
+            if (Oel())
+                stack.Item().BorderTop(0.6f).Padding(3).Text("Insurance Policy No. :  " + policy);
+
+            stack.Item().BorderTop(0.6f).Padding(3).Row(row =>
+            {
+                row.RelativeItem().Text("Advance Payment Voucher No & DT :   NIL");
+                row.RelativeItem().Text(text =>
+                {
+                    text.Span("Invoice Amount (In Words) Rs.  ").SemiBold();
+                    text.Span(words);
+                });
+            });
+            stack.Item().PaddingHorizontal(3).PaddingBottom(3).Text("Advance Received Amount :   NIL");
+
+            stack.Item().BorderTop(0.6f).Row(row =>
             {
                 row.RelativeItem().BorderRight(0.6f).Padding(3).Column(c =>
                 {
-                    c.Item().AlignCenter().Text("Bank Detail :").SemiBold();
-                    c.Item().Text(Text(F("nBankdetail"), "")).FontSize(6.5f);
+                    c.Item().Text("Declaration").SemiBold();
+                    c.Item().Text(Text(F("InvoiceDecl"), "")).FontSize(6);
                 });
-            }
-            row.RelativeItem().Padding(3).Column(c =>
-            {
-                c.Item().AlignRight().Text("E & E O").Bold();
-                c.Item().AlignRight().Text("For, " + company).SemiBold();
-                c.Item().PaddingTop(28).AlignRight().Text("Authorised Signatory");
+                if (!Oel())
+                {
+                    row.RelativeItem().BorderRight(0.6f).Padding(3).Column(c =>
+                    {
+                        c.Item().AlignCenter().Text("Bank Detail :").SemiBold();
+                        c.Item().Text(Text(F("nBankdetail"), "")).FontSize(6.5f);
+                    });
+                }
+                row.RelativeItem().Padding(3).Column(c =>
+                {
+                    c.Item().AlignRight().Text("E & E O").Bold();
+                    c.Item().AlignRight().Text("For, " + company).SemiBold();
+                    c.Item().PaddingTop(28).AlignRight().Text("Authorised Signatory");
+                });
             });
-        });
-        if (terms.Length > 0)
-            stack.Item().BorderTop(0.6f).Padding(3).Text(terms).FontSize(5.5f);
+            if (terms.Length > 0)
+                stack.Item().BorderTop(0.6f).Padding(3).Text(terms).FontSize(5.5f);
         });
     }
 
@@ -471,9 +474,15 @@ public class DomesticInvoicePdfDocument : IDocument
         return Math.Round(lines.Sum(l => Dec(V(l, "Amount"))) * Dec(VatPercent()) / 100m, 0, MidpointRounding.ToEven);
     }
 
-    private static byte[]? TryLoadLogo(bool oswal)
+    private string LogoFile()
     {
-        var file = oswal ? "oswal_logo.jpg" : "hcp_logo.jpeg";
+        if (Fibco()) return "fibco_logo.jpg";
+        if (Oel()) return "oswal_logo.jpg";
+        return "hcp_logo.jpeg";
+    }
+
+    private static byte[]? TryLoadLogo(string file)
+    {
         var candidates = new[]
         {
             Path.Combine(AppContext.BaseDirectory, "Assets", file),
