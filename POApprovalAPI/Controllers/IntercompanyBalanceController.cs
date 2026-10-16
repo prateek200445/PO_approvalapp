@@ -8,10 +8,52 @@ namespace POApprovalAPI.Controllers;
 public class IntercompanyBalanceController : ControllerBase
 {
     private readonly IntercompanyBalanceService _service;
+    private readonly IntercompanyTransactionService _transactions;
 
-    public IntercompanyBalanceController(IntercompanyBalanceService service)
+    public IntercompanyBalanceController(
+        IntercompanyBalanceService service,
+        IntercompanyTransactionService transactions)
     {
         _service = service;
+        _transactions = transactions;
+    }
+
+    [HttpGet("groups")]
+    public async Task<IActionResult> Groups()
+    {
+        try
+        {
+            var names = await _transactions.GetGroupsAsync();
+            return Ok(names);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("transactions")]
+    public async Task<IActionResult> Transactions(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] List<string>? groups)
+    {
+        if (from is null || to is null)
+            return BadRequest(new { message = "Choose a from date and a to date." });
+
+        try
+        {
+            var data = await _transactions.GetTransactionsAsync(from.Value, to.Value, groups ?? []);
+            return Ok(data);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
     }
 
     [HttpGet]
