@@ -13,6 +13,7 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ExhibitionProductRouteImport } from './routes/exhibition.product'
 import { Route as ExhibitionDealerRouteImport } from './routes/exhibition.dealer'
+import { Route as AppWovenQuoteRouteImport } from './routes/_app/woven-quote'
 import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
 import { Route as AppSalesDashboardRouteImport } from './routes/_app/sales-dashboard'
 import { Route as AppReconciliationRouteImport } from './routes/_app/reconciliation'
@@ -80,6 +81,11 @@ const ExhibitionDealerRoute = ExhibitionDealerRouteImport.update({
   id: '/exhibition/dealer',
   path: '/exhibition/dealer',
   getParentRoute: () => rootRouteImport,
+} as any)
+const AppWovenQuoteRoute = AppWovenQuoteRouteImport.update({
+  id: '/woven-quote',
+  path: '/woven-quote',
+  getParentRoute: () => AppRoute,
 } as any)
 const AppWorkordersRoute = AppWorkordersRouteImport.update({
   id: '/workorders',
@@ -362,6 +368,7 @@ export interface FileRoutesByFullPath {
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
+  '/woven-quote': typeof AppWovenQuoteRoute
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
@@ -414,6 +421,7 @@ export interface FileRoutesByTo {
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
   '/workorders': typeof AppWorkordersRoute
+  '/woven-quote': typeof AppWovenQuoteRoute
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
@@ -469,6 +477,7 @@ export interface FileRoutesById {
   '/_app/reconciliation': typeof AppReconciliationRoute
   '/_app/sales-dashboard': typeof AppSalesDashboardRoute
   '/_app/workorders': typeof AppWorkordersRoute
+  '/_app/woven-quote': typeof AppWovenQuoteRoute
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/_app/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
@@ -524,6 +533,7 @@ export interface FileRouteTypes {
     | '/reconciliation'
     | '/sales-dashboard'
     | '/workorders'
+    | '/woven-quote'
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/advance-payment/$paymentNo'
@@ -576,6 +586,7 @@ export interface FileRouteTypes {
     | '/reconciliation'
     | '/sales-dashboard'
     | '/workorders'
+    | '/woven-quote'
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/advance-payment/$paymentNo'
@@ -630,6 +641,7 @@ export interface FileRouteTypes {
     | '/_app/reconciliation'
     | '/_app/sales-dashboard'
     | '/_app/workorders'
+    | '/_app/woven-quote'
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/_app/advance-payment/$paymentNo'
@@ -685,6 +697,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/exhibition/dealer'
       preLoaderRoute: typeof ExhibitionDealerRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_app/woven-quote': {
+      id: '/_app/woven-quote'
+      path: '/woven-quote'
+      fullPath: '/woven-quote'
+      preLoaderRoute: typeof AppWovenQuoteRouteImport
+      parentRoute: typeof AppRoute
     }
     '/_app/workorders': {
       id: '/_app/workorders'
@@ -1102,6 +1121,7 @@ interface AppRouteChildren {
   AppReconciliationRoute: typeof AppReconciliationRoute
   AppSalesDashboardRoute: typeof AppSalesDashboardRoute
   AppWorkordersRoute: typeof AppWorkordersRoute
+  AppWovenQuoteRoute: typeof AppWovenQuoteRoute
   AppAdvancePaymentPaymentNoRoute: typeof AppAdvancePaymentPaymentNoRoute
   AppBankRequirementsDocumentPackRoute: typeof AppBankRequirementsDocumentPackRoute
   AppHrReportsDocumentsRoute: typeof AppHrReportsDocumentsRoute
@@ -1146,6 +1166,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppReconciliationRoute: AppReconciliationRoute,
   AppSalesDashboardRoute: AppSalesDashboardRoute,
   AppWorkordersRoute: AppWorkordersRoute,
+  AppWovenQuoteRoute: AppWovenQuoteRoute,
   AppAdvancePaymentPaymentNoRoute: AppAdvancePaymentPaymentNoRoute,
   AppBankRequirementsDocumentPackRoute: AppBankRequirementsDocumentPackRoute,
   AppHrReportsDocumentsRoute: AppHrReportsDocumentsRoute,

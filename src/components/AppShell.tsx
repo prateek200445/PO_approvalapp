@@ -28,6 +28,7 @@ import {
   Package,
   ReceiptText,
   FileSpreadsheet,
+  Calculator,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useLayoutEffect, useState, type ComponentType } from "react";
@@ -69,6 +70,7 @@ type AppPath =
   | "/hr-reports"
   | "/exhibition-leads"
   | "/bom"
+  | "/woven-quote"
   | "/fibc-buyers"
   | "/profile"
   | "/assistant";
@@ -333,6 +335,7 @@ export function AppShell() {
     },
     ...(canAccessExhibitionLeads(user?.username) ? [exhibitionNavItem] : []),
     { to: "/bom", icon: Layers, label: "BOM Report", match: (p) => p.startsWith("/bom") },
+    { to: "/woven-quote", icon: Calculator, label: "Bag quotation", match: (p) => p.startsWith("/woven-quote") },
   ];
 
   const accountNav: NavItem[] = [

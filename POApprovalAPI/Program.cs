@@ -116,6 +116,7 @@ builder.Services.AddScoped<BomCreationService>();
 builder.Services.AddScoped<DailyProductionPriceService>();
 builder.Services.AddScoped<FibcBuyersService>();
 builder.Services.AddScoped<ExhibitionLeadService>();
+builder.Services.AddScoped<WovenQuoteService>();
 builder.Services.AddScoped<BankStatementService>();
 builder.Services.Configure<HrReportsOptions>(
     builder.Configuration.GetSection(HrReportsOptions.SectionName));
