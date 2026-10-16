@@ -311,6 +311,75 @@ export function buildPairSettlements(matrix: IntercompanyMatrix | undefined): Pa
     .sort((a, b) => a.balance - b.balance);
 }
 
+export interface IntercompanyTransactionCell {
+  bookGroup: string;
+  counterGroup: string;
+  sales: number;
+  purchase: number;
+  payment: number;
+  receipt: number;
+}
+
+export interface IntercompanyTransactions {
+  from: string;
+  to: string;
+  groups: string[];
+  cells: IntercompanyTransactionCell[];
+}
+
+export async function getIntercompanyGroups(): Promise<string[]> {
+  const response = await fetch(getApiUrl("/api/Intercompany/groups"));
+  const text = await response.text();
+  let payload: unknown = [];
+  try {
+    payload = text ? JSON.parse(text) : [];
+  } catch {
+    throw new Error(response.ok ? "Invalid group list" : "Intercompany API is not running. Restart the local API.");
+  }
+  if (!response.ok) {
+    const message = (payload as { message?: string })?.message;
+    throw new Error(message || "Failed to load group companies");
+  }
+  const names = Array.isArray(payload) ? payload : [];
+  return names.map((n) => String(n)).filter(Boolean);
+}
+
+export async function getIntercompanyTransactions(
+  from: string,
+  to: string,
+  groups: string[],
+): Promise<IntercompanyTransactions> {
+  const params = new URLSearchParams({ from, to });
+  for (const group of groups) params.append("groups", group);
+  const response = await fetch(getApiUrl(`/api/Intercompany/transactions?${params}`));
+  const text = await response.text();
+  let payload: Record<string, unknown> & { message?: string } = {};
+  try {
+    payload = text ? (JSON.parse(text) as Record<string, unknown> & { message?: string }) : {};
+  } catch {
+    throw new Error(response.ok ? "Invalid transaction response" : "Intercompany API is not running. Restart the local API.");
+  }
+  if (!response.ok) {
+    throw new Error(payload.message || "Failed to load intercompany transactions");
+  }
+
+  const cellsRaw = (payload.cells ?? payload.Cells ?? []) as Array<Record<string, unknown>>;
+  const groupsRaw = (payload.groups ?? payload.Groups ?? groups) as unknown[];
+  return {
+    from: String(payload.from ?? payload.From ?? from),
+    to: String(payload.to ?? payload.To ?? to),
+    groups: groupsRaw.map((n) => String(n)).filter(Boolean),
+    cells: cellsRaw.map((c) => ({
+      bookGroup: String(c.bookGroup ?? c.BookGroup ?? ""),
+      counterGroup: String(c.counterGroup ?? c.CounterGroup ?? ""),
+      sales: Number(c.sales ?? c.Sales ?? 0),
+      purchase: Number(c.purchase ?? c.Purchase ?? 0),
+      payment: Number(c.payment ?? c.Payment ?? 0),
+      receipt: Number(c.receipt ?? c.Receipt ?? 0),
+    })),
+  };
+}
+
 export function formatAsOn(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   if (!y || !m || !d) return iso;

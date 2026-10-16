@@ -50,6 +50,7 @@ import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
 import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
 import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
 import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
+import { Route as AppIntercompanyTransactionsRouteImport } from './routes/_app/intercompany.transactions'
 import { Route as AppIntercompanySettlementRouteImport } from './routes/_app/intercompany.settlement'
 import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
 import { Route as AppHrReportsEmployeeMasterRouteImport } from './routes/_app/hr-reports_.employee-master'
@@ -265,6 +266,12 @@ const AppPaymentPaymentNoRoute = AppPaymentPaymentNoRouteImport.update({
   path: '/payment/$paymentNo',
   getParentRoute: () => AppRoute,
 } as any)
+const AppIntercompanyTransactionsRoute =
+  AppIntercompanyTransactionsRouteImport.update({
+    id: '/transactions',
+    path: '/transactions',
+    getParentRoute: () => AppIntercompanyRoute,
+  } as any)
 const AppIntercompanySettlementRoute =
   AppIntercompanySettlementRouteImport.update({
     id: '/settlement',
@@ -367,6 +374,7 @@ export interface FileRoutesByFullPath {
   '/hr-reports/employee-master': typeof AppHrReportsEmployeeMasterRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/intercompany/settlement': typeof AppIntercompanySettlementRoute
+  '/intercompany/transactions': typeof AppIntercompanyTransactionsRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
@@ -418,6 +426,7 @@ export interface FileRoutesByTo {
   '/hr-reports/employee-master': typeof AppHrReportsEmployeeMasterRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/intercompany/settlement': typeof AppIntercompanySettlementRoute
+  '/intercompany/transactions': typeof AppIntercompanyTransactionsRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
@@ -472,6 +481,7 @@ export interface FileRoutesById {
   '/_app/hr-reports_/employee-master': typeof AppHrReportsEmployeeMasterRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
   '/_app/intercompany/settlement': typeof AppIntercompanySettlementRoute
+  '/_app/intercompany/transactions': typeof AppIntercompanyTransactionsRoute
   '/_app/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/_app/po/$poNo': typeof AppPoPoNoRoute
   '/_app/workorder/$poNo': typeof AppWorkorderPoNoRoute
@@ -526,6 +536,7 @@ export interface FileRouteTypes {
     | '/hr-reports/employee-master'
     | '/indent/$indentNo'
     | '/intercompany/settlement'
+    | '/intercompany/transactions'
     | '/payment/$paymentNo'
     | '/po/$poNo'
     | '/workorder/$poNo'
@@ -577,6 +588,7 @@ export interface FileRouteTypes {
     | '/hr-reports/employee-master'
     | '/indent/$indentNo'
     | '/intercompany/settlement'
+    | '/intercompany/transactions'
     | '/payment/$paymentNo'
     | '/po/$poNo'
     | '/workorder/$poNo'
@@ -630,6 +642,7 @@ export interface FileRouteTypes {
     | '/_app/hr-reports_/employee-master'
     | '/_app/indent/$indentNo'
     | '/_app/intercompany/settlement'
+    | '/_app/intercompany/transactions'
     | '/_app/payment/$paymentNo'
     | '/_app/po/$poNo'
     | '/_app/workorder/$poNo'
@@ -932,6 +945,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppPaymentPaymentNoRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/intercompany/transactions': {
+      id: '/_app/intercompany/transactions'
+      path: '/transactions'
+      fullPath: '/intercompany/transactions'
+      preLoaderRoute: typeof AppIntercompanyTransactionsRouteImport
+      parentRoute: typeof AppIntercompanyRoute
+    }
     '/_app/intercompany/settlement': {
       id: '/_app/intercompany/settlement'
       path: '/settlement'
@@ -1036,10 +1056,12 @@ const AppFibcBuyersRouteWithChildren = AppFibcBuyersRoute._addFileChildren(
 
 interface AppIntercompanyRouteChildren {
   AppIntercompanySettlementRoute: typeof AppIntercompanySettlementRoute
+  AppIntercompanyTransactionsRoute: typeof AppIntercompanyTransactionsRoute
 }
 
 const AppIntercompanyRouteChildren: AppIntercompanyRouteChildren = {
   AppIntercompanySettlementRoute: AppIntercompanySettlementRoute,
+  AppIntercompanyTransactionsRoute: AppIntercompanyTransactionsRoute,
 }
 
 const AppIntercompanyRouteWithChildren = AppIntercompanyRoute._addFileChildren(

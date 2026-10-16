@@ -36,7 +36,9 @@ export const Route = createFileRoute("/_app/intercompany")({
 
 function IntercompanyLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  if (pathname.startsWith("/intercompany/settlement")) return <Outlet />;
+  if (pathname.startsWith("/intercompany/settlement") || pathname.startsWith("/intercompany/transactions")) {
+    return <Outlet />;
+  }
   return <IntercompanyPage />;
 }
 

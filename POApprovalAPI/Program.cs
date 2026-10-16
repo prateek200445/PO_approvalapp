@@ -106,6 +106,7 @@ builder.Services.AddScoped<PlantProductionService>();
 builder.Services.AddScoped<GstBillRecoService>();
 builder.Services.AddScoped<PnlService>();
 builder.Services.AddScoped<IntercompanyBalanceService>();
+builder.Services.AddScoped<IntercompanyTransactionService>();
 builder.Services.AddScoped<GstDocumentSummaryService>();
 builder.Services.AddScoped<Gstr1ReturnService>();
 builder.Services.AddSingleton<IcegateService>();
