@@ -33,6 +33,7 @@ import {
   formatStatusLabel,
   type ComparisonPair,
   type ComparisonResult,
+  type ComparisonSummary,
   type ComparisonStatus,
   type ExcelPreview,
   type LedgerColumnMapping,
@@ -588,7 +589,7 @@ function ReconciliationPage() {
         nextResults.push(pendingPair);
       }
 
-      const nextSummary = buildSummaryFromResults(prev.summary.totalA, prev.summary.totalB, nextResults);
+      const nextSummary = buildSummaryFromResults(prev.summary.totalA, prev.summary.totalB, nextResults, prev.summary);
       return { ...prev, results: nextResults, summary: nextSummary };
     });
     setSelected(null);
@@ -614,7 +615,7 @@ function ReconciliationPage() {
       };
 
       const nextResults = prev.results.map((r) => (r.id === pairId ? updatedPair : r));
-      const nextSummary = buildSummaryFromResults(prev.summary.totalA, prev.summary.totalB, nextResults);
+      const nextSummary = buildSummaryFromResults(prev.summary.totalA, prev.summary.totalB, nextResults, prev.summary);
       return { ...prev, results: nextResults, summary: nextSummary };
     });
     setSelected(null);
@@ -662,7 +663,7 @@ function ReconciliationPage() {
         });
       }
 
-      const nextSummary = buildSummaryFromResults(prev.summary.totalA, prev.summary.totalB, nextResults);
+      const nextSummary = buildSummaryFromResults(prev.summary.totalA, prev.summary.totalB, nextResults, prev.summary);
       return { ...prev, results: nextResults, summary: nextSummary };
     });
     setSelected(null);
@@ -1125,6 +1126,40 @@ function ReconciliationPage() {
                 />
               </div>
             </div>
+
+            {result.summary.closingKnown && (
+              <div className="grid gap-3 border-t border-border/80 pt-4 sm:grid-cols-3">
+                <div className="rounded-xl border border-border/80 bg-surface/70 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Closing — {companyNameA}
+                  </div>
+                  <div className="mt-1 text-lg font-bold tabular-nums">
+                    {formatNum(result.summary.closingA ?? 0)}
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">Positive is a debit balance</div>
+                </div>
+                <div className="rounded-xl border border-border/80 bg-surface/70 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Closing — {companyNameB}
+                  </div>
+                  <div className="mt-1 text-lg font-bold tabular-nums">
+                    {formatNum(result.summary.closingB ?? 0)}
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">Positive is a debit balance</div>
+                </div>
+                <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Closing difference
+                  </div>
+                  <div className="mt-1 text-lg font-bold tabular-nums text-primary">
+                    {formatNum(result.summary.closingDifference ?? 0)}
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    Side A + side B. Zero when the two books mirror each other.
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-2 md:flex-row md:items-center">
@@ -1671,13 +1706,39 @@ function LedgerSelect({
   value: string;
   onChange: (v: string) => void;
 }) {
-  const [ledgers, setLedgers] = useState<string[]>([]);
+  const [text, setText] = useState(value);
+  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [options, setOptions] = useState<string[]>([]);
+  const [active, setActive] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const debounced = useDebounce(text, 280);
+  const disabled = !company.trim();
 
   useEffect(() => {
+    setText(value);
+  }, [value]);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  useEffect(() => {
+    const q = debounced.trim();
     const name = company.trim();
-    if (!name) {
-      setLedgers([]);
+    if (disabled || q.length < 1) {
+      setOptions([]);
+      setLoading(false);
+      return;
+    }
+    if (value && q === value.trim()) {
+      setOptions([]);
+      setLoading(false);
       return;
     }
 
@@ -1686,59 +1747,102 @@ function LedgerSelect({
       setLoading(true);
       try {
         const res = await fetch(
-          getApiUrl(`/api/bill-wise/ledgers?company=${encodeURIComponent(name)}`),
+          getApiUrl(
+            `/api/bill-wise/ledgers?company=${encodeURIComponent(name)}&q=${encodeURIComponent(q)}&take=40`,
+          ),
         );
         const data = await res.json();
-        if (!res.ok) throw new Error(data.message || "Failed to load ledgers");
+        if (!res.ok) throw new Error(data.message || "Search failed");
         if (!cancelled) {
-          setLedgers(Array.isArray(data) ? data.map(String) : []);
+          setOptions(Array.isArray(data) ? data.map(String) : []);
+          setActive(0);
         }
       } catch {
-        if (!cancelled) setLedgers([]);
+        if (!cancelled) setOptions([]);
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
-
     return () => {
       cancelled = true;
     };
-  }, [company]);
+  }, [debounced, value, company, disabled]);
 
-  const disabled = !company.trim();
+  function pick(name: string) {
+    onChange(name);
+    setText(name);
+    setOpen(false);
+    setOptions([]);
+  }
+
+  function clear() {
+    onChange("");
+    setText("");
+    setOptions([]);
+    setOpen(true);
+  }
+
+  const showList = !disabled && open && (loading || options.length > 0 || debounced.trim().length >= 1);
 
   return (
-    <label className="flex flex-col gap-1 text-sm">
+    <div ref={rootRef} className="relative flex flex-col gap-1 text-sm">
       <span className="text-xs text-muted-foreground">{label}</span>
       <div className="relative">
-        <select
-          value={value}
-          disabled={disabled || loading}
-          onChange={(e) => onChange(e.target.value)}
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={text}
+          disabled={disabled}
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={showList}
+          aria-controls={listId}
+          aria-autocomplete="list"
+          placeholder={disabled ? "Select a company first" : "Type ledger name…"}
+          onFocus={() => {
+            if (!disabled) setOpen(true);
+          }}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (value) onChange("");
+            setOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (!showList || options.length === 0) {
+              if (e.key === "Escape") setOpen(false);
+              return;
+            }
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setActive((i) => Math.min(i + 1, options.length - 1));
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActive((i) => Math.max(i - 1, 0));
+            } else if (e.key === "Enter") {
+              e.preventDefault();
+              const choice = options[active];
+              if (choice) pick(choice);
+            } else if (e.key === "Escape") {
+              setOpen(false);
+            }
+          }}
           className={cn(
-            "h-11 w-full rounded-md border border-input bg-surface px-3 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20",
-            (disabled || loading) && "cursor-not-allowed opacity-60",
+            "h-11 w-full rounded-md border border-input bg-surface py-2 pl-9 pr-10 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/20",
+            disabled && "cursor-not-allowed opacity-60",
           )}
-        >
-          <option value="">
-            {disabled
-              ? "Select a company first"
-              : loading
-                ? "Loading ledgers…"
-                : ledgers.length === 0
-                  ? "No ledgers found"
-                  : "Choose ledger…"}
-          </option>
-          {ledgers.map((l) => (
-            <option key={l} value={l}>
-              {l}
-            </option>
-          ))}
-        </select>
-        {loading ? (
-          <Loader2 className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+        />
+        {text && !disabled ? (
+          <button
+            type="button"
+            aria-label="Clear"
+            onClick={clear}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
         ) : null}
       </div>
+
       {value ? (
         <div className="inline-flex items-center gap-1 text-[11px] text-success">
           <Check className="h-3 w-3" />
@@ -1746,10 +1850,44 @@ function LedgerSelect({
         </div>
       ) : (
         <span className="text-[11px] text-muted-foreground">
-          {disabled ? "Pick the company above first" : "Counterparty ledger in this company’s books"}
+          {disabled ? "Pick the company above first" : "Start typing — results appear below"}
         </span>
       )}
-    </label>
+
+      {showList && (
+        <ul
+          id={listId}
+          role="listbox"
+          className="absolute left-0 right-0 top-[calc(100%-0.25rem)] z-30 mt-1 max-h-56 overflow-auto rounded-md border border-border bg-card py-1 shadow-lg"
+        >
+          {loading && (
+            <li className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Searching…
+            </li>
+          )}
+          {!loading && options.length === 0 && debounced.trim().length >= 1 && (
+            <li className="px-3 py-2 text-xs text-muted-foreground">No ledgers found</li>
+          )}
+          {!loading &&
+            options.map((o, i) => (
+              <li key={o} role="option" aria-selected={i === active}>
+                <button
+                  type="button"
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => pick(o)}
+                  className={cn(
+                    "flex w-full items-center px-3 py-2 text-left text-sm",
+                    i === active ? "bg-primary/10 text-foreground" : "hover:bg-secondary",
+                  )}
+                >
+                  {o}
+                </button>
+              </li>
+            ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -2986,7 +3124,12 @@ function summarizeEntries(entries: LedgerEntry[], fallbackCompany: string): Ledg
   };
 }
 
-function buildSummaryFromResults(totalA: number, totalB: number, results: ComparisonPair[]) {
+function buildSummaryFromResults(
+  totalA: number,
+  totalB: number,
+  results: ComparisonPair[],
+  prev?: ComparisonSummary,
+) {
   return {
     totalA,
     totalB,
@@ -2997,6 +3140,10 @@ function buildSummaryFromResults(totalA: number, totalB: number, results: Compar
     duplicates: results.filter((r) => r.status === "Duplicate").length,
     potentialMatches: results.filter((r) => r.status === "PotentialMatch").length,
     pendingRecords: results.filter((r) => r.status === "PendingRecord").length,
+    closingA: prev?.closingA ?? 0,
+    closingB: prev?.closingB ?? 0,
+    closingDifference: prev?.closingDifference ?? 0,
+    closingKnown: prev?.closingKnown ?? false,
   };
 }
 
@@ -3117,6 +3264,10 @@ function normalizeResult(data: any): ComparisonResult {
       duplicates: summary.duplicates ?? summary.Duplicates ?? 0,
       potentialMatches: summary.potentialMatches ?? summary.PotentialMatches ?? 0,
       pendingRecords: summary.pendingRecords ?? summary.PendingRecords ?? 0,
+      closingA: summary.closingA ?? summary.ClosingA ?? 0,
+      closingB: summary.closingB ?? summary.ClosingB ?? 0,
+      closingDifference: summary.closingDifference ?? summary.ClosingDifference ?? 0,
+      closingKnown: summary.closingKnown ?? summary.ClosingKnown ?? false,
     },
     results,
   };

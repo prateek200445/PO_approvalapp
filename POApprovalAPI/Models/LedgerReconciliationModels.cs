@@ -72,6 +72,14 @@ public class ComparisonSummary
     public int Duplicates { get; set; }
     public int PotentialMatches { get; set; }
     public int PendingRecords { get; set; }
+    /// <summary>Ledger closing for side A. Positive is a debit balance.</summary>
+    public decimal ClosingA { get; set; }
+    /// <summary>Ledger closing for side B. Positive is a debit balance.</summary>
+    public decimal ClosingB { get; set; }
+    /// <summary>ClosingA + ClosingB. Zero when the two books mirror each other.</summary>
+    public decimal ClosingDifference { get; set; }
+    /// <summary>True when closings came from the ledger, not an uploaded sheet.</summary>
+    public bool ClosingKnown { get; set; }
 }
 
 public class ComparisonPairDto

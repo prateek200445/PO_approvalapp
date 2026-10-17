@@ -1,3 +1,4 @@
+using System.Data;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Dapper;
@@ -134,6 +135,47 @@ ORDER BY LedgerName",
     }
 
     /// <summary>
+    /// Ledger typeahead for one company. Searches the ledger master, same idea as company search.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> SearchLedgersAsync(string companyName, string? q, int take = 40)
+    {
+        var company = (companyName ?? "").Trim();
+        if (company.Length == 0)
+            throw new ArgumentException("Company is required.");
+
+        take = Math.Clamp(take, 5, 80);
+        var query = (q ?? "").Trim();
+        if (query.Length == 0)
+            return Array.Empty<string>();
+
+        var cacheKey = $"billwise:ledger-search:{company.ToLowerInvariant()}:{query.ToLowerInvariant()}:{take}";
+        if (_cache.TryGetValue(cacheKey, out IReadOnlyList<string>? cached) && cached != null)
+            return cached;
+
+        using var connection = _database.CreateConnection();
+        var rows = (await connection.QueryAsync<string>(@"
+SELECT TOP (@Take) l.LedgerName
+FROM ledgermaster l WITH (NOLOCK)
+WHERE LTRIM(RTRIM(l.CompanyName)) = @Company
+  AND ISNULL(l.LedgerName, '') <> ''
+  AND l.LedgerName LIKE '%' + @Q + '%'
+ORDER BY
+  CASE WHEN l.LedgerName LIKE @Q + '%' THEN 0 ELSE 1 END,
+  l.LedgerName",
+            new { Company = company, Q = query, Take = take },
+            commandTimeout: 30)).ToList();
+
+        var list = rows
+            .Select(r => (r ?? "").Trim())
+            .Where(r => r.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        _cache.Set(cacheKey, (IReadOnlyList<string>)list, TimeSpan.FromMinutes(10));
+        return list;
+    }
+
+    /// <summary>
     /// Two companies → two swapped LIKE queries (same pattern as manual SSMS checks):
     ///   CompanyName LIKE %CoreA% AND LedgerName LIKE %CoreB%
     ///   CompanyName LIKE %CoreB% AND LedgerName LIKE %CoreA%
@@ -189,6 +231,11 @@ ORDER BY LedgerName",
 
         Console.WriteLine($"Rows A: {entriesA.Count}  |  Rows B: {entriesB.Count}");
 
+        var sideA = await SupplementSideAsync(companyA, null, companyB, entriesA, dateFrom, dateTo);
+        var sideB = await SupplementSideAsync(companyB, null, companyA, entriesB, dateFrom, dateTo);
+        entriesA = sideA.Entries;
+        entriesB = sideB.Entries;
+
         if (entriesA.Count == 0 && entriesB.Count == 0)
         {
             throw new InvalidOperationException(
@@ -196,7 +243,7 @@ ORDER BY LedgerName",
                 "Check company spelling against ERP CompanyName / LedgerName.");
         }
 
-        return _excel.CompareEntries(entriesA, entriesB, companyA, companyB, options);
+        return FinishCompare(entriesA, entriesB, companyA, companyB, options, sideA.Closing, sideB.Closing);
     }
 
     private static string FormatSwappedQuery(
@@ -397,13 +444,18 @@ WHERE CompanyName LIKE @CompanyPattern
         var entriesA = await fetchA;
         var entriesB = await fetchB;
 
+        var sideA = await SupplementSideAsync(companyA, ledgerA, companyB, entriesA, dateFrom, dateTo);
+        var sideB = await SupplementSideAsync(companyB, ledgerB, companyA, entriesB, dateFrom, dateTo);
+        entriesA = sideA.Entries;
+        entriesB = sideB.Entries;
+
         if (entriesA.Count == 0 && entriesB.Count == 0)
         {
             throw new InvalidOperationException(
                 $"No bill-wise rows for '{companyA}' / '{ledgerA}' or '{companyB}' / '{ledgerB}'.");
         }
 
-        return _excel.CompareEntries(entriesA, entriesB, companyA, companyB, options);
+        return FinishCompare(entriesA, entriesB, companyA, companyB, options, sideA.Closing, sideB.Closing);
     }
 
     private static List<string> MatchLedgersToParty(IReadOnlyList<string> ledgers, string partyCompany)
@@ -529,6 +581,11 @@ WHERE CompanyName LIKE @CompanyPattern
         var entriesA = await FetchBillWiseAsync(companyA, companyB, exactCompany: exactA, exactLedger: exactB);
         var entriesB = await FetchBillWiseAsync(companyB, companyA, exactCompany: exactB, exactLedger: exactA);
 
+        var sideA = await SupplementSideAsync(companyA, null, companyB, entriesA, null, null);
+        var sideB = await SupplementSideAsync(companyB, null, companyA, entriesB, null, null);
+        entriesA = sideA.Entries;
+        entriesB = sideB.Entries;
+
         if (entriesA.Count == 0 && entriesB.Count == 0)
         {
             throw new InvalidOperationException(
@@ -537,7 +594,7 @@ WHERE CompanyName LIKE @CompanyPattern
                 "Try a shorter override like 'HCP Enterprise' / 'Plastene India'.");
         }
 
-        return _excel.CompareEntries(entriesA, entriesB, companyA, companyB, options);
+        return FinishCompare(entriesA, entriesB, companyA, companyB, options, sideA.Closing, sideB.Closing);
     }
 
     public async Task<List<LedgerEntryDto>> FetchBillWiseForLedgersAsync(
@@ -861,5 +918,338 @@ WHERE CompanyName LIKE @CompanyPattern
   AND {column} < @DateToExclusive";
         parameters.Add("DateFrom", from.Value);
         parameters.Add("DateToExclusive", toExclusive.Value);
+    }
+
+    private ComparisonResultDto FinishCompare(
+        List<LedgerEntryDto> entriesA,
+        List<LedgerEntryDto> entriesB,
+        string companyA,
+        string companyB,
+        LedgerMatchOptions? options,
+        decimal closingA,
+        decimal closingB)
+    {
+        var result = _excel.CompareEntries(entriesA, entriesB, companyA, companyB, options);
+        result.Summary.ClosingA = closingA;
+        result.Summary.ClosingB = closingB;
+        result.Summary.ClosingDifference = closingA + closingB;
+        result.Summary.ClosingKnown = true;
+        return result;
+    }
+
+    /// <summary>
+    /// Bill-wise rows miss journals, on-account credit notes, and some inter-unit lines.
+    /// Pull the same ledger from the ledger summary and add only what the view does not already cover.
+    /// </summary>
+    private async Task<(List<LedgerEntryDto> Entries, decimal Closing)> SupplementSideAsync(
+        string companyName,
+        string? exactLedger,
+        string otherCompanyName,
+        List<LedgerEntryDto> billWise,
+        DateTime? dateFrom,
+        DateTime? dateTo)
+    {
+        var entries = billWise;
+        try
+        {
+            using var connection = _database.CreateConnection();
+            var companyId = await connection.QueryFirstOrDefaultAsync<int?>(@"
+SELECT TOP 1 fi.srno
+FROM FactoryInfo fi WITH (NOLOCK)
+WHERE LTRIM(RTRIM(fi.Name)) = @Name",
+                new { Name = companyName });
+
+            if (companyId is null or 0)
+            {
+                var core = BuildCompanyCore(companyName);
+                if (!string.IsNullOrWhiteSpace(core))
+                {
+                    companyId = await connection.QueryFirstOrDefaultAsync<int?>(@"
+SELECT TOP 1 fi.srno
+FROM FactoryInfo fi WITH (NOLOCK)
+WHERE fi.Name LIKE @Like
+ORDER BY LEN(fi.Name)",
+                        new { Like = "%" + core.Replace("%", "") + "%" });
+                }
+            }
+
+            if (companyId is null or 0)
+                return (entries, 0m);
+
+            var ledgers = await ResolveSupplementLedgersAsync(connection, companyId.Value, exactLedger, otherCompanyName, entries);
+            if (ledgers.Count == 0)
+                return (entries, 0m);
+
+            var from = (dateFrom ?? new DateTime(1990, 4, 1)).Date;
+            var to = (dateTo ?? DateTime.Today).Date;
+            if (from > to)
+                (from, to) = (to, from);
+
+            var closing = 0m;
+            var nextIndex = entries.Count == 0 ? 1 : entries.Max(e => e.RowIndex) + 1;
+            var merged = new List<LedgerEntryDto>(entries);
+
+            foreach (var ledger in ledgers)
+            {
+                var table = await LoadLedgerSummaryAsync(connection, companyId.Value, ledger, from, to);
+                if (table.Rows.Count == 0)
+                    continue;
+
+                closing += LedgerClosing(table);
+                var added = MissingLedgerLines(merged, table, companyName, ref nextIndex);
+                merged.AddRange(added);
+            }
+
+            Console.WriteLine($"Ledger supplement {companyName}: +{merged.Count - entries.Count} lines, closing {closing:0.00}");
+            return (merged, closing);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Ledger supplement skipped for {companyName}: {ex.Message}");
+            return (entries, 0m);
+        }
+    }
+
+    private async Task<List<string>> ResolveSupplementLedgersAsync(
+        System.Data.Common.DbConnection connection,
+        int companyId,
+        string? exactLedger,
+        string otherCompanyName,
+        List<LedgerEntryDto> billWise)
+    {
+        if (!string.IsNullOrWhiteSpace(exactLedger))
+            return new List<string> { exactLedger.Trim() };
+
+        var names = billWise
+            .Select(e => (e.Particulars ?? "").Trim())
+            .Where(n => n.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+
+        var otherCore = BuildCompanyCore(otherCompanyName);
+        var likeOther = string.IsNullOrWhiteSpace(otherCore) ? "%" : "%" + otherCore.Replace("%", "") + "%";
+
+        var candidates = (await connection.QueryAsync<string>(@"
+SELECT DISTINCT TOP 40 LTRIM(RTRIM(l.LedgerName))
+FROM ledgermaster l WITH (NOLOCK)
+INNER JOIN FactoryInfo fi WITH (NOLOCK) ON fi.Name = l.CompanyName AND fi.srno = @CompanyId
+WHERE ISNULL(l.LedgerName, '') <> ''
+  AND (
+        l.LedgerName LIKE @LikeOther
+     OR l.LedgerName LIKE '%inter%unit%'
+     OR l.LedgerName LIKE '%intercompany%'
+     OR l.LedgerName LIKE '%inter company%'
+     OR l.LedgerName LIKE '%inter-company%'
+  )",
+            new { CompanyId = companyId, LikeOther = likeOther })).ToList();
+
+        foreach (var candidate in candidates)
+        {
+            var name = (candidate ?? "").Trim();
+            if (name.Length == 0) continue;
+            if (names.Contains(name, StringComparer.OrdinalIgnoreCase)) continue;
+
+            var interUnit = name.Contains("inter", StringComparison.OrdinalIgnoreCase)
+                && (name.Contains("unit", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("company", StringComparison.OrdinalIgnoreCase));
+            var score = ScoreNameMatch(name, otherCompanyName);
+            if (score >= 12 || (interUnit && score >= 8) || name.Contains(otherCore ?? "", StringComparison.OrdinalIgnoreCase) && (otherCore?.Length ?? 0) >= 4)
+                names.Add(name);
+
+            if (names.Count >= 15) break;
+        }
+
+        return names;
+    }
+
+    private static async Task<DataTable> LoadLedgerSummaryAsync(
+        System.Data.Common.DbConnection connection,
+        int companyId,
+        string ledgerName,
+        DateTime from,
+        DateTime to)
+    {
+        var table = new DataTable();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "sp_ac_LedgerSummary_BankRecoDate";
+        cmd.CommandType = CommandType.StoredProcedure;
+        cmd.CommandTimeout = 120;
+        AddParam(cmd, "@CompanyType", 2);
+        AddParam(cmd, "@CompanyName", "");
+        AddParam(cmd, "@CompanyId", companyId);
+        AddParam(cmd, "@LedgerName", ledgerName);
+        AddParam(cmd, "@Currency", DBNull.Value);
+        AddParam(cmd, "@DateFrom", from);
+        AddParam(cmd, "@DateTo", to);
+        AddParam(cmd, "@InterestCal", 0);
+        await using var reader = await cmd.ExecuteReaderAsync();
+        table.Load(reader);
+        return table;
+    }
+
+    private static void AddParam(System.Data.Common.DbCommand cmd, string name, object value)
+    {
+        var p = cmd.CreateParameter();
+        p.ParameterName = name;
+        p.Value = value;
+        cmd.Parameters.Add(p);
+    }
+
+    private static decimal LedgerClosing(DataTable table)
+    {
+        var closing = 0m;
+        foreach (DataRow row in table.Rows)
+            closing += CellDecimal(row, "amount", "Amount");
+        return closing;
+    }
+
+    private static List<LedgerEntryDto> MissingLedgerLines(
+        List<LedgerEntryDto> existing,
+        DataTable table,
+        string companyName,
+        ref int nextIndex)
+    {
+        var covered = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in existing)
+        {
+            var key = VoucherKey(entry.VoucherNo, entry.Date);
+            covered[key] = covered.GetValueOrDefault(key) + entry.SignedAmount;
+        }
+
+        var fresh = new List<(string Key, decimal Signed, string Type, DateTime? Date, string Voucher, string Contra, string VoucherRef)>();
+        foreach (DataRow row in table.Rows)
+        {
+            var type = CellString(row, "VoucherType");
+            if (string.Equals(type, "z", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var raw = CellDecimal(row, "amount", "Amount");
+            if (raw == 0m)
+                continue;
+
+            var date = CellDate(row, "Date");
+            var voucher = CellString(row, "voucherno", "VoucherNo");
+            fresh.Add((
+                VoucherKey(voucher, date),
+                -raw,
+                type,
+                date,
+                voucher,
+                CellString(row, "LedgerName"),
+                CellString(row, "VoucherRef")));
+        }
+
+        var added = new List<LedgerEntryDto>();
+        foreach (var group in fresh.GroupBy(x => x.Key))
+        {
+            var already = covered.GetValueOrDefault(group.Key);
+            var ledgerTotal = group.Sum(x => x.Signed);
+            if (Math.Abs(already - ledgerTotal) <= 1m)
+                continue;
+
+            // Bill list has this voucher as a credit and the ledger has it as a debit
+            // (or the reverse) for the same amount. Inserting the gap would double it.
+            if (Math.Abs(Math.Abs(already) - Math.Abs(ledgerTotal)) <= 1m)
+                continue;
+
+            if (Math.Abs(already) <= 0.005m)
+            {
+                foreach (var line in group)
+                    added.Add(ToEntry(line.Type, line.Date, line.Voucher, line.Contra, line.VoucherRef, line.Signed, companyName, ref nextIndex));
+            }
+            else if (Math.Sign(already) == Math.Sign(ledgerTotal))
+            {
+                var sample = group.First();
+                var gap = ledgerTotal - already;
+                added.Add(ToEntry(sample.Type, sample.Date, sample.Voucher, sample.Contra, sample.VoucherRef, gap, companyName, ref nextIndex));
+            }
+
+            covered[group.Key] = ledgerTotal;
+        }
+
+        return added;
+    }
+
+    private static LedgerEntryDto ToEntry(
+        string voucherType,
+        DateTime? date,
+        string voucherNo,
+        string contra,
+        string voucherRef,
+        decimal signed,
+        string companyName,
+        ref int nextIndex)
+    {
+        var type = string.IsNullOrWhiteSpace(voucherType) ? "Journal" : voucherType.Trim();
+        var note = type.Contains("credit", StringComparison.OrdinalIgnoreCase)
+            || type.Contains("note", StringComparison.OrdinalIgnoreCase);
+        var bill = "";
+        if (note && !string.IsNullOrWhiteSpace(voucherRef)
+            && !string.Equals(voucherRef.Trim(), (voucherNo ?? "").Trim(), StringComparison.OrdinalIgnoreCase))
+            bill = voucherRef.Trim();
+
+        var particulars = string.IsNullOrWhiteSpace(contra) ? type : $"{type} · {contra.Trim()}";
+        return new LedgerEntryDto
+        {
+            RowIndex = nextIndex++,
+            Company = companyName,
+            Date = date,
+            BillDate = bill.Length > 0 ? date : null,
+            Particulars = particulars,
+            VoucherNo = (voucherNo ?? "").Trim(),
+            VoucherRef = type,
+            BillNo = bill,
+            SignedAmount = signed,
+            Debit = signed < 0 ? Math.Abs(signed) : 0m,
+            Credit = signed > 0 ? signed : 0m,
+        };
+    }
+
+    private static string VoucherKey(string? voucherNo, DateTime? date) =>
+        $"{(voucherNo ?? "").Trim().ToUpperInvariant()}|{(date?.ToString("yyyy-MM-dd") ?? "")}";
+
+    private static string CellString(DataRow row, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            foreach (DataColumn column in row.Table.Columns)
+            {
+                if (!string.Equals(column.ColumnName, name, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                return row[column] == DBNull.Value ? "" : Convert.ToString(row[column])?.Trim() ?? "";
+            }
+        }
+        return "";
+    }
+
+    private static decimal CellDecimal(DataRow row, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            foreach (DataColumn column in row.Table.Columns)
+            {
+                if (!string.Equals(column.ColumnName, name, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                return ToDecimal(row[column]);
+            }
+        }
+        return 0m;
+    }
+
+    private static DateTime? CellDate(DataRow row, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            foreach (DataColumn column in row.Table.Columns)
+            {
+                if (!string.Equals(column.ColumnName, name, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (row[column] == DBNull.Value) return null;
+                if (row[column] is DateTime dt) return dt.Date;
+                return ToDate(row[column]);
+            }
+        }
+        return null;
     }
 }
