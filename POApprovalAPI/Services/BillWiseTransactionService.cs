@@ -455,7 +455,13 @@ WHERE CompanyName LIKE @CompanyPattern
                 $"No bill-wise rows for '{companyA}' / '{ledgerA}' or '{companyB}' / '{ledgerB}'.");
         }
 
-        return FinishCompare(entriesA, entriesB, companyA, companyB, options, sideA.Closing, sideB.Closing);
+        var result = FinishCompare(entriesA, entriesB, companyA, companyB, options, sideA.Closing, sideB.Closing);
+        await AttachVoucherDateCounterpartsAsync(result, companyA, ledgerA, companyB, ledgerB, dateFrom, dateTo);
+        ApplySalesPurchaseSign(result, ledgerA, ledgerB);
+        await AttachPurchaseStockLegAsync(result, companyA, ledgerA, companyB, ledgerB);
+        HideSettledVoucherRemainders(result);
+        HideMissingThatDoNotExplainDifference(result);
+        return result;
     }
 
     private static List<string> MatchLedgersToParty(IReadOnlyList<string> ledgers, string partyCompany)
@@ -919,6 +925,601 @@ WHERE CompanyName LIKE @CompanyPattern
         parameters.Add("DateFrom", from.Value);
         parameters.Add("DateToExclusive", toExclusive.Value);
     }
+
+    /// <summary>
+    /// A bill can show two lines on one side and one on the other because the settlement
+    /// was posted to a different bill date. Pull that one line by voucher date and amount.
+    /// </summary>
+    private async Task AttachVoucherDateCounterpartsAsync(
+        ComparisonResultDto result,
+        string companyA,
+        string ledgerA,
+        string companyB,
+        string ledgerB,
+        DateTime? dateFrom,
+        DateTime? dateTo)
+    {
+        var jobs = new List<(ComparisonPairDto Pair, bool MissingOnA, LedgerEntryDto Extra)>();
+        foreach (var pair in result.Results)
+        {
+            if (pair.EntriesA.Count == 0 || pair.EntriesB.Count == 0)
+                continue;
+            jobs.AddRange(SurplusLines(pair, pair.EntriesA, pair.EntriesB).Select(line => (pair, MissingOnA: false, line)));
+            jobs.AddRange(SurplusLines(pair, pair.EntriesB, pair.EntriesA).Select(line => (pair, MissingOnA: true, line)));
+        }
+
+        if (jobs.Count == 0)
+            return;
+
+        var from = dateFrom?.Date;
+        var to = dateTo?.Date;
+        jobs = jobs.Where(job =>
+        {
+            var day = job.Extra.Date?.Date;
+            if (day == null) return false;
+            if (from != null && day < from) return false;
+            if (to != null && day > to) return false;
+            return true;
+        }).ToList();
+        if (jobs.Count == 0)
+            return;
+
+        try
+        {
+            using var connection = _database.CreateConnection();
+            var nextIndex = result.Results
+                .SelectMany(p => p.EntriesA.Concat(p.EntriesB))
+                .Select(e => e.RowIndex)
+                .DefaultIfEmpty(0)
+                .Max() + 1;
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in result.Results)
+            {
+                foreach (var entry in pair.EntriesA.Concat(pair.EntriesB))
+                    used.Add(EntryKey(entry));
+            }
+
+            var addedA = 0;
+            var addedB = 0;
+            var touched = new HashSet<ComparisonPairDto>();
+            foreach (var group in jobs.GroupBy(job => job.MissingOnA))
+            {
+                var company = group.Key ? companyA : companyB;
+                var ledger = group.Key ? ledgerA : ledgerB;
+                var found = await FindByVoucherDateAndAmountAsync(connection, company, ledger, group.Select(job => job.Extra).ToList());
+                foreach (var job in group)
+                {
+                    var amount = Math.Abs(job.Extra.SignedAmount);
+                    var day = job.Extra.Date!.Value.Date;
+                    var billKeys = BillKeys(job.Pair);
+                    foreach (var row in found)
+                    {
+                        if (row.Date?.Date != day) continue;
+                        if (Math.Abs(Math.Abs(row.SignedAmount) - amount) > 0.01m) continue;
+                        if (!billKeys.Contains(BillKey(row.BillNo))) continue;
+                        var key = EntryKey(row);
+                        if (!used.Add(key)) continue;
+
+                        row.RowIndex = nextIndex++;
+                        if (job.MissingOnA)
+                        {
+                            job.Pair.EntriesA.Add(row);
+                            addedA++;
+                        }
+                        else
+                        {
+                            job.Pair.EntriesB.Add(row);
+                            addedB++;
+                        }
+                        touched.Add(job.Pair);
+                    }
+                }
+            }
+
+            if (addedA == 0 && addedB == 0)
+                return;
+
+            foreach (var pair in touched)
+                RefreshPairTotals(pair);
+
+            result.Summary.TotalA += addedA;
+            result.Summary.TotalB += addedB;
+            result.Summary.Matched = result.Results.Count(r => r.Status == "Matched");
+            result.Summary.AmountMismatch = result.Results.Count(r => r.Status == "AmountMismatch");
+            result.Summary.MissingInA = result.Results.Count(r => r.Status == "MissingInA");
+            result.Summary.MissingInB = result.Results.Count(r => r.Status == "MissingInB");
+            result.Summary.PotentialMatches = result.Results.Count(r => r.Status == "PotentialMatch");
+            result.Summary.PendingRecords = result.Results.Count(r => r.Status == "PendingRecord");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Voucher-date counterpart lookup skipped: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// When sales has two credits and purchase has only the invoice, the other leg of that
+    /// purchase voucher is on the stock ledger. Add it on the purchase side as a debit so
+    /// the bill matches. Closings stay on the two selected ledgers.
+    /// </summary>
+    private async Task AttachPurchaseStockLegAsync(
+        ComparisonResultDto result,
+        string companyA,
+        string ledgerA,
+        string companyB,
+        string ledgerB)
+    {
+        if (!TrySalesPurchaseSides(ledgerA, ledgerB, out var salesIsA))
+            return;
+
+        var jobs = new List<(ComparisonPairDto Pair, string VoucherNo, decimal Amount, int SalesSign)>();
+        foreach (var pair in result.Results)
+        {
+            var sales = salesIsA ? pair.EntriesA : pair.EntriesB;
+            var purchase = salesIsA ? pair.EntriesB : pair.EntriesA;
+            foreach (var group in sales.GroupBy(line => Math.Round(Math.Abs(line.SignedAmount), 2)))
+            {
+                if (group.Key <= 0.01m) continue;
+                var lines = group.ToList();
+                if (lines.Count < 2) continue;
+                var sign = Math.Sign(lines[0].SignedAmount);
+                if (sign == 0 || lines.Any(line => Math.Sign(line.SignedAmount) != sign))
+                    continue;
+
+                var purchaseLines = purchase
+                    .Where(line => Math.Abs(Math.Abs(line.SignedAmount) - group.Key) <= 0.01m)
+                    .ToList();
+                var missing = lines.Count - purchaseLines.Count;
+                if (missing <= 0) continue;
+
+                var voucher = purchaseLines
+                    .Select(line => (line.VoucherNo ?? "").Trim())
+                    .FirstOrDefault(no => no.Length > 0);
+                if (string.IsNullOrWhiteSpace(voucher)) continue;
+                for (var n = 0; n < missing; n++)
+                    jobs.Add((pair, voucher, group.Key, sign));
+            }
+        }
+
+        if (jobs.Count == 0)
+            return;
+
+        var purchaseCompany = salesIsA ? companyB : companyA;
+        var purchaseLedger = salesIsA ? ledgerB : ledgerA;
+        try
+        {
+            using var connection = _database.CreateConnection();
+            var found = await FindStockLegAsync(connection, purchaseCompany, purchaseLedger, jobs);
+            var nextIndex = result.Results
+                .SelectMany(p => p.EntriesA.Concat(p.EntriesB))
+                .Select(e => e.RowIndex)
+                .DefaultIfEmpty(0)
+                .Max() + 1;
+            var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var touched = new HashSet<ComparisonPairDto>();
+            var addedA = 0;
+            var addedB = 0;
+
+            foreach (var job in jobs)
+            {
+                var row = found.FirstOrDefault(entry =>
+                    string.Equals((entry.VoucherNo ?? "").Trim(), job.VoucherNo, StringComparison.OrdinalIgnoreCase)
+                    && Math.Abs(Math.Abs(entry.SignedAmount) - job.Amount) <= 0.01m
+                    && used.Add(EntryKey(entry)));
+                if (row == null) continue;
+
+                var target = -job.SalesSign * job.Amount;
+                if (Math.Sign(row.SignedAmount) != Math.Sign(target))
+                {
+                    row.SignedAmount = target;
+                    row.Debit = row.SignedAmount < 0 ? Math.Abs(row.SignedAmount) : 0m;
+                    row.Credit = row.SignedAmount > 0 ? row.SignedAmount : 0m;
+                }
+
+                row.RowIndex = nextIndex++;
+                if (salesIsA)
+                {
+                    job.Pair.EntriesB.Add(row);
+                    addedB++;
+                }
+                else
+                {
+                    job.Pair.EntriesA.Add(row);
+                    addedA++;
+                }
+                touched.Add(job.Pair);
+            }
+
+            if (touched.Count == 0)
+                return;
+
+            foreach (var pair in touched)
+                RefreshPairTotals(pair);
+
+            result.Summary.TotalA += addedA;
+            result.Summary.TotalB += addedB;
+            RecountSummary(result);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Purchase stock-leg lookup skipped: {ex.Message}");
+        }
+    }
+
+    private async Task<List<LedgerEntryDto>> FindStockLegAsync(
+        System.Data.Common.DbConnection connection,
+        string company,
+        string purchaseLedger,
+        List<(ComparisonPairDto Pair, string VoucherNo, decimal Amount, int SalesSign)> jobs)
+    {
+        var clauses = new List<string>();
+        var parameters = new DynamicParameters();
+        parameters.Add("CompanyName", company);
+        parameters.Add("PurchaseLedger", purchaseLedger);
+        var i = 0;
+        foreach (var job in jobs.GroupBy(job => $"{job.VoucherNo}|{job.Amount:0.00}", StringComparer.OrdinalIgnoreCase))
+        {
+            var sample = job.First();
+            parameters.Add($"V{i}", sample.VoucherNo);
+            parameters.Add($"A{i}", sample.Amount);
+            clauses.Add($"(VoucherNo = @V{i} AND ABS(Amount) BETWEEN @A{i} - 0.01 AND @A{i} + 0.01)");
+            i++;
+        }
+
+        var sql = $@"
+SELECT
+    CompanyName,
+    LedgerName,
+    VoucherNo,
+    VoucherDate,
+    BillNo,
+    BillDate,
+    Amount,
+    RefType
+FROM dbo.vw_BillWiseTransactionWithOnAccount WITH (NOLOCK)
+WHERE CompanyName = @CompanyName
+  AND LedgerName <> @PurchaseLedger
+  AND ({string.Join(" OR ", clauses)})";
+
+        var rows = (await connection.QueryAsync(sql, parameters, commandTimeout: 180)).ToList();
+        var entries = new List<LedgerEntryDto>();
+        foreach (var row in rows)
+        {
+            var entry = MapRow(row, 0);
+            if (entry != null)
+                entries.Add(entry);
+        }
+        return entries;
+    }
+
+    /// <summary>
+    /// Sales often stores the settlement as a second credit. On a purchase ledger that same
+    /// settlement is a credit and cancels the invoice. For a sales-versus-purchase compare,
+    /// turn that against-reference into the opposite of the sales line so both purchase
+    /// lines stay on the invoice's side. Other ledger pairs are left unchanged.
+    /// </summary>
+    private static bool TrySalesPurchaseSides(string ledgerA, string ledgerB, out bool salesIsA)
+    {
+        var aIsSales = IsSalesLedger(ledgerA);
+        var bIsSales = IsSalesLedger(ledgerB);
+        var aIsPurchase = IsPurchaseLedger(ledgerA);
+        var bIsPurchase = IsPurchaseLedger(ledgerB);
+        if (aIsSales && bIsPurchase && !aIsPurchase && !bIsSales)
+        {
+            salesIsA = true;
+            return true;
+        }
+        if (bIsSales && aIsPurchase && !bIsPurchase && !aIsSales)
+        {
+            salesIsA = false;
+            return true;
+        }
+        salesIsA = false;
+        return false;
+    }
+
+    /// <summary>
+    /// A no-bill line left over from a voucher whose bill lines are already in the compare
+    /// is the outside-range remainder. It is already inside the ledger closing, so it is not shown.
+    /// A missing bill, or a no-bill line that is the only line for its voucher, stays.
+    /// </summary>
+    private static void HideSettledVoucherRemainders(ComparisonResultDto result)
+    {
+        static string Key(LedgerEntryDto entry) =>
+            $"{(entry.VoucherNo ?? "").Trim().ToUpperInvariant()}|{(entry.Date?.ToString("yyyy-MM-dd") ?? "")}";
+
+        var billedA = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var billedB = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in result.Results)
+        {
+            foreach (var entry in pair.EntriesA)
+            {
+                if (!string.IsNullOrWhiteSpace(entry.BillNo) && !string.IsNullOrWhiteSpace(entry.VoucherNo))
+                    billedA.Add(Key(entry));
+            }
+            foreach (var entry in pair.EntriesB)
+            {
+                if (!string.IsNullOrWhiteSpace(entry.BillNo) && !string.IsNullOrWhiteSpace(entry.VoucherNo))
+                    billedB.Add(Key(entry));
+            }
+        }
+
+        var removedA = 0;
+        var removedB = 0;
+        result.Results = result.Results.Where(pair =>
+        {
+            var onA = pair.EntriesA.Count > 0 && pair.EntriesB.Count == 0;
+            var onB = pair.EntriesB.Count > 0 && pair.EntriesA.Count == 0;
+            if (!onA && !onB)
+                return true;
+            if (pair.Status != "MissingInA" && pair.Status != "MissingInB")
+                return true;
+
+            var line = onA ? pair.EntriesA[0] : pair.EntriesB[0];
+            if (pair.EntriesA.Count + pair.EntriesB.Count != 1)
+                return true;
+            if (!string.IsNullOrWhiteSpace(line.BillNo) || string.IsNullOrWhiteSpace(line.VoucherNo) || line.Date == null)
+                return true;
+            if (!(onA ? billedA : billedB).Contains(Key(line)))
+                return true;
+
+            if (onA) removedA++;
+            else removedB++;
+            return false;
+        }).ToList();
+
+        if (removedA == 0 && removedB == 0)
+            return;
+
+        result.Summary.TotalA = Math.Max(0, result.Summary.TotalA - removedA);
+        result.Summary.TotalB = Math.Max(0, result.Summary.TotalB - removedB);
+        RecountSummary(result);
+    }
+
+    /// <summary>
+    /// When the two closings already agree (within ₹1), missing rows stay only if their signed
+    /// total is that difference. One row or several rows can make that total. A large closing
+    /// difference keeps its missing rows, because those rows are the unmatched balance.
+    /// The closing figures are left unchanged.
+    /// </summary>
+    private static void HideMissingThatDoNotExplainDifference(ComparisonResultDto result)
+    {
+        if (!result.Summary.ClosingKnown)
+            return;
+
+        if (Math.Abs(result.Summary.ClosingDifference) > 1m)
+            return;
+
+        var missing = result.Results
+            .Where(pair => pair.Status is "MissingInA" or "MissingInB")
+            .ToList();
+        if (missing.Count == 0)
+            return;
+
+        var signed = missing.Sum(pair => pair.EntriesA.Sum(e => e.SignedAmount) + pair.EntriesB.Sum(e => e.SignedAmount));
+        if (Math.Abs(signed - result.Summary.ClosingDifference) <= 1m)
+            return;
+
+        var removedA = missing.Sum(pair => pair.EntriesA.Count);
+        var removedB = missing.Sum(pair => pair.EntriesB.Count);
+        result.Results = result.Results
+            .Where(pair => pair.Status is not "MissingInA" and not "MissingInB")
+            .ToList();
+        result.Summary.TotalA = Math.Max(0, result.Summary.TotalA - removedA);
+        result.Summary.TotalB = Math.Max(0, result.Summary.TotalB - removedB);
+        RecountSummary(result);
+    }
+
+    private static void RecountSummary(ComparisonResultDto result)
+    {
+        result.Summary.Matched = result.Results.Count(r => r.Status == "Matched");
+        result.Summary.AmountMismatch = result.Results.Count(r => r.Status == "AmountMismatch");
+        result.Summary.MissingInA = result.Results.Count(r => r.Status == "MissingInA");
+        result.Summary.MissingInB = result.Results.Count(r => r.Status == "MissingInB");
+        result.Summary.PotentialMatches = result.Results.Count(r => r.Status == "PotentialMatch");
+        result.Summary.PendingRecords = result.Results.Count(r => r.Status == "PendingRecord");
+    }
+
+    private static void ApplySalesPurchaseSign(ComparisonResultDto result, string ledgerA, string ledgerB)
+    {
+        if (!TrySalesPurchaseSides(ledgerA, ledgerB, out var salesIsA))
+            return;
+
+        var touched = new HashSet<ComparisonPairDto>();
+        foreach (var pair in result.Results)
+        {
+            var salesLines = salesIsA ? pair.EntriesA : pair.EntriesB;
+            var purchaseLines = salesIsA ? pair.EntriesB : pair.EntriesA;
+            if (!FlipPurchaseSettlement(salesLines, purchaseLines))
+                continue;
+            touched.Add(pair);
+        }
+
+        if (touched.Count == 0)
+            return;
+
+        foreach (var pair in touched)
+            RefreshPairTotals(pair);
+
+        RecountSummary(result);
+    }
+
+    private static bool IsSalesLedger(string ledger) =>
+        ledger.Contains("sales", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPurchaseLedger(string ledger) =>
+        ledger.Contains("purchase", StringComparison.OrdinalIgnoreCase);
+
+    private static bool FlipPurchaseSettlement(List<LedgerEntryDto> sales, List<LedgerEntryDto> purchase)
+    {
+        var changed = false;
+        foreach (var group in sales.GroupBy(line => Math.Round(Math.Abs(line.SignedAmount), 2)))
+        {
+            if (group.Key <= 0.01m) continue;
+            var lines = group.ToList();
+            if (lines.Count < 2) continue;
+            var sign = Math.Sign(lines[0].SignedAmount);
+            if (sign == 0 || lines.Any(line => Math.Sign(line.SignedAmount) != sign))
+                continue;
+
+            foreach (var line in purchase)
+            {
+                if (Math.Abs(Math.Abs(line.SignedAmount) - group.Key) > 0.01m) continue;
+                if (Math.Sign(line.SignedAmount) != sign) continue;
+                if (line.VoucherRef.IndexOf("agst", StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+                line.SignedAmount = -line.SignedAmount;
+                line.Debit = line.SignedAmount < 0 ? Math.Abs(line.SignedAmount) : 0m;
+                line.Credit = line.SignedAmount > 0 ? line.SignedAmount : 0m;
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private static IEnumerable<LedgerEntryDto> SurplusLines(
+        ComparisonPairDto pair,
+        List<LedgerEntryDto> side,
+        List<LedgerEntryDto> other)
+    {
+        foreach (var amountGroup in side.GroupBy(line => Math.Round(Math.Abs(line.SignedAmount), 2)))
+        {
+            if (amountGroup.Key <= 0.01m) continue;
+            var here = amountGroup.OrderBy(line => line.Date ?? DateTime.MaxValue).ToList();
+            var otherCount = other.Count(line => Math.Abs(Math.Abs(line.SignedAmount) - amountGroup.Key) <= 0.01m);
+            if (here.Count <= otherCount) continue;
+            foreach (var extra in here.Skip(otherCount))
+            {
+                if (extra.Date == null) continue;
+                if (string.IsNullOrWhiteSpace(pair.EntryA?.BillNo) && string.IsNullOrWhiteSpace(pair.EntryB?.BillNo))
+                    continue;
+                yield return extra;
+            }
+        }
+    }
+
+    private async Task<List<LedgerEntryDto>> FindByVoucherDateAndAmountAsync(
+        System.Data.Common.DbConnection connection,
+        string company,
+        string ledger,
+        List<LedgerEntryDto> extras)
+    {
+        var clauses = new List<string>();
+        var parameters = new DynamicParameters();
+        parameters.Add("CompanyName", company);
+        parameters.Add("LedgerName", ledger);
+        var i = 0;
+        foreach (var extra in extras.GroupBy(line => $"{line.Date:yyyy-MM-dd}|{Math.Round(Math.Abs(line.SignedAmount), 2)}"))
+        {
+            var sample = extra.First();
+            parameters.Add($"D{i}", sample.Date!.Value.Date);
+            parameters.Add($"N{i}", sample.Date!.Value.Date.AddDays(1));
+            parameters.Add($"A{i}", Math.Round(Math.Abs(sample.SignedAmount), 2));
+            clauses.Add($"(VoucherDate >= @D{i} AND VoucherDate < @N{i} AND ABS(Amount) BETWEEN @A{i} - 0.01 AND @A{i} + 0.01)");
+            i++;
+        }
+
+        if (clauses.Count == 0)
+            return new List<LedgerEntryDto>();
+
+        var sql = $@"
+SELECT
+    CompanyName,
+    LedgerName,
+    VoucherNo,
+    VoucherDate,
+    BillNo,
+    BillDate,
+    Amount,
+    RefType
+FROM dbo.vw_BillWiseTransactionWithOnAccount WITH (NOLOCK)
+WHERE CompanyName = @CompanyName
+  AND LedgerName = @LedgerName
+  AND ({string.Join(" OR ", clauses)})";
+
+        var rows = (await connection.QueryAsync(sql, parameters, commandTimeout: 180)).ToList();
+        var entries = new List<LedgerEntryDto>();
+        foreach (var row in rows)
+        {
+            var entry = MapRow(row, 0);
+            if (entry != null)
+                entries.Add(entry);
+        }
+        return entries;
+    }
+
+    private static void RefreshPairTotals(ComparisonPairDto pair)
+    {
+        if (pair.EntriesA.Count > 0)
+            pair.EntryA = SummarizeSide(pair.EntriesA, pair.EntryA);
+        if (pair.EntriesB.Count > 0)
+            pair.EntryB = SummarizeSide(pair.EntriesB, pair.EntryB);
+
+        var totalA = pair.EntriesA.Sum(e => e.SignedAmount);
+        var totalB = pair.EntriesB.Sum(e => e.SignedAmount);
+        var gap = Math.Abs(Math.Abs(totalA) - Math.Abs(totalB));
+        var lines = $"{pair.EntriesA.Count} ↔ {pair.EntriesB.Count} lines";
+        var bothZero = Math.Abs(totalA) <= 1m && Math.Abs(totalB) <= 1m;
+        var opposite = totalA != 0 && totalB != 0 && Math.Sign(totalA) != Math.Sign(totalB) && gap <= 1m;
+        if (bothZero || opposite)
+        {
+            pair.Status = "Matched";
+            pair.Difference = null;
+            pair.Message = bothZero
+                ? $"Bill totals both net to 0 after including the voucher-date line ({lines})"
+                : $"Reconciled after including the voucher-date line ({lines})";
+            return;
+        }
+
+        pair.Status = "PotentialMatch";
+        pair.Difference = gap;
+        pair.Message = $"Related bill includes the other side's voucher-date line ({lines}, diff {gap:N2})";
+    }
+
+    private static LedgerEntryDto SummarizeSide(List<LedgerEntryDto> entries, LedgerEntryDto? previous)
+    {
+        var total = entries.Sum(e => e.SignedAmount);
+        var first = entries[0];
+        return new LedgerEntryDto
+        {
+            RowIndex = previous?.RowIndex ?? first.RowIndex,
+            Company = previous?.Company ?? first.Company,
+            BillNo = string.IsNullOrWhiteSpace(previous?.BillNo) ? first.BillNo : previous!.BillNo,
+            BillDate = previous?.BillDate ?? first.BillDate,
+            Date = entries.Select(e => e.Date).Where(d => d.HasValue).OrderBy(d => d).FirstOrDefault(),
+            Particulars = entries.Count == 1 ? first.Particulars : $"Bill total ({entries.Count} lines)",
+            VoucherNo = entries.Count == 1 ? first.VoucherNo : "",
+            SignedAmount = total,
+            Debit = total < 0 ? Math.Abs(total) : 0m,
+            Credit = total > 0 ? total : 0m,
+        };
+    }
+
+    private static HashSet<string> BillKeys(ComparisonPairDto pair)
+    {
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(string? bill)
+        {
+            var key = BillKey(bill);
+            if (key.Length > 0) keys.Add(key);
+        }
+
+        Add(pair.EntryA?.BillNo);
+        Add(pair.EntryB?.BillNo);
+        foreach (var entry in pair.EntriesA.Concat(pair.EntriesB))
+            Add(entry.BillNo);
+        return keys;
+    }
+
+    private static string BillKey(string? billNo)
+    {
+        if (string.IsNullOrWhiteSpace(billNo)) return "";
+        var chars = billNo.Where(char.IsLetterOrDigit).ToArray();
+        return new string(chars).ToUpperInvariant();
+    }
+
+    private static string EntryKey(LedgerEntryDto entry) =>
+        $"{entry.VoucherNo}|{entry.Date:yyyy-MM-dd}|{entry.BillNo}|{entry.SignedAmount:0.00}";
 
     private ComparisonResultDto FinishCompare(
         List<LedgerEntryDto> entriesA,

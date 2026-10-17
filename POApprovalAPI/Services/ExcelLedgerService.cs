@@ -737,8 +737,8 @@ public class ExcelLedgerService
     }
 
     /// <summary>
-    /// Last pass. Anything still missing is paired when the absolute amounts are the same,
-    /// closest dates first. Same side is allowed: both books can show the same figure as a debit.
+    /// Last pass. Anything still missing is paired when the amounts are equal and opposite,
+    /// closest dates first. Same-sign leftovers stay missing: they do not cancel the closing difference.
     /// </summary>
     private static List<ComparisonPairDto> MatchUnmatchedByAmount(List<ComparisonPairDto> results, LedgerMatchOptions options)
     {
@@ -754,7 +754,7 @@ public class ExcelLedgerService
         {
             foreach (var right in missingOnA)
             {
-                if (!AbsAmountsClose(left.EntryA!, right.EntryB!, tolerance))
+                if (!OppositeSignedAmounts(left.EntryA!, right.EntryB!, tolerance))
                     continue;
                 pairs.Add((
                     left,
@@ -1087,15 +1087,8 @@ public class ExcelLedgerService
 
         // A shared year (26 in 688/26-27 and ESIC-Apr-26) is not the same bill.
         // A short serial outside the year pair still matches: 58/26-27 with HPBL/D/58.
-        if (!SharesBillSerial(tokensA.NumericTokens, tokensB.NumericTokens))
-        {
-            var lettersAgree = tokensA.AlphaTokens.Count > 0 && tokensB.AlphaTokens.Count > 0
-                && tokensA.AlphaTokens.Overlaps(tokensB.AlphaTokens);
-            if (!lettersAgree)
-                return false;
-        }
-
-        return true;
+        // A shared letter prefix (kpv on kpv/cr/26-27/4 and KPV/D/616/26-27) is not a serial.
+        return SharesBillSerial(tokensA.NumericTokens, tokensB.NumericTokens);
     }
 
     private static (HashSet<string> NumericTokens, HashSet<string> AlphaTokens) TokenizeBillNo(string value)
