@@ -17,6 +17,7 @@ import {
   ReceiptText,
   RefreshCw,
   Scale,
+  Factory,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -24,26 +25,38 @@ import {
   getGstDocumentSummary,
   type GstDocumentSeries,
 } from "@/lib/gst-api";
+import { itc04PeriodOptions } from "@/lib/gst-itc04-api";
 import { cn } from "@/lib/utils";
 import { Gstr1Return } from "@/components/gst/Gstr1Return";
 import { GstLiability } from "@/components/gst/GstLiability";
+import { GstItc04 } from "@/components/gst/GstItc04";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-type GstView = "summary" | "gstr1" | "liability";
+type GstView = "summary" | "gstr1" | "liability" | "itc04";
 
 interface GstSearch {
   view?: GstView;
   month?: string;
+  period?: string;
 }
 
 export const Route = createFileRoute("/_app/gst")({
   head: () => ({ meta: [{ title: "GST Compliance — PO Portal" }] }),
   validateSearch: (search: Record<string, unknown>): GstSearch => ({
     view:
-      search.view === "gstr1" || search.view === "summary" || search.view === "liability" ? search.view : undefined,
+      search.view === "gstr1" ||
+      search.view === "summary" ||
+      search.view === "liability" ||
+      search.view === "itc04"
+        ? search.view
+        : undefined,
     month: typeof search.month === "string" && /^\d{4}-\d{2}$/.test(search.month) ? search.month : undefined,
+    period:
+      typeof search.period === "string" && /^\d{4}-H[12]$/i.test(search.period)
+        ? search.period.toUpperCase()
+        : undefined,
   }),
   component: GstCompliancePage,
 });
@@ -73,13 +86,26 @@ const VIEWS: { key: GstView; label: string; title: string; description: string; 
       "Month-wise IGST / CGST / SGST output and input ledger balances per GST registration, with cash ledger balance and net payable.",
     icon: Scale,
   },
+  {
+    key: "itc04",
+    label: "ITC-04 Job Work",
+    title: "ITC-04 · Job Work",
+    description:
+      "Goods sent to and received back from job workers, grouped by manufacturer GSTIN, in the GST ITC-04 offline utility format.",
+    icon: Factory,
+  },
 ];
+
+function defaultItc04Period(): string {
+  return itc04PeriodOptions()[0]?.value ?? "2026-H2";
+}
 
 function GstCompliancePage() {
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
   const view: GstView = search.view ?? "summary";
   const month = search.month ?? previousMonth();
+  const period = search.period ?? defaultItc04Period();
   const active = VIEWS.find((v) => v.key === view) ?? VIEWS[1];
 
   const update = (next: Partial<GstSearch>) =>
@@ -98,7 +124,7 @@ function GstCompliancePage() {
         </div>
       </div>
 
-      <div className="flex w-full gap-1 rounded-xl border border-border bg-muted/40 p-1 sm:w-fit" role="tablist">
+      <div className="flex w-full flex-wrap gap-1 rounded-xl border border-border bg-muted/40 p-1 sm:w-fit" role="tablist">
         {VIEWS.map((v) => {
           const Icon = v.icon;
           const selected = v.key === view;
@@ -125,6 +151,8 @@ function GstCompliancePage() {
         <Gstr1Return month={month} onMonthChange={(m) => update({ month: m })} />
       ) : view === "liability" ? (
         <GstLiability month={month} onMonthChange={(m) => update({ month: m })} />
+      ) : view === "itc04" ? (
+        <GstItc04 period={period} onPeriodChange={(p) => update({ period: p })} />
       ) : (
         <GstDocumentSummaryPage month={month} onMonthChange={(m) => update({ month: m })} />
       )}
