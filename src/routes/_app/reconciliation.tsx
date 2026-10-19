@@ -1252,6 +1252,8 @@ function ReconciliationPage() {
                         status={row.status}
                         companyNameA={companyNameA}
                         companyNameB={companyNameB}
+                        label={openingMismatchLabel(row)}
+                        tip={openingMismatchTip(row)}
                         onLearnMore={() => openHelp(row.status)}
                       />
                       {row.difference != null && (
@@ -1321,6 +1323,8 @@ function ReconciliationPage() {
                         status={row.status}
                         companyNameA={companyNameA}
                         companyNameB={companyNameB}
+                        label={openingMismatchLabel(row)}
+                        tip={openingMismatchTip(row)}
                         onLearnMore={() => openHelp(row.status)}
                       />
                           </div>
@@ -2440,11 +2444,15 @@ function ResultBadge({
   status,
   companyNameA = "A",
   companyNameB = "B",
+  label: labelOverride,
+  tip: tipOverride,
   onLearnMore,
 }: {
   status: ComparisonStatus;
   companyNameA?: string;
   companyNameB?: string;
+  label?: string;
+  tip?: string;
   onLearnMore?: () => void;
 }) {
   const map: Record<ComparisonStatus, string> = {
@@ -2459,9 +2467,12 @@ function ResultBadge({
 
   const missingCompany =
     status === "MissingInA" ? companyNameA : status === "MissingInB" ? companyNameB : null;
-  const useStackedMissing = Boolean(missingCompany && missingCompany.length > 14);
-  const tip = STATUS_HELP[status];
-  const label = formatStatusLabel(status, companyNameA, companyNameB);
+  const useStackedMissing = !labelOverride && Boolean(missingCompany && missingCompany.length > 14);
+  const tip = tipOverride ?? STATUS_HELP[status];
+  const label = labelOverride ?? formatStatusLabel(status, companyNameA, companyNameB);
+  const tone = labelOverride
+    ? "bg-warning/15 text-warning border-warning/30"
+    : map[status];
   const tipId = useId();
   const anchorRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -2515,7 +2526,7 @@ function ResultBadge({
     <span
       className={cn(
         "inline-flex max-w-[9.5rem] flex-col items-center justify-center rounded-lg border px-2.5 py-1.5 text-center text-[10px] font-medium leading-snug",
-        map[status],
+        tone,
       )}
     >
       <span className="whitespace-nowrap">Missing in</span>
@@ -2525,10 +2536,10 @@ function ResultBadge({
     <span
       className={cn(
         "inline-flex max-w-[10rem] items-center justify-center gap-1 rounded-full border px-2.5 py-1 text-center text-[11px] font-medium leading-tight",
-        map[status],
+        tone,
       )}
     >
-      {status === "Duplicate" && <Copy className="h-3 w-3 shrink-0" />}
+      {status === "Duplicate" && !labelOverride && <Copy className="h-3 w-3 shrink-0" />}
       <span className="text-balance">{label}</span>
     </span>
   );
@@ -2830,6 +2841,8 @@ function DetailSheet({
                 status={pair.status}
                 companyNameA={companyNameA}
                 companyNameB={companyNameB}
+                label={openingMismatchLabel(pair)}
+                tip={openingMismatchTip(pair)}
                 onLearnMore={onOpenHelp ? () => onOpenHelp(pair.status) : undefined}
               />
               {isBillGroup && (
@@ -3043,6 +3056,20 @@ function LineList({
       </ul>
     </div>
   );
+}
+
+function isOpeningMismatch(row: ComparisonPair) {
+  return row.entryA?.voucherRef === "Opening" || row.entryB?.voucherRef === "Opening";
+}
+
+function openingMismatchLabel(row: ComparisonPair) {
+  return isOpeningMismatch(row) ? "Opening mismatch" : undefined;
+}
+
+function openingMismatchTip(row: ComparisonPair) {
+  return isOpeningMismatch(row)
+    ? "The two opening balances do not cancel. This amount is the difference."
+    : undefined;
 }
 
 function pairListTitle(row: ComparisonPair) {

@@ -243,7 +243,10 @@ ORDER BY
                 "Check company spelling against ERP CompanyName / LedgerName.");
         }
 
-        return FinishCompare(entriesA, entriesB, companyA, companyB, options, sideA.Closing, sideB.Closing);
+        var result = FinishCompare(entriesA, entriesB, companyA, companyB, options, sideA.Closing, sideB.Closing);
+        AddOpeningRows(result, sideA.Opening, sideB.Opening, companyA, companyB);
+        HideSettledOpening(result);
+        return result;
     }
 
     private static string FormatSwappedQuery(
@@ -459,8 +462,15 @@ WHERE CompanyName LIKE @CompanyPattern
         await AttachVoucherDateCounterpartsAsync(result, companyA, ledgerA, companyB, ledgerB, dateFrom, dateTo);
         ApplySalesPurchaseSign(result, ledgerA, ledgerB);
         await AttachPurchaseStockLegAsync(result, companyA, ledgerA, companyB, ledgerB);
+        NormalizeSalesPurchaseLedgerSign(result, ledgerA, ledgerB);
         HideSettledVoucherRemainders(result);
+        AddOpeningRows(result, sideA.Opening, sideB.Opening, companyA, companyB);
+        await MatchClosingExtrasOutsideBillDateAsync(result, companyA, ledgerA, companyB, ledgerB, dateFrom, dateTo);
         HideMissingThatDoNotExplainDifference(result);
+        HideMissingOutsideClosing(result, dateFrom, dateTo);
+        await AddClosingLinesMissingFromBillDateAsync(result, companyA, ledgerA, companyB, ledgerB, dateFrom, dateTo);
+        ReleaseMatchesPostedOutsideClosing(result, dateFrom, dateTo);
+        HideSettledOpening(result);
         return result;
     }
 
@@ -600,7 +610,10 @@ WHERE CompanyName LIKE @CompanyPattern
                 "Try a shorter override like 'HCP Enterprise' / 'Plastene India'.");
         }
 
-        return FinishCompare(entriesA, entriesB, companyA, companyB, options, sideA.Closing, sideB.Closing);
+        var result = FinishCompare(entriesA, entriesB, companyA, companyB, options, sideA.Closing, sideB.Closing);
+        AddOpeningRows(result, sideA.Opening, sideB.Opening, companyA, companyB);
+        HideSettledOpening(result);
+        return result;
     }
 
     public async Task<List<LedgerEntryDto>> FetchBillWiseForLedgersAsync(
@@ -1277,6 +1290,509 @@ WHERE CompanyName = @CompanyName
     }
 
     /// <summary>
+    /// Missing rows that already add up to the closing difference stay missing.
+    /// One leftover row, or one unique pair of leftovers, is the amount sitting outside that
+    /// difference. Pair it only when the other ledger has exactly one line for that amount
+    /// whose voucher date is inside the selected range and whose bill date is outside it.
+    /// </summary>
+    private async Task MatchClosingExtrasOutsideBillDateAsync(
+        ComparisonResultDto result,
+        string companyA,
+        string ledgerA,
+        string companyB,
+        string ledgerB,
+        DateTime? dateFrom,
+        DateTime? dateTo)
+    {
+        if (!result.Summary.ClosingKnown)
+            return;
+
+        var (from, toExclusive) = NormalizeDateRange(dateFrom, dateTo);
+        if (from == null || toExclusive == null)
+            return;
+
+        var extras = FindClosingExtras(result, from.Value, toExclusive.Value);
+        if (extras.Count == 0)
+            return;
+
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in result.Results)
+        {
+            foreach (var entry in pair.EntriesA.Concat(pair.EntriesB))
+                used.Add(OutsideLineKey(entry));
+        }
+
+        try
+        {
+            using var connection = _database.CreateConnection();
+            var resolved = new List<(ComparisonPairDto Extra, LedgerEntryDto Row, bool AddToA)>();
+            foreach (var extra in extras)
+            {
+                var addToA = extra.Status == "MissingInA";
+                var company = addToA ? companyA : companyB;
+                var ledger = addToA ? ledgerA : ledgerB;
+                var source = extra.EntryA ?? extra.EntryB;
+                if (source == null)
+                    continue;
+                var amount = Math.Abs(SignedMissing(extra));
+                var found = await FindOutsideRangeCounterpartAsync(
+                    connection, company, ledger, amount, from.Value, toExclusive.Value);
+                var fresh = found.Where(row => !used.Contains(OutsideLineKey(row))).ToList();
+                var sameDay = fresh.Where(row => row.Date?.Date == source.Date?.Date).ToList();
+                if (sameDay.Count == 1)
+                    fresh = sameDay;
+                else if (sameDay.Count > 1)
+                    continue;
+                else
+                {
+                    var sameVoucher = fresh.Where(row =>
+                        string.Equals((row.VoucherNo ?? "").Trim(), (source.VoucherNo ?? "").Trim(), StringComparison.OrdinalIgnoreCase)
+                        && (source.VoucherNo ?? "").Trim().Length > 0).ToList();
+                    if (sameVoucher.Count == 1)
+                        fresh = sameVoucher;
+                    else if (sameVoucher.Count > 1 || fresh.Count != 1)
+                        continue;
+                }
+                var row = fresh[0];
+                if (!used.Add(OutsideLineKey(row)))
+                    continue;
+                resolved.Add((extra, row, addToA));
+            }
+
+            var nextIndex = result.Results
+                .SelectMany(p => p.EntriesA.Concat(p.EntriesB))
+                .Select(e => e.RowIndex)
+                .DefaultIfEmpty(0)
+                .Max() + 1;
+            foreach (var (extra, row, addToA) in resolved)
+            {
+                row.RowIndex = nextIndex++;
+                if (addToA)
+                {
+                    extra.EntriesA.Add(row);
+                    extra.EntryA = extra.EntriesA.Count == 1 ? row : SummarizeSide(extra.EntriesA, extra.EntryA);
+                    result.Summary.TotalA += 1;
+                }
+                else
+                {
+                    extra.EntriesB.Add(row);
+                    extra.EntryB = extra.EntriesB.Count == 1 ? row : SummarizeSide(extra.EntriesB, extra.EntryB);
+                    result.Summary.TotalB += 1;
+                }
+
+                extra.Status = "Matched";
+                extra.Difference = null;
+                extra.MatchKind = extra.EntriesA.Count + extra.EntriesB.Count > 2 ? extra.MatchKind : "row";
+                extra.Message = $"Same amount {row.Amount:N2} on a bill date outside the selected range";
+            }
+
+            if (resolved.Count > 0)
+                NormalizeSalesPurchaseLedgerSign(result, ledgerA, ledgerB);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Outside bill-date extra lookup skipped: {ex.Message}");
+        }
+    }
+
+    private static List<ComparisonPairDto> FindClosingExtras(
+        ComparisonResultDto result,
+        DateTime from,
+        DateTime toExclusive)
+    {
+        var missing = result.Results
+            .Where(pair => pair.Status is "MissingInA" or "MissingInB")
+            .ToList();
+        if (missing.Count == 0)
+            return [];
+
+        var picked = new List<ComparisonPairDto>();
+        var sum = missing.Sum(SignedMissing);
+        var gap = sum - result.Summary.ClosingDifference;
+        var candidates = missing.Where(pair => !IsOpeningMismatch(pair)).ToList();
+        if (Math.Abs(gap) > 1m)
+        {
+            var singles = candidates.Where(pair => Math.Abs(SignedMissing(pair) - gap) <= 1m).ToList();
+            if (singles.Count == 1)
+                picked.Add(singles[0]);
+            else if (singles.Count == 0)
+            {
+                var pairs = new List<ComparisonPairDto[]>();
+                for (var i = 0; i < candidates.Count; i++)
+                {
+                    for (var j = i + 1; j < candidates.Count; j++)
+                    {
+                        if (Math.Abs(SignedMissing(candidates[i]) + SignedMissing(candidates[j]) - gap) <= 1m)
+                            pairs.Add([candidates[i], candidates[j]]);
+                    }
+                }
+                if (pairs.Count == 1)
+                    picked.AddRange(pairs[0]);
+            }
+        }
+
+        foreach (var pair in candidates)
+        {
+            var day = (pair.EntryA ?? pair.EntryB)?.Date?.Date;
+            if (day == null || picked.Contains(pair))
+                continue;
+            if (day < from || day >= toExclusive)
+                picked.Add(pair);
+        }
+
+        return picked;
+    }
+
+    private static decimal SignedMissing(ComparisonPairDto pair) =>
+        pair.EntriesA.Sum(e => e.SignedAmount) + pair.EntriesB.Sum(e => e.SignedAmount);
+
+    private static bool IsOpeningMismatch(ComparisonPairDto pair) =>
+        string.Equals(pair.EntryA?.VoucherRef, "Opening", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(pair.EntryB?.VoucherRef, "Opening", StringComparison.OrdinalIgnoreCase);
+
+    private static string OutsideLineKey(LedgerEntryDto entry) =>
+        $"{(entry.VoucherNo ?? "").Trim()}|{(entry.Date?.ToString("yyyy-MM-dd") ?? "")}|{(entry.BillNo ?? "").Trim()}|{Math.Abs(entry.SignedAmount):0.00}";
+
+    private async Task<List<LedgerEntryDto>> FindOutsideRangeCounterpartAsync(
+        System.Data.Common.DbConnection connection,
+        string company,
+        string ledger,
+        decimal amount,
+        DateTime from,
+        DateTime toExclusive)
+    {
+        var sql = @"
+SELECT
+    CompanyName,
+    LedgerName,
+    VoucherNo,
+    VoucherDate,
+    BillNo,
+    BillDate,
+    Amount,
+    RefType
+FROM dbo.vw_BillWiseTransactionWithOnAccount WITH (NOLOCK)
+WHERE CompanyName = @CompanyName
+  AND LedgerName = @LedgerName
+  AND ABS(Amount) BETWEEN @Amount - 0.01 AND @Amount + 0.01
+  AND (
+        BillDate IS NULL OR BillDate < @From OR BillDate >= @ToExclusive
+        OR VoucherDate < @From OR VoucherDate >= @ToExclusive
+      )";
+
+        var rows = (await connection.QueryAsync(sql, new
+        {
+            CompanyName = company,
+            LedgerName = ledger,
+            Amount = amount,
+            From = from,
+            ToExclusive = toExclusive,
+        }, commandTimeout: 180)).ToList();
+
+        var entries = new List<LedgerEntryDto>();
+        foreach (var row in rows)
+        {
+            var entry = MapRow(row, 0);
+            if (entry != null)
+                entries.Add(entry);
+        }
+        return entries;
+    }
+
+    /// <summary>
+    /// Last step. A line posted outside the closing must not hide the line that is inside it.
+    /// The outside line is dropped. The inside line goes back to missing, with the sign it had
+    /// before the sales-versus-purchase adjustment.
+    /// </summary>
+    private static void ReleaseMatchesPostedOutsideClosing(ComparisonResultDto result, DateTime? dateFrom, DateTime? dateTo)
+    {
+        var (from, toExclusive) = NormalizeDateRange(dateFrom, dateTo);
+        if (from == null || toExclusive == null)
+            return;
+
+        bool Inside(LedgerEntryDto entry) =>
+            entry.Date != null && entry.Date.Value.Date >= from && entry.Date.Value.Date < toExclusive;
+
+        var removedA = 0;
+        var removedB = 0;
+        foreach (var pair in result.Results)
+        {
+            if (pair.EntriesA.Count == 0 || pair.EntriesB.Count == 0)
+                continue;
+            if (pair.Status is not ("Matched" or "PotentialMatch" or "AmountMismatch"))
+                continue;
+
+            var aInside = pair.EntriesA.All(Inside);
+            var bInside = pair.EntriesB.All(Inside);
+            var aOutside = pair.EntriesA.All(entry => !Inside(entry));
+            var bOutside = pair.EntriesB.All(entry => !Inside(entry));
+            if (!(aInside && bOutside) && !(bInside && aOutside))
+                continue;
+
+            var (recordedA, recordedB) = RecordedSides(pair.Message);
+            if (aInside && recordedA.Length > 0 && pair.EntryA != null && pair.EntryA.Side != recordedA)
+                FlipSide(pair.EntriesA);
+            if (bInside && recordedB.Length > 0 && pair.EntryB != null && pair.EntryB.Side != recordedB)
+                FlipSide(pair.EntriesB);
+
+            if (aOutside)
+            {
+                removedA += pair.EntriesA.Count;
+                pair.EntriesA.Clear();
+                pair.EntryA = null;
+                pair.Status = "MissingInA";
+                pair.EntryB = pair.EntriesB.Count == 1 ? pair.EntriesB[0] : SummarizeSide(pair.EntriesB, pair.EntryB);
+            }
+            else
+            {
+                removedB += pair.EntriesB.Count;
+                pair.EntriesB.Clear();
+                pair.EntryB = null;
+                pair.Status = "MissingInB";
+                pair.EntryA = pair.EntriesA.Count == 1 ? pair.EntriesA[0] : SummarizeSide(pair.EntriesA, pair.EntryA);
+            }
+
+            pair.Difference = null;
+            pair.MatchKind = "row";
+            pair.Message = "In the closing. The other side is posted outside the selected voucher dates.";
+        }
+
+        if (removedA == 0 && removedB == 0)
+            return;
+
+        result.Summary.TotalA = Math.Max(0, result.Summary.TotalA - removedA);
+        result.Summary.TotalB = Math.Max(0, result.Summary.TotalB - removedB);
+        RecountSummary(result);
+    }
+
+    private static (string A, string B) RecordedSides(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return ("", "");
+        var marker = "reconciles with";
+        var at = message.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (at < 0)
+            return ("", "");
+        var left = message[..at];
+        var colon = left.LastIndexOf(':');
+        if (colon >= 0)
+            left = left[(colon + 1)..];
+        var right = message[(at + marker.Length)..];
+        return (SideWord(left), SideWord(right));
+    }
+
+    private static string SideWord(string text)
+    {
+        if (text.Contains("Debit", StringComparison.OrdinalIgnoreCase))
+            return "Debit";
+        if (text.Contains("Credit", StringComparison.OrdinalIgnoreCase))
+            return "Credit";
+        return "";
+    }
+
+    /// <summary>
+    /// Last step. A missing row whose voucher date is outside the selected range is not in the
+    /// closing, so it is not shown. Runs only after matching has finished. The opening row stays.
+    /// </summary>
+    private static void HideMissingOutsideClosing(ComparisonResultDto result, DateTime? dateFrom, DateTime? dateTo)
+    {
+        var (from, toExclusive) = NormalizeDateRange(dateFrom, dateTo);
+        if (from == null || toExclusive == null)
+            return;
+
+        var removedA = 0;
+        var removedB = 0;
+        result.Results = result.Results.Where(pair =>
+        {
+            if (pair.Status is not ("MissingInA" or "MissingInB"))
+                return true;
+            if (IsOpeningMismatch(pair))
+                return true;
+
+            var dated = pair.EntriesA.Concat(pair.EntriesB)
+                .Where(entry => entry.Date != null)
+                .Select(entry => entry.Date!.Value.Date)
+                .ToList();
+            if (dated.Count == 0 || dated.Any(day => day >= from && day < toExclusive))
+                return true;
+
+            removedA += pair.EntriesA.Count;
+            removedB += pair.EntriesB.Count;
+            return false;
+        }).ToList();
+
+        if (removedA == 0 && removedB == 0)
+            return;
+
+        result.Summary.TotalA = Math.Max(0, result.Summary.TotalA - removedA);
+        result.Summary.TotalB = Math.Max(0, result.Summary.TotalB - removedB);
+        RecountSummary(result);
+    }
+
+    /// <summary>
+    /// Last step. A line can sit in the closing because its voucher date is in range while its
+    /// bill date is outside, so a bill-date run never loaded it. Add that line to the missing
+    /// list when it is the gap between the missing rows and the closing difference.
+    /// </summary>
+    private async Task AddClosingLinesMissingFromBillDateAsync(
+        ComparisonResultDto result,
+        string companyA,
+        string ledgerA,
+        string companyB,
+        string ledgerB,
+        DateTime? dateFrom,
+        DateTime? dateTo)
+    {
+        if (!result.Summary.ClosingKnown)
+            return;
+
+        var (from, toExclusive) = NormalizeDateRange(dateFrom, dateTo);
+        if (from == null || toExclusive == null)
+            return;
+
+        var missing = result.Results
+            .Where(pair => pair.Status is "MissingInA" or "MissingInB")
+            .ToList();
+        var shown = missing.Sum(ShownContribution);
+        var gap = result.Summary.ClosingDifference - shown;
+        if (Math.Abs(gap) <= 1m)
+            return;
+
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in result.Results)
+        {
+            foreach (var entry in pair.EntriesA.Concat(pair.EntriesB))
+                used.Add(OutsideLineKey(entry));
+        }
+
+        try
+        {
+            using var connection = _database.CreateConnection();
+            var onA = await FindVoucherInsideBillOutsideAsync(connection, companyA, ledgerA, from.Value, toExclusive.Value);
+            var onB = await FindVoucherInsideBillOutsideAsync(connection, companyB, ledgerB, from.Value, toExclusive.Value);
+            var candidates = new List<(LedgerEntryDto Row, bool OnA)>();
+            foreach (var row in onA)
+            {
+                if (used.Contains(OutsideLineKey(row)))
+                    continue;
+                candidates.Add((row, true));
+            }
+            foreach (var row in onB)
+            {
+                if (used.Contains(OutsideLineKey(row)))
+                    continue;
+                candidates.Add((row, false));
+            }
+
+            var singles = candidates.Where(item => Math.Abs(item.Row.SignedAmount - gap) <= 1m).ToList();
+            var chosen = new List<(LedgerEntryDto Row, bool OnA)>();
+            if (singles.Count == 1)
+                chosen.Add(singles[0]);
+            else if (singles.Count == 0)
+            {
+                var pairs = new List<(int I, int J)>();
+                for (var i = 0; i < candidates.Count; i++)
+                {
+                    for (var j = i + 1; j < candidates.Count; j++)
+                    {
+                        var sum = candidates[i].Row.SignedAmount + candidates[j].Row.SignedAmount;
+                        if (Math.Abs(sum - gap) <= 1m)
+                            pairs.Add((i, j));
+                    }
+                }
+                if (pairs.Count == 1)
+                {
+                    chosen.Add(candidates[pairs[0].I]);
+                    chosen.Add(candidates[pairs[0].J]);
+                }
+            }
+
+            if (chosen.Count == 0)
+                return;
+
+            var nextIndex = result.Results
+                .SelectMany(p => p.EntriesA.Concat(p.EntriesB))
+                .Select(e => e.RowIndex)
+                .DefaultIfEmpty(0)
+                .Max() + 1;
+            foreach (var (row, belongsToA) in chosen)
+            {
+                row.RowIndex = nextIndex++;
+                result.Results.Add(new ComparisonPairDto
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Status = belongsToA ? "MissingInB" : "MissingInA",
+                    MatchKind = "row",
+                    Message = "In the closing. Bill date is outside the selected range.",
+                    EntryA = belongsToA ? row : null,
+                    EntryB = belongsToA ? null : row,
+                    EntriesA = belongsToA ? [row] : [],
+                    EntriesB = belongsToA ? [] : [row],
+                });
+                if (belongsToA) result.Summary.TotalA += 1;
+                else result.Summary.TotalB += 1;
+            }
+
+            RecountSummary(result);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Closing bill-date gap lookup skipped: {ex.Message}");
+        }
+    }
+
+    private static decimal ShownContribution(ComparisonPairDto pair)
+    {
+        var entry = pair.EntryA ?? pair.EntryB;
+        var amount = Math.Abs(SignedMissing(pair));
+        if (entry == null)
+            return 0m;
+        return entry.Side == "Debit" ? -amount : amount;
+    }
+
+    private async Task<List<LedgerEntryDto>> FindVoucherInsideBillOutsideAsync(
+        System.Data.Common.DbConnection connection,
+        string company,
+        string ledger,
+        DateTime from,
+        DateTime toExclusive)
+    {
+        var sql = @"
+SELECT
+    CompanyName,
+    LedgerName,
+    VoucherNo,
+    VoucherDate,
+    BillNo,
+    BillDate,
+    Amount,
+    RefType
+FROM dbo.vw_BillWiseTransactionWithOnAccount WITH (NOLOCK)
+WHERE CompanyName = @CompanyName
+  AND LedgerName = @LedgerName
+  AND VoucherDate >= @From
+  AND VoucherDate < @ToExclusive
+  AND (BillDate IS NULL OR BillDate < @From OR BillDate >= @ToExclusive)";
+
+        var rows = (await connection.QueryAsync(sql, new
+        {
+            CompanyName = company,
+            LedgerName = ledger,
+            From = from,
+            ToExclusive = toExclusive,
+        }, commandTimeout: 180)).ToList();
+
+        var entries = new List<LedgerEntryDto>();
+        foreach (var row in rows)
+        {
+            var entry = MapRow(row, 0);
+            if (entry != null)
+                entries.Add(entry);
+        }
+        return entries;
+    }
+
+    /// <summary>
     /// When the two closings already agree (within ₹1), missing rows stay only if their signed
     /// total is that difference. One row or several rows can make that total. A large closing
     /// difference keeps its missing rows, because those rows are the unmatched balance.
@@ -1542,7 +2058,7 @@ WHERE CompanyName = @CompanyName
     /// Bill-wise rows miss journals, on-account credit notes, and some inter-unit lines.
     /// Pull the same ledger from the ledger summary and add only what the view does not already cover.
     /// </summary>
-    private async Task<(List<LedgerEntryDto> Entries, decimal Closing)> SupplementSideAsync(
+    private async Task<(List<LedgerEntryDto> Entries, decimal Closing, decimal Opening)> SupplementSideAsync(
         string companyName,
         string? exactLedger,
         string otherCompanyName,
@@ -1575,11 +2091,11 @@ ORDER BY LEN(fi.Name)",
             }
 
             if (companyId is null or 0)
-                return (entries, 0m);
+                return (entries, 0m, 0m);
 
             var ledgers = await ResolveSupplementLedgersAsync(connection, companyId.Value, exactLedger, otherCompanyName, entries);
             if (ledgers.Count == 0)
-                return (entries, 0m);
+                return (entries, 0m, 0m);
 
             var from = (dateFrom ?? new DateTime(1990, 4, 1)).Date;
             var to = (dateTo ?? DateTime.Today).Date;
@@ -1587,6 +2103,7 @@ ORDER BY LEN(fi.Name)",
                 (from, to) = (to, from);
 
             var closing = 0m;
+            var opening = 0m;
             var nextIndex = entries.Count == 0 ? 1 : entries.Max(e => e.RowIndex) + 1;
             var merged = new List<LedgerEntryDto>(entries);
 
@@ -1597,17 +2114,18 @@ ORDER BY LEN(fi.Name)",
                     continue;
 
                 closing += LedgerClosing(table);
+                opening += LedgerOpening(table);
                 var added = MissingLedgerLines(merged, table, companyName, ref nextIndex);
                 merged.AddRange(added);
             }
 
             Console.WriteLine($"Ledger supplement {companyName}: +{merged.Count - entries.Count} lines, closing {closing:0.00}");
-            return (merged, closing);
+            return (merged, closing, opening);
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Ledger supplement skipped for {companyName}: {ex.Message}");
-            return (entries, 0m);
+            return (entries, 0m, 0m);
         }
     }
 
@@ -1695,6 +2213,203 @@ WHERE ISNULL(l.LedgerName, '') <> ''
         p.ParameterName = name;
         p.Value = value;
         cmd.Parameters.Add(p);
+    }
+
+    /// <summary>
+    /// The opening row is how far apart the books were on the first day. Keep it only
+    /// when that old gap is still inside today's closing difference. If the other
+    /// missing rows and the small gaps on potential matches already add up to the
+    /// closing difference, the opening has been settled and the row is removed.
+    /// </summary>
+    private static void HideSettledOpening(ComparisonResultDto result)
+    {
+        if (!result.Summary.ClosingKnown)
+            return;
+        if (!result.Results.Any(IsOpeningMismatch))
+            return;
+
+        var explained = 0m;
+        foreach (var pair in result.Results)
+        {
+            if (IsOpeningMismatch(pair))
+                continue;
+            if (pair.Status is "MissingInA" or "MissingInB")
+                explained += ShownContribution(pair);
+            else if (pair.Status is "PotentialMatch" or "AmountMismatch")
+                explained += UnsettledPairContribution(pair);
+        }
+
+        if (Math.Abs(explained - result.Summary.ClosingDifference) > 1m)
+            return;
+
+        var removedA = 0;
+        var removedB = 0;
+        result.Results = result.Results.Where(pair =>
+        {
+            if (!IsOpeningMismatch(pair))
+                return true;
+            removedA += pair.EntriesA.Count;
+            removedB += pair.EntriesB.Count;
+            return false;
+        }).ToList();
+
+        result.Summary.TotalA = Math.Max(0, result.Summary.TotalA - removedA);
+        result.Summary.TotalB = Math.Max(0, result.Summary.TotalB - removedB);
+        RecountSummary(result);
+    }
+
+    /// <summary>
+    /// Two opposite sides cancel down to the amount they still disagree by.
+    /// That leftover is what the closing difference still contains.
+    /// </summary>
+    private static decimal UnsettledPairContribution(ComparisonPairDto pair)
+    {
+        var totalA = pair.EntriesA.Sum(e => e.SignedAmount);
+        var totalB = pair.EntriesB.Sum(e => e.SignedAmount);
+        if (Math.Abs(totalA) > 0.01m && Math.Abs(totalB) > 0.01m && Math.Sign(totalA) != Math.Sign(totalB))
+            return -(totalA + totalB);
+
+        var sum = 0m;
+        foreach (var entry in pair.EntriesA.Concat(pair.EntriesB))
+        {
+            var amount = Math.Abs(entry.SignedAmount);
+            sum += entry.Side == "Debit" ? -amount : amount;
+        }
+        return sum;
+    }
+
+    /// <summary>
+    /// The opening is part of the closing. Show it when the two openings do not cancel,
+    /// so the missing rows can add up to the closing difference. When they cancel, leave
+    /// the compare as it was.
+    /// </summary>
+    private static void AddOpeningRows(
+        ComparisonResultDto result,
+        decimal openingA,
+        decimal openingB,
+        string companyA,
+        string companyB)
+    {
+        var net = openingA + openingB;
+        if (Math.Abs(net) <= 1m)
+            return;
+
+        // One residual row. The two gross openings mostly cancel, and showing both
+        // would look like a crore-sized hole that is not in the closing difference.
+        var onA = Math.Abs(openingA) >= Math.Abs(openingB);
+        result.Results.Add(OpeningPair(net, onA ? companyA : companyB, missingOnB: onA));
+        if (onA) result.Summary.TotalA += 1;
+        else result.Summary.TotalB += 1;
+        RecountSummary(result);
+    }
+
+    private static ComparisonPairDto OpeningPair(decimal amount, string company, bool missingOnB)
+    {
+        var entry = new LedgerEntryDto
+        {
+            Company = company,
+            Particulars = "Opening mismatch",
+            VoucherNo = "Opening",
+            VoucherRef = "Opening",
+            BillNo = "",
+            SignedAmount = amount,
+            Debit = amount > 0 ? amount : 0m,
+            Credit = amount < 0 ? Math.Abs(amount) : 0m,
+        };
+        return new ComparisonPairDto
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Status = missingOnB ? "MissingInB" : "MissingInA",
+            MatchKind = "row",
+            Message = "Opening mismatch. The two opening balances do not cancel, and this amount is the difference.",
+            EntryA = missingOnB ? entry : null,
+            EntryB = missingOnB ? null : entry,
+            EntriesA = missingOnB ? [entry] : [],
+            EntriesB = missingOnB ? [] : [entry],
+        };
+    }
+
+    /// <summary>
+    /// Sales-versus-purchase compare: the sales net is a debit and the purchase net is a credit.
+    /// The whole side flips together, so a bill and its note keep their offset and a match stays a match.
+    /// One-sided rows keep the ledger sign so the missing rows still add up to the closing difference.
+    /// </summary>
+    private static void NormalizeSalesPurchaseLedgerSign(ComparisonResultDto result, string ledgerA, string ledgerB)
+    {
+        if (!TrySalesPurchaseSides(ledgerA, ledgerB, out var salesIsA))
+            return;
+
+        foreach (var pair in result.Results)
+        {
+            var salesLines = salesIsA ? pair.EntriesA : pair.EntriesB;
+            var purchaseLines = salesIsA ? pair.EntriesB : pair.EntriesA;
+            if (salesLines.Count == 0 || purchaseLines.Count == 0)
+                continue;
+
+            var salesNet = salesLines.Sum(line => line.SignedAmount);
+            var purchaseNet = purchaseLines.Sum(line => line.SignedAmount);
+            // Flip the whole side, never one line. A bill and its debit note have to
+            // keep offsetting, otherwise a match that already nets out breaks apart.
+            // A row that is only on one side keeps the ledger sign, because that sign
+            // is what has to add up to the closing difference.
+            var salesWrong = salesNet > 0.5m;
+            var purchaseWrong = purchaseNet < -0.5m;
+            if (!salesWrong && !purchaseWrong)
+                continue;
+
+            if (salesWrong) FlipSide(salesLines);
+            if (purchaseWrong) FlipSide(purchaseLines);
+
+            pair.EntryA = SummarizeSide(pair.EntriesA, pair.EntryA);
+            pair.EntryB = SummarizeSide(pair.EntriesB, pair.EntryB);
+
+            var totalA = pair.EntriesA.Sum(e => e.SignedAmount);
+            var totalB = pair.EntriesB.Sum(e => e.SignedAmount);
+            var gap = Math.Abs(Math.Abs(totalA) - Math.Abs(totalB));
+            var bothZero = Math.Abs(totalA) <= 1m && Math.Abs(totalB) <= 1m;
+            var opposite = totalA != 0 && totalB != 0 && Math.Sign(totalA) != Math.Sign(totalB) && gap <= 1m;
+            if (bothZero || opposite)
+            {
+                if (pair.Status != "Matched")
+                {
+                    pair.Status = "Matched";
+                    pair.Difference = null;
+                }
+                continue;
+            }
+
+            if (pair.Status == "Matched")
+            {
+                pair.Status = "PotentialMatch";
+                pair.Difference = gap;
+                pair.Message = $"Sales and purchase signs do not reconcile ({pair.EntriesA.Count} ↔ {pair.EntriesB.Count} lines, diff {gap:N2})";
+            }
+        }
+
+        RecountSummary(result);
+    }
+
+    private static void FlipSide(List<LedgerEntryDto> lines)
+    {
+        foreach (var line in lines)
+        {
+            if (line.SignedAmount == 0m)
+                continue;
+            line.SignedAmount = -line.SignedAmount;
+            line.Debit = line.SignedAmount < 0 ? Math.Abs(line.SignedAmount) : 0m;
+            line.Credit = line.SignedAmount > 0 ? line.SignedAmount : 0m;
+        }
+    }
+
+    private static decimal LedgerOpening(DataTable table)
+    {
+        var opening = 0m;
+        foreach (DataRow row in table.Rows)
+        {
+            if (string.Equals(CellString(row, "VoucherType"), "z", StringComparison.OrdinalIgnoreCase))
+                opening += CellDecimal(row, "amount", "Amount");
+        }
+        return opening;
     }
 
     private static decimal LedgerClosing(DataTable table)

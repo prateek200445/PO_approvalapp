@@ -648,6 +648,7 @@ public class ExcelLedgerService
         }
 
         results = PromoteMissingPairsToPotential(results, options);
+        results = MatchSameDayTransfers(results);
         results = MatchUnmatchedByAmount(results, options);
 
         return new ComparisonResultDto
@@ -737,35 +738,103 @@ public class ExcelLedgerService
     }
 
     /// <summary>
-    /// Last pass. Anything still missing is paired when the amounts are equal and opposite,
-    /// closest dates first. Same-sign leftovers stay missing: they do not cancel the closing difference.
+    /// A bank or internal transfer can carry a different voucher number on each ledger.
+    /// Pair it when the amount and the voucher date are the same and the signs are opposite.
+    /// </summary>
+    private static List<ComparisonPairDto> MatchSameDayTransfers(List<ComparisonPairDto> results)
+    {
+        var list = results.ToList();
+        var missingOnB = list.Where(r => r.Status == "MissingInB" && r.EntryA != null && IsTransferLine(r.EntryA)).ToList();
+        var missingOnA = list.Where(r => r.Status == "MissingInA" && r.EntryB != null && IsTransferLine(r.EntryB)).ToList();
+        if (missingOnB.Count == 0 || missingOnA.Count == 0)
+            return list;
+
+        var consumed = new HashSet<string>();
+        var extra = new List<ComparisonPairDto>();
+        foreach (var left in missingOnB)
+        {
+            if (consumed.Contains(left.Id) || left.EntryA?.Date == null)
+                continue;
+            var right = missingOnA.FirstOrDefault(candidate =>
+                !consumed.Contains(candidate.Id)
+                && candidate.EntryB?.Date != null
+                && candidate.EntryB.Date.Value.Date == left.EntryA.Date.Value.Date
+                && OppositeSignedAmounts(left.EntryA, candidate.EntryB, 0.01m));
+            if (right?.EntryB == null)
+                continue;
+
+            consumed.Add(left.Id);
+            consumed.Add(right.Id);
+            var entryA = left.EntryA;
+            var entryB = right.EntryB;
+            extra.Add(new ComparisonPairDto
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Status = "Matched",
+                MatchKind = "row",
+                Message = $"Same amount {entryA.Amount:N2} on the same day",
+                EntryA = entryA,
+                EntryB = entryB,
+                EntriesA = left.EntriesA is { Count: > 0 } ? left.EntriesA : [entryA],
+                EntriesB = right.EntriesB is { Count: > 0 } ? right.EntriesB : [entryB],
+            });
+        }
+
+        if (consumed.Count == 0)
+            return list;
+
+        list.RemoveAll(r => consumed.Contains(r.Id));
+        list.AddRange(extra);
+        return list;
+    }
+
+    private static bool IsTransferLine(LedgerEntryDto entry)
+    {
+        var text = $"{entry.VoucherRef} {entry.Particulars} {entry.VoucherNo}";
+        return text.Contains("bank", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("transfer", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("payment", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("receipt", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Last pass. Anything still missing is paired when the amounts are equal,
+    /// closest dates first. Opposite signs win when several rows share an amount.
+    /// A same-sign pair still matches: a ledger supplement and a bill can both be
+    /// stored negative for the same invoice.
     /// </summary>
     private static List<ComparisonPairDto> MatchUnmatchedByAmount(List<ComparisonPairDto> results, LedgerMatchOptions options)
     {
         var list = results.ToList();
-        var missingOnB = list.Where(r => r.Status == "MissingInB" && r.EntryA != null).ToList();
-        var missingOnA = list.Where(r => r.Status == "MissingInA" && r.EntryB != null).ToList();
+        var missingOnB = list.Where(r => r.Status == "MissingInB" && r.EntryA != null && !IsOpeningRow(r)).ToList();
+        var missingOnA = list.Where(r => r.Status == "MissingInA" && r.EntryB != null && !IsOpeningRow(r)).ToList();
         if (missingOnB.Count == 0 || missingOnA.Count == 0)
             return list;
 
         var tolerance = Math.Max(options.AmountTolerance, 0.01m);
-        var pairs = new List<(ComparisonPairDto Left, ComparisonPairDto Right, int Days)>();
+        var pairs = new List<(ComparisonPairDto Left, ComparisonPairDto Right, int Days, int OppositeFirst)>();
         foreach (var left in missingOnB)
         {
             foreach (var right in missingOnA)
             {
-                if (!OppositeSignedAmounts(left.EntryA!, right.EntryB!, tolerance))
+                var entryA = left.EntryA!;
+                var entryB = right.EntryB!;
+                if (entryA.Amount <= 0.01m || entryB.Amount <= 0.01m)
                     continue;
+                if (!AbsAmountsClose(entryA, entryB, tolerance))
+                    continue;
+                var opposite = OppositeSignedAmounts(entryA, entryB, tolerance) ? 0 : 1;
                 pairs.Add((
                     left,
                     right,
-                    DateDiff(left.EntryA!.BillDate ?? left.EntryA.Date, right.EntryB!.BillDate ?? right.EntryB.Date)));
+                    DateDiff(entryA.BillDate ?? entryA.Date, entryB.BillDate ?? entryB.Date),
+                    opposite));
             }
         }
 
         var consumed = new HashSet<string>();
         var extra = new List<ComparisonPairDto>();
-        foreach (var pair in pairs.OrderBy(p => p.Days).ThenBy(p => p.Left.Id).ThenBy(p => p.Right.Id))
+        foreach (var pair in pairs.OrderBy(p => p.OppositeFirst).ThenBy(p => p.Days).ThenBy(p => p.Left.Id).ThenBy(p => p.Right.Id))
         {
             if (consumed.Contains(pair.Left.Id) || consumed.Contains(pair.Right.Id))
                 continue;
@@ -797,6 +866,10 @@ public class ExcelLedgerService
         list.AddRange(extra);
         return list;
     }
+
+    private static bool IsOpeningRow(ComparisonPairDto pair) =>
+        string.Equals(pair.EntryA?.VoucherRef, "Opening", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(pair.EntryB?.VoucherRef, "Opening", StringComparison.OrdinalIgnoreCase);
 
     private static Dictionary<string, BillGroup> BuildBillGroups(List<LedgerEntryDto> entries)
     {
