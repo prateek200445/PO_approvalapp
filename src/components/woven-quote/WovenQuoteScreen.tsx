@@ -120,11 +120,12 @@ function QuoteList({ onOpen }: { onOpen: (id: number) => void }) {
               <th className="py-2 pr-3 font-medium">Terms</th>
               <th className="py-2 pr-3 text-right font-medium">Weight g</th>
               <th className="py-2 text-right font-medium">Price / pc</th>
+              <th className="py-2 pl-3 text-right font-medium"> </th>
             </tr>
           </thead>
           <tbody>
             {query.data?.map((row) => (
-              <tr key={row.id} className="cursor-pointer border-b border-border/70 hover:bg-muted/40" onClick={() => onOpen(row.id)}>
+              <tr key={row.id} className="border-b border-border/70 hover:bg-muted/40">
                 <td className="py-2.5 pr-3">{row.quoteDate.slice(0, 10)}</td>
                 <td className="py-2.5 pr-3 font-medium">{row.customerName}</td>
                 <td className="py-2.5 pr-3">{row.ourRef || row.customerRef || "—"}</td>
@@ -132,10 +133,11 @@ function QuoteList({ onOpen }: { onOpen: (id: number) => void }) {
                 <td className="py-2.5 pr-3">{row.terms} {row.currency}</td>
                 <td className="py-2.5 pr-3 text-right tabular-nums">{formatQty(row.totalWeightGram, 1)}</td>
                 <td className="py-2.5 text-right font-semibold tabular-nums">{formatQty(row.pricePerPiece, 4)} {row.currency}</td>
+                <td className="py-2.5 pl-3 text-right"><Button size="sm" variant="outline" onClick={() => onOpen(row.id)}>Edit</Button></td>
               </tr>
             ))}
             {query.data?.length === 0 ? (
-              <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">No quotations yet.</td></tr>
+              <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">No quotations yet.</td></tr>
             ) : null}
           </tbody>
         </table>
@@ -437,8 +439,9 @@ function WovenSheet({
 }
 
 function withPercentWastage(draft: WovenDraft): WovenDraft {
-  return {
+    return {
     ...draft,
+    quoteDate: draft.quoteDate ? draft.quoteDate.slice(0, 10) : "",
     wastageFabric: showWastagePercent(draft.wastageFabric),
     wastageLiner: showWastagePercent(draft.wastageLiner),
     wastageFinishing: showWastagePercent(draft.wastageFinishing),
@@ -571,7 +574,27 @@ function MastersPanel({ masters, rates }: { masters: WovenMasters; rates: WovenR
 
   useEffect(() => setConstants(masters.constants), [masters.constants]);
 
-  const latest = new Map(masters.latestRates.filter((row) => row.sector === sector).map((row) => [row.materialCode, row]));
+  const asOf = useMemo(() => ratesAsOf(rates, sector, rateDate), [rates, sector, rateDate]);
+  const fromDate = useMemo(() => {
+    const found = new Map<string, string>();
+    for (const row of rates) {
+      if (row.sector !== sector) continue;
+      const day = row.effectiveDate.slice(0, 10);
+      if (day > rateDate) continue;
+      const current = found.get(row.materialCode);
+      if (!current || current < day) found.set(row.materialCode, day);
+    }
+    return found;
+  }, [rates, sector, rateDate]);
+
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    for (const material of masters.materials) {
+      const value = asOf[material.code];
+      next[material.code] = value === undefined ? "" : String(value);
+    }
+    setPendingRates(next);
+  }, [asOf, masters.materials]);
   const shownCustomers = masters.customers.filter((row) => {
     const text = `${row.fullName} ${row.shortName}`.toLowerCase();
     return row.sector === customerSector && text.includes(customerQuery.trim().toLowerCase());
@@ -580,6 +603,34 @@ function MastersPanel({ masters, rates }: { masters: WovenMasters; rates: WovenR
   async function refresh() {
     await client.invalidateQueries({ queryKey: ["woven-masters"] });
     await client.invalidateQueries({ queryKey: ["woven-rates"] });
+  }
+
+  async function saveRatesForDate() {
+    const changed = masters.materials.filter((material) => {
+      const raw = pendingRates[material.code];
+      if (raw === undefined || raw === "") return false;
+      const next = Number(raw);
+      if (Number.isNaN(next)) return false;
+      const exact = rates.find((row) => row.sector === sector && row.materialCode === material.code && row.effectiveDate.slice(0, 10) === rateDate);
+      if (exact) return exact.rate !== next;
+      return asOf[material.code] !== next;
+    });
+    if (changed.length === 0) {
+      toast.success("No rate changes for this date.");
+      return;
+    }
+    try {
+      await Promise.all(changed.map((material) => saveWovenRate({
+        materialCode: material.code,
+        sector,
+        effectiveDate: rateDate,
+        rate: Number(pendingRates[material.code]),
+      })));
+      toast.success(`Saved ${changed.length} rate${changed.length === 1 ? "" : "s"} for ${rateDate}.`);
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save rates.");
+    }
   }
 
   return (
@@ -596,35 +647,26 @@ function MastersPanel({ masters, rates }: { masters: WovenMasters; rates: WovenR
             <Select label="Sector" value={sector} onChange={setSector} options={["Export", "Domestic"]} />
             <Field label="Effective date" type="date" value={rateDate} onChange={setRateDate} />
           </div>
-          <p className="text-xs text-muted-foreground">{rates.length.toLocaleString("en-IN")} historical rates are loaded. A new date keeps older quotations on the rate that applied then.</p>
+          <p className="text-xs text-muted-foreground">These are the rates in force on {rateDate}. Saving writes them on this date, so earlier quotations keep the rate that applied then. {rates.length.toLocaleString("en-IN")} historical rates are loaded.</p>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="text-left text-xs uppercase text-muted-foreground">
-                <tr className="border-b border-border"><th className="py-2">Material</th><th className="py-2">Latest</th><th className="py-2">New rate</th><th /></tr>
+                <tr className="border-b border-border"><th className="py-2">Material</th><th className="py-2">Rate on this date</th><th className="py-2">Taken from</th></tr>
               </thead>
               <tbody>
-                {masters.materials.map((material) => {
-                  const current = latest.get(material.code);
-                  return (
-                    <tr key={material.code} className="border-b border-border/70">
-                      <td className="py-2 pr-3">{material.name}</td>
-                      <td className="py-2 pr-3 tabular-nums text-muted-foreground">{current ? `${formatQty(current.rate, 3)} · ${current.effectiveDate.slice(0, 10)}` : "—"}</td>
-                      <td className="py-2 pr-3"><Input className="h-8 w-28" type="number" step="any" value={pendingRates[material.code] ?? ""} onChange={(e) => setPendingRates((rows) => ({ ...rows, [material.code]: e.target.value }))} /></td>
-                      <td className="py-2 text-right">
-                        <Button size="sm" variant="outline" onClick={() => {
-                          const value = pendingRates[material.code];
-                          if (value === undefined || value === "") return;
-                          void saveWovenRate({ materialCode: material.code, sector, effectiveDate: rateDate, rate: Number(value) })
-                            .then(() => { toast.success(`${material.name} updated.`); return refresh(); })
-                            .catch((error: Error) => toast.error(error.message));
-                        }}>Save</Button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {masters.materials.map((material) => (
+                  <tr key={material.code} className="border-b border-border/70">
+                    <td className="py-2 pr-3">{material.name}</td>
+                    <td className="py-2 pr-3">
+                      <Input className="h-8 w-32" type="number" step="any" value={pendingRates[material.code] ?? ""} onChange={(e) => setPendingRates((rows) => ({ ...rows, [material.code]: e.target.value }))} />
+                    </td>
+                    <td className="py-2 tabular-nums text-muted-foreground">{fromDate.get(material.code) ?? "No rate yet"}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
+          <Button onClick={() => void saveRatesForDate()}>Save rates for {rateDate}</Button>
         </TabsContent>
         <TabsContent value="constants" className="space-y-4 pt-4">
           {[...new Set(constants.map((row) => row.groupName))].map((group) => (

@@ -88,7 +88,8 @@ export function ratesAsOf(rates: WovenRate[], sector: string, quoteDate: string)
   for (const rate of rates) {
     if (rate.sector !== sector) continue;
     const day = rate.effectiveDate.slice(0, 10);
-    if (day > quoteDate) continue;
+    const asOf = (quoteDate || "").slice(0, 10);
+    if (!asOf || day > asOf) continue;
     const current = picked.get(rate.materialCode);
     if (!current || current.effectiveDate.slice(0, 10) < day) picked.set(rate.materialCode, rate);
   }

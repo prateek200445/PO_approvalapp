@@ -199,6 +199,15 @@ if (importAt >= 0)
     return;
 }
 
+if (args.Contains("--restore-woven-rates"))
+{
+    using var scope = app.Services.CreateScope();
+    var woven = scope.ServiceProvider.GetRequiredService<WovenQuoteService>();
+    var restored = await woven.ReplaceRatesFromSeedAsync();
+    Console.WriteLine($"Restored {restored} woven raw-material rates from the workbook.");
+    return;
+}
+
 app.Run();
 
 static void LoadDotEnvFiles()

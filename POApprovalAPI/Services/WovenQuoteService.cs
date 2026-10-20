@@ -132,9 +132,9 @@ public class WovenQuoteService
     {
         await EnsureReadyAsync();
         using var con = _database.CreateConnection();
-        return (await con.QueryAsync<WovenQuoteListItem>("""
+        var rows = (await con.QueryAsync<QuoteStoreRow>("""
             SELECT Id, ProductType, QuoteDate, Sector, CustomerName, OurRef, CustomerRef, Currency, Terms,
-                   PricePerPiece, TotalWeightGram, CreatedBy, UpdatedAt
+                   PricePerPiece, TotalWeightGram, PayloadJson, ResultJson, CreatedBy, UpdatedAt
             FROM dbo.WovenQuote
             WHERE (@sector IS NULL OR Sector = @sector)
               AND (@customer IS NULL OR CustomerName LIKE @customerLike)
@@ -152,6 +152,30 @@ public class WovenQuoteService
             fromDate = from?.Date,
             toDate = to?.Date,
         })).ToList();
+        var list = new List<WovenQuoteListItem>(rows.Count);
+        foreach (var row in rows)
+        {
+            var draft = JsonSerializer.Deserialize<WovenQuoteDraft>(row.PayloadJson, JsonOptions) ?? new WovenQuoteDraft();
+            var (rates, constants, fabric, coating, liner) = await LoadCalcContextAsync(draft);
+            var result = WovenQuoteMath.Calculate(draft, rates, constants, fabric, coating, liner);
+            list.Add(new WovenQuoteListItem
+            {
+                Id = row.Id,
+                ProductType = row.ProductType,
+                QuoteDate = row.QuoteDate,
+                Sector = row.Sector,
+                CustomerName = row.CustomerName,
+                OurRef = row.OurRef,
+                CustomerRef = row.CustomerRef,
+                Currency = row.Currency,
+                Terms = row.Terms,
+                PricePerPiece = result.PricePerPiece,
+                TotalWeightGram = result.TotalComponentGram,
+                CreatedBy = row.CreatedBy,
+                UpdatedAt = row.UpdatedAt,
+            });
+        }
+        return list;
     }
 
     public async Task<WovenQuoteDetail?> GetAsync(int id)
@@ -173,9 +197,7 @@ public class WovenQuoteService
         var result = WovenQuoteMath.Calculate(draft, rates, constants, fabric, coating, liner);
         var payload = JsonSerializer.Serialize(draft, JsonOptions);
         var resultJson = JsonSerializer.Serialize(result, JsonOptions);
-        var weight = string.Equals(draft.ProductType, "AdStar", StringComparison.OrdinalIgnoreCase)
-            ? result.TotalComponentGram
-            : draft.TotalWeightGram ?? 0m;
+        var weight = result.TotalComponentGram;
         using var con = _database.CreateConnection();
         if (id is null)
         {
@@ -319,15 +341,39 @@ public class WovenQuoteService
         }
     }
 
-    private async Task SeedAsync(System.Data.IDbConnection con)
+    public async Task<int> ReplaceRatesFromSeedAsync()
+    {
+        await EnsureReadyAsync();
+        var seed = await ReadSeedAsync();
+        using var con = _database.CreateConnection();
+        if (con.State != System.Data.ConnectionState.Open) con.Open();
+        using var tx = con.BeginTransaction();
+        await con.ExecuteAsync("DELETE FROM dbo.WovenQuoteRmRate", transaction: tx);
+        foreach (var row in seed.Rates)
+        {
+            await con.ExecuteAsync("""
+                INSERT INTO dbo.WovenQuoteRmRate (MaterialCode, Sector, EffectiveDate, Rate)
+                VALUES (@code, @sector, @effectiveDate, @rate)
+                """, row, tx);
+        }
+        tx.Commit();
+        return seed.Rates.Count;
+    }
+
+    private async Task<SeedFile> ReadSeedAsync()
     {
         var path = Path.Combine(_environment.ContentRootPath, "Data", "WovenQuote", "seed.json");
         if (!File.Exists(path))
             path = Path.Combine(AppContext.BaseDirectory, "Data", "WovenQuote", "seed.json");
         if (!File.Exists(path))
             throw new InvalidOperationException("Woven quote seed file was not found.");
-        var seed = JsonSerializer.Deserialize<SeedFile>(await File.ReadAllTextAsync(path), JsonOptions)
+        return JsonSerializer.Deserialize<SeedFile>(await File.ReadAllTextAsync(path), JsonOptions)
             ?? throw new InvalidOperationException("Woven quote seed file is empty.");
+    }
+
+    private async Task SeedAsync(System.Data.IDbConnection con)
+    {
+        var seed = await ReadSeedAsync();
         using var tx = con.BeginTransaction();
         foreach (var row in seed.Materials)
         {
