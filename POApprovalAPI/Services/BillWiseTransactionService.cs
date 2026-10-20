@@ -449,8 +449,8 @@ WHERE CompanyName LIKE @CompanyPattern
 
         var sideA = await SupplementSideAsync(companyA, ledgerA, companyB, entriesA, dateFrom, dateTo);
         var sideB = await SupplementSideAsync(companyB, ledgerB, companyA, entriesB, dateFrom, dateTo);
-        entriesA = sideA.Entries;
-        entriesB = sideB.Entries;
+        entriesA = KeepLinesInsideClosing(sideA.Entries, dateFrom, dateTo);
+        entriesB = KeepLinesInsideClosing(sideB.Entries, dateFrom, dateTo);
 
         if (entriesA.Count == 0 && entriesB.Count == 0)
         {
@@ -895,6 +895,27 @@ WHERE CompanyName LIKE @CompanyPattern
 
     private static string NormalizeLoose(string value) =>
         new string(value.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+
+    /// <summary>
+    /// A voucher posted outside the closing is not part of the difference. Leaving it in
+    /// lets it cancel the in-period line on the same bill, so the sales side never shows
+    /// the debit that should clear the purchase credit.
+    /// </summary>
+    private static List<LedgerEntryDto> KeepLinesInsideClosing(
+        List<LedgerEntryDto> entries,
+        DateTime? dateFrom,
+        DateTime? dateTo)
+    {
+        var (from, toExclusive) = NormalizeDateRange(dateFrom, dateTo);
+        if (from == null || toExclusive == null)
+            return entries;
+
+        return entries
+            .Where(entry =>
+                entry.Date == null
+                || (entry.Date.Value.Date >= from && entry.Date.Value.Date < toExclusive))
+            .ToList();
+    }
 
     private static (DateTime? From, DateTime? ToExclusive) NormalizeDateRange(DateTime? dateFrom, DateTime? dateTo)
     {
@@ -2370,6 +2391,17 @@ WHERE ISNULL(l.LedgerName, '') <> ''
             var opposite = totalA != 0 && totalB != 0 && Math.Sign(totalA) != Math.Sign(totalB) && gap <= 1m;
             if (bothZero || opposite)
             {
+                if (pair.EntryA != null && pair.EntryB != null)
+                {
+                    var billA = (pair.EntryA.BillNo ?? "").Trim();
+                    var billB = (pair.EntryB.BillNo ?? "").Trim();
+                    var prefix = billA.Length > 0 && billB.Length > 0 &&
+                                 !string.Equals(billA, billB, StringComparison.OrdinalIgnoreCase)
+                        ? $"Related Bill No ({billA} ↔ {billB}): "
+                        : billA.Length > 0 ? $"Bill No {billA}: " : "";
+                    pair.Message =
+                        $"{prefix}{pair.EntryA.Side} {pair.EntryA.Amount:N2} reconciles with {pair.EntryB.Side} {pair.EntryB.Amount:N2}";
+                }
                 if (pair.Status != "Matched")
                 {
                     pair.Status = "Matched";

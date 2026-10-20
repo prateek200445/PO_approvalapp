@@ -1161,6 +1161,7 @@ public class ExcelLedgerService
         // A shared year (26 in 688/26-27 and ESIC-Apr-26) is not the same bill.
         // A short serial outside the year pair still matches: 58/26-27 with HPBL/D/58.
         // A shared letter prefix (kpv on kpv/cr/26-27/4 and KPV/D/616/26-27) is not a serial.
+        // 012 and 12 are the same serial. The 3 glued onto KPW3 is part of the name.
         return SharesBillSerial(tokensA.NumericTokens, tokensB.NumericTokens);
     }
 
@@ -1168,14 +1169,39 @@ public class ExcelLedgerService
     {
         var numeric = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var alpha = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (Match match in Regex.Matches(value.ToLowerInvariant(), @"[a-z]+|\d+"))
+        var text = (value ?? "").ToLowerInvariant();
+        var i = 0;
+        while (i < text.Length)
         {
-            var token = match.Value.Trim();
-            if (token.Length == 0) continue;
-            if (char.IsDigit(token[0])) numeric.Add(token);
-            else alpha.Add(token);
+            if (char.IsLetter(text[i]))
+            {
+                var start = i;
+                while (i < text.Length && char.IsLetter(text[i]))
+                    i++;
+                // Digits glued to the word stay with it: KPW3 is the series, not serial 3.
+                while (i < text.Length && char.IsDigit(text[i]))
+                    i++;
+                alpha.Add(text[start..i]);
+            }
+            else if (char.IsDigit(text[i]))
+            {
+                var start = i;
+                while (i < text.Length && char.IsDigit(text[i]))
+                    i++;
+                numeric.Add(StripLeadingZeros(text[start..i]));
+            }
+            else
+            {
+                i++;
+            }
         }
         return (numeric, alpha);
+    }
+
+    private static string StripLeadingZeros(string digits)
+    {
+        var trimmed = digits.TrimStart('0');
+        return trimmed.Length == 0 ? "0" : trimmed;
     }
 
     private static bool HasStrongNumericCoreMatch(HashSet<string> numsA, HashSet<string> numsB)
