@@ -67,6 +67,7 @@ type AppPath =
   | "/daily-production"
   | "/plant-consumption"
   | "/daily-reports"
+  | "/custom-report"
   | "/hr-reports"
   | "/exhibition-leads"
   | "/bom"
@@ -326,6 +327,12 @@ export function AppShell() {
       icon: ClipboardList,
       label: "Daily Reports",
       match: (p) => p.startsWith("/daily-reports"),
+    },
+    {
+      to: "/custom-report",
+      icon: FileBarChart,
+      label: "All Type of Report",
+      match: (p) => p.startsWith("/custom-report"),
     },
     {
       to: "/hr-reports",
