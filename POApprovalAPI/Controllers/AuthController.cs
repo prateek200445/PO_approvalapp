@@ -21,6 +21,9 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Login against portal LoginRights (5115). Optional payroll (3445) fallback is off by default.
     /// Authority / Deptt come from poallocation on 5115 in the same round-trip.
+    ///
+    /// ERP stores Password as user-password + a 1-char rights identifier (a/g/n/p/s/…).
+    /// Users type the password without that trailing identifier (same as ERP login).
     /// </summary>
     [HttpPost("login")]
     public async Task<IActionResult> Login(LoginRequest request)
@@ -51,7 +54,13 @@ FROM Loginentry.dbo.LoginRights l
 LEFT JOIN poallocation p
     ON LTRIM(RTRIM(p.username)) = LTRIM(RTRIM(l.Name))
 WHERE LTRIM(RTRIM(l.Name)) = @UserName
-  AND l.Password = @Password",
+  AND (
+        RTRIM(l.Password) = @Password
+     OR (
+            LEN(RTRIM(l.Password)) > 1
+        AND LEFT(RTRIM(l.Password), LEN(RTRIM(l.Password)) - 1) = @Password
+        )
+      )",
                 new { UserName = userName, Password = password });
 
             if (portalUser != null)
@@ -83,7 +92,13 @@ SELECT
     NULLIF(LTRIM(RTRIM(ISNULL(FullName, Name))), '') AS FullName
 FROM LoginRights WITH (NOLOCK)
 WHERE LTRIM(RTRIM(Name)) = @UserName
-  AND Password = @Password",
+  AND (
+        RTRIM(Password) = @Password
+     OR (
+            LEN(RTRIM(Password)) > 1
+        AND LEFT(RTRIM(Password), LEN(RTRIM(Password)) - 1) = @Password
+        )
+      )",
                     new { UserName = userName, Password = password });
 
                 if (payUser != null)

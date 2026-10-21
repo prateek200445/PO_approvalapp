@@ -94,6 +94,7 @@ builder.Services.AddScoped<BankRequirementsService>();
 builder.Services.AddScoped<BankDocumentPackService>();
 builder.Services.AddScoped<GstLiabilityService>();
 builder.Services.AddScoped<GstItc04Service>();
+builder.Services.AddScoped<CustomReportService>();
 builder.Services.Configure<OrderBookSummaryOptions>(
     builder.Configuration.GetSection(OrderBookSummaryOptions.SectionName));
 builder.Services.AddScoped<OrderBookSummaryService>();
