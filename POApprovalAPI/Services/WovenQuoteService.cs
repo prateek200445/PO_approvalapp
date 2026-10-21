@@ -152,11 +152,22 @@ public class WovenQuoteService
             fromDate = from?.Date,
             toDate = to?.Date,
         })).ToList();
+        var materials = (await con.QueryAsync<WovenQuoteMaterialRow>("SELECT Code, Name, SortOrder, InFabric, InCoating, InLiner FROM dbo.WovenQuoteMaterial ORDER BY SortOrder")).ToList();
+        var constants = (await con.QueryAsync<WovenQuoteConstantRow>("SELECT [Key], Value, Label, GroupName FROM dbo.WovenQuoteConstant")).ToDictionary(x => x.Key, x => x.Value);
+        var allRates = (await con.QueryAsync<WovenQuoteRateRow>("SELECT Id, MaterialCode, Sector, EffectiveDate, Rate FROM dbo.WovenQuoteRmRate")).ToList();
+        var fabric = materials.Where(m => m.InFabric).Select(m => m.Code).ToList();
+        var coating = materials.Where(m => m.InCoating).Select(m => m.Code).ToList();
+        var liner = materials.Where(m => m.InLiner).Select(m => m.Code).ToList();
         var list = new List<WovenQuoteListItem>(rows.Count);
         foreach (var row in rows)
         {
             var draft = JsonSerializer.Deserialize<WovenQuoteDraft>(row.PayloadJson, JsonOptions) ?? new WovenQuoteDraft();
-            var (rates, constants, fabric, coating, liner) = await LoadCalcContextAsync(draft);
+            var quoteSector = string.IsNullOrWhiteSpace(draft.Sector) ? "Export" : draft.Sector.Trim();
+            var when = (draft.QuoteDate ?? row.QuoteDate).Date;
+            var rates = allRates
+                .Where(r => string.Equals(r.Sector, quoteSector, StringComparison.OrdinalIgnoreCase) && r.EffectiveDate.Date <= when)
+                .GroupBy(r => r.MaterialCode)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveDate).First().Rate);
             var result = WovenQuoteMath.Calculate(draft, rates, constants, fabric, coating, liner);
             list.Add(new WovenQuoteListItem
             {

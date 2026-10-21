@@ -32,13 +32,17 @@ type View = "list" | "edit" | "masters";
 export function WovenQuoteScreen() {
   const [view, setView] = useState<View>("list");
   const [quoteId, setQuoteId] = useState<number | null>(null);
-  const leaveEditor = useRef<(() => Promise<boolean>) | null>(null);
+  const [listTab, setListTab] = useState<"saved" | "drafts">("saved");
+  const leaveEditor = useRef<(() => Promise<"saved" | "draft" | "new" | false>) | null>(null);
   const masters = useQuery({ queryKey: ["woven-masters"], queryFn: getWovenMasters });
   const rates = useQuery({ queryKey: ["woven-rates"], queryFn: getWovenRates });
 
   async function leaveQuote() {
-    if (view !== "edit" || !leaveEditor.current) return true;
-    return leaveEditor.current();
+    if (view !== "edit" || !leaveEditor.current) return "new" as const;
+    const outcome = await leaveEditor.current();
+    if (outcome === "draft") setListTab("drafts");
+    if (outcome === "saved") setListTab("saved");
+    return outcome;
   }
   async function openNew() {
     if (!(await leaveQuote())) return;
@@ -88,7 +92,7 @@ export function WovenQuoteScreen() {
         </p>
       ) : null}
 
-      {view === "list" ? <QuoteList onOpen={openQuote} /> : null}
+      {view === "list" ? <QuoteList tab={listTab} onTabChange={setListTab} onOpen={openQuote} /> : null}
       {view === "edit" && (!masters.data || !rates.data) ? <p className="text-sm text-muted-foreground">Loading rates and masters…</p> : null}
       {view === "edit" && masters.data && rates.data ? (
         <QuoteEditor
@@ -107,10 +111,19 @@ export function WovenQuoteScreen() {
 
 const PAGE_SIZE = 20;
 
-function QuoteList({ onOpen }: { onOpen: (id: number) => void }) {
+function QuoteList({
+  tab,
+  onTabChange,
+  onOpen,
+}: {
+  tab: "saved" | "drafts";
+  onTabChange: (tab: "saved" | "drafts") => void;
+  onOpen: (id: number) => void;
+}) {
   const [sector, setSector] = useState("");
   const [customer, setCustomer] = useState("");
   const [reference, setReference] = useState("");
+  const [dateOrder, setDateOrder] = useState<"desc" | "asc">("desc");
   const [page, setPage] = useState(1);
   const query = useQuery({
     queryKey: ["woven-quotes", sector, customer, reference],
@@ -125,16 +138,40 @@ function QuoteList({ onOpen }: { onOpen: (id: number) => void }) {
   });
 
   const rows = query.data ?? [];
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const savedRows = rows.filter((row) => !row.isDraft);
+  const draftRows = rows.filter((row) => row.isDraft);
+  const shown = [...(tab === "drafts" ? draftRows : savedRows)].sort((a, b) => {
+    const byDate = a.quoteDate.slice(0, 10).localeCompare(b.quoteDate.slice(0, 10));
+    if (byDate !== 0) return dateOrder === "desc" ? -byDate : byDate;
+    return dateOrder === "desc" ? b.id - a.id : a.id - b.id;
+  });
+  const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
   const current = Math.min(page, pages);
-  const visible = rows.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+  const visible = shown.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
 
   return (
     <section className="card-3d space-y-4 rounded-xl p-4 md:p-5">
-      <div className="grid gap-3 md:grid-cols-3">
+      <Tabs value={tab} onValueChange={(value) => { onTabChange(value === "drafts" ? "drafts" : "saved"); setPage(1); }}>
+        <TabsList>
+          <TabsTrigger value="saved">Saved ({savedRows.length})</TabsTrigger>
+          <TabsTrigger value="drafts">Drafts ({draftRows.length})</TabsTrigger>
+        </TabsList>
+      </Tabs>
+      <div className="grid gap-3 md:grid-cols-4">
         <Select label="Sector" value={sector} onChange={(value) => { setSector(value); setPage(1); }} options={["", "Export", "Domestic"]} />
         <Field label="Customer" value={customer} onChange={(value) => { setCustomer(value); setPage(1); }} />
         <Field label="Reference" value={reference} onChange={(value) => { setReference(value); setPage(1); }} />
+        <label className="space-y-1 text-xs">
+          <span className="text-muted-foreground">Date</span>
+          <select
+            className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            value={dateOrder}
+            onChange={(event) => { setDateOrder(event.target.value === "asc" ? "asc" : "desc"); setPage(1); }}
+          >
+            <option value="desc">Newest first</option>
+            <option value="asc">Oldest first</option>
+          </select>
+        </label>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
@@ -165,14 +202,14 @@ function QuoteList({ onOpen }: { onOpen: (id: number) => void }) {
                 <td className="py-2.5 pl-3 text-right"><Button size="sm" variant="outline" onClick={() => onOpen(row.id)}>Edit</Button></td>
               </tr>
             ))}
-            {rows.length === 0 ? (
-              <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">No quotations yet.</td></tr>
+            {shown.length === 0 ? (
+              <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">{tab === "drafts" ? "No drafts." : "No saved quotations."}</td></tr>
             ) : null}
           </tbody>
         </table>
       </div>
       <div className="flex items-center justify-between gap-3 text-sm">
-        <p className="text-muted-foreground">{rows.length === 0 ? "0 quotations" : `${(current - 1) * PAGE_SIZE + 1}–${Math.min(current * PAGE_SIZE, rows.length)} of ${rows.length}`}</p>
+        <p className="text-muted-foreground">{shown.length === 0 ? (tab === "drafts" ? "0 drafts" : "0 quotations") : `${(current - 1) * PAGE_SIZE + 1}–${Math.min(current * PAGE_SIZE, shown.length)} of ${shown.length}`}</p>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" disabled={current <= 1} onClick={() => setPage(current - 1)}>Previous</Button>
           <Button size="sm" variant="outline" disabled={current >= pages} onClick={() => setPage(current + 1)}>Next</Button>
@@ -195,7 +232,7 @@ function QuoteEditor({
   rates: WovenRate[];
   onClose: () => void;
   onSaved: (id: number) => void;
-  onRegisterLeave: (leave: (() => Promise<boolean>) | null) => void;
+  onRegisterLeave: (leave: (() => Promise<"saved" | "draft" | "new" | false>) | null) => void;
 }) {
   const { user } = useAuth();
   const client = useQueryClient();
@@ -203,6 +240,7 @@ function QuoteEditor({
   const [loading, setLoading] = useState(quoteId != null);
   const [saving, setSaving] = useState(false);
   const dirty = useRef(false);
+  const kindRef = useRef<"saved" | "draft" | "new">(quoteId == null ? "new" : "saved");
   const draftRef = useRef(draft);
   const idRef = useRef(quoteId);
   draftRef.current = draft;
@@ -210,6 +248,7 @@ function QuoteEditor({
 
   useEffect(() => {
     if (quoteId == null) {
+      kindRef.current = "new";
       setDraft(blankWovenDraft());
       setLoading(false);
       return;
@@ -218,7 +257,9 @@ function QuoteEditor({
     setLoading(true);
     getWovenQuote(quoteId)
       .then((row) => {
-        if (live) setDraft(withPercentWastage(row.draft));
+        if (!live) return;
+        kindRef.current = row.isDraft ? "draft" : "saved";
+        setDraft(withPercentWastage(row.draft));
       })
       .catch((error: Error) => toast.error(error.message))
       .finally(() => {
@@ -246,19 +287,20 @@ function QuoteEditor({
       ? await createWovenQuote(current, user?.username ?? "", asDraft)
       : await updateWovenQuote(id, current, asDraft);
     idRef.current = saved.id;
+    kindRef.current = asDraft ? "draft" : "saved";
     onSaved(saved.id);
     await client.invalidateQueries({ queryKey: ["woven-quotes"] });
     return saved;
   }
 
-  const leaveRef = useRef<() => Promise<boolean>>(async () => true);
+  const leaveRef = useRef<() => Promise<"saved" | "draft" | "new" | false>>(async () => "new");
   leaveRef.current = async () => {
-    if (!dirty.current) return true;
+    if (!dirty.current) return kindRef.current;
     try {
       await persist(true);
       dirty.current = false;
       toast.success("Draft saved.");
-      return true;
+      return "draft";
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Draft could not be saved.");
       return false;
