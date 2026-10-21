@@ -1162,7 +1162,7 @@ public class ExcelLedgerService
         // A short serial outside the year pair still matches: 58/26-27 with HPBL/D/58.
         // A shared letter prefix (kpv on kpv/cr/26-27/4 and KPV/D/616/26-27) is not a serial.
         // 012 and 12 are the same serial. The 3 glued onto KPW3 is part of the name.
-        return SharesBillSerial(tokensA.NumericTokens, tokensB.NumericTokens);
+        return BillSerials(billNoA).Overlaps(BillSerials(billNoB));
     }
 
     private static (HashSet<string> NumericTokens, HashSet<string> AlphaTokens) TokenizeBillNo(string value)
@@ -1618,27 +1618,42 @@ public class ExcelLedgerService
         return sb.ToString();
     }
 
-    private static bool SharesBillSerial(HashSet<string> numsA, HashSet<string> numsB)
-    {
-        var yearA = ExtractFinancialYearTokens(numsA);
-        var yearB = ExtractFinancialYearTokens(numsB);
-        foreach (var token in numsA)
-        {
-            if (!numsB.Contains(token)) continue;
-            if (IsBillSerial(token, yearA) && IsBillSerial(token, yearB))
-                return true;
-        }
-        return false;
-    }
-
     /// <summary>
-    /// 688 and 1234 are serials. 58 in 58/26-27 is a serial because 26-27 is the year pair.
-    /// 26 in that same bill is not a serial.
+    /// The numbers of a bill minus its year pair. 58 in 58/26-27 is the serial and 26-27 the year.
+    /// The year pair is found by position, so 27 in 27/26-27 stays a serial.
     /// </summary>
-    private static bool IsBillSerial(string token, HashSet<string> yearTokens)
+    private static HashSet<string> BillSerials(string? value)
     {
-        if (!int.TryParse(token, out var n)) return true;
-        if (token.Length > 2 || n >= 100) return true;
-        return !yearTokens.Contains(n.ToString("00"));
+        var numbers = new List<string>();
+        var text = value ?? "";
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (char.IsLetter(text[i]))
+            {
+                while (i < text.Length && char.IsLetter(text[i])) i++;
+                while (i < text.Length && char.IsDigit(text[i])) i++;
+            }
+            else if (char.IsDigit(text[i]))
+            {
+                var start = i;
+                while (i < text.Length && char.IsDigit(text[i])) i++;
+                numbers.Add(StripLeadingZeros(text[start..i]));
+            }
+            else
+            {
+                i++;
+            }
+        }
+
+        for (var k = 0; k + 1 < numbers.Count; k++)
+        {
+            if (numbers[k].Length > 2 || numbers[k + 1].Length > 2) continue;
+            if (int.Parse(numbers[k + 1]) != int.Parse(numbers[k]) + 1) continue;
+            numbers.RemoveRange(k, 2);
+            break;
+        }
+
+        return new HashSet<string>(numbers, StringComparer.OrdinalIgnoreCase);
     }
 }

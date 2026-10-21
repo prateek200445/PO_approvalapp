@@ -839,9 +839,9 @@ WHERE CompanyName LIKE @CompanyPattern
             VoucherNo = voucherNo,
             VoucherRef = ToString(Get(dict, "VoucherRef", "Voucher Ref", "RefType")),
             BillNo = billNo,
-            SignedAmount = amount,
-            Debit = amount < 0 ? Math.Abs(amount) : 0m,
-            Credit = amount > 0 ? amount : 0m,
+            SignedAmount = -amount,
+            Debit = amount > 0 ? amount : 0m,
+            Credit = amount < 0 ? Math.Abs(amount) : 0m,
         };
     }
 
@@ -1428,12 +1428,12 @@ WHERE CompanyName = @CompanyName
             return [];
 
         var picked = new List<ComparisonPairDto>();
-        var sum = missing.Sum(SignedMissing);
+        var sum = missing.Sum(DebitTotal);
         var gap = sum - result.Summary.ClosingDifference;
         var candidates = missing.Where(pair => !IsOpeningMismatch(pair)).ToList();
         if (Math.Abs(gap) > 1m)
         {
-            var singles = candidates.Where(pair => Math.Abs(SignedMissing(pair) - gap) <= 1m).ToList();
+            var singles = candidates.Where(pair => Math.Abs(DebitTotal(pair) - gap) <= 1m).ToList();
             if (singles.Count == 1)
                 picked.Add(singles[0]);
             else if (singles.Count == 0)
@@ -1443,7 +1443,7 @@ WHERE CompanyName = @CompanyName
                 {
                     for (var j = i + 1; j < candidates.Count; j++)
                     {
-                        if (Math.Abs(SignedMissing(candidates[i]) + SignedMissing(candidates[j]) - gap) <= 1m)
+                        if (Math.Abs(DebitTotal(candidates[i]) + DebitTotal(candidates[j]) - gap) <= 1m)
                             pairs.Add([candidates[i], candidates[j]]);
                     }
                 }
@@ -1466,6 +1466,9 @@ WHERE CompanyName = @CompanyName
 
     private static decimal SignedMissing(ComparisonPairDto pair) =>
         pair.EntriesA.Sum(e => e.SignedAmount) + pair.EntriesB.Sum(e => e.SignedAmount);
+
+    /// <summary>Lines are credit-positive. The closing is debit-positive, so compare against this.</summary>
+    private static decimal DebitTotal(ComparisonPairDto pair) => -SignedMissing(pair);
 
     private static bool IsOpeningMismatch(ComparisonPairDto pair) =>
         string.Equals(pair.EntryA?.VoucherRef, "Opening", StringComparison.OrdinalIgnoreCase)
@@ -1705,7 +1708,7 @@ WHERE CompanyName = @CompanyName
                 candidates.Add((row, false));
             }
 
-            var singles = candidates.Where(item => Math.Abs(item.Row.SignedAmount - gap) <= 1m).ToList();
+            var singles = candidates.Where(item => Math.Abs(-item.Row.SignedAmount - gap) <= 1m).ToList();
             var chosen = new List<(LedgerEntryDto Row, bool OnA)>();
             if (singles.Count == 1)
                 chosen.Add(singles[0]);
@@ -1716,7 +1719,7 @@ WHERE CompanyName = @CompanyName
                 {
                     for (var j = i + 1; j < candidates.Count; j++)
                     {
-                        var sum = candidates[i].Row.SignedAmount + candidates[j].Row.SignedAmount;
+                        var sum = -(candidates[i].Row.SignedAmount + candidates[j].Row.SignedAmount);
                         if (Math.Abs(sum - gap) <= 1m)
                             pairs.Add((i, j));
                     }
@@ -1762,14 +1765,7 @@ WHERE CompanyName = @CompanyName
         }
     }
 
-    private static decimal ShownContribution(ComparisonPairDto pair)
-    {
-        var entry = pair.EntryA ?? pair.EntryB;
-        var amount = Math.Abs(SignedMissing(pair));
-        if (entry == null)
-            return 0m;
-        return entry.Side == "Debit" ? -amount : amount;
-    }
+    private static decimal ShownContribution(ComparisonPairDto pair) => DebitTotal(pair);
 
     private async Task<List<LedgerEntryDto>> FindVoucherInsideBillOutsideAsync(
         System.Data.Common.DbConnection connection,
@@ -1833,7 +1829,7 @@ WHERE CompanyName = @CompanyName
         if (missing.Count == 0)
             return;
 
-        var signed = missing.Sum(pair => pair.EntriesA.Sum(e => e.SignedAmount) + pair.EntriesB.Sum(e => e.SignedAmount));
+        var signed = missing.Sum(DebitTotal);
         if (Math.Abs(signed - result.Summary.ClosingDifference) <= 1m)
             return;
 
@@ -2283,21 +2279,7 @@ WHERE ISNULL(l.LedgerName, '') <> ''
     /// Two opposite sides cancel down to the amount they still disagree by.
     /// That leftover is what the closing difference still contains.
     /// </summary>
-    private static decimal UnsettledPairContribution(ComparisonPairDto pair)
-    {
-        var totalA = pair.EntriesA.Sum(e => e.SignedAmount);
-        var totalB = pair.EntriesB.Sum(e => e.SignedAmount);
-        if (Math.Abs(totalA) > 0.01m && Math.Abs(totalB) > 0.01m && Math.Sign(totalA) != Math.Sign(totalB))
-            return -(totalA + totalB);
-
-        var sum = 0m;
-        foreach (var entry in pair.EntriesA.Concat(pair.EntriesB))
-        {
-            var amount = Math.Abs(entry.SignedAmount);
-            sum += entry.Side == "Debit" ? -amount : amount;
-        }
-        return sum;
-    }
+    private static decimal UnsettledPairContribution(ComparisonPairDto pair) => DebitTotal(pair);
 
     /// <summary>
     /// The opening is part of the closing. Show it when the two openings do not cancel,
@@ -2333,7 +2315,7 @@ WHERE ISNULL(l.LedgerName, '') <> ''
             VoucherNo = "Opening",
             VoucherRef = "Opening",
             BillNo = "",
-            SignedAmount = amount,
+            SignedAmount = -amount,
             Debit = amount > 0 ? amount : 0m,
             Credit = amount < 0 ? Math.Abs(amount) : 0m,
         };
@@ -2369,17 +2351,13 @@ WHERE ISNULL(l.LedgerName, '') <> ''
 
             var salesNet = salesLines.Sum(line => line.SignedAmount);
             var purchaseNet = purchaseLines.Sum(line => line.SignedAmount);
-            // Flip the whole side, never one line. A bill and its debit note have to
-            // keep offsetting, otherwise a match that already nets out breaks apart.
-            // A row that is only on one side keeps the ledger sign, because that sign
-            // is what has to add up to the closing difference.
+            // Never flip a sign here. Lines carry the ledger's own Dr/Cr, so a real sale
+            // and purchase already cancel, and a same-sign pair (a credit booked against a
+            // sales ledger) has to stay visible because it is part of the closing difference.
             var salesWrong = salesNet > 0.5m;
             var purchaseWrong = purchaseNet < -0.5m;
             if (!salesWrong && !purchaseWrong)
                 continue;
-
-            if (salesWrong) FlipSide(salesLines);
-            if (purchaseWrong) FlipSide(purchaseLines);
 
             pair.EntryA = SummarizeSide(pair.EntriesA, pair.EntryA);
             pair.EntryB = SummarizeSide(pair.EntriesB, pair.EntryB);
