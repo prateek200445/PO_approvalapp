@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Calculator, Plus, Save, Settings2, Trash2 } from "lucide-react";
+import { Calculator, Loader2, Plus, Save, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -153,8 +153,8 @@ function QuoteList({
     <section className="card-3d space-y-4 rounded-xl p-4 md:p-5">
       <Tabs value={tab} onValueChange={(value) => { onTabChange(value === "drafts" ? "drafts" : "saved"); setPage(1); }}>
         <TabsList>
-          <TabsTrigger value="saved">Saved ({savedRows.length})</TabsTrigger>
-          <TabsTrigger value="drafts">Drafts ({draftRows.length})</TabsTrigger>
+          <TabsTrigger value="saved">Saved{query.data ? ` (${savedRows.length})` : ""}</TabsTrigger>
+          <TabsTrigger value="drafts">Drafts{query.data ? ` (${draftRows.length})` : ""}</TabsTrigger>
         </TabsList>
       </Tabs>
       <div className="grid gap-3 md:grid-cols-4">
@@ -173,6 +173,15 @@ function QuoteList({
           </select>
         </label>
       </div>
+      {query.isPending ? (
+        <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          Loading quotations…
+        </div>
+      ) : query.isError ? (
+        <p className="py-8 text-center text-sm text-destructive">Quotations could not be loaded.</p>
+      ) : (
+      <div className="space-y-4">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
           <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -215,6 +224,8 @@ function QuoteList({
           <Button size="sm" variant="outline" disabled={current >= pages} onClick={() => setPage(current + 1)}>Next</Button>
         </div>
       </div>
+      </div>
+      )}
     </section>
   );
 }
