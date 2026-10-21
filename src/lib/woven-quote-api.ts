@@ -135,6 +135,7 @@ export interface WovenListItem {
   totalWeightGram: number;
   createdBy: string;
   updatedAt: string;
+  isDraft: boolean;
 }
 
 export interface WovenDetail extends WovenListItem {
@@ -222,15 +223,16 @@ export function saveWovenLookup(category: string, value: string) {
   return read<{ ok: boolean }>("/api/woven-quote/lookups", { method: "POST", body: JSON.stringify({ category, value, sortOrder: 0 }) });
 }
 
-export function createWovenQuote(draft: WovenDraft, username: string) {
-  return read<WovenDetail>(`/api/woven-quote?username=${encodeURIComponent(username)}`, {
+export function createWovenQuote(draft: WovenDraft, username: string, asDraft = false) {
+  const draftFlag = asDraft ? "&draft=true" : "";
+  return read<WovenDetail>(`/api/woven-quote?username=${encodeURIComponent(username)}${draftFlag}`, {
     method: "POST",
     body: JSON.stringify({ draft }),
   });
 }
 
-export function updateWovenQuote(id: number, draft: WovenDraft) {
-  return read<WovenDetail>(`/api/woven-quote/${id}`, { method: "PUT", body: JSON.stringify({ draft }) });
+export function updateWovenQuote(id: number, draft: WovenDraft, asDraft = false) {
+  return read<WovenDetail>(`/api/woven-quote/${id}${asDraft ? "?draft=true" : ""}`, { method: "PUT", body: JSON.stringify({ draft }) });
 }
 
 export function deleteWovenQuote(id: number) {

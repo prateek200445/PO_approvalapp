@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Calculator, Plus, Save, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -32,16 +32,34 @@ type View = "list" | "edit" | "masters";
 export function WovenQuoteScreen() {
   const [view, setView] = useState<View>("list");
   const [quoteId, setQuoteId] = useState<number | null>(null);
+  const leaveEditor = useRef<(() => Promise<boolean>) | null>(null);
   const masters = useQuery({ queryKey: ["woven-masters"], queryFn: getWovenMasters });
   const rates = useQuery({ queryKey: ["woven-rates"], queryFn: getWovenRates });
 
-  function openNew() {
+  async function leaveQuote() {
+    if (view !== "edit" || !leaveEditor.current) return true;
+    return leaveEditor.current();
+  }
+  async function openNew() {
+    if (!(await leaveQuote())) return;
     setQuoteId(null);
     setView("edit");
   }
   function openQuote(id: number) {
     setQuoteId(id);
     setView("edit");
+  }
+  async function showList() {
+    if (!(await leaveQuote())) return;
+    setView("list");
+  }
+  async function showMasters() {
+    if (view === "masters") {
+      setView("list");
+      return;
+    }
+    if (!(await leaveQuote())) return;
+    setView("masters");
   }
 
   return (
@@ -55,10 +73,10 @@ export function WovenQuoteScreen() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant={view === "masters" ? "default" : "outline"} onClick={() => setView(view === "masters" ? "list" : "masters")}>
+          <Button variant={view === "masters" ? "default" : "outline"} onClick={() => void showMasters()}>
             <Settings2 /> Masters
           </Button>
-          <Button onClick={openNew}>
+          <Button onClick={() => void openNew()}>
             <Plus /> New quote
           </Button>
         </div>
@@ -77,8 +95,9 @@ export function WovenQuoteScreen() {
           quoteId={quoteId}
           masters={masters.data}
           rates={rates.data}
-          onClose={() => setView("list")}
+          onClose={() => void showList()}
           onSaved={(id) => setQuoteId(id)}
+          onRegisterLeave={(leave) => { leaveEditor.current = leave; }}
         />
       ) : null}
       {view === "masters" && masters.data ? <MastersPanel masters={masters.data} rates={rates.data ?? []} /> : null}
@@ -86,10 +105,13 @@ export function WovenQuoteScreen() {
   );
 }
 
+const PAGE_SIZE = 20;
+
 function QuoteList({ onOpen }: { onOpen: (id: number) => void }) {
   const [sector, setSector] = useState("");
   const [customer, setCustomer] = useState("");
   const [reference, setReference] = useState("");
+  const [page, setPage] = useState(1);
   const query = useQuery({
     queryKey: ["woven-quotes", sector, customer, reference],
     queryFn: () => {
@@ -102,12 +124,17 @@ function QuoteList({ onOpen }: { onOpen: (id: number) => void }) {
     },
   });
 
+  const rows = query.data ?? [];
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const current = Math.min(page, pages);
+  const visible = rows.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+
   return (
     <section className="card-3d space-y-4 rounded-xl p-4 md:p-5">
       <div className="grid gap-3 md:grid-cols-3">
-        <Select label="Sector" value={sector} onChange={setSector} options={["", "Export", "Domestic"]} />
-        <Field label="Customer" value={customer} onChange={setCustomer} />
-        <Field label="Reference" value={reference} onChange={setReference} />
+        <Select label="Sector" value={sector} onChange={(value) => { setSector(value); setPage(1); }} options={["", "Export", "Domestic"]} />
+        <Field label="Customer" value={customer} onChange={(value) => { setCustomer(value); setPage(1); }} />
+        <Field label="Reference" value={reference} onChange={(value) => { setReference(value); setPage(1); }} />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">
@@ -116,6 +143,7 @@ function QuoteList({ onOpen }: { onOpen: (id: number) => void }) {
               <th className="py-2 pr-3 font-medium">Date</th>
               <th className="py-2 pr-3 font-medium">Customer</th>
               <th className="py-2 pr-3 font-medium">Reference</th>
+              <th className="py-2 pr-3 font-medium">Status</th>
               <th className="py-2 pr-3 font-medium">Type</th>
               <th className="py-2 pr-3 font-medium">Terms</th>
               <th className="py-2 pr-3 text-right font-medium">Weight g</th>
@@ -124,11 +152,12 @@ function QuoteList({ onOpen }: { onOpen: (id: number) => void }) {
             </tr>
           </thead>
           <tbody>
-            {query.data?.map((row) => (
+            {visible.map((row) => (
               <tr key={row.id} className="border-b border-border/70 hover:bg-muted/40">
                 <td className="py-2.5 pr-3">{row.quoteDate.slice(0, 10)}</td>
-                <td className="py-2.5 pr-3 font-medium">{row.customerName}</td>
+                <td className="py-2.5 pr-3 font-medium">{row.customerName || "Untitled"}</td>
                 <td className="py-2.5 pr-3">{row.ourRef || row.customerRef || "—"}</td>
+                <td className="py-2.5 pr-3">{row.isDraft ? <Badge variant="secondary">Draft</Badge> : <Badge variant="outline">Saved</Badge>}</td>
                 <td className="py-2.5 pr-3">{row.productType === "AdStar" ? "AD Star" : "Woven bag"}</td>
                 <td className="py-2.5 pr-3">{row.terms} {row.currency}</td>
                 <td className="py-2.5 pr-3 text-right tabular-nums">{formatQty(row.totalWeightGram, 1)}</td>
@@ -136,11 +165,18 @@ function QuoteList({ onOpen }: { onOpen: (id: number) => void }) {
                 <td className="py-2.5 pl-3 text-right"><Button size="sm" variant="outline" onClick={() => onOpen(row.id)}>Edit</Button></td>
               </tr>
             ))}
-            {query.data?.length === 0 ? (
-              <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">No quotations yet.</td></tr>
+            {rows.length === 0 ? (
+              <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">No quotations yet.</td></tr>
             ) : null}
           </tbody>
         </table>
+      </div>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <p className="text-muted-foreground">{rows.length === 0 ? "0 quotations" : `${(current - 1) * PAGE_SIZE + 1}–${Math.min(current * PAGE_SIZE, rows.length)} of ${rows.length}`}</p>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" disabled={current <= 1} onClick={() => setPage(current - 1)}>Previous</Button>
+          <Button size="sm" variant="outline" disabled={current >= pages} onClick={() => setPage(current + 1)}>Next</Button>
+        </div>
       </div>
     </section>
   );
@@ -152,18 +188,25 @@ function QuoteEditor({
   rates,
   onClose,
   onSaved,
+  onRegisterLeave,
 }: {
   quoteId: number | null;
   masters: WovenMasters;
   rates: WovenRate[];
   onClose: () => void;
   onSaved: (id: number) => void;
+  onRegisterLeave: (leave: (() => Promise<boolean>) | null) => void;
 }) {
   const { user } = useAuth();
   const client = useQueryClient();
   const [draft, setDraft] = useState<WovenDraft>(blankWovenDraft);
   const [loading, setLoading] = useState(quoteId != null);
   const [saving, setSaving] = useState(false);
+  const dirty = useRef(false);
+  const draftRef = useRef(draft);
+  const idRef = useRef(quoteId);
+  draftRef.current = draft;
+  idRef.current = quoteId;
 
   useEffect(() => {
     if (quoteId == null) {
@@ -192,18 +235,53 @@ function QuoteEditor({
   );
 
   function patch(partial: Partial<WovenDraft>) {
+    dirty.current = true;
     setDraft((current) => ({ ...current, ...partial }));
   }
+
+  async function persist(asDraft: boolean) {
+    const current = draftRef.current;
+    const id = idRef.current;
+    const saved = id == null
+      ? await createWovenQuote(current, user?.username ?? "", asDraft)
+      : await updateWovenQuote(id, current, asDraft);
+    idRef.current = saved.id;
+    onSaved(saved.id);
+    await client.invalidateQueries({ queryKey: ["woven-quotes"] });
+    return saved;
+  }
+
+  const leaveRef = useRef<() => Promise<boolean>>(async () => true);
+  leaveRef.current = async () => {
+    if (!dirty.current) return true;
+    try {
+      await persist(true);
+      dirty.current = false;
+      toast.success("Draft saved.");
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Draft could not be saved.");
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    onRegisterLeave(() => leaveRef.current());
+    return () => onRegisterLeave(null);
+    // Register once. leaveRef always points at the latest sheet.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => () => {
+    if (dirty.current) void leaveRef.current();
+  }, []);
 
   async function save() {
     setSaving(true);
     try {
-      const saved = quoteId == null
-        ? await createWovenQuote(draft, user?.username ?? "")
-        : await updateWovenQuote(quoteId, draft);
+      await persist(false);
+      dirty.current = false;
       toast.success("Quotation saved.");
-      onSaved(saved.id);
-      await client.invalidateQueries({ queryKey: ["woven-quotes"] });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Save failed.");
     } finally {

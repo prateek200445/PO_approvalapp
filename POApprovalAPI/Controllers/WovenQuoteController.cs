@@ -92,12 +92,12 @@ public class WovenQuoteController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] WovenQuoteSaveRequest request, [FromQuery] string? username)
+    public async Task<IActionResult> Create([FromBody] WovenQuoteSaveRequest request, [FromQuery] string? username, [FromQuery] bool draft = false)
     {
         if (request.Draft is null) return BadRequest(new { message = "Quote details are required." });
         try
         {
-            var saved = await _service.SaveAsync(null, request.Draft, username);
+            var saved = await _service.SaveAsync(null, request.Draft, username, draft);
             return StatusCode(StatusCodes.Status201Created, saved);
         }
         catch (ArgumentException ex)
@@ -107,12 +107,12 @@ public class WovenQuoteController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    public async Task<IActionResult> Update(int id, [FromBody] WovenQuoteSaveRequest request)
+    public async Task<IActionResult> Update(int id, [FromBody] WovenQuoteSaveRequest request, [FromQuery] bool draft = false)
     {
         if (request.Draft is null) return BadRequest(new { message = "Quote details are required." });
         try
         {
-            return Ok(await _service.SaveAsync(id, request.Draft, null));
+            return Ok(await _service.SaveAsync(id, request.Draft, null, draft));
         }
         catch (ArgumentException ex)
         {

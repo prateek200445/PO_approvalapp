@@ -134,7 +134,7 @@ public class WovenQuoteService
         using var con = _database.CreateConnection();
         var rows = (await con.QueryAsync<QuoteStoreRow>("""
             SELECT Id, ProductType, QuoteDate, Sector, CustomerName, OurRef, CustomerRef, Currency, Terms,
-                   PricePerPiece, TotalWeightGram, PayloadJson, ResultJson, CreatedBy, UpdatedAt
+                   PricePerPiece, TotalWeightGram, PayloadJson, ResultJson, CreatedBy, UpdatedAt, IsDraft
             FROM dbo.WovenQuote
             WHERE (@sector IS NULL OR Sector = @sector)
               AND (@customer IS NULL OR CustomerName LIKE @customerLike)
@@ -173,6 +173,7 @@ public class WovenQuoteService
                 TotalWeightGram = result.TotalComponentGram,
                 CreatedBy = row.CreatedBy,
                 UpdatedAt = row.UpdatedAt,
+                IsDraft = row.IsDraft,
             });
         }
         return list;
@@ -186,12 +187,13 @@ public class WovenQuoteService
         return row is null ? null : ToDetail(row);
     }
 
-    public async Task<WovenQuoteDetail> SaveAsync(int? id, WovenQuoteDraft draft, string? username)
+    public async Task<WovenQuoteDetail> SaveAsync(int? id, WovenQuoteDraft draft, string? username, bool isDraft = false)
     {
-        if (string.IsNullOrWhiteSpace(draft.CustomerName))
+        if (!isDraft && string.IsNullOrWhiteSpace(draft.CustomerName))
             throw new ArgumentException("Customer is required.");
-        if (draft.QuoteDate is null)
-            throw new ArgumentException("Quote date is required.");
+        draft.QuoteDate ??= DateTime.Today;
+        if (string.IsNullOrWhiteSpace(draft.CustomerName))
+            draft.CustomerName = "";
         await EnsureReadyAsync();
         var (rates, constants, fabric, coating, liner) = await LoadCalcContextAsync(draft);
         var result = WovenQuoteMath.Calculate(draft, rates, constants, fabric, coating, liner);
@@ -204,11 +206,11 @@ public class WovenQuoteService
             var newId = await con.ExecuteScalarAsync<int>("""
                 INSERT INTO dbo.WovenQuote
                     (ProductType, QuoteDate, Sector, CustomerName, OurRef, CustomerRef, Currency, Terms,
-                     PricePerPiece, TotalWeightGram, PayloadJson, ResultJson, CreatedBy)
+                     PricePerPiece, TotalWeightGram, PayloadJson, ResultJson, CreatedBy, IsDraft)
                 OUTPUT INSERTED.Id
                 VALUES
                     (@productType, @quoteDate, @sector, @customer, @ourRef, @customerRef, @currency, @terms,
-                     @price, @weight, @payload, @result, @createdBy)
+                     @price, @weight, @payload, @result, @createdBy, @isDraft)
                 """, new
             {
                 productType = draft.ProductType,
@@ -224,6 +226,7 @@ public class WovenQuoteService
                 payload,
                 result = resultJson,
                 createdBy = username ?? "",
+                isDraft,
             });
             return (await GetAsync(newId))!;
         }
@@ -233,7 +236,7 @@ public class WovenQuoteService
                 ProductType = @productType, QuoteDate = @quoteDate, Sector = @sector, CustomerName = @customer,
                 OurRef = @ourRef, CustomerRef = @customerRef, Currency = @currency, Terms = @terms,
                 PricePerPiece = @price, TotalWeightGram = @weight, PayloadJson = @payload, ResultJson = @result,
-                UpdatedAt = SYSUTCDATETIME()
+                IsDraft = @isDraft, UpdatedAt = SYSUTCDATETIME()
             WHERE Id = @id
             """, new
         {
@@ -250,6 +253,7 @@ public class WovenQuoteService
             weight,
             payload,
             result = resultJson,
+            isDraft,
         });
         if (updated == 0) throw new ArgumentException("Quote was not found.");
         return (await GetAsync(id.Value))!;
@@ -305,6 +309,7 @@ public class WovenQuoteService
             TotalWeightGram = row.TotalWeightGram,
             CreatedBy = row.CreatedBy,
             UpdatedAt = row.UpdatedAt,
+            IsDraft = row.IsDraft,
             Draft = JsonSerializer.Deserialize<WovenQuoteDraft>(row.PayloadJson, JsonOptions) ?? new WovenQuoteDraft(),
             Result = JsonSerializer.Deserialize<WovenQuoteResult>(row.ResultJson, JsonOptions) ?? new WovenQuoteResult(),
         };
@@ -549,8 +554,11 @@ public class WovenQuoteService
             ResultJson NVARCHAR(MAX) NOT NULL,
             CreatedBy NVARCHAR(80) NOT NULL CONSTRAINT DF_WovenQuote_CreatedBy DEFAULT (''),
             CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_WovenQuote_CreatedAt DEFAULT (SYSUTCDATETIME()),
-            UpdatedAt DATETIME2 NOT NULL CONSTRAINT DF_WovenQuote_UpdatedAt DEFAULT (SYSUTCDATETIME())
+            UpdatedAt DATETIME2 NOT NULL CONSTRAINT DF_WovenQuote_UpdatedAt DEFAULT (SYSUTCDATETIME()),
+            IsDraft BIT NOT NULL CONSTRAINT DF_WovenQuote_IsDraft DEFAULT (0)
         );
+        IF COL_LENGTH(N'dbo.WovenQuote', N'IsDraft') IS NULL
+            ALTER TABLE dbo.WovenQuote ADD IsDraft BIT NOT NULL CONSTRAINT DF_WovenQuote_IsDraft DEFAULT (0);
         """;
 
     private sealed class QuoteStoreRow
@@ -570,6 +578,7 @@ public class WovenQuoteService
         public string ResultJson { get; set; } = "";
         public string CreatedBy { get; set; } = "";
         public DateTime UpdatedAt { get; set; }
+        public bool IsDraft { get; set; }
     }
 
     private sealed class SeedFile

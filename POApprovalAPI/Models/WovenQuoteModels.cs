@@ -144,6 +144,7 @@ public class WovenQuoteListItem
     public decimal TotalWeightGram { get; set; }
     public string CreatedBy { get; set; } = "";
     public DateTime UpdatedAt { get; set; }
+    public bool IsDraft { get; set; }
 }
 
 public class WovenQuoteDetail : WovenQuoteListItem
