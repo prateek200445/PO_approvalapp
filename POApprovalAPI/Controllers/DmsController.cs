@@ -35,6 +35,22 @@ public class DmsController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>List ERP DMS attachments for an exact voucher reference.</summary>
+    [HttpGet("reference-attachments")]
+    public async Task<IActionResult> ListReferenceAttachments(
+        [FromQuery] string refType,
+        [FromQuery] string refEntryNo,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(refType) || string.IsNullOrWhiteSpace(refEntryNo))
+            return BadRequest(new { error = "refType and refEntryNo are required." });
+
+        var result = await _dms.GetReferenceAttachmentsAsync(refType, refEntryNo, ct);
+        return result is null
+            ? NotFound(new { error = "DMS reference not found." })
+            : Ok(result);
+    }
+
     /// <summary>Download a DMS file by FileId (metadata from dms_files).</summary>
     [HttpGet("files/{fileId:int}")]
     public async Task<IActionResult> DownloadFile(int fileId, CancellationToken ct)

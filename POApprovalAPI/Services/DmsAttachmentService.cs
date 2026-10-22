@@ -73,6 +73,42 @@ public sealed class DmsAttachmentService
         };
     }
 
+    public async Task<DmsAttachmentListResponse?> GetReferenceAttachmentsAsync(
+        string refType,
+        string refEntryNo,
+        CancellationToken ct = default)
+    {
+        var type = (refType ?? "").Trim();
+        var entry = (refEntryNo ?? "").Trim();
+        if (type.Length == 0 || entry.Length == 0)
+            return null;
+
+        using var connection = _database.CreateConnection();
+        var files = (await connection.QueryAsync<DmsAttachmentDto>(
+            """
+            SELECT
+                f.FileId,
+                f.FileName,
+                f.FileSize,
+                f.UploadedBy,
+                f.UploadedOn
+            FROM dms_files f
+            INNER JOIN dms_ref r ON r.RefId = f.RefId
+            WHERE r.RefType = @RefType
+              AND r.RefEntryNo = @RefEntryNo
+              AND ISNULL(f.IsDeleted, 0) = 0
+            ORDER BY f.UploadedOn DESC, f.FileId DESC
+            """,
+            new { RefType = type, RefEntryNo = entry })).ToList();
+
+        return new DmsAttachmentListResponse
+        {
+            RefType = type,
+            RefEntryNo = entry,
+            Files = files
+        };
+    }
+
     public async Task<DmsFileRow?> GetFileRowAsync(int fileId, CancellationToken ct = default)
     {
         using var connection = _database.CreateConnection();

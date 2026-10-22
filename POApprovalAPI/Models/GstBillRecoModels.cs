@@ -13,6 +13,7 @@ public class GstBillRecoResult
     public int SavedRows { get; set; }
     public int ErpRows { get; set; }
     public int Matched { get; set; }
+    public int PotentialMatch { get; set; }
     public int Mismatch { get; set; }
     public int MissingInErp { get; set; }
     public int MissingIn2B { get; set; }
@@ -47,6 +48,9 @@ public class GstBillRecoRow
     public string MonthAsPer2B { get; set; } = "";
     public string TwoBPeriod { get; set; } = "";
     public string DocumentType { get; set; } = "";
+    public int AttachmentCount { get; set; }
+    public string DmsRefType { get; set; } = "";
+    public string DmsRefEntryNo { get; set; } = "";
     public Dictionary<string, decimal?> Ledgers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 

@@ -49,6 +49,20 @@ export async function fetchDmsAttachments(
   return response.json();
 }
 
+export async function fetchDmsReferenceAttachments(
+  refType: string,
+  refEntryNo: string,
+): Promise<DmsAttachmentListResponse> {
+  const query = new URLSearchParams({ refType, refEntryNo });
+  const response = await fetch(
+    getApiUrl(`/api/dms/reference-attachments?${query.toString()}`),
+  );
+  if (!response.ok) {
+    throw new Error("Failed to load voucher attachments");
+  }
+  return response.json();
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
