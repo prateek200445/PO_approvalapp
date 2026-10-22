@@ -12,6 +12,16 @@ export interface GstLiabilityCompany {
   inputIgst: number;
   inputCgst: number;
   inputSgst: number;
+  openingCredit: number;
+  openingCash: number;
+  inputBalance: number;
+  outputBalance: number;
+  purchaseIgst: number;
+  purchaseCgst: number;
+  purchaseSgst: number;
+  salesIgst: number;
+  salesCgst: number;
+  salesSgst: number;
   setOff: number;
   moved: boolean;
 }
@@ -23,7 +33,7 @@ export interface GstLiabilityLedgerRow {
   known: boolean;
   ledger: string;
   group: string;
-  kind: "output" | "input" | "other";
+  kind: "output" | "input" | "other" | "cash";
   tax: string;
   opening: number;
   debit: number;

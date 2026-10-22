@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { FileSpreadsheet, Loader2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -40,6 +40,34 @@ const num = (s: string | undefined) => {
 
 const outputTotal = (c: GstLiabilityCompany) => c.outputIgst + c.outputCgst + c.outputSgst;
 const inputTotal = (c: GstLiabilityCompany) => c.inputIgst + c.inputCgst + c.inputSgst;
+
+function erpRows(ledgers: GstLiabilityLedgerRow[], code: string) {
+  const rows = ledgers.filter((l) => l.code === code);
+  const sum = (kind: GstLiabilityLedgerRow["kind"], field: "opening" | "closing", tax?: string) =>
+    rows
+      .filter((l) => l.kind === kind && (!tax || l.tax === tax))
+      .reduce((s, l) => s + (field === "opening" ? l.opening : l.closing), 0);
+  const byTax = (kind: GstLiabilityLedgerRow["kind"], field: "opening" | "closing") => {
+    const igst = sum(kind, field, "IGST");
+    const cgst = sum(kind, field, "CGST");
+    const sgst = sum(kind, field, "SGST");
+    return { igst, cgst, sgst, net: igst + cgst + sgst };
+  };
+  const credit = byTax("input", "opening");
+  const input = byTax("input", "closing");
+  const output = byTax("output", "closing");
+  const cash = sum("cash", "opening");
+  return [
+    { label: "Opening balance credit", ...credit },
+    { label: "Opening balance cash", igst: null, cgst: null, sgst: null, net: cash },
+    { label: "Input balance", ...input },
+    { label: "Output balance", ...output },
+  ];
+}
+
+function taxRow(label: string, igst: number, cgst: number, sgst: number) {
+  return { label, igst, cgst, sgst, net: igst + cgst + sgst };
+}
 
 const TH = "px-2.5 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground";
 const TD = "px-2.5 py-1.5 text-right tabular-nums";
@@ -170,7 +198,7 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
   useEffect(() => setBalances(loadBalances(month)), [month]);
 
   const query = useQuery({
-    queryKey: ["gst-liability", month, excludeSetOff, refreshToken],
+    queryKey: ["gst-liability-pending-month", month, excludeSetOff, refreshToken],
     queryFn: () => {
       const refresh = bypassCacheRef.current;
       bypassCacheRef.current = false;
@@ -268,7 +296,7 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
             <option value="">All companies</option>
             {known.map((c) => (
               <option key={c.code} value={c.code}>
-                {c.code} · {c.name}
+                {c.name && c.name !== c.code ? `${c.code} · ${c.name}` : c.code}
               </option>
             ))}
             {others.length > 0 && (
@@ -379,7 +407,7 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
           <header className="border-b border-border px-4 py-3">
             <h3 className="text-sm font-semibold">Net balance — payable (−) / balance (+)</h3>
             <p className="text-xs text-muted-foreground">
-              Enter the IGST / CGST / SGST A/c balance from the GST portal cash / credit ledger. Net = output + input + balance.
+              Enter the IGST / CGST / SGST A/c balance from the GST portal. Under each company, opening, input and output rows are the sums of that company’s fetched GST ledgers. Purchase pending and sales pending are the GST amounts stored on that month’s orders which still have a pending quantity. They are not included in Grand Total.
             </p>
           </header>
           <div className="overflow-x-auto">
@@ -399,36 +427,49 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
                 {shown.map((c) => {
                   const n = net(c);
                   return (
-                    <tr key={c.code} className="border-b border-border/60 even:bg-muted/20">
-                      <td className="px-3 py-1.5 font-semibold" title={`${c.gstin}\n${c.units.join("\n")}`}>
-                        {c.code}
-                      </td>
-                      <td className={TD}><Amount value={outputTotal(c)} /></td>
-                      <td className={TD}><Amount value={inputTotal(c)} /></td>
-                      {(["igst", "cgst", "sgst"] as const).map((f) => (
-                        <td key={f} className="px-2 py-1">
-                          <Input
-                            inputMode="decimal"
-                            value={balances[c.code]?.[f] ?? ""}
-                            placeholder="0.00"
-                            onChange={(e) => setBalance(c.code, f, e.target.value)}
-                            className="ml-auto h-8 w-full max-w-[150px] text-right tabular-nums"
-                          />
+                    <Fragment key={c.code}>
+                      <tr className="border-b border-border/60">
+                        <td className="px-3 py-1.5 font-semibold" title={`${c.gstin}\n${c.units.join("\n")}`}>
+                          {c.code}
                         </td>
+                        <td className={TD}><Amount value={outputTotal(c)} /></td>
+                        <td className={TD}><Amount value={inputTotal(c)} /></td>
+                        {(["igst", "cgst", "sgst"] as const).map((f) => (
+                          <td key={f} className="px-2 py-1">
+                            <Input
+                              inputMode="decimal"
+                              value={balances[c.code]?.[f] ?? ""}
+                              placeholder="0.00"
+                              onChange={(e) => setBalance(c.code, f, e.target.value)}
+                              className="ml-auto h-8 w-full max-w-[150px] text-right tabular-nums"
+                            />
+                          </td>
+                        ))}
+                        <td className={TD}>
+                          <span
+                            className={cn(
+                              "inline-block rounded-md px-2 py-0.5 font-semibold",
+                              n < 0
+                                ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+                                : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+                            )}
+                          >
+                            {fmt(n)}
+                          </span>
+                        </td>
+                      </tr>
+                      {[...erpRows(data.ledgers, c.code), taxRow("Purchase pending", c.purchaseIgst, c.purchaseCgst, c.purchaseSgst), taxRow("Sales pending", c.salesIgst, c.salesCgst, c.salesSgst)].map((row) => (
+                        <tr key={row.label} className="border-b border-border/40 bg-muted/20 text-xs">
+                          <td className="py-1.5 pl-6 pr-3 text-muted-foreground">{row.label}</td>
+                          <td className={TD} />
+                          <td className={TD} />
+                          <td className={TD}>{row.igst == null ? "" : <Amount value={row.igst} />}</td>
+                          <td className={TD}>{row.cgst == null ? "" : <Amount value={row.cgst} />}</td>
+                          <td className={TD}>{row.sgst == null ? "" : <Amount value={row.sgst} />}</td>
+                          <td className={TD}><Amount value={row.net} /></td>
+                        </tr>
                       ))}
-                      <td className={TD}>
-                        <span
-                          className={cn(
-                            "inline-block rounded-md px-2 py-0.5 font-semibold",
-                            n < 0
-                              ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
-                              : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
-                          )}
-                        >
-                          {fmt(n)}
-                        </span>
-                      </td>
-                    </tr>
+                    </Fragment>
                   );
                 })}
               </tbody>
