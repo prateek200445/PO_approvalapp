@@ -76,13 +76,8 @@ public class WovenQuoteController : ControllerBase
         Ok(await _service.PreviewAsync(draft));
 
     [HttpGet]
-    public async Task<IActionResult> List(
-        [FromQuery] string? sector,
-        [FromQuery] string? customer,
-        [FromQuery] string? reference,
-        [FromQuery] DateTime? from,
-        [FromQuery] DateTime? to) =>
-        Ok(await _service.ListAsync(sector, customer, reference, from, to));
+    public async Task<IActionResult> List([FromQuery] WovenQuoteListQuery query) =>
+        Ok(await _service.ListAsync(query));
 
     [HttpGet("{id:int}")]
     public async Task<IActionResult> Get(int id)

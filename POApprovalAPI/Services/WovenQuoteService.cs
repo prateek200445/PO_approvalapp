@@ -128,30 +128,84 @@ public class WovenQuoteService
         return WovenQuoteMath.Calculate(draft, rates, constants, fabric, coating, liner);
     }
 
-    public async Task<IReadOnlyList<WovenQuoteListItem>> ListAsync(string? sector, string? customer, string? reference, DateTime? from, DateTime? to)
+    public async Task<WovenQuoteListPage> ListAsync(WovenQuoteListQuery query)
     {
         await EnsureReadyAsync();
+        var page = Math.Max(1, query.Page);
+        var pageSize = Math.Clamp(query.PageSize, 1, 100);
+        var offset = (page - 1) * pageSize;
+        var order = string.Equals(query.DateOrder, "asc", StringComparison.OrdinalIgnoreCase) ? "ASC" : "DESC";
+        bool? isDraft = query.Status?.Trim().ToLowerInvariant() switch
+        {
+            "draft" => true,
+            "saved" => false,
+            _ => null,
+        };
         using var con = _database.CreateConnection();
-        var rows = (await con.QueryAsync<QuoteStoreRow>("""
+        var sql = $"""
+            SELECT COUNT(1)
+            FROM dbo.WovenQuote
+            WHERE (@sector IS NULL OR Sector = @sector)
+              AND (@customer IS NULL OR CustomerName LIKE @customerLike)
+              AND (@ourRef IS NULL OR OurRef LIKE @ourRefLike)
+              AND (@customerRef IS NULL OR CustomerRef LIKE @customerRefLike)
+              AND (@isDraft IS NULL OR IsDraft = @isDraft)
+              AND (@productType IS NULL OR ProductType = @productType)
+              AND (@terms IS NULL OR Terms LIKE @termsLike)
+              AND (@currency IS NULL OR Currency = @currency)
+              AND (@fromDate IS NULL OR QuoteDate >= @fromDate)
+              AND (@toDate IS NULL OR QuoteDate <= @toDate)
+              AND (@minWeight IS NULL OR TotalWeightGram >= @minWeight)
+              AND (@maxWeight IS NULL OR TotalWeightGram <= @maxWeight)
+              AND (@minPrice IS NULL OR PricePerPiece >= @minPrice)
+              AND (@maxPrice IS NULL OR PricePerPiece <= @maxPrice);
+
             SELECT Id, ProductType, QuoteDate, Sector, CustomerName, OurRef, CustomerRef, Currency, Terms,
                    PricePerPiece, TotalWeightGram, PayloadJson, ResultJson, CreatedBy, UpdatedAt, IsDraft
             FROM dbo.WovenQuote
             WHERE (@sector IS NULL OR Sector = @sector)
               AND (@customer IS NULL OR CustomerName LIKE @customerLike)
-              AND (@reference IS NULL OR OurRef LIKE @referenceLike OR CustomerRef LIKE @referenceLike)
+              AND (@ourRef IS NULL OR OurRef LIKE @ourRefLike)
+              AND (@customerRef IS NULL OR CustomerRef LIKE @customerRefLike)
+              AND (@isDraft IS NULL OR IsDraft = @isDraft)
+              AND (@productType IS NULL OR ProductType = @productType)
+              AND (@terms IS NULL OR Terms LIKE @termsLike)
+              AND (@currency IS NULL OR Currency = @currency)
               AND (@fromDate IS NULL OR QuoteDate >= @fromDate)
               AND (@toDate IS NULL OR QuoteDate <= @toDate)
-            ORDER BY QuoteDate DESC, Id DESC
-            """, new
+              AND (@minWeight IS NULL OR TotalWeightGram >= @minWeight)
+              AND (@maxWeight IS NULL OR TotalWeightGram <= @maxWeight)
+              AND (@minPrice IS NULL OR PricePerPiece >= @minPrice)
+              AND (@maxPrice IS NULL OR PricePerPiece <= @maxPrice)
+            ORDER BY QuoteDate {order}, Id {order}
+            OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
+            """;
+        var parameters = new
         {
-            sector = BlankToNull(sector),
-            customer = BlankToNull(customer),
-            customerLike = string.IsNullOrWhiteSpace(customer) ? null : $"%{customer.Trim()}%",
-            reference = BlankToNull(reference),
-            referenceLike = string.IsNullOrWhiteSpace(reference) ? null : $"%{reference.Trim()}%",
-            fromDate = from?.Date,
-            toDate = to?.Date,
-        })).ToList();
+            sector = BlankToNull(query.Sector),
+            customer = BlankToNull(query.Customer),
+            customerLike = Like(query.Customer),
+            ourRef = BlankToNull(query.OurRef),
+            ourRefLike = Like(query.OurRef),
+            customerRef = BlankToNull(query.CustomerRef),
+            customerRefLike = Like(query.CustomerRef),
+            isDraft,
+            productType = BlankToNull(query.ProductType),
+            terms = BlankToNull(query.Terms),
+            termsLike = Like(query.Terms),
+            currency = BlankToNull(query.Currency),
+            fromDate = query.From?.Date,
+            toDate = query.To?.Date,
+            query.MinWeight,
+            query.MaxWeight,
+            query.MinPrice,
+            query.MaxPrice,
+            offset,
+            pageSize,
+        };
+        using var resultSet = await con.QueryMultipleAsync(sql, parameters);
+        var total = await resultSet.ReadSingleAsync<int>();
+        var rows = (await resultSet.ReadAsync<QuoteStoreRow>()).ToList();
         var materials = (await con.QueryAsync<WovenQuoteMaterialRow>("SELECT Code, Name, SortOrder, InFabric, InCoating, InLiner FROM dbo.WovenQuoteMaterial ORDER BY SortOrder")).ToList();
         var constants = (await con.QueryAsync<WovenQuoteConstantRow>("SELECT [Key], Value, Label, GroupName FROM dbo.WovenQuoteConstant")).ToDictionary(x => x.Key, x => x.Value);
         var allRates = (await con.QueryAsync<WovenQuoteRateRow>("SELECT Id, MaterialCode, Sector, EffectiveDate, Rate FROM dbo.WovenQuoteRmRate")).ToList();
@@ -187,7 +241,13 @@ public class WovenQuoteService
                 IsDraft = row.IsDraft,
             });
         }
-        return list;
+        return new WovenQuoteListPage
+        {
+            Items = list,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+        };
     }
 
     public async Task<WovenQuoteDetail?> GetAsync(int id)
@@ -506,6 +566,7 @@ public class WovenQuoteService
     }
 
     private static string? BlankToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static string? Like(string? value) => string.IsNullOrWhiteSpace(value) ? null : $"%{value.Trim()}%";
 
     private const string SchemaSql = """
         IF OBJECT_ID(N'dbo.WovenQuoteMaterial', N'U') IS NULL
@@ -570,6 +631,9 @@ public class WovenQuoteService
         );
         IF COL_LENGTH(N'dbo.WovenQuote', N'IsDraft') IS NULL
             ALTER TABLE dbo.WovenQuote ADD IsDraft BIT NOT NULL CONSTRAINT DF_WovenQuote_IsDraft DEFAULT (0);
+        IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_WovenQuote_List' AND object_id = OBJECT_ID(N'dbo.WovenQuote'))
+            CREATE INDEX IX_WovenQuote_List ON dbo.WovenQuote (IsDraft, QuoteDate DESC, Id DESC)
+            INCLUDE (Sector, ProductType, Currency, Terms, PricePerPiece, TotalWeightGram);
         """;
 
     private sealed class QuoteStoreRow

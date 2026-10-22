@@ -62,6 +62,10 @@ public class WovenQuoteDraft
     public string PalletSize { get; set; } = "";
     public decimal? BagsPerPallet { get; set; }
     public decimal? PrintPlateCost { get; set; }
+    public string PrintPlateCostText { get; set; } = "";
+    public string DisplayGsm { get; set; } = "";
+    public decimal? MeterPerRoll { get; set; }
+    public decimal? RollsPerPallet { get; set; }
     public string Remarks { get; set; } = "";
     public decimal? AdWidth { get; set; }
     public decimal? AdLength { get; set; }
@@ -145,6 +149,35 @@ public class WovenQuoteListItem
     public string CreatedBy { get; set; } = "";
     public DateTime UpdatedAt { get; set; }
     public bool IsDraft { get; set; }
+}
+
+public class WovenQuoteListQuery
+{
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 100;
+    public string DateOrder { get; set; } = "desc";
+    public string? Sector { get; set; }
+    public string? Customer { get; set; }
+    public string? OurRef { get; set; }
+    public string? CustomerRef { get; set; }
+    public string? Status { get; set; }
+    public string? ProductType { get; set; }
+    public string? Terms { get; set; }
+    public string? Currency { get; set; }
+    public DateTime? From { get; set; }
+    public DateTime? To { get; set; }
+    public decimal? MinWeight { get; set; }
+    public decimal? MaxWeight { get; set; }
+    public decimal? MinPrice { get; set; }
+    public decimal? MaxPrice { get; set; }
+}
+
+public class WovenQuoteListPage
+{
+    public List<WovenQuoteListItem> Items { get; set; } = [];
+    public int Total { get; set; }
+    public int Page { get; set; }
+    public int PageSize { get; set; }
 }
 
 public class WovenQuoteDetail : WovenQuoteListItem

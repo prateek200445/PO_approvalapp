@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Calculator, Loader2, Plus, Save, Settings2, Trash2 } from "lucide-react";
+import { ArrowLeft, Calculator, Copy, Loader2, Plus, Save, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -109,7 +109,39 @@ export function WovenQuoteScreen() {
   );
 }
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 100;
+
+type QuoteFilters = {
+  sector: string;
+  customer: string;
+  ourRef: string;
+  customerRef: string;
+  productType: string;
+  terms: string;
+  currency: string;
+  from: string;
+  to: string;
+  minWeight: string;
+  maxWeight: string;
+  minPrice: string;
+  maxPrice: string;
+};
+
+const emptyQuoteFilters = (): QuoteFilters => ({
+  sector: "",
+  customer: "",
+  ourRef: "",
+  customerRef: "",
+  productType: "",
+  terms: "",
+  currency: "",
+  from: "",
+  to: "",
+  minWeight: "",
+  maxWeight: "",
+  minPrice: "",
+  maxPrice: "",
+});
 
 function QuoteList({
   tab,
@@ -120,49 +152,49 @@ function QuoteList({
   onTabChange: (tab: "saved" | "drafts") => void;
   onOpen: (id: number) => void;
 }) {
-  const [sector, setSector] = useState("");
-  const [customer, setCustomer] = useState("");
-  const [reference, setReference] = useState("");
+  const [filters, setFilters] = useState<QuoteFilters>(emptyQuoteFilters);
+  const [applied, setApplied] = useState<QuoteFilters>(emptyQuoteFilters);
   const [dateOrder, setDateOrder] = useState<"desc" | "asc">("desc");
   const [page, setPage] = useState(1);
+  const setFilter = (key: keyof QuoteFilters, value: string) =>
+    setFilters((current) => ({ ...current, [key]: value }));
   const query = useQuery({
-    queryKey: ["woven-quotes", sector, customer, reference],
+    queryKey: ["woven-quotes", tab, page, dateOrder, applied],
     queryFn: () => {
       const params = new URLSearchParams();
-      if (sector) params.set("sector", sector);
-      if (customer) params.set("customer", customer);
-      if (reference) params.set("reference", reference);
-      const text = params.toString();
-      return listWovenQuotes(text ? `?${text}` : "");
+      params.set("page", String(page));
+      params.set("pageSize", String(PAGE_SIZE));
+      params.set("dateOrder", dateOrder);
+      params.set("status", tab === "drafts" ? "draft" : "saved");
+      Object.entries(applied).forEach(([key, value]) => {
+        if (value) params.set(key, value);
+      });
+      return listWovenQuotes(`?${params.toString()}`);
     },
   });
 
-  const rows = query.data ?? [];
-  const savedRows = rows.filter((row) => !row.isDraft);
-  const draftRows = rows.filter((row) => row.isDraft);
-  const shown = [...(tab === "drafts" ? draftRows : savedRows)].sort((a, b) => {
-    const byDate = a.quoteDate.slice(0, 10).localeCompare(b.quoteDate.slice(0, 10));
-    if (byDate !== 0) return dateOrder === "desc" ? -byDate : byDate;
-    return dateOrder === "desc" ? b.id - a.id : a.id - b.id;
-  });
-  const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
-  const current = Math.min(page, pages);
-  const visible = shown.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+  const rows = query.data?.items ?? [];
+  const total = query.data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <section className="card-3d space-y-4 rounded-xl p-4 md:p-5">
       <Tabs value={tab} onValueChange={(value) => { onTabChange(value === "drafts" ? "drafts" : "saved"); setPage(1); }}>
         <TabsList>
-          <TabsTrigger value="saved">Saved{query.data ? ` (${savedRows.length})` : ""}</TabsTrigger>
-          <TabsTrigger value="drafts">Drafts{query.data ? ` (${draftRows.length})` : ""}</TabsTrigger>
+          <TabsTrigger value="saved">Saved</TabsTrigger>
+          <TabsTrigger value="drafts">Drafts</TabsTrigger>
         </TabsList>
       </Tabs>
       <div className="grid gap-3 md:grid-cols-4">
-        <Select label="Sector" value={sector} onChange={(value) => { setSector(value); setPage(1); }} options={["", "Export", "Domestic"]} />
-        <Field label="Customer" value={customer} onChange={(value) => { setCustomer(value); setPage(1); }} />
-        <Field label="Reference" value={reference} onChange={(value) => { setReference(value); setPage(1); }} />
+        <Select label="Sector" value={filters.sector} onChange={(value) => setFilter("sector", value)} options={["", "Export", "Domestic"]} />
+        <Field label="Customer" value={filters.customer} onChange={(value) => setFilter("customer", value)} />
+        <Field label="Our reference" value={filters.ourRef} onChange={(value) => setFilter("ourRef", value)} />
+        <Field label="Customer reference" value={filters.customerRef} onChange={(value) => setFilter("customerRef", value)} />
+        <Select label="Type" value={filters.productType} onChange={(value) => setFilter("productType", value)} options={["", "WovenBag", "AdStar"]} />
+        <Field label="Terms" value={filters.terms} onChange={(value) => setFilter("terms", value)} />
+        <Field label="Currency" value={filters.currency} onChange={(value) => setFilter("currency", value)} />
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">Date</span>
+          <span className="text-muted-foreground">Date order</span>
           <select
             className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
             value={dateOrder}
@@ -172,8 +204,18 @@ function QuoteList({
             <option value="asc">Oldest first</option>
           </select>
         </label>
+        <Field label="Date from" type="date" value={filters.from} onChange={(value) => setFilter("from", value)} />
+        <Field label="Date to" type="date" value={filters.to} onChange={(value) => setFilter("to", value)} />
+        <Field label="Minimum weight g" type="number" value={filters.minWeight} onChange={(value) => setFilter("minWeight", value)} />
+        <Field label="Maximum weight g" type="number" value={filters.maxWeight} onChange={(value) => setFilter("maxWeight", value)} />
+        <Field label="Minimum price" type="number" value={filters.minPrice} onChange={(value) => setFilter("minPrice", value)} />
+        <Field label="Maximum price" type="number" value={filters.maxPrice} onChange={(value) => setFilter("maxPrice", value)} />
+        <div className="flex items-end gap-2 md:col-span-2">
+          <Button onClick={() => { setApplied(filters); setPage(1); }}>Apply filters</Button>
+          <Button variant="outline" onClick={() => { const empty = emptyQuoteFilters(); setFilters(empty); setApplied(empty); setPage(1); }}>Clear</Button>
+        </div>
       </div>
-      {query.isPending ? (
+      {query.isPending || query.isFetching ? (
         <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" />
           Loading quotations…
@@ -188,40 +230,44 @@ function QuoteList({
             <tr className="border-b border-border">
               <th className="py-2 pr-3 font-medium">Date</th>
               <th className="py-2 pr-3 font-medium">Customer</th>
-              <th className="py-2 pr-3 font-medium">Reference</th>
+              <th className="py-2 pr-3 font-medium">Our reference</th>
+              <th className="py-2 pr-3 font-medium">Customer reference</th>
               <th className="py-2 pr-3 font-medium">Status</th>
               <th className="py-2 pr-3 font-medium">Type</th>
               <th className="py-2 pr-3 font-medium">Terms</th>
+              <th className="py-2 pr-3 font-medium">Currency</th>
               <th className="py-2 pr-3 text-right font-medium">Weight g</th>
               <th className="py-2 text-right font-medium">Price / pc</th>
               <th className="py-2 pl-3 text-right font-medium"> </th>
             </tr>
           </thead>
           <tbody>
-            {visible.map((row) => (
+            {rows.map((row) => (
               <tr key={row.id} className="border-b border-border/70 hover:bg-muted/40">
                 <td className="py-2.5 pr-3">{row.quoteDate.slice(0, 10)}</td>
                 <td className="py-2.5 pr-3 font-medium">{row.customerName || "Untitled"}</td>
-                <td className="py-2.5 pr-3">{row.ourRef || row.customerRef || "—"}</td>
+                <td className="py-2.5 pr-3">{row.ourRef || "—"}</td>
+                <td className="py-2.5 pr-3">{row.customerRef || "—"}</td>
                 <td className="py-2.5 pr-3">{row.isDraft ? <Badge variant="secondary">Draft</Badge> : <Badge variant="outline">Saved</Badge>}</td>
                 <td className="py-2.5 pr-3">{row.productType === "AdStar" ? "AD Star" : "Woven bag"}</td>
-                <td className="py-2.5 pr-3">{row.terms} {row.currency}</td>
+                <td className="py-2.5 pr-3">{row.terms || "—"}</td>
+                <td className="py-2.5 pr-3">{row.currency || "—"}</td>
                 <td className="py-2.5 pr-3 text-right tabular-nums">{formatQty(row.totalWeightGram, 1)}</td>
                 <td className="py-2.5 text-right font-semibold tabular-nums">{formatQty(row.pricePerPiece, 4)} {row.currency}</td>
                 <td className="py-2.5 pl-3 text-right"><Button size="sm" variant="outline" onClick={() => onOpen(row.id)}>Edit</Button></td>
               </tr>
             ))}
-            {shown.length === 0 ? (
-              <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">{tab === "drafts" ? "No drafts." : "No saved quotations."}</td></tr>
+            {rows.length === 0 ? (
+              <tr><td colSpan={11} className="py-8 text-center text-muted-foreground">{tab === "drafts" ? "No drafts match these filters." : "No saved quotations match these filters."}</td></tr>
             ) : null}
           </tbody>
         </table>
       </div>
       <div className="flex items-center justify-between gap-3 text-sm">
-        <p className="text-muted-foreground">{shown.length === 0 ? (tab === "drafts" ? "0 drafts" : "0 quotations") : `${(current - 1) * PAGE_SIZE + 1}–${Math.min(current * PAGE_SIZE, shown.length)} of ${shown.length}`}</p>
+        <p className="text-muted-foreground">{total === 0 ? (tab === "drafts" ? "0 drafts" : "0 quotations") : `${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} of ${total}`}</p>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" disabled={current <= 1} onClick={() => setPage(current - 1)}>Previous</Button>
-          <Button size="sm" variant="outline" disabled={current >= pages} onClick={() => setPage(current + 1)}>Next</Button>
+          <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button>
+          <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => setPage(page + 1)}>Next</Button>
         </div>
       </div>
       </div>
@@ -291,10 +337,10 @@ function QuoteEditor({
     setDraft((current) => ({ ...current, ...partial }));
   }
 
-  async function persist(asDraft: boolean) {
+  async function persist(asDraft: boolean, createCopy = false) {
     const current = draftRef.current;
     const id = idRef.current;
-    const saved = id == null
+    const saved = id == null || createCopy
       ? await createWovenQuote(current, user?.username ?? "", asDraft)
       : await updateWovenQuote(id, current, asDraft);
     idRef.current = saved.id;
@@ -342,6 +388,19 @@ function QuoteEditor({
     }
   }
 
+  async function saveAsNew() {
+    setSaving(true);
+    try {
+      const saved = await persist(false, true);
+      dirty.current = false;
+      toast.success(`New quotation #${saved.id} created.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "New quotation could not be created.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function remove() {
     if (quoteId == null) return;
     if (!window.confirm("Delete this quotation?")) return;
@@ -360,7 +419,10 @@ function QuoteEditor({
     <div className="grid items-start gap-4 pb-20 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="font-semibold">Quote sheet</h2>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={onClose}><ArrowLeft /> Back to list</Button>
+            <h2 className="font-semibold">Quote sheet</h2>
+          </div>
           <div className="flex gap-2">
             <Button size="sm" variant={draft.productType === "WovenBag" ? "default" : "outline"} onClick={() => patch({ productType: "WovenBag" })}>Woven bag</Button>
             <Button size="sm" variant={draft.productType === "AdStar" ? "default" : "outline"} onClick={() => patch({ productType: "AdStar" })}>AD Star</Button>
@@ -371,10 +433,11 @@ function QuoteEditor({
         ) : (
           <AdStarSpec draft={draft} patch={patch} />
         )}
+        {draft.productType === "WovenBag" ? <QuotationTextCard draft={draft} result={result} /> : null}
 
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => void save()} disabled={saving}><Save /> {saving ? "Saving…" : "Save quotation"}</Button>
-          <Button variant="outline" onClick={onClose}>Back to list</Button>
+          {quoteId != null ? <Button variant="secondary" onClick={() => void saveAsNew()} disabled={saving}><Plus /> Save as new</Button> : null}
           {quoteId != null ? <Button variant="destructive" onClick={() => void remove()}><Trash2 /> Delete</Button> : null}
         </div>
       </div>
@@ -417,6 +480,95 @@ function QuoteEditor({
       <QuoteDock result={result} saving={saving} onSave={() => void save()} />
     </div>
   );
+}
+
+function QuotationTextCard({ draft, result }: { draft: WovenDraft; result: WovenResult }) {
+  const isFabric = draft.bagType === "Flat Fabric" || draft.bagType === "Tubular Fabric";
+  const text = quotationText(draft, result, isFabric);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Quotation text copied.");
+    } catch {
+      toast.error("Quotation text could not be copied.");
+    }
+  }
+  return (
+    <section className="card-3d space-y-3 rounded-xl p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="font-semibold">{isFabric ? "Fabric quotation text" : "Bag quotation text"}</h3>
+          <p className="text-xs text-muted-foreground">Copy and paste this directly into an email.</p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => void copy()}><Copy /> Copy quotation</Button>
+      </div>
+      <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-4 font-sans text-sm leading-6">{text}</pre>
+    </section>
+  );
+}
+
+function quotationText(draft: WovenDraft, result: WovenResult, isFabric: boolean) {
+  const number = (value: number | null | undefined, digits = 2) => value == null ? "" : formatQty(value, digits);
+  const yesNo = (value: boolean) => value ? "Yes" : "No";
+  const plate = draft.printPlateCostText || (draft.printPlateCost == null ? "" : String(draft.printPlateCost));
+  const commonEnd: Array<[string, string]> = [
+    ["Terms", draft.terms],
+    ["Sea Port", draft.seaPort],
+    ["Currency", draft.currency],
+  ];
+  if (isFabric) {
+    const totalWidth = result.offerWidth == null || result.offerGusset == null
+      ? null
+      : result.offerWidth + result.offerGusset;
+    const tubeFlat = draft.bagType === "Flat Fabric" ? "Flat" : "Tube";
+    return formatQuotationRows("FABRIC QUOTATION", [
+      ["Customer Ref", draft.customerRef],
+      ["Dimensions", draft.dimensionUnit],
+      ["UV (Y/N)", result.uvLabel],
+      ["Colour", draft.fabricColour],
+      ["Printed Y/N", result.printedLabel],
+      ["Packing", draft.packing],
+      ["Print Plate Cost/Colour", plate],
+      ["Fabric Width", number(result.offerWidth)],
+      ["Gusset", number(result.offerGusset)],
+      ["Total Width", number(totalWidth)],
+      ["Tube/Flat", tubeFlat],
+      ["GSM", draft.displayGsm],
+      ["Meter/Roll", number(draft.meterPerRoll)],
+      ["Rolls/Pallet", number(draft.rollsPerPallet, 0)],
+      ...commonEnd,
+      ["Price/UOM", `${formatQty(result.pricePerPiece, 4)} ${draft.currency}`.trim()],
+    ]);
+  }
+  return formatQuotationRows("BAG QUOTATION", [
+    ["Customer Ref", draft.customerRef],
+    ["Dimensions", draft.dimensionUnit],
+    ["Bag/Fabric Width", number(result.offerWidth)],
+    ["Gusset Width", number(result.offerGusset)],
+    ["Bag Length", number(result.offerLength)],
+    ["Bag Weight (+/-5%)", `${formatQty(result.totalComponentGram, 2)} g`],
+    ["Coated (Y/N)", result.coatedLabel],
+    ["UV (Y/N)", result.uvLabel],
+    ["Colour", draft.fabricColour],
+    ["Printed", result.printedLabel],
+    ["Liner (Y/N)", result.linerLabel],
+    ["Top", draft.top],
+    ["Thumb Notch", yesNo(draft.thumbNotch)],
+    ["Metal Detection", yesNo(draft.metalDetection)],
+    ["Perforation", yesNo(draft.perforation)],
+    ["Packing", draft.packing],
+    ["Pieces/Bale", number(draft.pcsPerBale, 0)],
+    ["Pallet Size", draft.palletSize],
+    ["Bags/Pallet", number(draft.bagsPerPallet, 0)],
+    ["Print Plate Cost/Colour", plate],
+    ...commonEnd,
+    ["Price/Piece", `${formatQty(result.pricePerPiece, 4)} ${draft.currency}`.trim()],
+    ["Remarks", draft.remarks],
+  ]);
+}
+
+function formatQuotationRows(title: string, rows: Array<[string, string]>) {
+  return [title, "", ...rows.map(([label, value]) => `${label}: ${value || "—"}`)].join("\n");
 }
 
 function QuoteDock({ result, saving, onSave }: { result: WovenResult; saving: boolean; onSave: () => void }) {
@@ -474,6 +626,7 @@ function WovenSheet({
   result: WovenResult;
 }) {
   const coatingWaste = result.lines.find((line) => line.label === "Coating wastage");
+  const isFabric = draft.bagType === "Flat Fabric" || draft.bagType === "Tubular Fabric";
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <p className="border-b border-border px-3 py-2 text-xs text-muted-foreground">Filled rows are inputs. Shaded rows are calculated. Type 5 for 5%. Leave total weight blank unless the bag must be heavier than the calculated weight.</p>
@@ -561,7 +714,10 @@ function WovenSheet({
           <Entry label="No of pcs per bale"><SheetNum value={draft.pcsPerBale} onChange={(pcsPerBale) => patch({ pcsPerBale })} /></Entry>
           <Entry label="Pallet size"><Input className="h-8 border-0 shadow-none" value={draft.palletSize} onChange={(e) => patch({ palletSize: e.target.value })} /></Entry>
           <Entry label="Bags / pallet"><SheetNum value={draft.bagsPerPallet} onChange={(bagsPerPallet) => patch({ bagsPerPallet })} /></Entry>
-          <Entry label="Print plate cost / colour"><SheetNum value={draft.printPlateCost} onChange={(printPlateCost) => patch({ printPlateCost })} /></Entry>
+          <Entry label="Print plate cost / colour"><Input className="h-8 border-0 shadow-none" value={draft.printPlateCostText || (draft.printPlateCost == null ? "" : String(draft.printPlateCost))} onChange={(e) => patch({ printPlateCostText: e.target.value })} placeholder="USD 50 Per Colour" /></Entry>
+          {isFabric ? <Entry label="Display GSM"><Input className="h-8 border-0 shadow-none" value={draft.displayGsm} onChange={(e) => patch({ displayGsm: e.target.value })} placeholder="70+20" /></Entry> : null}
+          {isFabric ? <Entry label="Meter / roll"><SheetNum value={draft.meterPerRoll} onChange={(meterPerRoll) => patch({ meterPerRoll })} /></Entry> : null}
+          {isFabric ? <Entry label="Rolls / pallet"><SheetNum value={draft.rollsPerPallet} onChange={(rollsPerPallet) => patch({ rollsPerPallet })} /></Entry> : null}
           <Entry label="Remarks"><Input className="h-8 border-0 shadow-none" value={draft.remarks} onChange={(e) => patch({ remarks: e.target.value })} /></Entry>
         </tbody>
       </table>
@@ -573,6 +729,10 @@ function withPercentWastage(draft: WovenDraft): WovenDraft {
     return {
     ...draft,
     quoteDate: draft.quoteDate ? draft.quoteDate.slice(0, 10) : "",
+    printPlateCostText: draft.printPlateCostText ?? "",
+    displayGsm: draft.displayGsm ?? "",
+    meterPerRoll: draft.meterPerRoll ?? null,
+    rollsPerPallet: draft.rollsPerPallet ?? null,
     wastageFabric: showWastagePercent(draft.wastageFabric),
     wastageLiner: showWastagePercent(draft.wastageLiner),
     wastageFinishing: showWastagePercent(draft.wastageFinishing),
@@ -771,7 +931,7 @@ function MastersPanel({ masters, rates }: { masters: WovenMasters; rates: WovenR
           <TabsTrigger value="rates">Raw material rates</TabsTrigger>
           <TabsTrigger value="constants">Formula constants</TabsTrigger>
           <TabsTrigger value="customers">Customers</TabsTrigger>
-          <TabsTrigger value="lists">Lists</TabsTrigger>
+          <TabsTrigger value="lists">Other Masters</TabsTrigger>
         </TabsList>
         <TabsContent value="rates" className="space-y-3 pt-4">
           <div className="grid gap-3 sm:grid-cols-2">

@@ -61,6 +61,10 @@ export interface WovenDraft {
   palletSize: string;
   bagsPerPallet: number | null;
   printPlateCost: number | null;
+  printPlateCostText: string;
+  displayGsm: string;
+  meterPerRoll: number | null;
+  rollsPerPallet: number | null;
   remarks: string;
   adWidth: number | null;
   adLength: number | null;
@@ -138,6 +142,13 @@ export interface WovenListItem {
   isDraft: boolean;
 }
 
+export interface WovenListPage {
+  items: WovenListItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface WovenDetail extends WovenListItem {
   draft: WovenDraft;
   result: WovenResult;
@@ -204,7 +215,7 @@ async function read<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getWovenMasters = () => read<WovenMasters>("/api/woven-quote/masters");
 export const getWovenRates = () => read<WovenRate[]>("/api/woven-quote/rates");
-export const listWovenQuotes = (query: string) => read<WovenListItem[]>(`/api/woven-quote${query}`);
+export const listWovenQuotes = (query: string) => read<WovenListPage>(`/api/woven-quote${query}`);
 export const getWovenQuote = (id: number) => read<WovenDetail>(`/api/woven-quote/${id}`);
 
 export function saveWovenRate(row: { materialCode: string; sector: string; effectiveDate: string; rate: number }) {
