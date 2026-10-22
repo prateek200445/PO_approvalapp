@@ -42,10 +42,11 @@ public class GstBillRecoService
         await using var connection = _database.CreateConnection();
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = @"
-SELECT Name
+SELECT DISTINCT
+    COALESCE(NULLIF(LTRIM(RTRIM(GroupName)), ''), LTRIM(RTRIM(Name))) AS GroupLabel
 FROM FactoryInfo WITH (NOLOCK)
-WHERE ISNULL(Name, '') <> ''
-ORDER BY Name";
+WHERE ISNULL(LTRIM(RTRIM(Name)), '') <> ''
+ORDER BY GroupLabel";
         var names = new List<string>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -64,8 +65,8 @@ ORDER BY Name";
         var company = (companyName ?? "").Trim();
         if (company.Length == 0)
             throw new ArgumentException("Company is required.");
-        if (company.Length > 100)
-            throw new ArgumentException("Company name is longer than the GST summary allows.");
+        if (company.Length > 150)
+            throw new ArgumentException("Company group name is too long.");
         var from = dateFrom.Date;
         var to = dateTo.Date;
         if (to < from)
@@ -77,13 +78,37 @@ ORDER BY Name";
         if (parsed.Rows.Count == 0)
             throw new ArgumentException("No invoice, credit note, or debit note rows with GST were found. Use the Invoice Wise 2B (B2B, CN, DN) sheet.");
 
+        var members = await LoadGroupMembersAsync(company, ct);
+        if (members.Count == 0)
+            throw new ArgumentException($"No ERP companies were found for group {company}.");
+
+        var buyerGstin = NormGst(parsed.BuyerGstin);
+        if (buyerGstin.Length == 0)
+        {
+            var groupGstins = members.Select(member => member.Gstin).Where(value => value.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (groupGstins.Count == 1)
+            {
+                buyerGstin = groupGstins[0];
+                parsed.BuyerGstin = buyerGstin;
+            }
+        }
+        if (buyerGstin.Length == 0)
+            throw new ArgumentException("The 2B file has no buyer GSTIN, so its company group cannot be identified.");
+
+        var matchingMembers = members
+            .Where(member => string.Equals(member.Gstin, buyerGstin, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (matchingMembers.Count == 0)
+            throw new ArgumentException($"The uploaded 2B GSTIN {buyerGstin} does not belong to {company}.");
+
         var saved = await SaveTwoBAsync(company, parsed, ct);
         var inRange = parsed.Rows.Where(row => InRange(row.BillDate, row.Period, from, to)).ToList();
         if (inRange.Count == 0)
             throw new ArgumentException($"Saved {saved} portal bills. None of them fall in the selected dates.");
 
-        var companyGstin = await LoadCompanyGstinAsync(company, ct);
-        var erpRows = await LoadErpAsync(company, from, to, ct);
+        var erpParts = await Task.WhenAll(matchingMembers.Select(member => LoadErpAsync(member.Name, from, to, ct)));
+        var erpRows = erpParts.SelectMany(part => part).ToList();
 
         var result = new GstBillRecoResult
         {
@@ -92,22 +117,19 @@ ORDER BY Name";
             DateTo = to,
             AmountTolerance = amountTolerance,
             BuyerGstin = parsed.BuyerGstin,
-            CompanyGstin = companyGstin,
+            CompanyGstin = buyerGstin,
             TwoBRows = inRange.Count,
             SavedRows = saved,
             ErpRows = erpRows.Count,
         };
 
-        if (!string.IsNullOrEmpty(parsed.BuyerGstin) &&
-            !string.IsNullOrEmpty(companyGstin) &&
-            !string.Equals(parsed.BuyerGstin, companyGstin, StringComparison.OrdinalIgnoreCase))
-        {
-            result.Warning =
-                $"The 2B file is for GSTIN {parsed.BuyerGstin}. {company} is {companyGstin}.";
-        }
+        if (matchingMembers.Count > 1)
+            result.Warning = $"Combined {matchingMembers.Count} ERP units in {company} that use GSTIN {buyerGstin}.";
 
         result.Rows = BuildRows(company, erpRows, inRange, amountTolerance);
+        await AddAttachmentReferencesAsync(result.Rows, ct);
         result.Matched = result.Rows.Count(r => r.Status == "Matched");
+        result.PotentialMatch = result.Rows.Count(r => r.Status == "Potential match");
         result.Mismatch = result.Rows.Count(r => r.Status == "Mismatch");
         result.MissingInErp = result.Rows.Count(r => r.Status == "Missing in ERP");
         result.MissingIn2B = result.Rows.Count(r => r.Status == "Missing in 2B");
@@ -191,6 +213,101 @@ WHERE Name = @Name";
         cmd.Parameters.Add("@Name", SqlDbType.VarChar, 150).Value = company;
         var value = await cmd.ExecuteScalarAsync(ct);
         return value == null || value == DBNull.Value ? "" : NormGst(Convert.ToString(value));
+    }
+
+    private async Task<List<CompanyMember>> LoadGroupMembersAsync(string groupLabel, CancellationToken ct)
+    {
+        await using var connection = _database.CreateConnection();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+SELECT LTRIM(RTRIM(Name)) AS Name, LTRIM(RTRIM(ISNULL(NewGSTNo, ''))) AS Gstin
+FROM FactoryInfo WITH (NOLOCK)
+WHERE ISNULL(LTRIM(RTRIM(Name)), '') <> ''
+  AND COALESCE(NULLIF(LTRIM(RTRIM(GroupName)), ''), LTRIM(RTRIM(Name))) = @GroupLabel
+ORDER BY Name";
+        cmd.Parameters.Add("@GroupLabel", SqlDbType.NVarChar, 150).Value = groupLabel;
+
+        var members = new List<CompanyMember>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            members.Add(new CompanyMember
+            {
+                Name = Convert.ToString(reader["Name"])?.Trim() ?? "",
+                Gstin = NormGst(Convert.ToString(reader["Gstin"]))
+            });
+        }
+        return members;
+    }
+
+    private async Task AddAttachmentReferencesAsync(List<GstBillRecoRow> rows, CancellationToken ct)
+    {
+        var erpRows = rows
+            .Where(row => row.VoucherDate.HasValue && !string.IsNullOrWhiteSpace(row.VoucherNo))
+            .ToList();
+        if (erpRows.Count == 0)
+            return;
+
+        foreach (var companyRows in erpRows.GroupBy(row => row.CompanyName, StringComparer.OrdinalIgnoreCase))
+            await AddCompanyAttachmentReferencesAsync(companyRows.Key, companyRows.ToList(), ct);
+    }
+
+    private async Task AddCompanyAttachmentReferencesAsync(
+        string companyName,
+        List<GstBillRecoRow> rows,
+        CancellationToken ct)
+    {
+        await using var connection = _database.CreateConnection();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+DECLARE @Code varchar(50) = (
+    SELECT TOP 1 LTRIM(RTRIM(ISNULL(IndentCode, '')))
+    FROM FactoryInfo WITH (NOLOCK)
+    WHERE Name = @CompanyName
+);
+
+IF OBJECT_ID('dbo.dms_ref', 'U') IS NOT NULL AND OBJECT_ID('dbo.dms_files', 'U') IS NOT NULL
+BEGIN
+    SELECT r.RefType, r.RefEntryNo, COUNT_BIG(*) AS AttachmentCount
+    FROM dbo.dms_ref r WITH (NOLOCK)
+    INNER JOIN dbo.dms_files f WITH (NOLOCK) ON f.RefId = r.RefId
+    WHERE @Code <> ''
+      AND r.RefEntryNo LIKE @Code + '/%'
+      AND ISNULL(f.IsDeleted, 0) = 0
+    GROUP BY r.RefType, r.RefEntryNo;
+END
+""";
+        cmd.Parameters.Add("@CompanyName", SqlDbType.VarChar, 150).Value = companyName;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var references = new List<(string Type, string Entry, int Count)>();
+        while (await reader.ReadAsync(ct))
+        {
+            references.Add((
+                Convert.ToString(reader["RefType"])?.Trim() ?? "",
+                Convert.ToString(reader["RefEntryNo"])?.Trim() ?? "",
+                Convert.ToInt32(reader["AttachmentCount"], CultureInfo.InvariantCulture)));
+        }
+
+        foreach (var row in rows)
+        {
+            var fy = FinancialYear(row.VoucherDate!.Value);
+            var voucherSuffix = "/" + row.VoucherNo.Trim();
+            var match = references.FirstOrDefault(reference =>
+                reference.Entry.Contains("/" + fy + "/", StringComparison.OrdinalIgnoreCase) &&
+                reference.Entry.EndsWith(voucherSuffix, StringComparison.OrdinalIgnoreCase));
+            if (match.Count <= 0)
+                continue;
+            row.AttachmentCount = match.Count;
+            row.DmsRefType = match.Type;
+            row.DmsRefEntryNo = match.Entry;
+        }
+    }
+
+    private static string FinancialYear(DateTime date)
+    {
+        var start = date.Month >= 4 ? date.Year : date.Year - 1;
+        return $"{start % 100:00}-{(start + 1) % 100:00}";
     }
 
     private async Task<string> CompanyNameForGstinAsync(string gstin, CancellationToken ct)
@@ -350,15 +467,13 @@ END";
     }
 
     /// <summary>
-    /// OtherAll is used when its absolute value is above zero. A value that rounds to 0.00 counts as zero,
-    /// and OTHER ALL is used only in that case. Freight and C&amp;F are included by amount.
-    /// The sign follows the Other All column that was used.
+    /// Produces the valid ERP taxable alternatives. If both OtherAll columns contain values,
+    /// either may reconcile the bill. Freight and C&amp;F are included in every alternative.
     /// </summary>
-    private static decimal TaxableWithFreight(SqlDataReader reader, int camelAt, int capitalAt)
+    private static List<decimal> TaxableCandidatesWithFreight(SqlDataReader reader, int camelAt, int capitalAt)
     {
         var camel = camelAt >= 0 ? Money(reader, camelAt) ?? 0 : 0;
         var capital = capitalAt >= 0 ? Money(reader, capitalAt) ?? 0 : 0;
-        var otherAll = Math.Abs(Math.Round(camel, 2)) > 0 ? camel : capital;
         decimal charges = 0;
         for (var i = 0; i < reader.FieldCount; i++)
         {
@@ -372,8 +487,22 @@ END";
             charges += Math.Abs(Money(reader, i) ?? 0);
         }
 
-        var magnitude = Math.Abs(otherAll) + charges;
-        return otherAll < 0 ? -magnitude : magnitude;
+        var bases = new List<decimal>();
+        if (Math.Abs(Math.Round(camel, 2)) > 0)
+            bases.Add(camel);
+        if (Math.Abs(Math.Round(capital, 2)) > 0)
+            bases.Add(capital);
+        if (bases.Count == 0)
+            bases.Add(0);
+
+        return bases
+            .Select(value =>
+            {
+                var magnitude = Math.Abs(value) + charges;
+                return value < 0 ? -magnitude : magnitude;
+            })
+            .Distinct()
+            .ToList();
     }
 
     private static int FindOtherAllLedger(SqlDataReader reader, int camelAt)
@@ -453,8 +582,10 @@ END";
                     ledgers[name] = Money(reader, at);
             }
 
+            var taxableCandidates = TaxableCandidatesWithFreight(reader, otherAllAt, otherAllLedgerAt);
             rows.Add(new ErpLine
             {
+                CompanyName = company,
                 BillNo = billNo,
                 BillParts = BillParts(billNo),
                 BillDate = billDate.Value,
@@ -468,7 +599,8 @@ END";
                 Ledger = Text(reader, ordinal, "LEDGER"),
                 GrossAmount = MoneyAt(reader, ordinal, "GROSSAMOUNT"),
                 ValueAmount = MoneyAt(reader, ordinal, "VALUE"),
-                Taxable = TaxableWithFreight(reader, otherAllAt, otherAllLedgerAt),
+                Taxable = taxableCandidates[0],
+                TaxableCandidates = taxableCandidates,
                 TotalC = MoneyAt(reader, ordinal, "TOTALC"),
                 OtherAll = otherAllAt >= 0 ? Money(reader, otherAllAt) : null,
                 Cgst = cgst,
@@ -554,12 +686,15 @@ END";
             foreach (var hit in hits)
                 used.Add(hit.Id);
 
-            var erpAbs = cluster.Sum(c => Math.Abs(c.Erp.Taxable));
             var twoAbs = hits.Sum(h => Math.Abs(h.Taxable));
+            SelectBestTaxableCandidates(cluster, twoAbs);
+            var erpAbs = cluster.Sum(c => Math.Abs(c.Erp.Taxable));
             var difference = Math.Round(erpAbs - twoAbs, 2);
             var status = hits.Count == 0
                 ? "Missing in 2B"
-                : Math.Abs(difference) <= tolerance ? "Matched" : "Mismatch";
+                : Math.Abs(difference) <= tolerance
+                    ? "Matched"
+                    : TaxMatches(cluster, hits, tolerance) ? "Potential match" : "Mismatch";
             var period = string.Join(", ", hits.Select(h => h.Period).Where(p => p.Length > 0).Distinct());
             var month = string.Join(", ", hits.Select(h => h.Month).Where(p => p.Length > 0).Distinct());
             var docType = string.Join(", ", hits.Select(h => h.DocumentType).Where(p => p.Length > 0).Distinct());
@@ -573,7 +708,7 @@ END";
                 output.Add(new GstBillRecoRow
                 {
                     Status = status,
-                    CompanyName = company,
+                    CompanyName = erp.CompanyName,
                     VoucherType = erp.VoucherType,
                     VoucherNo = erp.VoucherNo,
                     VoucherDate = erp.VoucherDate,
@@ -632,6 +767,63 @@ END";
             .ThenBy(r => r.BillNo, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
+
+    private static void SelectBestTaxableCandidates(
+        List<(ErpLine Erp, List<TwoBLine> Hits)> cluster,
+        decimal target)
+    {
+        var combinations = 1L;
+        foreach (var item in cluster)
+        {
+            combinations *= Math.Max(1, item.Erp.TaxableCandidates.Count);
+            if (combinations > 65_536)
+                return;
+        }
+
+        var current = new decimal[cluster.Count];
+        var best = cluster.Select(item => item.Erp.Taxable).ToArray();
+        var bestDifference = Math.Abs(best.Sum(Math.Abs) - target);
+
+        void Visit(int index, decimal total)
+        {
+            if (index == cluster.Count)
+            {
+                var candidateDifference = Math.Abs(total - target);
+                if (candidateDifference >= bestDifference)
+                    return;
+                bestDifference = candidateDifference;
+                Array.Copy(current, best, current.Length);
+                return;
+            }
+
+            foreach (var candidate in cluster[index].Erp.TaxableCandidates)
+            {
+                current[index] = candidate;
+                Visit(index + 1, total + Math.Abs(candidate));
+            }
+        }
+
+        Visit(0, 0);
+        for (var i = 0; i < cluster.Count; i++)
+            cluster[i].Erp.Taxable = best[i];
+    }
+
+    private static bool TaxMatches(
+        List<(ErpLine Erp, List<TwoBLine> Hits)> cluster,
+        List<TwoBLine> hits,
+        decimal tolerance)
+    {
+        var erpIgst = cluster.Sum(item => Math.Abs(item.Erp.Igst));
+        var twoBIgst = hits.Sum(item => Math.Abs(item.Igst));
+        var erpCgstSgst = cluster.Sum(item => Math.Abs(item.Erp.Cgst) + Math.Abs(item.Erp.Sgst));
+        var twoBCgstSgst = hits.Sum(item => Math.Abs(item.CgstSgst));
+
+        return SameNonZeroAmount(erpIgst, twoBIgst, tolerance)
+            || SameNonZeroAmount(erpCgstSgst, twoBCgstSgst, tolerance);
+    }
+
+    private static bool SameNonZeroAmount(decimal erp, decimal portal, decimal tolerance) =>
+        erp > TaxEpsilon && portal > TaxEpsilon && Math.Abs(erp - portal) <= tolerance;
 
     public async Task<int> ImportFileAsync(string path, CancellationToken ct = default)
     {
@@ -988,8 +1180,9 @@ END";
     private static int StatusOrder(string status) => status switch
     {
         "Mismatch" => 0,
-        "Missing in ERP" => 1,
-        "Missing in 2B" => 2,
+        "Potential match" => 1,
+        "Missing in ERP" => 2,
+        "Missing in 2B" => 3,
         _ => 3,
     };
 
@@ -997,6 +1190,12 @@ END";
     {
         public string BuyerGstin { get; set; } = "";
         public List<TwoBLine> Rows { get; set; } = [];
+    }
+
+    private sealed class CompanyMember
+    {
+        public string Name { get; set; } = "";
+        public string Gstin { get; set; } = "";
     }
 
     private sealed class TwoBLine
@@ -1017,6 +1216,7 @@ END";
 
     private sealed class ErpLine
     {
+        public string CompanyName { get; set; } = "";
         public string FullKey { get; set; } = "";
         public string BillNo { get; set; } = "";
         public List<string> BillParts { get; set; } = [];
@@ -1031,6 +1231,7 @@ END";
         public decimal? GrossAmount { get; set; }
         public decimal? ValueAmount { get; set; }
         public decimal Taxable { get; set; }
+        public List<decimal> TaxableCandidates { get; set; } = [];
         public decimal? TotalC { get; set; }
         public decimal? OtherAll { get; set; }
         public decimal Cgst { get; set; }

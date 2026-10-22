@@ -26,6 +26,9 @@ export type GstBillRecoRow = {
   monthAsPer2B: string;
   twoBPeriod: string;
   documentType: string;
+  attachmentCount: number;
+  dmsRefType: string;
+  dmsRefEntryNo: string;
   ledgers: Record<string, number | null>;
 };
 
@@ -41,6 +44,7 @@ export type GstBillRecoResult = {
   savedRows: number;
   erpRows: number;
   matched: number;
+  potentialMatch: number;
   mismatch: number;
   missingInErp: number;
   missingIn2B: number;
@@ -90,6 +94,9 @@ function rowFrom(raw: Record<string, unknown>): GstBillRecoRow {
     monthAsPer2B: str(raw.monthAsPer2B),
     twoBPeriod: str(raw.twoBPeriod),
     documentType: str(raw.documentType),
+    attachmentCount: num(raw.attachmentCount) ?? 0,
+    dmsRefType: str(raw.dmsRefType),
+    dmsRefEntryNo: str(raw.dmsRefEntryNo),
     ledgers,
   };
 }
@@ -157,6 +164,7 @@ export async function runGstBillReco(
     savedRows: num(payload.savedRows) ?? 0,
     erpRows: num(payload.erpRows) ?? 0,
     matched: num(payload.matched) ?? 0,
+    potentialMatch: num(payload.potentialMatch) ?? rows.filter((row) => row.status === "Potential match").length,
     mismatch: num(payload.mismatch) ?? 0,
     missingInErp: num(payload.missingInErp) ?? 0,
     missingIn2B: num(payload.missingIn2B) ?? rows.filter((row) => row.status === "Missing in 2B").length,

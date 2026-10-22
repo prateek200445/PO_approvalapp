@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, Loader2, Search, Square, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, Loader2, Paperclip, Search, Square, X, XCircle } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { DatePickerField } from "@/components/DatePickerField";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth-context";
 import { canAccessGstBillReco } from "@/lib/feature-flags";
+import { downloadDmsFile, fetchDmsReferenceAttachments, formatFileSize } from "@/lib/dms-api";
 import { cn } from "@/lib/utils";
 import {
   exportGstBillReco,
@@ -31,10 +32,11 @@ const PAGE_SIZE = 25;
 const fieldClass =
   "flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
-type StatusFilter = "issues" | "all" | "Matched" | "Mismatch" | "Missing in ERP" | "Missing in 2B";
+type StatusFilter = "issues" | "all" | "Matched" | "Potential match" | "Mismatch" | "Missing in ERP" | "Missing in 2B";
 
 const PIE_COLORS = {
   Matched: "#16a34a",
+  "Potential match": "#2563eb",
   Mismatch: "#ea580c",
   "Missing in ERP": "#dc2626",
   "Missing in 2B": "#7c3aed",
@@ -59,6 +61,7 @@ function isAbortError(error: unknown) {
 
 function statusClass(status: string) {
   if (status === "Matched") return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
+  if (status === "Potential match") return "bg-blue-500/15 text-blue-700 dark:text-blue-300";
   if (status === "Mismatch") return "bg-amber-500/15 text-amber-700 dark:text-amber-300";
   return "bg-rose-500/15 text-rose-700 dark:text-rose-300";
 }
@@ -182,15 +185,15 @@ function GstBillRecoPage() {
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">GST Bill Reconciliation</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           Upload the monthly GSTR-2B workbook and compare it with the ERP GST summary. A bill matches only when bill
-          number, bill date, and GSTIN all agree. The portal taxable value is compared with ERP Other All, or OTHER ALL when that amount rounds to zero, plus freight and C&amp;F import and export. Each upload is saved. The summary can take a few minutes.
+          number, bill date, and GSTIN all agree. The portal taxable value is compared with either ERP Other All value plus freight and C&amp;F. A matching GST amount is shown as a potential match when taxable differs. Each upload is saved. The summary can take a few minutes.
         </p>
       </div>
 
       <div className="grid gap-4 rounded-xl border border-border bg-card p-4 shadow-sm md:grid-cols-2 xl:grid-cols-6">
         <div className="space-y-1.5 xl:col-span-2">
-          <Label htmlFor="gst-company">Company</Label>
+          <Label htmlFor="gst-company">Company group</Label>
           <select id="gst-company" className={fieldClass} value={company} onChange={(event) => setCompany(event.target.value)}>
-            <option value="">Select company</option>
+            <option value="">Select company group</option>
             {(companiesQuery.data ?? []).map((name) => (
               <option key={name} value={name}>
                 {name}
@@ -260,6 +263,7 @@ function GstBillRecoPage() {
               <option value="issues">Problems only</option>
               <option value="all">All results</option>
               <option value="Matched">Matched</option>
+              <option value="Potential match">Potential match</option>
               <option value="Mismatch">Mismatch</option>
               <option value="Missing in ERP">Missing in ERP</option>
               <option value="Missing in 2B">Missing in 2B</option>
@@ -274,19 +278,19 @@ function GstBillRecoPage() {
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-border bg-card shadow-sm">
-            <table className="w-full min-w-[980px] border-collapse text-sm">
+            <table className="w-full min-w-[1320px] border-collapse text-sm">
               <thead>
-                <tr className="border-b border-border bg-card text-left">
-                  <th className="px-3 py-2 font-medium">Status</th>
-                  <th className="px-3 py-2 font-medium">Bill no</th>
-                  <th className="px-3 py-2 font-medium">Bill date</th>
-                  <th className="px-3 py-2 font-medium">GSTIN</th>
-                  <th className="px-3 py-2 font-medium">Party</th>
-                  <th className="px-3 py-2 text-right font-medium">ERP taxable</th>
-                  <th className="px-3 py-2 text-right font-medium">2B taxable</th>
-                  <th className="px-3 py-2 text-right font-medium">Difference</th>
-                  <th className="px-3 py-2 font-medium">2B period</th>
-                  <th className="px-3 py-2 font-medium">Voucher</th>
+                <tr className="border-b border-border bg-card text-left whitespace-nowrap">
+                  <th className="min-w-[140px] px-4 py-3 font-medium">Status</th>
+                  <th className="min-w-[130px] px-4 py-3 font-medium">Bill no</th>
+                  <th className="min-w-[125px] px-4 py-3 font-medium">Bill date</th>
+                  <th className="min-w-[165px] px-4 py-3 font-medium">GSTIN</th>
+                  <th className="min-w-[250px] px-4 py-3 font-medium">Party</th>
+                  <th className="min-w-[130px] px-4 py-3 text-right font-medium">ERP taxable</th>
+                  <th className="min-w-[130px] px-4 py-3 text-right font-medium">2B taxable</th>
+                  <th className="min-w-[125px] px-4 py-3 text-right font-medium">Difference</th>
+                  <th className="min-w-[110px] px-4 py-3 font-medium">2B period</th>
+                  <th className="min-w-[150px] px-4 py-3 font-medium">Voucher</th>
                 </tr>
                 <tr className="border-b border-border bg-card">
                   <th />
@@ -310,18 +314,36 @@ function GstBillRecoPage() {
                     className="cursor-pointer border-b border-border/70 hover:bg-muted/60"
                     onClick={() => setSelected(row)}
                   >
-                    <td className="px-3 py-2">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusClass(row.status)}`}>{row.status}</span>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${statusClass(row.status)}`}>{row.status}</span>
                     </td>
-                    <td className="px-3 py-2 font-medium">{row.billNo}</td>
-                    <td className="px-3 py-2">{formatIsoDate(row.billDate)}</td>
-                    <td className="px-3 py-2">{row.gstNo}</td>
-                    <td className="max-w-[220px] truncate px-3 py-2" title={row.party}>{row.party}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatMoney(row.erpTaxable)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatMoney(row.twoBTaxable)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatMoney(row.difference)}</td>
-                    <td className="px-3 py-2">{row.twoBPeriod}</td>
-                    <td className="px-3 py-2">{row.voucherNo}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-medium">{row.billNo}</td>
+                    <td className="whitespace-nowrap px-4 py-3">{formatIsoDate(row.billDate)}</td>
+                    <td className="whitespace-nowrap px-4 py-3">{row.gstNo}</td>
+                    <td className="max-w-[250px] truncate whitespace-nowrap px-4 py-3" title={row.party}>{row.party}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{formatMoney(row.erpTaxable)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{formatMoney(row.twoBTaxable)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{formatMoney(row.difference)}</td>
+                    <td className="whitespace-nowrap px-4 py-3">{row.twoBPeriod}</td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <div className="flex items-center gap-2 whitespace-nowrap">
+                        <span>{row.voucherNo}</span>
+                        {row.attachmentCount > 0 && (
+                          <button
+                            type="button"
+                            className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium text-primary hover:bg-accent"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelected(row);
+                            }}
+                            title={`Open ${row.attachmentCount} attachment${row.attachmentCount === 1 ? "" : "s"}`}
+                          >
+                            <Paperclip className="h-3.5 w-3.5" />
+                            {row.attachmentCount}
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {pageRows.length === 0 && (
@@ -380,6 +402,7 @@ function Overview({
 }) {
   const slices = [
     { key: "Matched" as const, name: "Matched", value: result.matched, filter: "Matched" as StatusFilter, tone: "success" as const, icon: CheckCircle2, hint: "Bill, date, and GSTIN agree" },
+    { key: "Potential match" as const, name: "Potential match", value: result.potentialMatch, filter: "Potential match" as StatusFilter, tone: "primary" as const, icon: Search, hint: "Bill and GST agree; taxable differs" },
     { key: "Mismatch" as const, name: "Mismatch", value: result.mismatch, filter: "Mismatch" as StatusFilter, tone: "warning" as const, icon: AlertTriangle, hint: "Same bill. Taxable differs." },
     { key: "Missing in ERP" as const, name: "Missing in ERP", value: result.missingInErp, filter: "Missing in ERP" as StatusFilter, tone: "danger" as const, icon: XCircle, hint: "On the 2B file only" },
     { key: "Missing in 2B" as const, name: "Missing in 2B", value: result.missingIn2B, filter: "Missing in 2B" as StatusFilter, tone: "muted" as const, icon: FileSpreadsheet, hint: "In the ERP summary only" },
@@ -405,6 +428,7 @@ function Overview({
         <div className="space-y-3">
           <StatCard label="Portal bills saved" value={result.savedRows} description="Stored from the 2B upload" icon={FileSpreadsheet} />
           <StatCard label="Matched" value={result.matched} description="Bill, date, and GSTIN agree" tone="success" icon={CheckCircle2} active={statusFilter === "Matched"} onClick={() => apply("Matched")} />
+          <StatCard label="Potential match" value={result.potentialMatch} description="Bill and GST agree; taxable differs" icon={Search} active={statusFilter === "Potential match"} onClick={() => apply("Potential match")} />
           <StatCard label="Mismatch" value={result.mismatch} description="Same bill. Taxable differs." tone="warning" icon={AlertTriangle} active={statusFilter === "Mismatch"} onClick={() => apply("Mismatch")} />
         </div>
         <div className="flex flex-col items-center">
@@ -591,7 +615,7 @@ function StatCard({
   label: string;
   value: number;
   description: string;
-  tone?: "success" | "warning" | "danger" | "muted";
+  tone?: "success" | "warning" | "danger" | "muted" | "primary";
   icon: typeof CheckCircle2;
   active?: boolean;
   onClick?: () => void;
@@ -642,6 +666,26 @@ function StatCard({
 }
 
 function BillSheet({ row, onClose }: { row: GstBillRecoRow; onClose: () => void }) {
+  const [downloadingFile, setDownloadingFile] = useState<number | null>(null);
+  const attachments = useQuery({
+    queryKey: ["dms-reference-attachments", row.dmsRefType, row.dmsRefEntryNo],
+    queryFn: () => fetchDmsReferenceAttachments(row.dmsRefType, row.dmsRefEntryNo),
+    enabled: row.attachmentCount > 0 && !!row.dmsRefType && !!row.dmsRefEntryNo,
+    staleTime: 10 * 60_000,
+  });
+  const twoBCgst = row.twoBCgstSgst == null ? null : row.twoBCgstSgst / 2;
+
+  async function downloadAttachment(fileId: number, fileName: string) {
+    setDownloadingFile(fileId);
+    try {
+      await downloadDmsFile(fileId, fileName);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not download attachment.");
+    } finally {
+      setDownloadingFile(null);
+    }
+  }
+
   const fields: { label: string; erp: string; portal: string }[] = [
     { label: "Bill no", erp: row.billNo || "—", portal: row.billNo || "—" },
     { label: "Bill date", erp: formatIsoDate(row.billDate) || "—", portal: formatIsoDate(row.billDate) || "—" },
@@ -649,7 +693,7 @@ function BillSheet({ row, onClose }: { row: GstBillRecoRow; onClose: () => void 
     { label: "Party", erp: row.party || "—", portal: row.party || "—" },
     { label: "Taxable", erp: formatMoney(row.erpTaxable) || "—", portal: formatMoney(row.twoBTaxable) || "—" },
     { label: "IGST", erp: formatMoney(row.igst) || "—", portal: formatMoney(row.twoBIgst) || "—" },
-    { label: "CGST / SGST", erp: [formatMoney(row.cgst), formatMoney(row.sgst)].filter(Boolean).join(" / ") || "—", portal: formatMoney(row.twoBCgstSgst) || "—" },
+    { label: "CGST / SGST", erp: [formatMoney(row.cgst), formatMoney(row.sgst)].filter(Boolean).join(" / ") || "—", portal: twoBCgst == null ? "—" : `${formatMoney(twoBCgst)} / ${formatMoney(twoBCgst)}` },
     { label: "Voucher", erp: [row.voucherType, row.voucherNo].filter(Boolean).join(" ") || "—", portal: row.documentType || "—" },
     { label: "Voucher date", erp: formatIsoDate(row.voucherDate) || "—", portal: "—" },
     { label: "2B period", erp: "—", portal: row.twoBPeriod || "—" },
@@ -686,6 +730,44 @@ function BillSheet({ row, onClose }: { row: GstBillRecoRow; onClose: () => void 
             ))}
           </tbody>
         </table>
+        {row.attachmentCount > 0 && (
+          <section className="mt-5 rounded-lg border border-border">
+            <header className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+              <Paperclip className="h-4 w-4 text-primary" />
+              <h3 className="text-sm font-semibold">ERP attachments</h3>
+              <span className="ml-auto rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                {row.attachmentCount}
+              </span>
+            </header>
+            <div className="space-y-2 p-3">
+              {attachments.isLoading && (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading attachments…
+                </p>
+              )}
+              {attachments.isError && <p className="text-sm text-destructive">Could not load voucher attachments.</p>}
+              {attachments.data?.files.map((file) => (
+                <div key={file.fileId} className="flex items-center gap-3 rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+                  <FileText className="h-4 w-4 shrink-0 text-primary" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{file.fileName}</p>
+                    <p className="text-[11px] text-muted-foreground">{formatFileSize(file.fileSize)}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={downloadingFile === file.fileId}
+                    onClick={() => void downloadAttachment(file.fileId, file.fileName)}
+                  >
+                    {downloadingFile === file.fileId ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}
+                    Download
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );
