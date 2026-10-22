@@ -191,9 +191,9 @@ function GstBillRecoPage() {
 
       <div className="grid gap-4 rounded-xl border border-border bg-card p-4 shadow-sm md:grid-cols-2 xl:grid-cols-6">
         <div className="space-y-1.5 xl:col-span-2">
-          <Label htmlFor="gst-company">Company</Label>
+          <Label htmlFor="gst-company">Company group</Label>
           <select id="gst-company" className={fieldClass} value={company} onChange={(event) => setCompany(event.target.value)}>
-            <option value="">Select company</option>
+            <option value="">Select company group</option>
             {(companiesQuery.data ?? []).map((name) => (
               <option key={name} value={name}>
                 {name}

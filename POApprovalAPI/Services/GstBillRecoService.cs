@@ -42,10 +42,11 @@ public class GstBillRecoService
         await using var connection = _database.CreateConnection();
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = @"
-SELECT Name
+SELECT DISTINCT
+    COALESCE(NULLIF(LTRIM(RTRIM(GroupName)), ''), LTRIM(RTRIM(Name))) AS GroupLabel
 FROM FactoryInfo WITH (NOLOCK)
-WHERE ISNULL(Name, '') <> ''
-ORDER BY Name";
+WHERE ISNULL(LTRIM(RTRIM(Name)), '') <> ''
+ORDER BY GroupLabel";
         var names = new List<string>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -64,8 +65,8 @@ ORDER BY Name";
         var company = (companyName ?? "").Trim();
         if (company.Length == 0)
             throw new ArgumentException("Company is required.");
-        if (company.Length > 100)
-            throw new ArgumentException("Company name is longer than the GST summary allows.");
+        if (company.Length > 150)
+            throw new ArgumentException("Company group name is too long.");
         var from = dateFrom.Date;
         var to = dateTo.Date;
         if (to < from)
@@ -77,13 +78,37 @@ ORDER BY Name";
         if (parsed.Rows.Count == 0)
             throw new ArgumentException("No invoice, credit note, or debit note rows with GST were found. Use the Invoice Wise 2B (B2B, CN, DN) sheet.");
 
+        var members = await LoadGroupMembersAsync(company, ct);
+        if (members.Count == 0)
+            throw new ArgumentException($"No ERP companies were found for group {company}.");
+
+        var buyerGstin = NormGst(parsed.BuyerGstin);
+        if (buyerGstin.Length == 0)
+        {
+            var groupGstins = members.Select(member => member.Gstin).Where(value => value.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (groupGstins.Count == 1)
+            {
+                buyerGstin = groupGstins[0];
+                parsed.BuyerGstin = buyerGstin;
+            }
+        }
+        if (buyerGstin.Length == 0)
+            throw new ArgumentException("The 2B file has no buyer GSTIN, so its company group cannot be identified.");
+
+        var matchingMembers = members
+            .Where(member => string.Equals(member.Gstin, buyerGstin, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (matchingMembers.Count == 0)
+            throw new ArgumentException($"The uploaded 2B GSTIN {buyerGstin} does not belong to {company}.");
+
         var saved = await SaveTwoBAsync(company, parsed, ct);
         var inRange = parsed.Rows.Where(row => InRange(row.BillDate, row.Period, from, to)).ToList();
         if (inRange.Count == 0)
             throw new ArgumentException($"Saved {saved} portal bills. None of them fall in the selected dates.");
 
-        var companyGstin = await LoadCompanyGstinAsync(company, ct);
-        var erpRows = await LoadErpAsync(company, from, to, ct);
+        var erpParts = await Task.WhenAll(matchingMembers.Select(member => LoadErpAsync(member.Name, from, to, ct)));
+        var erpRows = erpParts.SelectMany(part => part).ToList();
 
         var result = new GstBillRecoResult
         {
@@ -92,19 +117,14 @@ ORDER BY Name";
             DateTo = to,
             AmountTolerance = amountTolerance,
             BuyerGstin = parsed.BuyerGstin,
-            CompanyGstin = companyGstin,
+            CompanyGstin = buyerGstin,
             TwoBRows = inRange.Count,
             SavedRows = saved,
             ErpRows = erpRows.Count,
         };
 
-        if (!string.IsNullOrEmpty(parsed.BuyerGstin) &&
-            !string.IsNullOrEmpty(companyGstin) &&
-            !string.Equals(parsed.BuyerGstin, companyGstin, StringComparison.OrdinalIgnoreCase))
-        {
-            result.Warning =
-                $"The 2B file is for GSTIN {parsed.BuyerGstin}. {company} is {companyGstin}.";
-        }
+        if (matchingMembers.Count > 1)
+            result.Warning = $"Combined {matchingMembers.Count} ERP units in {company} that use GSTIN {buyerGstin}.";
 
         result.Rows = BuildRows(company, erpRows, inRange, amountTolerance);
         await AddAttachmentReferencesAsync(result.Rows, ct);
@@ -195,6 +215,31 @@ WHERE Name = @Name";
         return value == null || value == DBNull.Value ? "" : NormGst(Convert.ToString(value));
     }
 
+    private async Task<List<CompanyMember>> LoadGroupMembersAsync(string groupLabel, CancellationToken ct)
+    {
+        await using var connection = _database.CreateConnection();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = @"
+SELECT LTRIM(RTRIM(Name)) AS Name, LTRIM(RTRIM(ISNULL(NewGSTNo, ''))) AS Gstin
+FROM FactoryInfo WITH (NOLOCK)
+WHERE ISNULL(LTRIM(RTRIM(Name)), '') <> ''
+  AND COALESCE(NULLIF(LTRIM(RTRIM(GroupName)), ''), LTRIM(RTRIM(Name))) = @GroupLabel
+ORDER BY Name";
+        cmd.Parameters.Add("@GroupLabel", SqlDbType.NVarChar, 150).Value = groupLabel;
+
+        var members = new List<CompanyMember>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            members.Add(new CompanyMember
+            {
+                Name = Convert.ToString(reader["Name"])?.Trim() ?? "",
+                Gstin = NormGst(Convert.ToString(reader["Gstin"]))
+            });
+        }
+        return members;
+    }
+
     private async Task AddAttachmentReferencesAsync(List<GstBillRecoRow> rows, CancellationToken ct)
     {
         var erpRows = rows
@@ -203,6 +248,15 @@ WHERE Name = @Name";
         if (erpRows.Count == 0)
             return;
 
+        foreach (var companyRows in erpRows.GroupBy(row => row.CompanyName, StringComparer.OrdinalIgnoreCase))
+            await AddCompanyAttachmentReferencesAsync(companyRows.Key, companyRows.ToList(), ct);
+    }
+
+    private async Task AddCompanyAttachmentReferencesAsync(
+        string companyName,
+        List<GstBillRecoRow> rows,
+        CancellationToken ct)
+    {
         await using var connection = _database.CreateConnection();
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = """
@@ -223,7 +277,7 @@ BEGIN
     GROUP BY r.RefType, r.RefEntryNo;
 END
 """;
-        cmd.Parameters.Add("@CompanyName", SqlDbType.VarChar, 150).Value = erpRows[0].CompanyName;
+        cmd.Parameters.Add("@CompanyName", SqlDbType.VarChar, 150).Value = companyName;
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var references = new List<(string Type, string Entry, int Count)>();
@@ -235,7 +289,7 @@ END
                 Convert.ToInt32(reader["AttachmentCount"], CultureInfo.InvariantCulture)));
         }
 
-        foreach (var row in erpRows)
+        foreach (var row in rows)
         {
             var fy = FinancialYear(row.VoucherDate!.Value);
             var voucherSuffix = "/" + row.VoucherNo.Trim();
@@ -531,6 +585,7 @@ END";
             var taxableCandidates = TaxableCandidatesWithFreight(reader, otherAllAt, otherAllLedgerAt);
             rows.Add(new ErpLine
             {
+                CompanyName = company,
                 BillNo = billNo,
                 BillParts = BillParts(billNo),
                 BillDate = billDate.Value,
@@ -653,7 +708,7 @@ END";
                 output.Add(new GstBillRecoRow
                 {
                     Status = status,
-                    CompanyName = company,
+                    CompanyName = erp.CompanyName,
                     VoucherType = erp.VoucherType,
                     VoucherNo = erp.VoucherNo,
                     VoucherDate = erp.VoucherDate,
@@ -1137,6 +1192,12 @@ END";
         public List<TwoBLine> Rows { get; set; } = [];
     }
 
+    private sealed class CompanyMember
+    {
+        public string Name { get; set; } = "";
+        public string Gstin { get; set; } = "";
+    }
+
     private sealed class TwoBLine
     {
         public int Id { get; set; }
@@ -1155,6 +1216,7 @@ END";
 
     private sealed class ErpLine
     {
+        public string CompanyName { get; set; } = "";
         public string FullKey { get; set; } = "";
         public string BillNo { get; set; } = "";
         public List<string> BillParts { get; set; } = [];
