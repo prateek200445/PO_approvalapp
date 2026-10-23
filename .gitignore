@@ -63,4 +63,7 @@ POApprovalAPI/Data/FibcBuyers/raw/
 **/appsettings.Production.json
 **/appsettings.Local.json
 
+# Local GST portal credentials (plaintext; never commit)
+gst login credential.xls.xlsx
+
 

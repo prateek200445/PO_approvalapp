@@ -51,6 +51,15 @@ export type GstBillRecoResult = {
   rows: GstBillRecoRow[];
 };
 
+export type GstPortalStep = {
+  sessionId: string;
+  status: "captcha" | "otp" | "error" | "complete";
+  gstin: string;
+  captchaImage: string;
+  message: string;
+  result: GstBillRecoResult | null;
+};
+
 function str(value: unknown): string {
   return value == null ? "" : String(value);
 }
@@ -151,6 +160,10 @@ export async function runGstBillReco(
   const response = await fetch(getApiUrl("/api/gst-bill-reco/run"), { method: "POST", body, signal });
   if (!response.ok) throw new Error(await readError(response));
   const payload = (await response.json()) as Record<string, unknown>;
+  return resultFrom(payload);
+}
+
+function resultFrom(payload: Record<string, unknown>): GstBillRecoResult {
   const rows = Array.isArray(payload.rows) ? payload.rows.map((row) => rowFrom(row as Record<string, unknown>)) : [];
   return {
     companyName: str(payload.companyName),
@@ -170,6 +183,56 @@ export async function runGstBillReco(
     missingIn2B: num(payload.missingIn2B) ?? rows.filter((row) => row.status === "Missing in 2B").length,
     rows,
   };
+}
+
+function portalStepFrom(payload: Record<string, unknown>): GstPortalStep {
+  const resultPayload = payload.result;
+  return {
+    sessionId: str(payload.sessionId),
+    status: str(payload.status) as GstPortalStep["status"],
+    gstin: str(payload.gstin),
+    captchaImage: str(payload.captchaImage),
+    message: str(payload.message),
+    result: resultPayload && typeof resultPayload === "object"
+      ? resultFrom(resultPayload as Record<string, unknown>)
+      : null,
+  };
+}
+
+async function postPortal(path: string, body: Record<string, unknown>): Promise<GstPortalStep> {
+  const response = await fetch(getApiUrl(`/api/gst-bill-reco/portal/${path}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return portalStepFrom((await response.json()) as Record<string, unknown>);
+}
+
+export function startGstPortalFetch(input: {
+  companyName: string;
+  dateFrom: string;
+  dateTo: string;
+  amountTolerance: number;
+  username: string;
+}): Promise<GstPortalStep> {
+  return postPortal("start", input);
+}
+
+export function submitGstPortalCaptcha(
+  sessionId: string,
+  captcha: string,
+  username: string,
+): Promise<GstPortalStep> {
+  return postPortal("captcha", { sessionId, captcha, username });
+}
+
+export function submitGstPortalOtp(
+  sessionId: string,
+  otp: string,
+  username: string,
+): Promise<GstPortalStep> {
+  return postPortal("otp", { sessionId, otp, username });
 }
 
 export async function exportGstBillReco(rows: GstBillRecoRow[], username: string): Promise<Blob> {

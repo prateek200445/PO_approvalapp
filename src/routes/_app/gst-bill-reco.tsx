@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, Loader2, Paperclip, Search, Square, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, Globe2, Loader2, Paperclip, Search, Square, X, XCircle } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { DatePickerField } from "@/components/DatePickerField";
@@ -18,8 +18,12 @@ import {
   formatMoney,
   getGstBillCompanies,
   runGstBillReco,
+  startGstPortalFetch,
+  submitGstPortalCaptcha,
+  submitGstPortalOtp,
   type GstBillRecoResult,
   type GstBillRecoRow,
+  type GstPortalStep,
 } from "@/lib/gst-bill-reco-api";
 
 export const Route = createFileRoute("/_app/gst-bill-reco")({
@@ -92,6 +96,10 @@ function GstBillRecoPage() {
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
   const [selected, setSelected] = useState<GstBillRecoRow | null>(null);
+  const [portalStep, setPortalStep] = useState<GstPortalStep | null>(null);
+  const [portalValue, setPortalValue] = useState("");
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [portalResult, setPortalResult] = useState<GstBillRecoResult | null>(null);
 
   const companiesQuery = useQuery({
     queryKey: ["gst-bill-companies", user?.username],
@@ -109,7 +117,7 @@ function GstBillRecoPage() {
     refetchOnReconnect: false,
   });
 
-  const result = recoQuery.data;
+  const result = portalResult ?? recoQuery.data;
   const filtered = useMemo(() => filterRows(result?.rows ?? [], statusFilter, billFilter, partyFilter, gstFilter), [
     result,
     statusFilter,
@@ -132,6 +140,7 @@ function GstBillRecoPage() {
     }
     setPage(1);
     setSelected(null);
+    setPortalResult(null);
     setSubmitted({
       file,
       companyName: company.trim(),
@@ -141,6 +150,57 @@ function GstBillRecoPage() {
       username: user?.username ?? "",
     });
     setSearchNonce((value) => value + 1);
+  }
+
+  function acceptPortalStep(next: GstPortalStep) {
+    setPortalStep(next.status === "complete" ? null : next);
+    setPortalValue("");
+    if (next.result) {
+      setPortalResult(next.result);
+      setSubmitted(null);
+      setPage(1);
+      setSelected(null);
+      toast.success(next.message || "GSTR-2B downloaded and reconciled.");
+    } else if (next.status === "error") {
+      toast.error(next.message);
+    }
+  }
+
+  async function startPortalFetch() {
+    if (!company.trim()) {
+      toast.error("Select a company group.");
+      return;
+    }
+    setPortalBusy(true);
+    setPortalResult(null);
+    try {
+      acceptPortalStep(await startGstPortalFetch({
+        companyName: company.trim(),
+        dateFrom,
+        dateTo,
+        amountTolerance: Number(tolerance) || 0,
+        username: user?.username ?? "",
+      }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not start GST portal login.");
+    } finally {
+      setPortalBusy(false);
+    }
+  }
+
+  async function continuePortalFetch() {
+    if (!portalStep || !portalValue.trim()) return;
+    setPortalBusy(true);
+    try {
+      const next = portalStep.status === "otp"
+        ? await submitGstPortalOtp(portalStep.sessionId, portalValue.trim(), user?.username ?? "")
+        : await submitGstPortalCaptcha(portalStep.sessionId, portalValue.trim(), user?.username ?? "");
+      acceptPortalStep(next);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "GST portal request failed.");
+    } finally {
+      setPortalBusy(false);
+    }
   }
 
   function abort() {
@@ -164,7 +224,7 @@ function GstBillRecoPage() {
     }
   }
 
-  const loading = recoQuery.isFetching;
+  const loading = recoQuery.isFetching || portalBusy;
   const errorMessage = recoQuery.error && !isAbortError(recoQuery.error) ? (recoQuery.error as Error).message : "";
 
   if (!allowed) {
@@ -226,9 +286,13 @@ function GstBillRecoPage() {
         <div className="flex items-end gap-2 xl:col-span-2">
           <Button type="button" onClick={run} disabled={loading}>
             {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-            Reconcile
+            Upload &amp; reconcile
           </Button>
-          {loading && (
+          <Button type="button" variant="outline" onClick={() => void startPortalFetch()} disabled={loading}>
+            {portalBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Globe2 className="mr-2 h-4 w-4" />}
+            Fetch from GST
+          </Button>
+          {recoQuery.isFetching && (
             <Button type="button" variant="outline" onClick={abort}>
               <Square className="mr-2 h-4 w-4" />
               Abort
@@ -236,6 +300,56 @@ function GstBillRecoPage() {
           )}
         </div>
       </div>
+
+      {portalStep && (
+        <div className="rounded-xl border border-primary/30 bg-card p-4 shadow-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+            <div className="space-y-2">
+              <div>
+                <h2 className="text-sm font-semibold">
+                  {portalStep.status === "otp" ? "GST portal OTP" : portalStep.status === "error" ? "GST portal error" : "GST portal CAPTCHA"}
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {portalStep.message} {portalStep.gstin ? `GSTIN: ${portalStep.gstin}` : ""}
+                </p>
+              </div>
+              {portalStep.status === "captcha" && portalStep.captchaImage && (
+                <img
+                  src={portalStep.captchaImage}
+                  alt="GST portal CAPTCHA"
+                  className="h-auto max-h-20 w-auto min-w-40 rounded-md border border-border bg-white"
+                />
+              )}
+            </div>
+            {portalStep.status !== "error" ? (
+              <div className="flex flex-1 flex-col gap-2 sm:max-w-sm sm:flex-row sm:items-end">
+                <div className="flex-1 space-y-1.5">
+                  <Label htmlFor="gst-portal-value">{portalStep.status === "otp" ? "OTP" : "CAPTCHA"}</Label>
+                  <Input
+                    id="gst-portal-value"
+                    value={portalValue}
+                    onChange={(event) => setPortalValue(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void continuePortalFetch();
+                    }}
+                    autoComplete="off"
+                    inputMode={portalStep.status === "otp" ? "numeric" : "text"}
+                    placeholder={portalStep.status === "otp" ? "Enter OTP" : "Enter CAPTCHA"}
+                  />
+                </div>
+                <Button type="button" disabled={portalBusy || !portalValue.trim()} onClick={() => void continuePortalFetch()}>
+                  {portalBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Continue
+                </Button>
+              </div>
+            ) : (
+              <Button type="button" variant="outline" onClick={() => void startPortalFetch()} disabled={portalBusy}>
+                Start again
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {errorMessage && <p className="text-sm text-rose-600">{errorMessage}</p>}
       {result?.warning && <p className="text-sm text-amber-700 dark:text-amber-300">{result.warning}</p>}

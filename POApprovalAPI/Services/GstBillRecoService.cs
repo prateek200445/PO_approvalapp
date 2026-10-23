@@ -31,10 +31,12 @@ public class GstBillRecoService
     ];
 
     private readonly DatabaseService _database;
+    private readonly Gst2BSnapshotService _snapshots;
 
-    public GstBillRecoService(DatabaseService database)
+    public GstBillRecoService(DatabaseService database, Gst2BSnapshotService snapshots)
     {
         _database = database;
+        _snapshots = snapshots;
     }
 
     public async Task<IReadOnlyList<string>> GetCompaniesAsync(CancellationToken ct = default)
@@ -74,7 +76,21 @@ ORDER BY GroupLabel";
         if (amountTolerance < 0)
             amountTolerance = 0;
 
-        var parsed = ParseTwoB(twoBFile);
+        TwoBParse parsed;
+        int saved;
+        if (Gst2BSnapshotService.TryRead(twoBFile, out var snapshot))
+        {
+            var stored = await _snapshots.SaveAsync(snapshot, "portal.xlsx", ct);
+            parsed = FromSnapshot(snapshot);
+            saved = stored.InsertedRows;
+        }
+        else
+        {
+            if (twoBFile.CanSeek)
+                twoBFile.Position = 0;
+            parsed = ParseTwoB(twoBFile);
+            saved = -1;
+        }
         if (parsed.Rows.Count == 0)
             throw new ArgumentException("No invoice, credit note, or debit note rows with GST were found. Use the Invoice Wise 2B (B2B, CN, DN) sheet.");
 
@@ -102,8 +118,9 @@ ORDER BY GroupLabel";
         if (matchingMembers.Count == 0)
             throw new ArgumentException($"The uploaded 2B GSTIN {buyerGstin} does not belong to {company}.");
 
-        var saved = await SaveTwoBAsync(company, parsed, ct);
-        var inRange = parsed.Rows.Where(row => InRange(row.BillDate, row.Period, from, to)).ToList();
+        if (saved < 0)
+            saved = await SaveTwoBAsync(company, parsed, ct);
+        var inRange = parsed.Rows.Where(row => InRange(row.BillDate, from, to)).ToList();
         if (inRange.Count == 0)
             throw new ArgumentException($"Saved {saved} portal bills. None of them fall in the selected dates.");
 
@@ -134,6 +151,101 @@ ORDER BY GroupLabel";
         result.MissingInErp = result.Rows.Count(r => r.Status == "Missing in ERP");
         result.MissingIn2B = result.Rows.Count(r => r.Status == "Missing in 2B");
         return result;
+    }
+
+    public async Task<GstBillRecoResult> ReconcileStoredAsync(
+        string companyName,
+        DateTime dateFrom,
+        DateTime dateTo,
+        decimal amountTolerance,
+        CancellationToken ct = default)
+    {
+        var company = (companyName ?? "").Trim();
+        if (company.Length == 0)
+            throw new ArgumentException("Company is required.");
+        var from = dateFrom.Date;
+        var to = dateTo.Date;
+        if (to < from)
+            throw new ArgumentException("Date to is before date from.");
+        if (amountTolerance < 0)
+            amountTolerance = 0;
+
+        var documents = await _snapshots.GetDocumentsAsync(company, from, to, purchaseOnly: true, ct);
+        var parsed = FromDocuments(documents);
+        if (parsed.Rows.Count == 0)
+            throw new ArgumentException("No frozen GSTR-2B purchase documents are stored for this group in those months.");
+
+        var members = await LoadGroupMembersAsync(company, ct);
+        var buyerGstins = documents.Select(document => document.BuyerGstin).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var matchingMembers = members
+            .Where(member => buyerGstins.Contains(member.Gstin, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        if (matchingMembers.Count == 0)
+            throw new ArgumentException($"No ERP units in {company} use the stored GSTIN.");
+
+        var erpParts = await Task.WhenAll(matchingMembers.Select(member => LoadErpAsync(member.Name, from, to, ct)));
+        var erpRows = erpParts.SelectMany(part => part).ToList();
+        var result = new GstBillRecoResult
+        {
+            CompanyName = company,
+            DateFrom = from,
+            DateTo = to,
+            AmountTolerance = amountTolerance,
+            BuyerGstin = string.Join(", ", buyerGstins),
+            CompanyGstin = string.Join(", ", buyerGstins),
+            TwoBRows = parsed.Rows.Count,
+            SavedRows = parsed.Rows.Count,
+            ErpRows = erpRows.Count,
+        };
+        if (matchingMembers.Count > 1)
+            result.Warning = $"Combined {matchingMembers.Count} ERP units in {company} that use the stored GSTIN.";
+        result.Rows = BuildRows(company, erpRows, parsed.Rows, amountTolerance);
+        await AddAttachmentReferencesAsync(result.Rows, ct);
+        result.Matched = result.Rows.Count(r => r.Status == "Matched");
+        result.PotentialMatch = result.Rows.Count(r => r.Status == "Potential match");
+        result.Mismatch = result.Rows.Count(r => r.Status == "Mismatch");
+        result.MissingInErp = result.Rows.Count(r => r.Status == "Missing in ERP");
+        result.MissingIn2B = result.Rows.Count(r => r.Status == "Missing in 2B");
+        return result;
+    }
+
+    private static TwoBParse FromSnapshot(Gst2BSnapshot snapshot) => FromDocuments(snapshot.Documents);
+
+    private static TwoBParse FromDocuments(IEnumerable<Gst2BDocumentRow> documents)
+    {
+        var rows = new List<TwoBLine>();
+        var nextId = 1;
+        foreach (var document in documents)
+        {
+            if (!Gst2BSnapshotService.IsPurchaseSection(document.Section))
+                continue;
+            if (!IncludeDocument(document.DocumentType))
+                continue;
+            var billNo = Gst2BSnapshotService.NormBill(document.DocumentNumber);
+            var gst = document.SupplierGstin;
+            if (billNo.Length == 0 || gst.Length == 0 || document.DocumentDate == default)
+                continue;
+            if (Math.Abs(document.Igst) <= TaxEpsilon && Math.Abs(document.Cgst + document.Sgst) <= TaxEpsilon)
+                continue;
+            rows.Add(new TwoBLine
+            {
+                Id = nextId++,
+                BillNo = billNo,
+                BillDate = document.DocumentDate,
+                GstNo = gst,
+                Key = Key(billNo, document.DocumentDate, gst),
+                Supplier = document.SupplierName,
+                DocumentType = document.DocumentType,
+                Taxable = document.Taxable,
+                Igst = document.Igst,
+                CgstSgst = document.Cgst + document.Sgst,
+                Period = document.ReturnPeriod.ToString("MMM-yy", CultureInfo.InvariantCulture),
+                Month = document.ReturnPeriod.ToString("MMM-yy", CultureInfo.InvariantCulture),
+            });
+        }
+
+        var buyer = documents.Select(document => document.BuyerGstin).FirstOrDefault(value => value.Length > 0) ?? "";
+        return new TwoBParse { BuyerGstin = buyer, Rows = rows };
     }
 
     public byte[] Export(IReadOnlyList<GstBillRecoRow> rows)
@@ -544,13 +656,54 @@ END";
         cmd.Parameters.Add("@IntSum", SqlDbType.Int).Value = 0;
 
         var rows = new List<ErpLine>();
+        var invoices = new List<ErpLine>();
+        var vouchers = new Dictionary<string, ErpLine>(StringComparer.OrdinalIgnoreCase);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var ordinal = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        for (var i = 0; i < reader.FieldCount; i++)
-            ordinal[Norm(reader.GetName(i))] = i;
-
-        if (!ordinal.ContainsKey("BILLNO") || !ordinal.ContainsKey("GSTNO"))
-            throw new ArgumentException("GST summary did not return bill number and GST number columns.");
+        var classic = false;
+        var seen = new List<string>();
+        while (true)
+        {
+            ordinal.Clear();
+            var names = new List<string>();
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                names.Add(reader.GetName(i));
+                ordinal[Norm(reader.GetName(i))] = i;
+            }
+            seen.Add(string.Join(", ", names));
+            if (ordinal.ContainsKey("BILLNO") && ordinal.ContainsKey("GSTNO"))
+            {
+                classic = true;
+                break;
+            }
+            if (ordinal.ContainsKey("INVNO") && ordinal.ContainsKey("SUPPLIERGSTNO") && invoices.Count == 0)
+                invoices.AddRange(await ReadInvoiceSummaryAsync(reader, ordinal, company, ct));
+            else if (ordinal.ContainsKey("BILLNO") && ordinal.ContainsKey("VOUCHERNO"))
+                await ReadVoucherSummaryAsync(reader, ordinal, vouchers, ct);
+            if (!await reader.NextResultAsync(ct))
+                break;
+        }
+        if (!classic)
+        {
+            if (invoices.Count == 0)
+                throw new ArgumentException(
+                    "GST summary did not return bill number and GST number columns. Result sets: " +
+                    string.Join(" || ", seen));
+            foreach (var invoice in invoices)
+            {
+                if (vouchers.TryGetValue(NormBill(invoice.BillNo), out var voucher))
+                {
+                    invoice.VoucherType = voucher.VoucherType;
+                    invoice.VoucherNo = voucher.VoucherNo;
+                    invoice.VoucherDate = voucher.VoucherDate;
+                    invoice.RefNo = voucher.RefNo;
+                    invoice.Party = voucher.Party;
+                    invoice.GrossAmount = voucher.GrossAmount;
+                }
+            }
+            return invoices;
+        }
         var otherAllAt = FindColumn(reader, "OtherAll");
         var otherAllLedgerAt = FindOtherAllLedger(reader, otherAllAt);
         if (otherAllAt < 0 && otherAllLedgerAt < 0)
@@ -611,6 +764,73 @@ END";
         }
 
         return rows;
+    }
+
+    private static async Task<List<ErpLine>> ReadInvoiceSummaryAsync(
+        SqlDataReader reader,
+        Dictionary<string, int> ordinal,
+        string company,
+        CancellationToken ct)
+    {
+        var rows = new List<ErpLine>();
+        while (await reader.ReadAsync(ct))
+        {
+            var billNo = Text(reader, ordinal, "INVNO");
+            var gst = NormGst(Text(reader, ordinal, "SUPPLIERGSTNO"));
+            var billDate = DateOf(reader, ordinal, "INVDATE");
+            if (billNo.Length == 0 || gst.Length == 0 || billDate == null)
+                continue;
+
+            var igst = MoneyAt(reader, ordinal, "IGST") ?? 0;
+            var combined = ordinal.ContainsKey("GST") ? MoneyAt(reader, ordinal, "GST") ?? 0 : 0;
+            if (!KeepErpTax(combined == 0 ? 0 : combined, combined == 0 ? 0 : combined, igst) && combined == 0)
+                continue;
+
+            var cgst = combined == 0 ? 0 : Math.Round(combined / 2, 2, MidpointRounding.AwayFromZero);
+            var sgst = combined - cgst;
+            var taxable = MoneyAt(reader, ordinal, "BASIC") ?? 0;
+            rows.Add(new ErpLine
+            {
+                CompanyName = company,
+                BillNo = billNo,
+                BillParts = BillParts(billNo),
+                BillDate = billDate.Value,
+                GstNo = gst,
+                FullKey = Key(NormBill(billNo), billDate.Value, gst),
+                ValueAmount = taxable,
+                Taxable = taxable,
+                TaxableCandidates = [taxable],
+                Igst = igst,
+                Cgst = cgst,
+                Sgst = sgst,
+                Ledgers = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase),
+            });
+        }
+        return rows;
+    }
+
+    private static async Task ReadVoucherSummaryAsync(
+        SqlDataReader reader,
+        Dictionary<string, int> ordinal,
+        Dictionary<string, ErpLine> vouchers,
+        CancellationToken ct)
+    {
+        while (await reader.ReadAsync(ct))
+        {
+            var billNo = NormBill(Text(reader, ordinal, "BILLNO"));
+            if (billNo.Length == 0 || vouchers.ContainsKey(billNo))
+                continue;
+            vouchers[billNo] = new ErpLine
+            {
+                BillNo = billNo,
+                VoucherType = Text(reader, ordinal, "VOUCHERTYPE"),
+                VoucherNo = Text(reader, ordinal, "VOUCHERNO"),
+                VoucherDate = DateOf(reader, ordinal, "REFDATE"),
+                RefNo = Text(reader, ordinal, "REFNO"),
+                Party = Text(reader, ordinal, "PARTY"),
+                GrossAmount = MoneyAt(reader, ordinal, "GROSSAMOUNT"),
+            };
+        }
     }
 
     private static List<GstBillRecoRow> BuildRows(
@@ -958,17 +1178,8 @@ END";
         return new TwoBParse { BuyerGstin = buyerGstin, Rows = rows };
     }
 
-    private static bool InRange(DateTime billDate, string period, DateTime from, DateTime to)
-    {
-        if (billDate.Date >= from && billDate.Date <= to)
-            return true;
-        if (TryPeriodMonth(period, out var monthStart))
-        {
-            var monthEnd = monthStart.AddMonths(1).AddDays(-1);
-            return monthStart <= to && monthEnd >= from;
-        }
-        return false;
-    }
+    private static bool InRange(DateTime billDate, DateTime from, DateTime to)
+        => billDate.Date >= from.Date && billDate.Date <= to.Date;
 
     private static bool TryPeriodMonth(string period, out DateTime monthStart)
     {

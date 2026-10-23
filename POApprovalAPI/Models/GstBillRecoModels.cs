@@ -59,3 +59,63 @@ public class GstBillRecoExportRequest
     public string? Username { get; set; }
     public List<GstBillRecoRow> Rows { get; set; } = [];
 }
+
+public class Gst2BPeriodRow
+{
+    public string BuyerGstin { get; set; } = "";
+    public string GroupName { get; set; } = "";
+    public DateTime ReturnPeriod { get; set; }
+    public int RowCount { get; set; }
+    public string FileName { get; set; } = "";
+    public DateTime DownloadedAt { get; set; }
+}
+
+public class Gst2BDocumentRow
+{
+    public string BuyerGstin { get; set; } = "";
+    public string GroupName { get; set; } = "";
+    public DateTime ReturnPeriod { get; set; }
+    public string Section { get; set; } = "";
+    public string SupplierGstin { get; set; } = "";
+    public string SupplierName { get; set; } = "";
+    public string DocumentType { get; set; } = "";
+    public string InvoiceType { get; set; } = "";
+    public string DocumentNumber { get; set; } = "";
+    public string DocumentNumberNorm { get; set; } = "";
+    public DateTime DocumentDate { get; set; }
+    public string OriginalDocumentNumber { get; set; } = "";
+    public DateTime? OriginalDocumentDate { get; set; }
+    public string PlaceOfSupply { get; set; } = "";
+    public string ReverseCharge { get; set; } = "";
+    public decimal DocumentValue { get; set; }
+    public decimal Taxable { get; set; }
+    public decimal Igst { get; set; }
+    public decimal Cgst { get; set; }
+    public decimal Sgst { get; set; }
+    public decimal CgstSgst { get; set; }
+    public decimal Cess { get; set; }
+    public string ItcAvailability { get; set; } = "";
+    public string ItcReason { get; set; } = "";
+    public string ApplicableTaxRate { get; set; } = "";
+    public string ItcReduced { get; set; } = "";
+    public decimal ReductionIgst { get; set; }
+    public decimal ReductionCgst { get; set; }
+    public decimal ReductionSgst { get; set; }
+    public decimal ReductionCess { get; set; }
+    public string Source { get; set; } = "";
+    public string Irn { get; set; } = "";
+    public DateTime? IrnDate { get; set; }
+    public string Gstr1Period { get; set; } = "";
+    public DateTime? Gstr1FilingDate { get; set; }
+    public string Remarks { get; set; } = "";
+}
+
+public class Gst2BSaveResult
+{
+    public bool AlreadyFrozen { get; set; }
+    public int InsertedRows { get; set; }
+    public string BuyerGstin { get; set; } = "";
+    public string GroupName { get; set; } = "";
+    public DateTime ReturnPeriod { get; set; }
+    public string Sections { get; set; } = "";
+}

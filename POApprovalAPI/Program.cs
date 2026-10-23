@@ -106,7 +106,9 @@ builder.Services.AddScoped<ItemStockService>();
 builder.Services.AddScoped<DomesticInvoiceService>();
 builder.Services.AddScoped<PlantConsumptionService>();
 builder.Services.AddScoped<PlantProductionService>();
+builder.Services.AddScoped<Gst2BSnapshotService>();
 builder.Services.AddScoped<GstBillRecoService>();
+builder.Services.AddSingleton<GstPortalBrowserService>();
 builder.Services.AddScoped<PnlService>();
 builder.Services.AddScoped<IntercompanyBalanceService>();
 builder.Services.AddScoped<IntercompanyTransactionService>();
@@ -188,6 +190,24 @@ app.UseSwaggerUI();
 app.MapControllers();
 app.MapGet("/", () => Results.Ok("PO Approval API is running!"));
 app.MapGet("/api/health", () => Results.Ok(new { ok = true, service = "PO Approval API" }));
+
+var portalImport = Array.FindIndex(args, arg => arg.Equals("--import-2b-portal", StringComparison.OrdinalIgnoreCase));
+if (portalImport >= 0)
+{
+    using var scope = app.Services.CreateScope();
+    var store = scope.ServiceProvider.GetRequiredService<Gst2BSnapshotService>();
+    var paths = args.Skip(portalImport + 1).TakeWhile(arg => !arg.StartsWith('-')).ToList();
+    if (paths.Count == 0)
+        throw new ArgumentException("Pass the monthly GSTR-2B workbook paths.");
+    foreach (var path in paths)
+    {
+        await using var stream = File.OpenRead(path);
+        var result = await store.SavePortalFileAsync(stream, Path.GetFileName(path));
+        var state = result.AlreadyFrozen ? "already frozen" : "stored";
+        Console.WriteLine($"{result.GroupName} {result.BuyerGstin} {result.ReturnPeriod:yyyy-MM} {state} rows={result.InsertedRows} {result.Sections}");
+    }
+    return;
+}
 
 var importAt = Array.FindIndex(args, arg => arg.Equals("--import-2b", StringComparison.OrdinalIgnoreCase));
 if (importAt >= 0)
