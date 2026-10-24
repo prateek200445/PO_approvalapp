@@ -16,12 +16,22 @@ export interface GstLiabilityCompany {
   openingCash: number;
   inputBalance: number;
   outputBalance: number;
-  purchaseIgst: number;
-  purchaseCgst: number;
-  purchaseSgst: number;
-  salesIgst: number;
-  salesCgst: number;
-  salesSgst: number;
+  opBalance: number;
+  inputClosingIgst: number;
+  inputClosingCgst: number;
+  inputClosingSgst: number;
+  outputClosingIgst: number;
+  outputClosingCgst: number;
+  outputClosingSgst: number;
+  pendingInputIgst: number;
+  pendingInputCgst: number;
+  pendingInputSgst: number;
+  pendingOutputIgst: number;
+  pendingOutputCgst: number;
+  pendingOutputSgst: number;
+  unclaimedIgst: number;
+  unclaimedCgst: number;
+  unclaimedSgst: number;
   setOff: number;
   moved: boolean;
 }
@@ -48,6 +58,7 @@ export interface GstLiability {
   from: string;
   to: string;
   excludeSetOff: boolean;
+  asOnDate: string;
   generatedAt: string;
   companies: GstLiabilityCompany[];
   ledgers: GstLiabilityLedgerRow[];
