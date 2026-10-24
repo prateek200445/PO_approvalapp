@@ -169,6 +169,27 @@ public class GstBillRecoController : ControllerBase
             return StatusCode(403, new { message = "GST Bill Reconciliation is only available to Prakash." });
         try
         {
+            var coverage = await _snapshots.CoverageAsync(request.CompanyName, request.DateFrom, request.DateTo, ct);
+            if (!coverage.NeedsDownload)
+            {
+                if (!coverage.HasStoredMonths)
+                    return BadRequest(new { message = coverage.Message });
+                var result = await _service.ReconcileStoredAsync(
+                    request.CompanyName,
+                    request.DateFrom,
+                    request.DateTo,
+                    request.AmountTolerance,
+                    ct);
+                if (!string.IsNullOrWhiteSpace(coverage.Message))
+                    result.Warning = string.Join(" ", new[] { result.Warning, coverage.Message }.Where(value => !string.IsNullOrWhiteSpace(value)));
+                return Ok(new
+                {
+                    status = "complete",
+                    message = coverage.Message,
+                    result
+                });
+            }
+
             return Ok(await _portal.StartAsync(request, ct));
         }
         catch (Exception ex)
@@ -232,22 +253,17 @@ public class GstBillRecoController : ControllerBase
 
     private async Task<IActionResult> PortalStepResult(GstPortalStep step, CancellationToken ct)
     {
-        if (step.Status != "complete" || step.Workbooks.Count == 0)
+        if (step.Status != "complete")
             return Ok(step);
 
-        var results = new List<GstBillRecoResult>();
-        foreach (var workbook in step.Workbooks)
-        {
-            await using var stream = new MemoryStream(workbook, writable: false);
-            results.Add(await _service.ReconcileAsync(
-                stream,
-                step.CompanyName,
-                step.DateFrom,
-                step.DateTo,
-                step.AmountTolerance,
-                ct));
-        }
-        var result = MergePortalResults(step.CompanyName, results);
+        var result = await _service.ReconcileStoredAsync(
+            step.CompanyName,
+            step.DateFrom,
+            step.DateTo,
+            step.AmountTolerance,
+            ct);
+        if (!string.IsNullOrWhiteSpace(step.Message))
+            result.Warning = string.Join(" ", new[] { result.Warning, step.Message }.Where(value => !string.IsNullOrWhiteSpace(value)));
         return Ok(new
         {
             step.Status,
@@ -256,32 +272,6 @@ public class GstBillRecoController : ControllerBase
             step.Message,
             result
         });
-    }
-
-    private static GstBillRecoResult MergePortalResults(
-        string companyName,
-        IReadOnlyList<GstBillRecoResult> results)
-    {
-        var first = results[0];
-        return new GstBillRecoResult
-        {
-            CompanyName = companyName,
-            DateFrom = first.DateFrom,
-            DateTo = first.DateTo,
-            AmountTolerance = first.AmountTolerance,
-            BuyerGstin = string.Join(", ", results.Select(item => item.BuyerGstin).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct()),
-            CompanyGstin = string.Join(", ", results.Select(item => item.CompanyGstin).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct()),
-            Warning = string.Join(" ", results.Select(item => item.Warning).Where(value => !string.IsNullOrWhiteSpace(value))),
-            TwoBRows = results.Sum(item => item.TwoBRows),
-            SavedRows = results.Sum(item => item.SavedRows),
-            ErpRows = results.Sum(item => item.ErpRows),
-            Matched = results.Sum(item => item.Matched),
-            PotentialMatch = results.Sum(item => item.PotentialMatch),
-            Mismatch = results.Sum(item => item.Mismatch),
-            MissingInErp = results.Sum(item => item.MissingInErp),
-            MissingIn2B = results.Sum(item => item.MissingIn2B),
-            Rows = results.SelectMany(item => item.Rows).ToList()
-        };
     }
 
     private bool IsAllowed(string? username)

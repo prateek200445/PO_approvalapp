@@ -46,11 +46,18 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
             throw new ArgumentException("Date to is before date from.");
 
         var credentials = await ResolveCredentialsAsync(request.CompanyName, ct);
+        using var scope = _scopes.CreateScope();
+        var coverage = await scope.ServiceProvider.GetRequiredService<Gst2BSnapshotService>()
+            .CoverageAsync(request.CompanyName, request.DateFrom, request.DateTo, ct);
+        if (!coverage.NeedsDownload)
+            throw new InvalidOperationException(coverage.Message);
+
         var id = Guid.NewGuid().ToString("N");
         var session = new PortalSession
         {
             Id = id,
             Request = request,
+            MonthsToDownload = coverage.MissingMonths,
             RemainingCredentials = new Queue<PortalCredential>(credentials),
             CreatedAt = DateTimeOffset.UtcNow
         };
@@ -229,10 +236,11 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
         await session.Page.Locator("#username").FillAsync(credential.Login);
         await session.Page.Locator("#user_pass").FillAsync(credential.Password);
         var captchaImage = await CaptureCaptchaAsync(session.Page);
+        var months = Gst2BSnapshotService.FormatMonthSpan(session.MonthsToDownload);
         var remaining = session.RemainingCredentials.Count;
         var message = remaining == 0
-            ? "Enter the letters shown in the GST portal CAPTCHA."
-            : $"Enter the CAPTCHA for this GSTIN. {remaining} registration(s) will follow.";
+            ? $"Enter the CAPTCHA to fetch {months}."
+            : $"Enter the CAPTCHA to fetch {months}. {remaining} more registration(s) will follow.";
         return Step(session, "captcha", message, captchaImage);
     }
 
@@ -242,7 +250,10 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
         try
         {
             var page = session.Page!;
-            foreach (var month in Months(session.Request.DateFrom, session.Request.DateTo))
+            var months = session.MonthsToDownload.Count > 0
+                ? session.MonthsToDownload
+                : Months(session.Request.DateFrom, session.Request.DateTo).ToList();
+            foreach (var month in months)
             {
                 var downloaded = await DownloadMonthAsync(page, month);
                 page = downloaded.Page;
@@ -255,7 +266,7 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
             if (session.RemainingCredentials.Count > 0)
                 return await BeginNextCredentialAsync(session);
 
-            var completed = Step(session, "complete", $"Downloaded {workbooks.Count} GSTR-2B period(s).");
+            var completed = Step(session, "complete", $"Fetched {Gst2BSnapshotService.FormatMonthSpan(months)} and stored them.");
             completed.Workbooks = session.CompletedWorkbooks;
             await RemoveSessionAsync(session.Id);
             return completed;
@@ -483,6 +494,9 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
 
     private static async Task<IPage> NavigateToReturnsDashboardAsync(IPage page)
     {
+        if (await TryOpenReturnsDashboardAsync(page))
+            return page;
+
         if (!page.Url.Contains("/services/auth/fowelcome", StringComparison.OrdinalIgnoreCase))
         {
             await page.GotoAsync("https://services.gst.gov.in/services/auth/dashboard", new PageGotoOptions
@@ -515,18 +529,53 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
         var returns = await VisibleTextAsync(page, "Returns");
         if (returns is not null)
             await returns.ClickAsync();
-        await page.WaitForTimeoutAsync(500);
-        await WriteNavigationSnapshotAsync(page, "menu");
 
-        var dashboard = await FirstVisibleAsync(page, "a, button, span, li", "Returns Dashboard");
+        var dashboard = await WaitForVisibleAsync(page, "a, button, span, li", "Returns Dashboard", TimeSpan.FromSeconds(20));
         if (dashboard is null)
-            throw new InvalidOperationException("Returns Dashboard was not visible after opening Services > Returns. " + await File.ReadAllTextAsync(NavigationSnapshotPath()));
+            throw new InvalidOperationException("Returns Dashboard did not open. Fetch from GST again.");
 
         var target = await ClickAndFollowAsync(page, dashboard);
         if (target.Url.Contains("accessdenied", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("GST redirected the browser to Access Denied while opening Returns Dashboard. " + await File.ReadAllTextAsync(NavigationSnapshotPath()));
+            throw new InvalidOperationException("GST opened Access Denied instead of the Returns Dashboard.");
         await WaitForReturnsDashboardAsync(target);
         return target;
+    }
+
+    private static async Task<bool> TryOpenReturnsDashboardAsync(IPage page)
+    {
+        try
+        {
+            await page.GotoAsync(DashboardUrl, new PageGotoOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = 60_000
+            });
+            if (page.Url.Contains("accessdenied", StringComparison.OrdinalIgnoreCase) || page.Url.Contains("/login", StringComparison.OrdinalIgnoreCase))
+                return false;
+            await page.Locator("select").First.WaitForAsync(new LocatorWaitForOptions
+            {
+                State = WaitForSelectorState.Visible,
+                Timeout = 15_000
+            });
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
+    }
+
+    private static async Task<ILocator?> WaitForVisibleAsync(IPage page, string selector, string text, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow.Add(timeout);
+        while (DateTime.UtcNow < deadline)
+        {
+            var found = await FirstVisibleAsync(page, selector, text);
+            if (found is not null)
+                return found;
+            await page.WaitForTimeoutAsync(500);
+        }
+        return null;
     }
 
     private static async Task<IPage> ClickAndFollowAsync(IPage page, ILocator control)
@@ -586,8 +635,6 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
     private static async Task WriteNavigationSnapshotAsync(IPage page, string stage)
     {
         var lines = new List<string> { $"stage={stage}", $"url={page.Url}" };
-        var cookies = await page.Context.CookiesAsync();
-        lines.Add("cookies=" + string.Join(", ", cookies.Select(cookie => $"{cookie.Name}@{cookie.Domain}")));
         var controls = page.Locator("a, button");
         for (var index = 0; index < Math.Min(await controls.CountAsync(), 250); index++)
         {
@@ -1019,6 +1066,7 @@ WHERE COALESCE(NULLIF(LTRIM(RTRIM(GroupName)), ''), LTRIM(RTRIM(Name))) = @Group
         public GstPortalStartRequest Request { get; set; } = new();
         public string Gstin { get; set; } = "";
         public PortalCredential? Credential { get; set; }
+        public List<DateTime> MonthsToDownload { get; set; } = [];
         public Queue<PortalCredential> RemainingCredentials { get; set; } = new();
         public List<byte[]> CompletedWorkbooks { get; set; } = [];
         public DateTimeOffset CreatedAt { get; set; }

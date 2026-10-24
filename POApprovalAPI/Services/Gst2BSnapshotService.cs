@@ -182,6 +182,72 @@ VALUES (@Buyer, @Group, @Period, @Rows, @File)";
         };
     }
 
+    public async Task<Gst2BCoverage> CoverageAsync(string groupName, DateTime from, DateTime to, CancellationToken ct = default)
+    {
+        if (to.Date < from.Date)
+            throw new ArgumentException("Date to is before date from.");
+
+        var periods = await GetPeriodsAsync(groupName, ct);
+        var stored = periods.Select(period => new DateTime(period.ReturnPeriod.Year, period.ReturnPeriod.Month, 1)).ToHashSet();
+        var missing = new List<DateTime>();
+        var unavailable = new List<DateTime>();
+        var inRange = new List<DateTime>();
+        for (var month = new DateTime(from.Year, from.Month, 1); month <= new DateTime(to.Year, to.Month, 1); month = month.AddMonths(1))
+        {
+            inRange.Add(month);
+            if (!IsPeriodAvailable(month))
+                unavailable.Add(month);
+            else if (!stored.Contains(month))
+                missing.Add(month);
+        }
+
+        var covered = inRange.Where(stored.Contains).ToList();
+        var coverage = new Gst2BCoverage
+        {
+            NeedsDownload = missing.Count > 0,
+            HasStoredMonths = covered.Count > 0,
+            MissingMonths = missing
+        };
+        if (missing.Count == 0 && unavailable.Count == 0)
+            coverage.Message = $"{FormatMonthSpan(covered)} already stored. Reconciled from the database.";
+        else if (missing.Count == 0)
+        {
+            var unavailableLabel = FormatMonthSpan(unavailable);
+            var verb = unavailable.Count == 1 ? "is" : "are";
+            coverage.Message = covered.Count == 0
+                ? $"{unavailableLabel} {verb} not on the GST portal yet. GSTR-2B for a month is available from the 14th of the next month."
+                : $"{unavailableLabel} {verb} not on the GST portal yet. Reconciled the months already stored.";
+        }
+        else
+            coverage.Message = $"Fetch {FormatMonthSpan(missing)} from GST. Those months are not stored yet.";
+        return coverage;
+    }
+
+    public static bool IsPeriodAvailable(DateTime month)
+    {
+        var next = new DateTime(month.Year, month.Month, 1).AddMonths(1);
+        return DateTime.Today >= new DateTime(next.Year, next.Month, 14);
+    }
+
+    public static string FormatMonthSpan(IReadOnlyList<DateTime> months)
+    {
+        if (months.Count == 0)
+            return "No months";
+        var ordered = months.OrderBy(month => month).ToList();
+        string Label(DateTime month) => month.ToString("MMMM yyyy", CultureInfo.InvariantCulture);
+        if (ordered.Count == 1)
+            return Label(ordered[0]);
+        var contiguous = true;
+        for (var i = 1; i < ordered.Count; i++)
+        {
+            if (ordered[i] != ordered[i - 1].AddMonths(1))
+                contiguous = false;
+        }
+        if (contiguous)
+            return $"{Label(ordered[0])} through {Label(ordered[^1])}";
+        return string.Join(", ", ordered.Select(Label));
+    }
+
     public async Task<IReadOnlyList<Gst2BPeriodRow>> GetPeriodsAsync(string groupName, CancellationToken ct = default)
     {
         await using var connection = _database.CreateConnection();

@@ -371,10 +371,6 @@ function QuoteEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => () => {
-    if (dirty.current) void leaveRef.current();
-  }, []);
-
   async function save() {
     setSaving(true);
     try {
@@ -484,30 +480,60 @@ function QuoteEditor({
 
 function QuotationTextCard({ draft, result }: { draft: WovenDraft; result: WovenResult }) {
   const isFabric = draft.bagType === "Flat Fabric" || draft.bagType === "Tubular Fabric";
-  const text = quotationText(draft, result, isFabric);
+  const quotation = quotationTable(draft, result, isFabric);
+  const plainText = [quotation.title, "", ...quotation.rows.map(([label, value]) => `${label}: ${value || "—"}`)].join("\n");
+  const html = quotationTableHtml(quotation.rows);
   async function copy() {
     try {
-      await navigator.clipboard.writeText(text);
-      toast.success("Quotation text copied.");
+      if (navigator.clipboard.write && typeof ClipboardItem !== "undefined") {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([plainText], { type: "text/plain" }),
+          }),
+        ]);
+      } else {
+        await navigator.clipboard.writeText(plainText);
+      }
+      toast.success("Quotation table copied.");
     } catch {
-      toast.error("Quotation text could not be copied.");
+      try {
+        await navigator.clipboard.writeText(plainText);
+        toast.success("Quotation copied as text.");
+      } catch {
+        toast.error("Quotation could not be copied.");
+      }
     }
   }
   return (
     <section className="card-3d space-y-3 rounded-xl p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="font-semibold">{isFabric ? "Fabric quotation text" : "Bag quotation text"}</h3>
-          <p className="text-xs text-muted-foreground">Copy and paste this directly into an email.</p>
+          <h3 className="font-semibold">{isFabric ? "Fabric quotation table" : "Bag quotation table"}</h3>
+          <p className="text-xs text-muted-foreground">Copy and paste this formatted table directly into an email.</p>
         </div>
-        <Button size="sm" variant="outline" onClick={() => void copy()}><Copy /> Copy quotation</Button>
+        <Button size="sm" variant="outline" onClick={() => void copy()}><Copy /> Copy table</Button>
       </div>
-      <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-4 font-sans text-sm leading-6">{text}</pre>
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full border-collapse text-sm">
+          <tbody>
+            {quotation.rows.map(([label, value]) => {
+              const price = label.startsWith("Price/");
+              return (
+                <tr key={label}>
+                  <td className={`w-[46%] border-b border-r border-border px-3 py-2 font-medium ${price ? "bg-amber-100 text-amber-950" : "bg-muted/60"}`}>{label}</td>
+                  <td className={`border-b border-border px-3 py-2 text-right tabular-nums ${price ? "bg-amber-50 font-semibold text-amber-950" : "bg-background"}`}>{value || "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
 
-function quotationText(draft: WovenDraft, result: WovenResult, isFabric: boolean) {
+function quotationTable(draft: WovenDraft, result: WovenResult, isFabric: boolean): { title: string; rows: Array<[string, string]> } {
   const number = (value: number | null | undefined, digits = 2) => value == null ? "" : formatQty(value, digits);
   const yesNo = (value: boolean) => value ? "Yes" : "No";
   const plate = draft.printPlateCostText || (draft.printPlateCost == null ? "" : String(draft.printPlateCost));
@@ -521,7 +547,7 @@ function quotationText(draft: WovenDraft, result: WovenResult, isFabric: boolean
       ? null
       : result.offerWidth + result.offerGusset;
     const tubeFlat = draft.bagType === "Flat Fabric" ? "Flat" : "Tube";
-    return formatQuotationRows("FABRIC QUOTATION", [
+    return { title: "FABRIC QUOTATION", rows: [
       ["Customer Ref", draft.customerRef],
       ["Dimensions", draft.dimensionUnit],
       ["UV (Y/N)", result.uvLabel],
@@ -538,9 +564,9 @@ function quotationText(draft: WovenDraft, result: WovenResult, isFabric: boolean
       ["Rolls/Pallet", number(draft.rollsPerPallet, 0)],
       ...commonEnd,
       ["Price/UOM", `${formatQty(result.pricePerPiece, 4)} ${draft.currency}`.trim()],
-    ]);
+    ] };
   }
-  return formatQuotationRows("BAG QUOTATION", [
+  return { title: "BAG QUOTATION", rows: [
     ["Customer Ref", draft.customerRef],
     ["Dimensions", draft.dimensionUnit],
     ["Bag/Fabric Width", number(result.offerWidth)],
@@ -564,11 +590,26 @@ function quotationText(draft: WovenDraft, result: WovenResult, isFabric: boolean
     ...commonEnd,
     ["Price/Piece", `${formatQty(result.pricePerPiece, 4)} ${draft.currency}`.trim()],
     ["Remarks", draft.remarks],
-  ]);
+  ] };
 }
 
-function formatQuotationRows(title: string, rows: Array<[string, string]>) {
-  return [title, "", ...rows.map(([label, value]) => `${label}: ${value || "—"}`)].join("\n");
+function quotationTableHtml(rows: Array<[string, string]>) {
+  const cells = rows.map(([label, value]) => {
+    const price = label.startsWith("Price/");
+    const labelBackground = price ? "#f6d8bd" : "#e7e7e7";
+    const valueBackground = price ? "#fce8d5" : "#f5f5f5";
+    return `<tr><td style="border:1px solid #777;padding:6px 8px;background:${labelBackground};color:#111;font-weight:500">${escapeHtml(label)}</td><td style="border:1px solid #777;padding:6px 8px;background:${valueBackground};color:#111;text-align:right;white-space:nowrap${price ? ";font-weight:700" : ""}">${escapeHtml(value || "—")}</td></tr>`;
+  }).join("");
+  return `<table style="border-collapse:collapse;width:100%;max-width:720px;font-family:Arial,sans-serif;font-size:14px">${cells}</table>`;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function QuoteDock({ result, saving, onSave }: { result: WovenResult; saving: boolean; onSave: () => void }) {
@@ -642,11 +683,12 @@ function WovenSheet({
           <Entry label="Our ref"><Input className="h-8 border-0 shadow-none" value={draft.ourRef} onChange={(e) => patch({ ourRef: e.target.value })} /></Entry>
           <Entry label="Customer ref"><Input className="h-8 border-0 shadow-none" value={draft.customerRef} onChange={(e) => patch({ customerRef: e.target.value })} /></Entry>
           <Band>Bag specification</Band>
+          <Entry label="Input unit"><SheetSelect value={draft.dimensionUnit} onChange={(dimensionUnit) => patch({ dimensionUnit })} options={options("DimensionUnit")} /></Entry>
           <Entry label="Type of fabric / bag"><SheetSelect value={draft.bagType} onChange={(bagType) => patch({ bagType })} options={options("BagType")} /></Entry>
           <Entry label="Fabric colour"><SheetSelect value={draft.fabricColour} onChange={(fabricColour) => patch({ fabricColour })} options={options("Colour")} /></Entry>
-          <Entry label="Face width cm"><SheetNum value={draft.faceWidthCm} onChange={(faceWidthCm) => patch({ faceWidthCm })} /></Entry>
-          <Entry label="Gusset cm"><SheetNum value={draft.gussetCm} onChange={(gussetCm) => patch({ gussetCm })} /></Entry>
-          <Entry label="Length cm"><SheetNum value={draft.lengthCm} onChange={(lengthCm) => patch({ lengthCm })} /></Entry>
+          <Entry label={`Face width ${dimensionSymbol(draft.dimensionUnit)}`}><SheetNum value={fromCm(draft.faceWidthCm, draft.dimensionUnit)} onChange={(value) => patch({ faceWidthCm: toCm(value, draft.dimensionUnit) })} /></Entry>
+          <Entry label={`Gusset ${dimensionSymbol(draft.dimensionUnit)}`}><SheetNum value={fromCm(draft.gussetCm, draft.dimensionUnit)} onChange={(value) => patch({ gussetCm: toCm(value, draft.dimensionUnit) })} /></Entry>
+          <Entry label={`Length ${dimensionSymbol(draft.dimensionUnit)}`}><SheetNum value={fromCm(draft.lengthCm, draft.dimensionUnit)} onChange={(value) => patch({ lengthCm: toCm(value, draft.dimensionUnit) })} /></Entry>
           <Entry label="Top"><SheetSelect value={draft.top} onChange={(top) => patch({ top })} options={options("Top")} /></Entry>
           <Calc label="Cut length cm" value={formatQty(result.cutLengthCm, 2)} />
           <Calc label="Gross width cm" value={formatQty(result.grossWidthCm, 2)} />
@@ -702,7 +744,6 @@ function WovenSheet({
           <Calc label="FOB USD/kg" value={formatQty(result.fobUsdPerKg, 4)} />
           <Calc label="CIF USD/kg" value={formatQty(result.cifUsdPerKg, 4)} />
           <Band>Customer offer</Band>
-          <Entry label="Dimensions"><SheetSelect value={draft.dimensionUnit} onChange={(dimensionUnit) => patch({ dimensionUnit })} options={options("DimensionUnit")} /></Entry>
           <Entry label="Thumb notch"><SheetSelect value={draft.thumbNotch ? "Yes" : "No"} onChange={(value) => patch({ thumbNotch: value === "Yes" })} options={["Yes", "No"]} /></Entry>
           <Entry label="Metal detection"><SheetSelect value={draft.metalDetection ? "Yes" : "No"} onChange={(value) => patch({ metalDetection: value === "Yes" })} options={["Yes", "No"]} /></Entry>
           <Entry label="Perforation"><SheetSelect value={draft.perforation ? "Yes" : "No"} onChange={(value) => patch({ perforation: value === "Yes" })} options={["Yes", "No"]} /></Entry>
@@ -765,6 +806,21 @@ function Calc({ label, value }: { label: string; value: string }) {
   );
 }
 
+function dimensionSymbol(unit: string) {
+  return unit.toLowerCase() === "inch" ? "in" : "cm";
+}
+
+function fromCm(value: number | null | undefined, unit: string) {
+  if (value == null) return null;
+  if (unit.toLowerCase() !== "inch") return value;
+  return Math.round((value / 2.54) * 1_000_000) / 1_000_000;
+}
+
+function toCm(value: number | null, unit: string) {
+  if (value == null) return null;
+  return unit.toLowerCase() === "inch" ? value * 2.54 : value;
+}
+
 function SheetNum({ value, onChange, placeholder }: { value: number | null; onChange: (value: number | null) => void; placeholder?: string }) {
   return (
     <Input
@@ -810,11 +866,12 @@ function AdStarSpec({ draft, patch }: { draft: WovenDraft; patch: (partial: Part
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <table className="w-full text-sm">
         <tbody>
-          <Entry label="Width"><SheetNum value={draft.adWidth} onChange={(adWidth) => patch({ adWidth })} /></Entry>
-          <Entry label="Length"><SheetNum value={draft.adLength} onChange={(adLength) => patch({ adLength })} /></Entry>
-          <Entry label="Patch"><SheetNum value={draft.adPatch} onChange={(adPatch) => patch({ adPatch })} /></Entry>
-          <Entry label="Valve length"><SheetNum value={draft.adValveLength} onChange={(adValveLength) => patch({ adValveLength })} /></Entry>
-          <Entry label="Extended valve"><SheetNum value={draft.adExtendedValve} onChange={(adExtendedValve) => patch({ adExtendedValve })} /></Entry>
+          <Entry label="Input unit"><SheetSelect value={draft.dimensionUnit} onChange={(dimensionUnit) => patch({ dimensionUnit })} options={["CM", "Inch"]} /></Entry>
+          <Entry label={`Width ${dimensionSymbol(draft.dimensionUnit)}`}><SheetNum value={fromCm(draft.adWidth, draft.dimensionUnit)} onChange={(value) => patch({ adWidth: toCm(value, draft.dimensionUnit) })} /></Entry>
+          <Entry label={`Length ${dimensionSymbol(draft.dimensionUnit)}`}><SheetNum value={fromCm(draft.adLength, draft.dimensionUnit)} onChange={(value) => patch({ adLength: toCm(value, draft.dimensionUnit) })} /></Entry>
+          <Entry label={`Patch ${dimensionSymbol(draft.dimensionUnit)}`}><SheetNum value={fromCm(draft.adPatch, draft.dimensionUnit)} onChange={(value) => patch({ adPatch: toCm(value, draft.dimensionUnit) })} /></Entry>
+          <Entry label={`Valve length ${dimensionSymbol(draft.dimensionUnit)}`}><SheetNum value={fromCm(draft.adValveLength, draft.dimensionUnit)} onChange={(value) => patch({ adValveLength: toCm(value, draft.dimensionUnit) })} /></Entry>
+          <Entry label={`Extended valve ${dimensionSymbol(draft.dimensionUnit)}`}><SheetNum value={fromCm(draft.adExtendedValve, draft.dimensionUnit)} onChange={(value) => patch({ adExtendedValve: toCm(value, draft.dimensionUnit) })} /></Entry>
           <Entry label="Fabric GSM"><SheetNum value={draft.adFabricGsm} onChange={(adFabricGsm) => patch({ adFabricGsm })} /></Entry>
           <Entry label="Coating GSM"><SheetNum value={draft.adCoatingGsm} onChange={(adCoatingGsm) => patch({ adCoatingGsm })} /></Entry>
           <Entry label="BOPP GSM"><SheetNum value={draft.adBoppGsm} onChange={(adBoppGsm) => patch({ adBoppGsm })} /></Entry>

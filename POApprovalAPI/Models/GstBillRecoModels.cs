@@ -110,6 +110,14 @@ public class Gst2BDocumentRow
     public string Remarks { get; set; } = "";
 }
 
+public class Gst2BCoverage
+{
+    public bool NeedsDownload { get; set; }
+    public bool HasStoredMonths { get; set; }
+    public string Message { get; set; } = "";
+    public List<DateTime> MissingMonths { get; set; } = [];
+}
+
 public class Gst2BSaveResult
 {
     public bool AlreadyFrozen { get; set; }
