@@ -38,35 +38,55 @@ const num = (s: string | undefined) => {
   return Number.isFinite(v) ? v : 0;
 };
 
-const outputTotal = (c: GstLiabilityCompany) => c.outputIgst + c.outputCgst + c.outputSgst;
-const inputTotal = (c: GstLiabilityCompany) => c.inputIgst + c.inputCgst + c.inputSgst;
+type Tax = { igst: number; cgst: number; sgst: number };
+const z = (): Tax => ({ igst: 0, cgst: 0, sgst: 0 });
+const add = (...rows: Tax[]): Tax =>
+  rows.reduce((s, r) => ({ igst: s.igst + r.igst, cgst: s.cgst + r.cgst, sgst: s.sgst + r.sgst }), z());
+const sub = (a: Tax, b: Tax): Tax => ({ igst: a.igst - b.igst, cgst: a.cgst - b.cgst, sgst: a.sgst - b.sgst });
 
-function erpRows(ledgers: GstLiabilityLedgerRow[], code: string) {
-  const rows = ledgers.filter((l) => l.code === code);
-  const sum = (kind: GstLiabilityLedgerRow["kind"], field: "opening" | "closing", tax?: string) =>
-    rows
-      .filter((l) => l.kind === kind && (!tax || l.tax === tax))
-      .reduce((s, l) => s + (field === "opening" ? l.opening : l.closing), 0);
-  const byTax = (kind: GstLiabilityLedgerRow["kind"], field: "opening" | "closing") => {
-    const igst = sum(kind, field, "IGST");
-    const cgst = sum(kind, field, "CGST");
-    const sgst = sum(kind, field, "SGST");
-    return { igst, cgst, sgst, net: igst + cgst + sgst };
+/** Same order as GstItcUtilisation on the API. Returns the movement, not the balance. */
+function itcAdjustment(net: Tax): Tax {
+  const credit = { igst: Math.max(0, net.igst), cgst: Math.max(0, net.cgst), sgst: Math.max(0, net.sgst) };
+  const liab = { igst: Math.max(0, -net.igst), cgst: Math.max(0, -net.cgst), sgst: Math.max(0, -net.sgst) };
+  const room = liab.cgst + liab.sgst;
+  const take = Math.min(credit.igst, room);
+  if (take > 0 && room > 0) {
+    let toC = Math.round((take * liab.cgst) / room * 100) / 100;
+    if (toC > liab.cgst) toC = liab.cgst;
+    let toS = Math.round((take - toC) * 100) / 100;
+    if (toS > liab.sgst) {
+      toS = liab.sgst;
+      toC = Math.min(liab.cgst, Math.round((take - toS) * 100) / 100);
+    }
+    credit.igst -= toC + toS;
+    liab.cgst -= toC;
+    liab.sgst -= toS;
+  }
+  const use = (from: "cgst" | "sgst") => {
+    const used = Math.min(credit[from], liab.igst);
+    credit[from] -= used;
+    liab.igst -= used;
   };
-  const credit = byTax("input", "opening");
-  const input = byTax("input", "closing");
-  const output = byTax("output", "closing");
-  const cash = sum("cash", "opening");
-  return [
-    { label: "Opening balance credit", ...credit },
-    { label: "Opening balance cash", igst: null, cgst: null, sgst: null, net: cash },
-    { label: "Input balance", ...input },
-    { label: "Output balance", ...output },
-  ];
+  use("cgst");
+  use("sgst");
+  const after = { igst: credit.igst - liab.igst, cgst: credit.cgst - liab.cgst, sgst: credit.sgst - liab.sgst };
+  return sub(after, net);
 }
 
-function taxRow(label: string, igst: number, cgst: number, sgst: number) {
-  return { label, igst, cgst, sgst, net: igst + cgst + sgst };
+function statement(c: GstLiabilityCompany, portal: Tax) {
+  const op: Tax = { igst: c.opBalance || 0, cgst: 0, sgst: 0 };
+  const input: Tax = { igst: c.inputClosingIgst || 0, cgst: c.inputClosingCgst || 0, sgst: c.inputClosingSgst || 0 };
+  const pendingIn: Tax = { igst: c.pendingInputIgst || 0, cgst: c.pendingInputCgst || 0, sgst: c.pendingInputSgst || 0 };
+  const a = add(op, input, pendingIn);
+  const output: Tax = { igst: -(c.outputClosingIgst || 0), cgst: -(c.outputClosingCgst || 0), sgst: -(c.outputClosingSgst || 0) };
+  const pendingOut: Tax = { igst: c.pendingOutputIgst || 0, cgst: c.pendingOutputCgst || 0, sgst: c.pendingOutputSgst || 0 };
+  const b = add(output, pendingOut);
+  const total = sub(a, b);
+  const before = add(total, portal);
+  const adjustment = itcAdjustment(before);
+  const net = add(before, adjustment);
+  const unclaimed: Tax = { igst: c.unclaimedIgst || 0, cgst: c.unclaimedCgst || 0, sgst: c.unclaimedSgst || 0 };
+  return { op, input, pendingIn, a, output, pendingOut, b, total, portal, adjustment, net, unclaimed };
 }
 
 const TH = "px-2.5 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-muted-foreground";
@@ -198,7 +218,7 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
   useEffect(() => setBalances(loadBalances(month)), [month]);
 
   const query = useQuery({
-    queryKey: ["gst-liability-pending-month", month, excludeSetOff, refreshToken],
+    queryKey: ["gst-liability-ason", month, excludeSetOff, refreshToken],
     queryFn: () => {
       const refresh = bypassCacheRef.current;
       bypassCacheRef.current = false;
@@ -230,9 +250,9 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
     const b = balances[code];
     return { igst: num(b?.igst), cgst: num(b?.cgst), sgst: num(b?.sgst) };
   };
-  const net = (c: GstLiabilityCompany) => {
-    const b = balanceOf(c.code);
-    return outputTotal(c) + inputTotal(c) + b.igst + b.cgst + b.sgst;
+  const netOf = (c: GstLiabilityCompany) => {
+    const row = statement(c, balanceOf(c.code)).net;
+    return row.igst + row.cgst + row.sgst;
   };
 
   const totals = { oI: 0, oC: 0, oS: 0, iI: 0, iC: 0, iS: 0, bI: 0, bC: 0, bS: 0, net: 0 };
@@ -247,7 +267,7 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
     totals.bI += b.igst;
     totals.bC += b.cgst;
     totals.bS += b.sgst;
-    totals.net += net(c);
+    totals.net += netOf(c);
   }
 
   const sourceRows: GstLiabilityLedgerRow[] = (data?.ledgers ?? []).filter(
@@ -370,7 +390,7 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
           <SummaryTile label="Cash / credit ledger balance" hint="Entered below" value={totals.bI + totals.bC + totals.bS} tone="amber" />
           <SummaryTile
             label={totals.net < 0 ? "Net GST payable" : "Net balance"}
-            hint="Output + input + balance"
+            hint="After ITC set-off, as on date"
             value={totals.net}
             tone={totals.net < 0 ? "red" : "green"}
             strong
@@ -405,68 +425,67 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
       {data && (
         <section className="overflow-hidden rounded-xl border border-t-4 border-border border-t-amber-500 bg-card shadow-sm">
           <header className="border-b border-border px-4 py-3">
-            <h3 className="text-sm font-semibold">Net balance — payable (−) / balance (+)</h3>
+            <h3 className="text-sm font-semibold">Net balance — as on date</h3>
             <p className="text-xs text-muted-foreground">
-              Enter the IGST / CGST / SGST A/c balance from the GST portal. Under each company, opening, input and output rows are the sums of that company’s fetched GST ledgers. Purchase pending and sales pending are the GST amounts stored on that month’s orders which still have a pending quantity. They are not included in Grand Total.
+              Same basis as the GST balance mail, with IGST, CGST and SGST on each row. (A) is opening + input closing + pending input. (B) is output and pending output, shown as GST payable. Total is A − B. OP Balance is the GST Receivable ledger, which ERP does not keep tax-wise, so the full opening sits under IGST and the adjustment uses it against any tax until it is exhausted. Pending entries are from {data.asOnDate ? new Date(data.asOnDate).toLocaleDateString("en-GB") : "the previous month end"} through today. Unclaimed is shown separately and is not in the net. Portal A/c is optional.
             </p>
           </header>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-secondary/40">
-                  <th className={cn(TH, "text-left")}>Co</th>
-                  <th className={TH}>Output total</th>
-                  <th className={TH}>Input total</th>
-                  <th className={TH}>IGST A/c</th>
-                  <th className={TH}>CGST A/c</th>
-                  <th className={TH}>SGST A/c</th>
-                  <th className={TH}>Net balance</th>
+                  <th className={cn(TH, "text-left")}>Particular</th>
+                  <th className={TH}>IGST</th>
+                  <th className={TH}>CGST</th>
+                  <th className={TH}>SGST</th>
                 </tr>
               </thead>
               <tbody>
                 {shown.map((c) => {
-                  const n = net(c);
+                  const portal = balanceOf(c.code);
+                  const s = statement(c, portal);
+                  const rows: { label: string; tax: Tax; strong?: boolean; inputs?: boolean; muted?: boolean }[] = [
+                    { label: "OP Balance", tax: s.op },
+                    { label: "Input (Closing)", tax: s.input },
+                    { label: "Pending Entry (Input)", tax: s.pendingIn },
+                    { label: "(A)", tax: s.a, strong: true },
+                    { label: "Output (Closing)", tax: s.output },
+                    { label: "Pending Entry (Output)", tax: s.pendingOut },
+                    { label: "(B)", tax: s.b, strong: true },
+                    { label: "Total (A − B)", tax: s.total, strong: true },
+                    { label: "Portal A/c", tax: portal, inputs: true },
+                    { label: "Adjustment", tax: s.adjustment },
+                    { label: "Net Balance", tax: s.net, strong: true },
+                    { label: "Unclaimed", tax: s.unclaimed, muted: true },
+                  ];
                   return (
                     <Fragment key={c.code}>
-                      <tr className="border-b border-border/60">
-                        <td className="px-3 py-1.5 font-semibold" title={`${c.gstin}\n${c.units.join("\n")}`}>
+                      <tr className="border-b border-border bg-secondary/30">
+                        <td className="px-3 py-1.5 font-semibold" title={`${c.gstin}\n${c.units.join("\n")}`} colSpan={4}>
                           {c.code}
-                        </td>
-                        <td className={TD}><Amount value={outputTotal(c)} /></td>
-                        <td className={TD}><Amount value={inputTotal(c)} /></td>
-                        {(["igst", "cgst", "sgst"] as const).map((f) => (
-                          <td key={f} className="px-2 py-1">
-                            <Input
-                              inputMode="decimal"
-                              value={balances[c.code]?.[f] ?? ""}
-                              placeholder="0.00"
-                              onChange={(e) => setBalance(c.code, f, e.target.value)}
-                              className="ml-auto h-8 w-full max-w-[150px] text-right tabular-nums"
-                            />
-                          </td>
-                        ))}
-                        <td className={TD}>
-                          <span
-                            className={cn(
-                              "inline-block rounded-md px-2 py-0.5 font-semibold",
-                              n < 0
-                                ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
-                                : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
-                            )}
-                          >
-                            {fmt(n)}
-                          </span>
+                          <span className="ml-2 font-normal text-muted-foreground">{c.gstin}</span>
                         </td>
                       </tr>
-                      {[...erpRows(data.ledgers, c.code), taxRow("Purchase pending", c.purchaseIgst, c.purchaseCgst, c.purchaseSgst), taxRow("Sales pending", c.salesIgst, c.salesCgst, c.salesSgst)].map((row) => (
-                        <tr key={row.label} className="border-b border-border/40 bg-muted/20 text-xs">
-                          <td className="py-1.5 pl-6 pr-3 text-muted-foreground">{row.label}</td>
-                          <td className={TD} />
-                          <td className={TD} />
-                          <td className={TD}>{row.igst == null ? "" : <Amount value={row.igst} />}</td>
-                          <td className={TD}>{row.cgst == null ? "" : <Amount value={row.cgst} />}</td>
-                          <td className={TD}>{row.sgst == null ? "" : <Amount value={row.sgst} />}</td>
-                          <td className={TD}><Amount value={row.net} /></td>
+                      {rows.map((row) => (
+                        <tr key={row.label} className={cn("border-b border-border/40", row.strong && "bg-muted/30", row.muted && "text-muted-foreground")}>
+                          <td className={cn("py-1.5 pl-6 pr-3", row.strong ? "font-semibold" : "text-muted-foreground")}>{row.label}</td>
+                          {row.inputs
+                            ? (["igst", "cgst", "sgst"] as const).map((f) => (
+                                <td key={f} className="px-2 py-1">
+                                  <Input
+                                    inputMode="decimal"
+                                    value={balances[c.code]?.[f] ?? ""}
+                                    placeholder="0.00"
+                                    onChange={(e) => setBalance(c.code, f, e.target.value)}
+                                    className="ml-auto h-8 w-full max-w-[150px] text-right tabular-nums"
+                                  />
+                                </td>
+                              ))
+                            : (["igst", "cgst", "sgst"] as const).map((f) => (
+                                <td key={f} className={TD}>
+                                  <Amount value={row.tax[f]} strong={row.strong} />
+                                </td>
+                              ))}
                         </tr>
                       ))}
                     </Fragment>
@@ -474,15 +493,54 @@ export function GstLiability({ month, onMonthChange }: { month: string; onMonthC
                 })}
               </tbody>
               <tfoot>
-                <tr className="border-t-2 border-border bg-secondary/50 font-semibold">
-                  <td className="px-3 py-2">Grand Total</td>
-                  <td className={TD}><Amount value={totals.oI + totals.oC + totals.oS} strong /></td>
-                  <td className={TD}><Amount value={totals.iI + totals.iC + totals.iS} strong /></td>
-                  <td className={TD}><Amount value={totals.bI} strong /></td>
-                  <td className={TD}><Amount value={totals.bC} strong /></td>
-                  <td className={TD}><Amount value={totals.bS} strong /></td>
-                  <td className={TD}><Amount value={totals.net} strong /></td>
-                </tr>
+                {(() => {
+                  const grand = shown.map((c) => statement(c, balanceOf(c.code))).reduce(
+                    (s, row) => ({
+                      op: add(s.op, row.op),
+                      input: add(s.input, row.input),
+                      pendingIn: add(s.pendingIn, row.pendingIn),
+                      a: add(s.a, row.a),
+                      output: add(s.output, row.output),
+                      pendingOut: add(s.pendingOut, row.pendingOut),
+                      b: add(s.b, row.b),
+                      total: add(s.total, row.total),
+                      portal: add(s.portal, row.portal),
+                      adjustment: add(s.adjustment, row.adjustment),
+                      net: add(s.net, row.net),
+                      unclaimed: add(s.unclaimed, row.unclaimed),
+                    }),
+                    { op: z(), input: z(), pendingIn: z(), a: z(), output: z(), pendingOut: z(), b: z(), total: z(), portal: z(), adjustment: z(), net: z(), unclaimed: z() },
+                  );
+                  const foot: { label: string; tax: Tax; strong?: boolean }[] = [
+                    { label: "OP Balance", tax: grand.op },
+                    { label: "Input (Closing)", tax: grand.input },
+                    { label: "Pending Entry (Input)", tax: grand.pendingIn },
+                    { label: "(A)", tax: grand.a, strong: true },
+                    { label: "Output (Closing)", tax: grand.output },
+                    { label: "Pending Entry (Output)", tax: grand.pendingOut },
+                    { label: "(B)", tax: grand.b, strong: true },
+                    { label: "Total (A − B)", tax: grand.total, strong: true },
+                    { label: "Portal A/c", tax: grand.portal },
+                    { label: "Adjustment", tax: grand.adjustment },
+                    { label: "Net Balance", tax: grand.net, strong: true },
+                    { label: "Unclaimed", tax: grand.unclaimed },
+                  ];
+                  return (
+                    <>
+                      <tr className="border-t-2 border-border bg-secondary/50">
+                        <td className="px-3 py-2 font-semibold" colSpan={4}>Grand Total</td>
+                      </tr>
+                      {foot.map((row) => (
+                        <tr key={row.label} className="border-b border-border/40 bg-secondary/30">
+                          <td className={cn("py-1.5 pl-6 pr-3", row.strong && "font-semibold")}>{row.label}</td>
+                          {(["igst", "cgst", "sgst"] as const).map((f) => (
+                            <td key={f} className={TD}><Amount value={row.tax[f]} strong={row.strong} /></td>
+                          ))}
+                        </tr>
+                      ))}
+                    </>
+                  );
+                })()}
               </tfoot>
             </table>
           </div>

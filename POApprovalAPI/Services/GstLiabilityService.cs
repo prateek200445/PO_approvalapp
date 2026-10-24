@@ -57,6 +57,16 @@ public sealed class GstLiabilityService
     /// <summary>Electronic cash ledger in the GST Refund group. Opening is the cash-ledger opening balance.</summary>
     private static readonly string[] CashLedgers = ["GST ELECTRONIC CASH LEDGER"];
 
+    /// <summary>Companies the GST balance mail leaves out, plus the Oswal Extrusion group GSTIN.</summary>
+    private static readonly HashSet<string> ExcludedGroups = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Shikharji Polymers",
+        "ANSHITA TRADING CO.PVT. LTD.",
+        "Plastene Infrastructure Limited",
+        "Parekh Bulk Pack",
+    };
+    private const string ExcludedGstin = "24AAACO7290H2ZD";
+
     private readonly DatabaseService _database;
     private readonly IMemoryCache _cache;
 
@@ -71,9 +81,10 @@ public sealed class GstLiabilityService
         var from = new DateTime(monthStart.Year, monthStart.Month, 1);
         var toExclusive = from.AddMonths(1);
         var rowsTask = LoadAsync(from, toExclusive, refresh);
-        var pendingTask = LoadPendingAsync(from, toExclusive, refresh);
-        await Task.WhenAll(rowsTask, pendingTask);
+        var asOnTask = LoadAsOnAsync(refresh);
+        await Task.WhenAll(rowsTask, asOnTask);
         var rows = rowsTask.Result;
+        var asOn = asOnTask.Result;
 
         var known = KnownRegistrations.ToDictionary(k => k.Gstin, k => k.Code, StringComparer.OrdinalIgnoreCase);
         var details = rows
@@ -142,7 +153,7 @@ public sealed class GstLiabilityService
             .OrderBy(c => c.Known ? 0 : 1).ThenBy(c => c.Code, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        foreach (var bucket in pendingTask.Result)
+        foreach (var bucket in asOn.Companies)
         {
             var company = companies.FirstOrDefault(c => string.Equals(c.Code, bucket.Code, StringComparison.OrdinalIgnoreCase));
             if (company == null)
@@ -152,18 +163,28 @@ public sealed class GstLiabilityService
                 {
                     Code = bucket.Code,
                     Gstin = bucket.Gstin,
-                    Name = bucket.Code,
+                    Name = string.Equals(bucket.Code, "PIL HO", StringComparison.OrdinalIgnoreCase) ? "PIL HO" : bucket.Code,
                     Known = true,
                     Units = bucket.Units,
                 };
                 companies.Add(company);
             }
-            company.PurchaseIgst += bucket.PurchaseIgst;
-            company.PurchaseCgst += bucket.PurchaseCgst;
-            company.PurchaseSgst += bucket.PurchaseSgst;
-            company.SalesIgst += bucket.SalesIgst;
-            company.SalesCgst += bucket.SalesCgst;
-            company.SalesSgst += bucket.SalesSgst;
+            company.OpBalance += bucket.OpBalance;
+            company.InputClosingIgst += bucket.InputClosingIgst;
+            company.InputClosingCgst += bucket.InputClosingCgst;
+            company.InputClosingSgst += bucket.InputClosingSgst;
+            company.OutputClosingIgst += bucket.OutputClosingIgst;
+            company.OutputClosingCgst += bucket.OutputClosingCgst;
+            company.OutputClosingSgst += bucket.OutputClosingSgst;
+            company.PendingInputIgst += bucket.PendingInputIgst;
+            company.PendingInputCgst += bucket.PendingInputCgst;
+            company.PendingInputSgst += bucket.PendingInputSgst;
+            company.PendingOutputIgst += bucket.PendingOutputIgst;
+            company.PendingOutputCgst += bucket.PendingOutputCgst;
+            company.PendingOutputSgst += bucket.PendingOutputSgst;
+            company.UnclaimedIgst += bucket.UnclaimedIgst;
+            company.UnclaimedCgst += bucket.UnclaimedCgst;
+            company.UnclaimedSgst += bucket.UnclaimedSgst;
             foreach (var unit in bucket.Units)
                 if (!company.Units.Contains(unit, StringComparer.OrdinalIgnoreCase))
                     company.Units.Add(unit);
@@ -177,6 +198,7 @@ public sealed class GstLiabilityService
             From = from.ToString("yyyy-MM-dd"),
             To = toExclusive.AddDays(-1).ToString("yyyy-MM-dd"),
             ExcludeSetOff = excludeSetOff,
+            AsOnDate = asOn.AsOnDate.ToString("yyyy-MM-dd"),
             GeneratedAt = rows.Count > 0 ? rows[0].LoadedAt : DateTime.Now,
             Companies = companies,
             Ledgers = details.Where(d => codes.Contains(d.Code)).ToList(),
@@ -276,99 +298,213 @@ public sealed class GstLiabilityService
     }
 
     /// <summary>
-    /// GST stored on purchase orders and sales orders dated in the same month, for quantity still pending.
-    /// When the whole order quantity is pending, the stored IGST / CGST / SGST amount is used as entered.
-    /// When only part is pending, that stored amount is taken in proportion to the pending quantity.
+    /// As-on-date GST balance used by the ERP mail (sp_Automail_GST_Data_withOpening_Daily), split by tax
+    /// wherever the ledger or the document stores IGST, CGST and SGST separately.
+    /// Opening is the GST Receivable ledger (one combined balance). Input and output are the full ledger
+    /// balances. Pending input is GST on MRNs not yet in a purchase voucher or journal since the previous
+    /// month end. Pending output is GST on despatches not yet in a sales voucher or journal in that window.
     /// </summary>
-    private async Task<List<PendingBucket>> LoadPendingAsync(DateTime from, DateTime toExclusive, bool refresh)
+    private async Task<AsOnResult> LoadAsOnAsync(bool refresh)
     {
-        var key = $"gst-pending-month-v2:{from:yyyyMM}";
-        if (!refresh && _cache.TryGetValue(key, out List<PendingBucket>? hit) && hit != null)
+        var asOnDate = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1).AddDays(-1);
+        var key = $"gst-ason-v1:{asOnDate:yyyyMMdd}";
+        if (!refresh && _cache.TryGetValue(key, out AsOnResult? hit) && hit != null)
             return hit;
 
-        const string share = """
-            CASE
-              WHEN ISNULL({0}, 0) = 0 THEN CAST(0 AS decimal(18, 2))
-              WHEN {1} >= {0} THEN CAST(ISNULL({2}, 0) AS decimal(18, 2))
-              ELSE CAST(ISNULL({2}, 0) AS decimal(18, 2)) * {1} / {0}
-            END
+        const string ledgerSql = """
+            SELECT LTRIM(RTRIM(CompanyName)) AS Unit, LTRIM(RTRIM(LedgerName)) AS Ledger,
+                   SUM(CAST(amount AS decimal(18, 2))) AS Amount
+            FROM dbo.vw_LedgerSummary WITH (NOLOCK)
+            WHERE LedgerName LIKE '%GST Receivable%'
+               OR LedgerName LIKE '%GST%Input%'
+               OR LedgerName LIKE '%GST%Output%'
+               OR LedgerName IN ('Unclaimed CGST', 'Unclaimed SGST', 'Unclaimed IGST')
+            GROUP BY LTRIM(RTRIM(CompanyName)), LTRIM(RTRIM(LedgerName))
             """;
-        string Purchase(string tax) => string.Format(share, "Qty", "PendingQty", tax + "Amount");
-        string Sales(string tax) => string.Format(share, "m.Qty", "p.PendingQty", "m." + tax + "Amount");
-        var purchaseSql = $"""
-            SELECT LTRIM(RTRIM(CompanyName)) AS Unit,
-                   SUM({Purchase("IGST")}) AS Igst, SUM({Purchase("CGST")}) AS Cgst, SUM({Purchase("SGST")}) AS Sgst
-            FROM dbo.Vw_PurchaseOrder WITH (NOLOCK)
-            WHERE ISNULL(PendingQty, 0) > 0
-              AND sysdate >= @From AND sysdate < @ToExcl
-            GROUP BY LTRIM(RTRIM(CompanyName))
+        const string purchaseSql = """
+            SELECT LTRIM(RTRIM(companyName)) AS Unit,
+                   SUM(CAST(ISNULL(IGSTAmount, 0) AS decimal(18, 2))) AS Igst,
+                   SUM(CAST(ISNULL(CGSTAmount, 0) AS decimal(18, 2))) AS Cgst,
+                   SUM(CAST(ISNULL(SGSTAmount, 0) AS decimal(18, 2))) AS Sgst
+            FROM dbo.vw_PurchaseRegister WITH (NOLOCK)
+            WHERE sysdate >= @From AND sysdate <= GETDATE()
+              AND srno NOT IN (
+                    SELECT StoreInwardNo FROM dbo.PurchaseVoucher WITH (NOLOCK) WHERE StoreInwardNo IS NOT NULL
+                    UNION
+                    SELECT InwardNo FROM dbo.Journal WITH (NOLOCK) WHERE InwardNo IS NOT NULL)
+            GROUP BY LTRIM(RTRIM(companyName))
             """;
-        var salesSql = $"""
-            SELECT LTRIM(RTRIM(p.Companyname)) AS Unit,
-                   SUM({Sales("IGST")}) AS Igst, SUM({Sales("CGST")}) AS Cgst, SUM({Sales("SGST")}) AS Sgst
-            FROM Despatch.dbo.vw_PendingOrderStatus p WITH (NOLOCK)
-            INNER JOIN (
-                SELECT MarketingInvNo, ItemNO,
-                       SUM(CAST(ISNULL(Qty, 0) AS decimal(18, 4))) AS Qty,
-                       SUM(CAST(ISNULL(IGSTAmount, 0) AS decimal(18, 2))) AS IGSTAmount,
-                       SUM(CAST(ISNULL(CGSTAmount, 0) AS decimal(18, 2))) AS CGSTAmount,
-                       SUM(CAST(ISNULL(SGSTAmount, 0) AS decimal(18, 2))) AS SGSTAmount
-                FROM Despatch.dbo.Vw_MarketingInvoice WITH (NOLOCK)
-                GROUP BY MarketingInvNo, ItemNO
-            ) m ON m.MarketingInvNo = p.MarketingInvNo AND m.ItemNO = p.ItemNO
-            WHERE ISNULL(p.PendingQty, 0) > 0
-              AND p.OrderDate >= @From AND p.OrderDate < @ToExcl
-            GROUP BY LTRIM(RTRIM(p.Companyname))
+        // Pending invoices are the same set as the mail. Tax is taken from the despatch invoice and,
+        // when that split does not add up to the register total, scaled so the company total still matches.
+        const string salesSql = """
+            WITH pending AS (
+                SELECT LTRIM(RTRIM(SR.companyname)) AS Unit,
+                       LTRIM(RTRIM(CONVERT(varchar(20), SR.aresuffix))) AS Yr,
+                       LTRIM(RTRIM(CONVERT(varchar(40), SR.invno))) AS InvNo,
+                       SUM(CAST(ISNULL(SR.GSTAmt, 0) AS decimal(18, 2))) AS Gst
+                FROM dbo.vw_SalesRegister_withGST SR WITH (NOLOCK)
+                WHERE SR.DespatchDate >= @From AND SR.DespatchDate <= GETDATE()
+                  AND NOT EXISTS (
+                        SELECT 1 FROM dbo.SalesVoucher SV WITH (NOLOCK)
+                        WHERE SR.aresuffix = SV.InvYear AND SR.companyname = SV.companyname
+                          AND SV.InvNo IS NOT NULL AND SR.Invno = SV.InvNo
+                        UNION
+                        SELECT 1 FROM dbo.Journal J WITH (NOLOCK)
+                        WHERE SR.aresuffix = J.yr AND SR.companyname = J.CompanyName
+                          AND J.InwardNo IS NOT NULL AND SR.Invno = J.InwardNo)
+                GROUP BY LTRIM(RTRIM(SR.companyname)),
+                         LTRIM(RTRIM(CONVERT(varchar(20), SR.aresuffix))),
+                         LTRIM(RTRIM(CONVERT(varchar(40), SR.invno)))
+            ),
+            tax AS (
+                SELECT LTRIM(RTRIM(companyname)) AS Unit, LTRIM(RTRIM(CONVERT(varchar(20), Yr))) AS Yr,
+                       LTRIM(RTRIM(CONVERT(varchar(40), InvNo))) AS InvNo,
+                       SUM(CAST(ISNULL(IGSTAmt, 0) AS decimal(18, 2))) AS Igst,
+                       SUM(CAST(ISNULL(CGSTamt, 0) AS decimal(18, 2))) AS Cgst,
+                       SUM(CAST(ISNULL(SGSTAmt, 0) AS decimal(18, 2))) AS Sgst
+                FROM Despatch.dbo.vw_domesticinvoice WITH (NOLOCK)
+                WHERE InvDate >= @From
+                GROUP BY LTRIM(RTRIM(companyname)), LTRIM(RTRIM(CONVERT(varchar(20), Yr))), LTRIM(RTRIM(CONVERT(varchar(40), InvNo)))
+                UNION ALL
+                SELECT LTRIM(RTRIM(companyname)), LTRIM(RTRIM(CONVERT(varchar(20), Yr))),
+                       LTRIM(RTRIM(CONVERT(varchar(40), commercial_Invno))),
+                       SUM(CAST(ISNULL(IGSTAmt, 0) AS decimal(18, 2))),
+                       SUM(CAST(ISNULL(CGSTamt, 0) AS decimal(18, 2))),
+                       SUM(CAST(ISNULL(SGSTAmt, 0) AS decimal(18, 2)))
+                FROM Despatch.dbo.vw_commercialdomesticinvoice WITH (NOLOCK)
+                WHERE InvDate >= @From
+                GROUP BY LTRIM(RTRIM(companyname)), LTRIM(RTRIM(CONVERT(varchar(20), Yr))), LTRIM(RTRIM(CONVERT(varchar(40), commercial_Invno)))
+                UNION ALL
+                SELECT LTRIM(RTRIM(companyname)), LTRIM(RTRIM(CONVERT(varchar(20), aresuffix))),
+                       LTRIM(RTRIM(CONVERT(varchar(40), InvNo))),
+                       SUM(CAST(CASE WHEN BeingExport = 'Claim for Rebate' THEN ISNULL(IGSTAmt, 0) * ISNULL(ExRate, 1) ELSE ISNULL(IGSTAmt, 0) END AS decimal(18, 2))),
+                       SUM(CAST(CASE WHEN BeingExport = 'Claim for Rebate' THEN ISNULL(CGSTamt, 0) * ISNULL(ExRate, 1) ELSE ISNULL(CGSTamt, 0) END AS decimal(18, 2))),
+                       SUM(CAST(CASE WHEN BeingExport = 'Claim for Rebate' THEN ISNULL(SGSTAmt, 0) * ISNULL(ExRate, 1) ELSE ISNULL(SGSTAmt, 0) END AS decimal(18, 2)))
+                FROM Despatch.dbo.vw_exportdetails WITH (NOLOCK)
+                WHERE InvDate >= @From
+                GROUP BY LTRIM(RTRIM(companyname)), LTRIM(RTRIM(CONVERT(varchar(20), aresuffix))), LTRIM(RTRIM(CONVERT(varchar(40), InvNo)))
+            )
+            SELECT p.Unit,
+                   SUM(p.Gst) AS Gst,
+                   SUM(ISNULL(t.Igst, 0)) AS Igst,
+                   SUM(ISNULL(t.Cgst, 0)) AS Cgst,
+                   SUM(ISNULL(t.Sgst, 0)) AS Sgst
+            FROM pending p
+            LEFT JOIN (
+                SELECT Unit, Yr, InvNo, SUM(Igst) AS Igst, SUM(Cgst) AS Cgst, SUM(Sgst) AS Sgst
+                FROM tax
+                GROUP BY Unit, Yr, InvNo
+            ) t ON t.Unit = p.Unit AND t.Yr = p.Yr AND t.InvNo = p.InvNo
+            GROUP BY p.Unit
             """;
         const string unitSql = """
-            SELECT LTRIM(RTRIM(Name)) AS Unit, MAX(LTRIM(RTRIM(NewGSTNo))) AS Gstin, MAX(LTRIM(RTRIM(GroupName))) AS GroupName
-            FROM dbo.FactoryInfo WITH (NOLOCK) GROUP BY LTRIM(RTRIM(Name))
+            SELECT LTRIM(RTRIM(Name)) AS Unit, MAX(LTRIM(RTRIM(NewGSTNo))) AS Gstin,
+                   MAX(LTRIM(RTRIM(GroupName))) AS GroupName
+            FROM dbo.FactoryInfo WITH (NOLOCK)
+            GROUP BY LTRIM(RTRIM(Name))
             """;
 
-        var window = new { From = from, ToExcl = toExclusive };
+        var window = new { From = asOnDate };
         async Task<List<T>> Query<T>(string sql, object? args = null)
         {
             using var connection = _database.CreateConnection();
             return (await connection.QueryAsync<T>(sql, args, commandTimeout: QueryTimeoutSeconds)).ToList();
         }
+        var ledgerTask = Query<AmountRow>(ledgerSql);
         var purchaseTask = Query<PendingTaxRow>(purchaseSql, window);
-        var salesTask = Query<PendingTaxRow>(salesSql, window);
+        var salesTask = Query<PendingOutputRow>(salesSql, window);
         var unitTask = Query<UnitRow>(unitSql);
-        await Task.WhenAll(purchaseTask, salesTask, unitTask);
+        await Task.WhenAll(ledgerTask, purchaseTask, salesTask, unitTask);
 
         var known = KnownRegistrations.ToDictionary(k => k.Gstin, k => k.Code, StringComparer.OrdinalIgnoreCase);
         var units = unitTask.Result.ToDictionary(u => u.Unit, StringComparer.OrdinalIgnoreCase);
-        var buckets = new Dictionary<string, PendingBucket>(StringComparer.OrdinalIgnoreCase);
-        void Add(PendingTaxRow row, bool purchase)
+        var buckets = new Dictionary<string, AsOnBucket>(StringComparer.OrdinalIgnoreCase);
+
+        bool TryBucket(string unit, out AsOnBucket bucket)
         {
-            if (row.Unit.Length == 0 || !units.TryGetValue(row.Unit, out var unit)) return;
-            var gstin = unit.Gstin ?? "";
+            bucket = null!;
+            if (unit.Length == 0 || !units.TryGetValue(unit, out var info)) return false;
+            var gstin = info.Gstin ?? "";
+            var group = info.GroupName ?? "";
+            if (ExcludedGroups.Contains(group) || string.Equals(gstin, ExcludedGstin, StringComparison.OrdinalIgnoreCase))
+                return false;
             var code = known.GetValueOrDefault(gstin);
-            if (string.IsNullOrWhiteSpace(code)) return;
-            if (!buckets.TryGetValue(code, out var bucket))
+            if (string.IsNullOrWhiteSpace(code)) return false;
+            if (!buckets.TryGetValue(code, out bucket!))
             {
-                buckets[code] = bucket = new PendingBucket { Code = code, Gstin = gstin, Known = true };
+                buckets[code] = bucket = new AsOnBucket { Code = code, Gstin = gstin, Known = true };
             }
-            if (!bucket.Units.Contains(row.Unit, StringComparer.OrdinalIgnoreCase)) bucket.Units.Add(row.Unit);
-            if (purchase)
+            if (!bucket.Units.Contains(unit, StringComparer.OrdinalIgnoreCase)) bucket.Units.Add(unit);
+            return true;
+        }
+
+        foreach (var row in ledgerTask.Result)
+        {
+            if (!TryBucket(row.Unit, out var bucket)) continue;
+            var ledger = row.Ledger;
+            var tax = ledger.Contains("IGST", StringComparison.OrdinalIgnoreCase) ? "IGST"
+                : ledger.Contains("CGST", StringComparison.OrdinalIgnoreCase) ? "CGST"
+                : ledger.Contains("SGST", StringComparison.OrdinalIgnoreCase) ? "SGST"
+                : "";
+            if (ledger.StartsWith("Unclaimed", StringComparison.OrdinalIgnoreCase))
             {
-                bucket.PurchaseIgst += row.Igst;
-                bucket.PurchaseCgst += row.Cgst;
-                bucket.PurchaseSgst += row.Sgst;
+                if (tax == "IGST") bucket.UnclaimedIgst += row.Amount;
+                else if (tax == "CGST") bucket.UnclaimedCgst += row.Amount;
+                else if (tax == "SGST") bucket.UnclaimedSgst += row.Amount;
             }
-            else
+            else if (ledger.Contains("GST Receivable", StringComparison.OrdinalIgnoreCase))
+                bucket.OpBalance += row.Amount;
+            else if (ledger.Contains("Input", StringComparison.OrdinalIgnoreCase))
             {
-                bucket.SalesIgst += row.Igst;
-                bucket.SalesCgst += row.Cgst;
-                bucket.SalesSgst += row.Sgst;
+                if (tax == "IGST") bucket.InputClosingIgst += row.Amount;
+                else if (tax == "CGST") bucket.InputClosingCgst += row.Amount;
+                else if (tax == "SGST") bucket.InputClosingSgst += row.Amount;
+            }
+            else if (ledger.Contains("Output", StringComparison.OrdinalIgnoreCase))
+            {
+                if (tax == "IGST") bucket.OutputClosingIgst += row.Amount;
+                else if (tax == "CGST") bucket.OutputClosingCgst += row.Amount;
+                else if (tax == "SGST") bucket.OutputClosingSgst += row.Amount;
             }
         }
-        foreach (var row in purchaseTask.Result) Add(row, purchase: true);
-        foreach (var row in salesTask.Result) Add(row, purchase: false);
 
-        var list = buckets.Values.ToList();
-        _cache.Set(key, list, TimeSpan.FromMinutes(30));
-        return list;
+        foreach (var row in purchaseTask.Result)
+        {
+            if (!TryBucket(row.Unit, out var bucket)) continue;
+            bucket.PendingInputIgst += row.Igst;
+            bucket.PendingInputCgst += row.Cgst;
+            bucket.PendingInputSgst += row.Sgst;
+        }
+
+        foreach (var row in salesTask.Result)
+        {
+            if (!TryBucket(row.Unit, out var bucket)) continue;
+            var (igst, cgst, sgst) = SplitPendingOutput(row.Gst, row.Igst, row.Cgst, row.Sgst);
+            bucket.PendingOutputIgst += igst;
+            bucket.PendingOutputCgst += cgst;
+            bucket.PendingOutputSgst += sgst;
+        }
+
+        var result = new AsOnResult { AsOnDate = asOnDate, Companies = buckets.Values.ToList() };
+        _cache.Set(key, result, TimeSpan.FromMinutes(30));
+        return result;
+    }
+
+    /// <summary>
+    /// Keeps the pending-output total equal to the sales register. Scales a real tax split onto that total.
+    /// When the invoice has no tax split, the whole amount stays in IGST so the company total is unchanged.
+    /// </summary>
+    private static (decimal Igst, decimal Cgst, decimal Sgst) SplitPendingOutput(decimal gst, decimal igst, decimal cgst, decimal sgst)
+    {
+        var tax = igst + cgst + sgst;
+        if (gst == 0) return (0, 0, 0);
+        if (tax == 0) return (gst, 0, 0);
+        if (tax == gst) return (igst, cgst, sgst);
+        var factor = gst / tax;
+        var i = Math.Round(igst * factor, 2, MidpointRounding.AwayFromZero);
+        var c = Math.Round(cgst * factor, 2, MidpointRounding.AwayFromZero);
+        var s = gst - i - c;
+        return (i, c, s);
     }
 
     /// <summary>Reloads the previous and current month so the page opens from cache.</summary>
@@ -557,76 +693,101 @@ public sealed class GstLiabilityService
         inPivot.ShowGrandTotalsColumns = true;
         inPivot.Theme = XLPivotTableTheme.PivotStyleLight16;
 
-        ws.Cell(3, 6).Value = "Payable in (-)/ Balance (+)";
-        ws.Cell(3, 7).Value = "Balance";
-        ws.Cell(4, 6).Value = "Net Balance";
-        ws.Cell(4, 7).Value = "IGST  A/c";
-        ws.Cell(4, 8).Value = "CGST  A/c";
-        ws.Cell(4, 9).Value = "SGST  A/c";
-        ws.Range(3, 6, 4, 9).Style.Font.SetBold().Fill.SetBackgroundColor(BalanceFill);
+        ws.Cell(3, 6).Value = "Particular";
+        ws.Cell(3, 7).Value = "IGST";
+        ws.Cell(3, 8).Value = "CGST";
+        ws.Cell(3, 9).Value = "SGST";
+        ws.Range(3, 6, 3, 9).Style.Font.SetBold().Fill.SetBackgroundColor(BalanceFill);
 
-        var row = 4;
-        var companyRows = new List<int>();
-        void ErpRow(string label, decimal igst, decimal? cgst, decimal? sgst, decimal net)
+        var row = 3;
+        var summed = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        void Line(string label, decimal igst, decimal cgst, decimal sgst, bool bold = false)
         {
             row++;
             ws.Cell(row, 6).Value = label;
-            if (cgst is null)
-                ws.Cell(row, 9).Value = net;
-            else
-            {
-                ws.Cell(row, 7).Value = igst;
-                ws.Cell(row, 8).Value = cgst;
-                ws.Cell(row, 9).Value = sgst;
-            }
-            ws.Range(row, 6, row, 9).Style.Font.SetFontColor(XLColor.FromHtml("#64748B"));
+            ws.Cell(row, 7).Value = igst;
+            ws.Cell(row, 8).Value = cgst;
+            ws.Cell(row, 9).Value = sgst;
+            if (!summed.TryGetValue(label, out var rows)) summed[label] = rows = [];
+            rows.Add(row);
+            if (bold) ws.Range(row, 6, row, 9).Style.Font.SetBold();
+            else ws.Range(row, 6, row, 9).Style.Font.SetFontColor(XLColor.FromHtml("#64748B"));
         }
-        decimal Inp(string code, string tax, Func<GstLiabilityLedgerRow, decimal> pick) =>
-            data.Ledgers.Where(l => string.Equals(l.Code, code, StringComparison.OrdinalIgnoreCase) && l.Kind == "input" && l.Tax == tax).Sum(pick);
-        decimal Out(string code, string tax) =>
-            data.Ledgers.Where(l => string.Equals(l.Code, code, StringComparison.OrdinalIgnoreCase) && l.Kind == "output" && l.Tax == tax).Sum(l => l.Closing);
-        decimal Cash(string code) =>
-            data.Ledgers.Where(l => string.Equals(l.Code, code, StringComparison.OrdinalIgnoreCase) && l.Kind == "cash").Sum(l => l.Opening);
         foreach (var code in codes)
         {
-            row++;
-            companyRows.Add(row);
+            var company = data.Companies.First(x => x.Code.Equals(code, StringComparison.OrdinalIgnoreCase));
             var b = balances.GetValueOrDefault(code);
-            var q = code.Replace("\"", "\"\"");
-            ws.Cell(row, 6).FormulaA1 =
-                $"IFERROR(GETPIVOTDATA(\"Closing Balance\",$A$3,\"Co\",\"{q}\"),0)+IFERROR(GETPIVOTDATA(\"Cl balance\",$K$3,\"Co2\",\"{q}\"),0)+SUM(G{row}:I{row})";
-            if (b?.Igst is { } i && i != 0) ws.Cell(row, 7).Value = i;
-            if (b?.Cgst is { } c && c != 0) ws.Cell(row, 8).Value = c;
-            if (b?.Sgst is { } s && s != 0) ws.Cell(row, 9).Value = s;
-            ws.Range(row, 6, row, 6).Style.Font.SetBold();
-            ErpRow("Opening balance credit", Inp(code, "IGST", l => l.Opening), Inp(code, "CGST", l => l.Opening), Inp(code, "SGST", l => l.Opening), 0);
-            ErpRow("Opening balance cash", 0, null, null, Cash(code));
-            ErpRow("Input balance", Inp(code, "IGST", l => l.Closing), Inp(code, "CGST", l => l.Closing), Inp(code, "SGST", l => l.Closing), 0);
-            ErpRow("Output balance", Out(code, "IGST"), Out(code, "CGST"), Out(code, "SGST"), 0);
-            var company = data.Companies.FirstOrDefault(x => string.Equals(x.Code, code, StringComparison.OrdinalIgnoreCase));
-            ErpRow("Purchase pending", company?.PurchaseIgst ?? 0, company?.PurchaseCgst ?? 0, company?.PurchaseSgst ?? 0, 0);
-            ErpRow("Sales pending", company?.SalesIgst ?? 0, company?.SalesCgst ?? 0, company?.SalesSgst ?? 0, 0);
+            row++;
+            ws.Cell(row, 6).Value = code;
+            ws.Range(row, 6, row, 9).Style.Font.SetBold();
+            var opI = company.OpBalance;
+            var inI = company.InputClosingIgst;
+            var inC = company.InputClosingCgst;
+            var inS = company.InputClosingSgst;
+            var pInI = company.PendingInputIgst;
+            var pInC = company.PendingInputCgst;
+            var pInS = company.PendingInputSgst;
+            var aI = opI + inI + pInI;
+            var aC = inC + pInC;
+            var aS = inS + pInS;
+            var outI = -company.OutputClosingIgst;
+            var outC = -company.OutputClosingCgst;
+            var outS = -company.OutputClosingSgst;
+            var pOutI = company.PendingOutputIgst;
+            var pOutC = company.PendingOutputCgst;
+            var pOutS = company.PendingOutputSgst;
+            var bI = outI + pOutI;
+            var bC = outC + pOutC;
+            var bS = outS + pOutS;
+            var tI = aI - bI + (b?.Igst ?? 0);
+            var tC = aC - bC + (b?.Cgst ?? 0);
+            var tS = aS - bS + (b?.Sgst ?? 0);
+            var adj = GstItcUtilisation.Adjustment(tI, tC, tS);
+            Line("OP Balance", opI, 0, 0);
+            Line("Input (Closing)", inI, inC, inS);
+            Line("Pending Entry (Input)", pInI, pInC, pInS);
+            Line("(A)", aI, aC, aS, bold: true);
+            Line("Output (Closing)", outI, outC, outS);
+            Line("Pending Entry (Output)", pOutI, pOutC, pOutS);
+            Line("(B)", bI, bC, bS, bold: true);
+            Line("Total (A-B)", aI - bI, aC - bC, aS - bS, bold: true);
+            Line("Portal A/c", b?.Igst ?? 0, b?.Cgst ?? 0, b?.Sgst ?? 0);
+            Line("Adjustment", adj.Igst, adj.Cgst, adj.Sgst);
+            Line("Net Balance", tI + adj.Igst, tC + adj.Cgst, tS + adj.Sgst, bold: true);
+            Line("Unclaimed", company.UnclaimedIgst, company.UnclaimedCgst, company.UnclaimedSgst);
         }
         row++;
-        for (var c = 6; c <= 9; c++)
+        ws.Cell(row, 6).Value = "Grand Total";
+        ws.Range(row, 6, row, 9).Style.Font.SetBold().Fill.SetBackgroundColor(BalanceFill);
+        string[] order = ["OP Balance", "Input (Closing)", "Pending Entry (Input)", "(A)", "Output (Closing)", "Pending Entry (Output)", "(B)", "Total (A-B)", "Portal A/c", "Adjustment", "Net Balance", "Unclaimed"];
+        foreach (var lineName in order)
         {
-            var col = XLHelper.GetColumnLetterFromNumber(c);
-            ws.Cell(row, c).FormulaA1 = companyRows.Count == 0
-                ? "0"
-                : string.Join("+", companyRows.Select(r => $"{col}{r}"));
+            row++;
+            ws.Cell(row, 6).Value = lineName;
+            if (lineName is "(A)" or "(B)" or "Total (A-B)" or "Net Balance")
+                ws.Range(row, 6, row, 9).Style.Font.SetBold();
+            for (var c = 7; c <= 9; c++)
+            {
+                var col = XLHelper.GetColumnLetterFromNumber(c);
+                var cells = summed.TryGetValue(lineName, out var rows) ? rows : [];
+                ws.Cell(row, c).FormulaA1 = cells.Count == 0 ? "0" : string.Join("+", cells.Select(r => $"{col}{r}"));
+            }
         }
-        ws.Range(row, 6, row, 9).Style.Font.SetBold();
-        ws.Range(5, 6, row, 9).Style.NumberFormat.Format = Amount;
+        ws.Range(4, 7, row, 9).Style.NumberFormat.Format = Amount;
         var box = ws.Range(3, 6, row, 9);
         box.Style.Border.SetOutsideBorder(XLBorderStyleValues.Thin).Border.SetInsideBorder(XLBorderStyleValues.Thin);
         box.Style.Border.SetInsideBorderColor(XLColor.FromHtml("#CBD5E1"));
 
         ws.Cell(row + 2, 1).Value =
-            "Under each company, the four rows are from that company's ERP ledgers and are not included in Grand Total. Opening balance credit = Input opening. Opening balance cash = GST Electronic Cash Ledger opening (shown under SGST A/c). Input / Output balance = closing by tax. Net Balance = output + input + IGST/CGST/SGST A/c. Negative = GST payable.";
+            "Net balance follows the GST balance mail. (A) = OP Balance + Input (Closing) + Pending Entry (Input). (B) = Output (Closing) + Pending Entry (Output), shown as GST payable. Total = A − B. "
+            + "OP Balance is the GST Receivable ledger and is not split by tax in ERP, so the full amount is under IGST and the adjustment uses it against any tax liability until it is exhausted. "
+            + "Adjustment is the ITC set-off: IGST credit first against IGST, then CGST and SGST; CGST credit against IGST then CGST; SGST credit against IGST then SGST. "
+            + "Grand Total adds each company after its own set-off. Unclaimed is not part of the net. Pending entries run from " + D(data.AsOnDate) + " through today.";
         ws.Cell(row + 2, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.FromHtml("#64748B"));
 
         ws.Column(1).Width = 11;
         for (var c = 2; c <= 9; c++) ws.Column(c).Width = 18;
+        ws.Column(6).Width = 26;
         ws.Column(10).Width = 3;
         ws.Column(11).Width = 11;
         for (var c = 12; c <= 15; c++) ws.Column(c).Width = 16;
@@ -665,18 +826,43 @@ public sealed class GstLiabilityService
         public decimal Sgst { get; set; }
     }
 
-    private sealed class PendingBucket
+    private sealed class PendingOutputRow
+    {
+        public string Unit { get; set; } = "";
+        public decimal Gst { get; set; }
+        public decimal Igst { get; set; }
+        public decimal Cgst { get; set; }
+        public decimal Sgst { get; set; }
+    }
+
+    private sealed class AsOnBucket
     {
         public string Code { get; set; } = "";
         public string Gstin { get; set; } = "";
         public bool Known { get; set; }
         public List<string> Units { get; set; } = [];
-        public decimal PurchaseIgst { get; set; }
-        public decimal PurchaseCgst { get; set; }
-        public decimal PurchaseSgst { get; set; }
-        public decimal SalesIgst { get; set; }
-        public decimal SalesCgst { get; set; }
-        public decimal SalesSgst { get; set; }
+        public decimal OpBalance { get; set; }
+        public decimal InputClosingIgst { get; set; }
+        public decimal InputClosingCgst { get; set; }
+        public decimal InputClosingSgst { get; set; }
+        public decimal OutputClosingIgst { get; set; }
+        public decimal OutputClosingCgst { get; set; }
+        public decimal OutputClosingSgst { get; set; }
+        public decimal PendingInputIgst { get; set; }
+        public decimal PendingInputCgst { get; set; }
+        public decimal PendingInputSgst { get; set; }
+        public decimal PendingOutputIgst { get; set; }
+        public decimal PendingOutputCgst { get; set; }
+        public decimal PendingOutputSgst { get; set; }
+        public decimal UnclaimedIgst { get; set; }
+        public decimal UnclaimedCgst { get; set; }
+        public decimal UnclaimedSgst { get; set; }
+    }
+
+    private sealed class AsOnResult
+    {
+        public DateTime AsOnDate { get; set; }
+        public List<AsOnBucket> Companies { get; set; } = [];
     }
 
     private sealed class UnitRow
@@ -707,6 +893,8 @@ public sealed class GstLiabilityDto
     public string From { get; set; } = "";
     public string To { get; set; } = "";
     public bool ExcludeSetOff { get; set; }
+    /// <summary>Previous month end. Pending entries run from this date through today, as in the GST balance mail.</summary>
+    public string AsOnDate { get; set; } = "";
     public DateTime GeneratedAt { get; set; }
     public List<GstLiabilityCompany> Companies { get; set; } = [];
     public List<GstLiabilityLedgerRow> Ledgers { get; set; } = [];
@@ -733,14 +921,27 @@ public sealed class GstLiabilityCompany
     public decimal InputBalance { get; set; }
     /// <summary>Closing balance of the Output A/c ledgers.</summary>
     public decimal OutputBalance { get; set; }
-    /// <summary>GST stored on this month’s purchase orders for quantity still pending.</summary>
-    public decimal PurchaseIgst { get; set; }
-    public decimal PurchaseCgst { get; set; }
-    public decimal PurchaseSgst { get; set; }
-    /// <summary>GST stored on this month’s sales orders for quantity still pending.</summary>
-    public decimal SalesIgst { get; set; }
-    public decimal SalesCgst { get; set; }
-    public decimal SalesSgst { get; set; }
+    /// <summary>GST Receivable ledger. ERP does not split this opening by tax.</summary>
+    public decimal OpBalance { get; set; }
+    /// <summary>Full balance of the Input ledgers, by tax.</summary>
+    public decimal InputClosingIgst { get; set; }
+    public decimal InputClosingCgst { get; set; }
+    public decimal InputClosingSgst { get; set; }
+    /// <summary>Full balance of the Output ledgers, by tax. Credit (payable) is negative.</summary>
+    public decimal OutputClosingIgst { get; set; }
+    public decimal OutputClosingCgst { get; set; }
+    public decimal OutputClosingSgst { get; set; }
+    /// <summary>GST on MRNs since the previous month end that are not yet in a purchase voucher or journal.</summary>
+    public decimal PendingInputIgst { get; set; }
+    public decimal PendingInputCgst { get; set; }
+    public decimal PendingInputSgst { get; set; }
+    /// <summary>GST on despatches since the previous month end that are not yet in a sales voucher or journal.</summary>
+    public decimal PendingOutputIgst { get; set; }
+    public decimal PendingOutputCgst { get; set; }
+    public decimal PendingOutputSgst { get; set; }
+    public decimal UnclaimedIgst { get; set; }
+    public decimal UnclaimedCgst { get; set; }
+    public decimal UnclaimedSgst { get; set; }
     /// <summary>Absolute amount of month-end set-off entries on the Output / Input ledgers this month.</summary>
     public decimal SetOff { get; set; }
     public bool Moved { get; set; }
@@ -771,6 +972,53 @@ public sealed class GstLiabilityBalanceInput
     public decimal Igst { get; set; }
     public decimal Cgst { get; set; }
     public decimal Sgst { get; set; }
+}
+
+/// <summary>
+/// Statutory ITC utilisation. IGST credit is used against IGST (already netted), then against CGST and SGST
+/// in proportion to those liabilities, until the IGST credit is exhausted. CGST credit can pay IGST then CGST.
+/// SGST credit can pay IGST then SGST. Neither can pay the other.
+/// </summary>
+public static class GstItcUtilisation
+{
+    public static (decimal Igst, decimal Cgst, decimal Sgst) Adjustment(decimal igst, decimal cgst, decimal sgst)
+    {
+        var creditI = Math.Max(0, igst);
+        var creditC = Math.Max(0, cgst);
+        var creditS = Math.Max(0, sgst);
+        var liabI = Math.Max(0, -igst);
+        var liabC = Math.Max(0, -cgst);
+        var liabS = Math.Max(0, -sgst);
+        PayAcross(ref creditI, ref liabC, ref liabS);
+        Use(ref creditC, ref liabI);
+        Use(ref creditS, ref liabI);
+        return (creditI - liabI - igst, creditC - liabC - cgst, creditS - liabS - sgst);
+    }
+
+    private static void Use(ref decimal credit, ref decimal liability)
+    {
+        var take = Math.Min(credit, liability);
+        credit -= take;
+        liability -= take;
+    }
+
+    private static void PayAcross(ref decimal credit, ref decimal first, ref decimal second)
+    {
+        var room = first + second;
+        var take = Math.Min(credit, room);
+        if (take <= 0) return;
+        var toFirst = room == 0 ? 0 : Math.Round(take * first / room, 2, MidpointRounding.AwayFromZero);
+        if (toFirst > first) toFirst = first;
+        var toSecond = take - toFirst;
+        if (toSecond > second)
+        {
+            toSecond = second;
+            toFirst = Math.Min(first, take - toSecond);
+        }
+        credit -= toFirst + toSecond;
+        first -= toFirst;
+        second -= toSecond;
+    }
 }
 
 public sealed class GstLiabilityExcelRequest
