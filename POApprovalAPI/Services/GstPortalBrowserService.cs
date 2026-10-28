@@ -522,23 +522,29 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
                 await page.GoBackAsync(new PageGoBackOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
         }
 
-        var services = await VisibleTextAsync(page, "Services");
-        if (services is not null)
-            await services.ClickAsync();
-        await page.WaitForTimeoutAsync(500);
-        var returns = await VisibleTextAsync(page, "Returns");
-        if (returns is not null)
-            await returns.ClickAsync();
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var services = await VisibleTextAsync(page, "Services");
+            if (services is not null)
+                await services.ClickAsync();
+            await page.WaitForTimeoutAsync(700);
+            var returns = await VisibleTextAsync(page, "Returns");
+            if (returns is not null)
+                await returns.ClickAsync();
 
-        var dashboard = await WaitForVisibleAsync(page, "a, button, span, li", "Returns Dashboard", TimeSpan.FromSeconds(20));
-        if (dashboard is null)
-            throw new InvalidOperationException("Returns Dashboard did not open. Fetch from GST again.");
+            var dashboard = await WaitForVisibleAsync(page, "a, button, span, li", "Returns Dashboard", TimeSpan.FromSeconds(15));
+            if (dashboard is null)
+                continue;
 
-        var target = await ClickAndFollowAsync(page, dashboard);
-        if (target.Url.Contains("accessdenied", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("GST opened Access Denied instead of the Returns Dashboard.");
-        await WaitForReturnsDashboardAsync(target);
-        return target;
+            var target = await ClickAndFollowAsync(page, dashboard);
+            if (target.Url.Contains("accessdenied", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("GST opened Access Denied instead of the Returns Dashboard.");
+            if (await DashboardReadyAsync(target, 25))
+                return target;
+            page = target;
+        }
+
+        throw new InvalidOperationException("Returns Dashboard did not open. Fetch from GST again.");
     }
 
     private static async Task<bool> TryOpenReturnsDashboardAsync(IPage page)
@@ -552,12 +558,7 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
             });
             if (page.Url.Contains("accessdenied", StringComparison.OrdinalIgnoreCase) || page.Url.Contains("/login", StringComparison.OrdinalIgnoreCase))
                 return false;
-            await page.Locator("select").First.WaitForAsync(new LocatorWaitForOptions
-            {
-                State = WaitForSelectorState.Visible,
-                Timeout = 15_000
-            });
-            return true;
+            return await DashboardReadyAsync(page, 25);
         }
         catch (TimeoutException)
         {
@@ -659,9 +660,24 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
     {
         if (page.Url.Contains("accessdenied", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("GST redirected the browser to Access Denied while opening Returns Dashboard.");
-        await page.Locator("select").First
-            .WaitForAsync(new LocatorWaitForOptions { State = WaitForSelectorState.Visible, Timeout = 60_000 });
+        if (!await DashboardReadyAsync(page, 25))
+            throw new InvalidOperationException("Returns Dashboard opened, but the period list was not ready.");
         await page.WaitForTimeoutAsync(750);
+    }
+
+    private static async Task<bool> DashboardReadyAsync(IPage page, int seconds)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(seconds);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (page.Url.Contains("accessdenied", StringComparison.OrdinalIgnoreCase))
+                return false;
+            var selects = page.Locator("select");
+            if (await selects.CountAsync() > 0 && await IsVisibleAsync(selects.First))
+                return true;
+            await page.WaitForTimeoutAsync(500);
+        }
+        return false;
     }
 
     private static async Task<ILocator?> VisibleTextAsync(IPage page, string text)
