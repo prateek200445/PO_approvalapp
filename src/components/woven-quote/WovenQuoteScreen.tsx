@@ -1,10 +1,30 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Calculator, Copy, Loader2, Plus, Save, Settings2, Trash2 } from "lucide-react";
+import { useBlocker } from "@tanstack/react-router";
+import { ArrowLeft, Calculator, Check, ChevronsUpDown, Copy, Eye, Loader2, Plus, Save, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Select as UiSelect,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -20,6 +40,7 @@ import {
   saveWovenRate,
   updateWovenQuote,
   type WovenConstant,
+  type WovenDetail,
   type WovenDraft,
   type WovenMasters,
   type WovenRate,
@@ -28,6 +49,7 @@ import {
 import { blankWovenDraft, calculateWovenQuote, formatQty, ratesAsOf, showWastagePercent } from "@/lib/woven-quote-calc";
 
 type View = "list" | "edit" | "masters";
+type LeaveDecision = "save-draft" | "discard" | "cancel";
 
 export function WovenQuoteScreen() {
   const [view, setView] = useState<View>("list");
@@ -92,7 +114,8 @@ export function WovenQuoteScreen() {
         </p>
       ) : null}
 
-      {view === "list" ? <QuoteList tab={listTab} onTabChange={setListTab} onOpen={openQuote} /> : null}
+      {view === "list" && !masters.data ? <p className="text-sm text-muted-foreground">Loading quotation filters…</p> : null}
+      {view === "list" && masters.data ? <QuoteList tab={listTab} masters={masters.data} onTabChange={setListTab} onOpen={openQuote} /> : null}
       {view === "edit" && (!masters.data || !rates.data) ? <p className="text-sm text-muted-foreground">Loading rates and masters…</p> : null}
       {view === "edit" && masters.data && rates.data ? (
         <QuoteEditor
@@ -104,7 +127,7 @@ export function WovenQuoteScreen() {
           onRegisterLeave={(leave) => { leaveEditor.current = leave; }}
         />
       ) : null}
-      {view === "masters" && masters.data ? <MastersPanel masters={masters.data} rates={rates.data ?? []} /> : null}
+      {view === "masters" && masters.data ? <MastersPanel masters={masters.data} rates={rates.data ?? []} onBack={() => setView("list")} /> : null}
     </div>
   );
 }
@@ -145,10 +168,12 @@ const emptyQuoteFilters = (): QuoteFilters => ({
 
 function QuoteList({
   tab,
+  masters,
   onTabChange,
   onOpen,
 }: {
   tab: "saved" | "drafts";
+  masters: WovenMasters;
   onTabChange: (tab: "saved" | "drafts") => void;
   onOpen: (id: number) => void;
 }) {
@@ -156,6 +181,11 @@ function QuoteList({
   const [applied, setApplied] = useState<QuoteFilters>(emptyQuoteFilters);
   const [dateOrder, setDateOrder] = useState<"desc" | "asc">("desc");
   const [page, setPage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [copying, setCopying] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewQuotes, setPreviewQuotes] = useState<WovenDetail[]>([]);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const setFilter = (key: keyof QuoteFilters, value: string) =>
     setFilters((current) => ({ ...current, [key]: value }));
   const query = useQuery({
@@ -176,10 +206,65 @@ function QuoteList({
   const rows = query.data?.items ?? [];
   const total = query.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const lookupOptions = (category: string) => [...new Set(masters.lookups.filter((row) => row.category === category).map((row) => row.value))];
+  const customerOptions = [...new Set(masters.customers.map((row) => row.shortName || row.fullName).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const selectableRows = rows.filter((row) => row.productType === "WovenBag");
+  const pageSelected = selectableRows.length > 0 && selectableRows.every((row) => selectedIds.has(row.id));
+
+  function toggleSelected(id: number, checked: boolean) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  async function loadSelectedQuotes() {
+    return Promise.all([...selectedIds].map((id) => getWovenQuote(id)));
+  }
+
+  async function previewSelected() {
+    if (selectedIds.size === 0) return;
+    setPreviewing(true);
+    try {
+      const quotes = await loadSelectedQuotes();
+      setPreviewQuotes(quotes);
+      setPreviewOpen(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Selected quotations could not be loaded.");
+    } finally {
+      setPreviewing(false);
+    }
+  }
+
+  async function copySelected(loadedQuotes?: WovenDetail[]) {
+    if (selectedIds.size === 0 && !loadedQuotes?.length) return;
+    setCopying(true);
+    try {
+      const quotes = loadedQuotes ?? await loadSelectedQuotes();
+      const { html, plainText } = mergedQuotationClipboard(quotes);
+      if (navigator.clipboard.write && typeof ClipboardItem !== "undefined") {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([plainText], { type: "text/plain" }),
+          }),
+        ]);
+      } else {
+        await navigator.clipboard.writeText(plainText);
+      }
+      toast.success(`${quotes.length} quotation${quotes.length === 1 ? "" : "s"} copied as one table.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Selected quotations could not be copied.");
+    } finally {
+      setCopying(false);
+    }
+  }
 
   return (
     <section className="card-3d space-y-4 rounded-xl p-4 md:p-5">
-      <Tabs value={tab} onValueChange={(value) => { onTabChange(value === "drafts" ? "drafts" : "saved"); setPage(1); }}>
+      <Tabs value={tab} onValueChange={(value) => { onTabChange(value === "drafts" ? "drafts" : "saved"); setPage(1); setSelectedIds(new Set()); }}>
         <TabsList>
           <TabsTrigger value="saved">Saved</TabsTrigger>
           <TabsTrigger value="drafts">Drafts</TabsTrigger>
@@ -187,23 +272,19 @@ function QuoteList({
       </Tabs>
       <div className="grid gap-3 md:grid-cols-4">
         <Select label="Sector" value={filters.sector} onChange={(value) => setFilter("sector", value)} options={["", "Export", "Domestic"]} />
-        <Field label="Customer" value={filters.customer} onChange={(value) => setFilter("customer", value)} />
+        <ComboboxField label="Customer" value={filters.customer} onChange={(value) => setFilter("customer", value)} options={customerOptions} placeholder="All customers" />
         <Field label="Our reference" value={filters.ourRef} onChange={(value) => setFilter("ourRef", value)} />
         <Field label="Customer reference" value={filters.customerRef} onChange={(value) => setFilter("customerRef", value)} />
-        <Select label="Type" value={filters.productType} onChange={(value) => setFilter("productType", value)} options={["", "WovenBag", "AdStar"]} />
-        <Field label="Terms" value={filters.terms} onChange={(value) => setFilter("terms", value)} />
-        <Field label="Currency" value={filters.currency} onChange={(value) => setFilter("currency", value)} />
-        <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">Date order</span>
-          <select
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-            value={dateOrder}
-            onChange={(event) => { setDateOrder(event.target.value === "asc" ? "asc" : "desc"); setPage(1); }}
-          >
-            <option value="desc">Newest first</option>
-            <option value="asc">Oldest first</option>
-          </select>
-        </label>
+        <Select label="Type" value={filters.productType} onChange={(value) => setFilter("productType", value)} options={["", "WovenBag", "AdStar"]} labels={{ WovenBag: "Woven bag", AdStar: "AD Star" }} />
+        <Select label="Terms" value={filters.terms} onChange={(value) => setFilter("terms", value)} options={["", ...lookupOptions("Terms")]} />
+        <Select label="Currency" value={filters.currency} onChange={(value) => setFilter("currency", value)} options={["", ...lookupOptions("Currency")]} />
+        <Select
+          label="Date order"
+          value={dateOrder}
+          onChange={(value) => { setDateOrder(value === "asc" ? "asc" : "desc"); setPage(1); setSelectedIds(new Set()); }}
+          options={["desc", "asc"]}
+          labels={{ desc: "Newest first", asc: "Oldest first" }}
+        />
         <Field label="Date from" type="date" value={filters.from} onChange={(value) => setFilter("from", value)} />
         <Field label="Date to" type="date" value={filters.to} onChange={(value) => setFilter("to", value)} />
         <Field label="Minimum weight g" type="number" value={filters.minWeight} onChange={(value) => setFilter("minWeight", value)} />
@@ -211,9 +292,21 @@ function QuoteList({
         <Field label="Minimum price" type="number" value={filters.minPrice} onChange={(value) => setFilter("minPrice", value)} />
         <Field label="Maximum price" type="number" value={filters.maxPrice} onChange={(value) => setFilter("maxPrice", value)} />
         <div className="flex items-end gap-2 md:col-span-2">
-          <Button onClick={() => { setApplied(filters); setPage(1); }}>Apply filters</Button>
-          <Button variant="outline" onClick={() => { const empty = emptyQuoteFilters(); setFilters(empty); setApplied(empty); setPage(1); }}>Clear</Button>
+          <Button onClick={() => { setApplied(filters); setPage(1); setSelectedIds(new Set()); }}>Apply filters</Button>
+          <Button variant="outline" onClick={() => { const empty = emptyQuoteFilters(); setFilters(empty); setApplied(empty); setPage(1); setSelectedIds(new Set()); }}>Clear</Button>
         </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" disabled={selectedIds.size === 0 || previewing} onClick={() => void previewSelected()}>
+          {previewing ? <Loader2 className="animate-spin" /> : <Eye />}
+          Preview selected{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+        </Button>
+        <Button variant="outline" disabled={selectedIds.size === 0 || copying} onClick={() => void copySelected()}>
+          {copying ? <Loader2 className="animate-spin" /> : <Copy />}
+          Copy selected{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+        </Button>
+        {selectedIds.size > 0 ? <Button variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear selection</Button> : null}
+        <p className="text-xs text-muted-foreground">Filter by customer or date, select the matching bag or fabric quotes, then copy one merged table.</p>
       </div>
       {query.isPending || query.isFetching ? (
         <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
@@ -228,6 +321,19 @@ function QuoteList({
         <table className="w-full min-w-[720px] text-sm">
           <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
             <tr className="border-b border-border">
+              <th className="w-10 py-2 pr-3 font-medium">
+                <Checkbox
+                  aria-label="Select all woven quotations on this page"
+                  checked={pageSelected}
+                  onCheckedChange={(checked) => {
+                    setSelectedIds((current) => {
+                      const next = new Set(current);
+                      selectableRows.forEach((row) => checked ? next.add(row.id) : next.delete(row.id));
+                      return next;
+                    });
+                  }}
+                />
+              </th>
               <th className="py-2 pr-3 font-medium">Date</th>
               <th className="py-2 pr-3 font-medium">Customer</th>
               <th className="py-2 pr-3 font-medium">Our reference</th>
@@ -244,6 +350,15 @@ function QuoteList({
           <tbody>
             {rows.map((row) => (
               <tr key={row.id} className="border-b border-border/70 hover:bg-muted/40">
+                <td className="py-2.5 pr-3">
+                  <Checkbox
+                    aria-label={`Select ${row.customerName || "untitled"} quotation`}
+                    checked={selectedIds.has(row.id)}
+                    disabled={row.productType !== "WovenBag"}
+                    title={row.productType !== "WovenBag" ? "Merged copy is available for bag and fabric quotations." : undefined}
+                    onCheckedChange={(checked) => toggleSelected(row.id, checked === true)}
+                  />
+                </td>
                 <td className="py-2.5 pr-3">{row.quoteDate.slice(0, 10)}</td>
                 <td className="py-2.5 pr-3 font-medium">{row.customerName || "Untitled"}</td>
                 <td className="py-2.5 pr-3">{row.ourRef || "—"}</td>
@@ -258,7 +373,7 @@ function QuoteList({
               </tr>
             ))}
             {rows.length === 0 ? (
-              <tr><td colSpan={11} className="py-8 text-center text-muted-foreground">{tab === "drafts" ? "No drafts match these filters." : "No saved quotations match these filters."}</td></tr>
+              <tr><td colSpan={12} className="py-8 text-center text-muted-foreground">{tab === "drafts" ? "No drafts match these filters." : "No saved quotations match these filters."}</td></tr>
             ) : null}
           </tbody>
         </table>
@@ -272,6 +387,27 @@ function QuoteList({
       </div>
       </div>
       )}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="flex h-[92vh] w-[90vw] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+          <DialogHeader className="shrink-0 px-6 pb-4 pt-6">
+            <DialogTitle>Merged quotation preview</DialogTitle>
+            <DialogDescription>Review the combined bag and fabric sections before copying them into an email.</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-auto border-y border-border bg-white p-4 md:p-6">
+            <div
+              className="mx-auto w-full min-w-[560px]"
+              dangerouslySetInnerHTML={{ __html: mergedQuotationClipboard(previewQuotes).html }}
+            />
+          </div>
+          <div className="flex shrink-0 justify-end gap-2 px-6 py-4">
+            <Button variant="outline" onClick={() => setPreviewOpen(false)}>Close</Button>
+            <Button disabled={copying} onClick={() => void copySelected(previewQuotes)}>
+              {copying ? <Loader2 className="animate-spin" /> : <Copy />}
+              Copy merged table
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }
@@ -296,16 +432,28 @@ function QuoteEditor({
   const [draft, setDraft] = useState<WovenDraft>(blankWovenDraft);
   const [loading, setLoading] = useState(quoteId != null);
   const [saving, setSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [leavePromptOpen, setLeavePromptOpen] = useState(false);
+  const [promptSaving, setPromptSaving] = useState(false);
   const dirty = useRef(false);
   const kindRef = useRef<"saved" | "draft" | "new">(quoteId == null ? "new" : "saved");
   const draftRef = useRef(draft);
   const idRef = useRef(quoteId);
+  const leaveDecisionRef = useRef<((decision: LeaveDecision) => void) | null>(null);
   draftRef.current = draft;
   idRef.current = quoteId;
+  const routeBlocker = useBlocker({
+    shouldBlockFn: () => isDirty,
+    withResolver: true,
+    enableBeforeUnload: isDirty,
+    disabled: !isDirty,
+  });
 
   useEffect(() => {
     if (quoteId == null) {
       kindRef.current = "new";
+      dirty.current = false;
+      setIsDirty(false);
       setDraft(blankWovenDraft());
       setLoading(false);
       return;
@@ -316,6 +464,8 @@ function QuoteEditor({
       .then((row) => {
         if (!live) return;
         kindRef.current = row.isDraft ? "draft" : "saved";
+        dirty.current = false;
+        setIsDirty(false);
         setDraft(withPercentWastage(row.draft));
       })
       .catch((error: Error) => toast.error(error.message))
@@ -334,7 +484,13 @@ function QuoteEditor({
 
   function patch(partial: Partial<WovenDraft>) {
     dirty.current = true;
+    setIsDirty(true);
     setDraft((current) => ({ ...current, ...partial }));
+  }
+
+  function markClean() {
+    dirty.current = false;
+    setIsDirty(false);
   }
 
   async function persist(asDraft: boolean, createCopy = false) {
@@ -353,9 +509,18 @@ function QuoteEditor({
   const leaveRef = useRef<() => Promise<"saved" | "draft" | "new" | false>>(async () => "new");
   leaveRef.current = async () => {
     if (!dirty.current) return kindRef.current;
+    const decision = await new Promise<LeaveDecision>((resolve) => {
+      leaveDecisionRef.current = resolve;
+      setLeavePromptOpen(true);
+    });
+    if (decision === "cancel") return false;
+    if (decision === "discard") {
+      markClean();
+      return kindRef.current;
+    }
     try {
-      await persist(true);
-      dirty.current = false;
+      await persist(true, kindRef.current === "saved");
+      markClean();
       toast.success("Draft saved.");
       return "draft";
     } catch (error) {
@@ -371,11 +536,41 @@ function QuoteEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function handleLeaveDecision(decision: LeaveDecision) {
+    if (routeBlocker.status !== "blocked") {
+      setLeavePromptOpen(false);
+      const resolve = leaveDecisionRef.current;
+      leaveDecisionRef.current = null;
+      resolve?.(decision);
+      return;
+    }
+    if (decision === "cancel") {
+      routeBlocker.reset?.();
+      return;
+    }
+    if (decision === "discard") {
+      markClean();
+      routeBlocker.proceed?.();
+      return;
+    }
+    setPromptSaving(true);
+    try {
+      await persist(true, kindRef.current === "saved");
+      markClean();
+      toast.success("Draft saved.");
+      routeBlocker.proceed?.();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Draft could not be saved.");
+    } finally {
+      setPromptSaving(false);
+    }
+  }
+
   async function save() {
     setSaving(true);
     try {
       await persist(false);
-      dirty.current = false;
+      markClean();
       toast.success("Quotation saved.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Save failed.");
@@ -388,7 +583,7 @@ function QuoteEditor({
     setSaving(true);
     try {
       const saved = await persist(false, true);
-      dirty.current = false;
+      markClean();
       toast.success(`New quotation #${saved.id} created.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "New quotation could not be created.");
@@ -402,6 +597,7 @@ function QuoteEditor({
     if (!window.confirm("Delete this quotation?")) return;
     await deleteWovenQuote(quoteId);
     await client.invalidateQueries({ queryKey: ["woven-quotes"] });
+    markClean();
     toast.success("Quotation deleted.");
     onClose();
   }
@@ -473,6 +669,31 @@ function QuoteEditor({
         ) : null}
         <Breakdown lines={result.lines} />
       </aside>
+      <AlertDialog
+        open={leavePromptOpen || routeBlocker.status === "blocked"}
+        onOpenChange={(open) => { if (!open) void handleLeaveDecision("cancel"); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save your changes as a draft?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {kindRef.current === "saved"
+                ? "The original quotation will remain saved. Choosing Save as draft creates a separate draft copy containing your edits."
+                : kindRef.current === "draft"
+                  ? "You have unsaved changes to this draft."
+                  : "This new quotation has not been saved yet."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="outline" disabled={promptSaving} onClick={() => void handleLeaveDecision("cancel")}>Stay here</Button>
+            <Button variant="destructive" disabled={promptSaving} onClick={() => void handleLeaveDecision("discard")}>Discard changes</Button>
+            <Button disabled={promptSaving} onClick={() => void handleLeaveDecision("save-draft")}>
+              {promptSaving ? <Loader2 className="animate-spin" /> : <Save />}
+              Save as draft
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <QuoteDock result={result} saving={saving} onSave={() => void save()} />
     </div>
   );
@@ -573,6 +794,7 @@ function quotationTable(draft: WovenDraft, result: WovenResult, isFabric: boolea
     ["Gusset Width", number(result.offerGusset)],
     ["Bag Length", number(result.offerLength)],
     ["Bag Weight (+/-5%)", `${formatQty(result.totalComponentGram, 2)} g`],
+    ["Fabric GSM", number(draft.fabricGsm ?? result.fabricGsmCalculated)],
     ["Coated (Y/N)", result.coatedLabel],
     ["UV (Y/N)", result.uvLabel],
     ["Colour", draft.fabricColour],
@@ -601,6 +823,62 @@ function quotationTableHtml(rows: Array<[string, string]>) {
     return `<tr><td style="border:1px solid #777;padding:6px 8px;background:${labelBackground};color:#111;font-weight:500">${escapeHtml(label)}</td><td style="border:1px solid #777;padding:6px 8px;background:${valueBackground};color:#111;text-align:right;white-space:nowrap${price ? ";font-weight:700" : ""}">${escapeHtml(value || "—")}</td></tr>`;
   }).join("");
   return `<table style="border-collapse:collapse;width:100%;max-width:720px;font-family:Arial,sans-serif;font-size:14px">${cells}</table>`;
+}
+
+function mergedQuotationClipboard(quotes: WovenDetail[]) {
+  const groups = [
+    {
+      title: "BAG QUOTATIONS",
+      quotes: quotes.filter((quote) => quote.draft.bagType !== "Flat Fabric" && quote.draft.bagType !== "Tubular Fabric"),
+    },
+    {
+      title: "FABRIC QUOTATIONS",
+      quotes: quotes.filter((quote) => quote.draft.bagType === "Flat Fabric" || quote.draft.bagType === "Tubular Fabric"),
+    },
+  ].filter((group) => group.quotes.length > 0);
+
+  const plainSections: string[] = [];
+  const htmlSections: string[] = [];
+  for (const group of groups) {
+    const tables = group.quotes.map((quote) => ({
+      quote,
+      table: quotationTable(quote.draft, quote.result, group.title === "FABRIC QUOTATIONS"),
+    }));
+    const labels = [...new Set(tables.flatMap(({ table }) => table.rows.map(([label]) => label)))];
+    const headings = tables.map(({ quote }) => quoteHeading(quote));
+    plainSections.push([
+      group.title,
+      ["Field", ...headings].join("\t"),
+      ...labels.map((label) => [
+        label,
+        ...tables.map(({ table }) => table.rows.find(([rowLabel]) => rowLabel === label)?.[1] || "—"),
+      ].join("\t")),
+    ].join("\n"));
+
+    const headerCells = headings.map((heading) =>
+      `<th style="border:1px solid #777;padding:7px 9px;background:#d9e3f0;color:#111;text-align:center;white-space:nowrap">${escapeHtml(heading)}</th>`,
+    ).join("");
+    const bodyRows = labels.map((label) => {
+      const price = label.startsWith("Price/");
+      const valueCells = tables.map(({ table }) => {
+        const value = table.rows.find(([rowLabel]) => rowLabel === label)?.[1] || "—";
+        return `<td style="border:1px solid #777;padding:6px 8px;background:${price ? "#fce8d5" : "#f5f5f5"};color:#111;text-align:right;white-space:nowrap${price ? ";font-weight:700" : ""}">${escapeHtml(value)}</td>`;
+      }).join("");
+      return `<tr><td style="border:1px solid #777;padding:6px 8px;background:${price ? "#f6d8bd" : "#e7e7e7"};color:#111;font-weight:500;white-space:nowrap">${escapeHtml(label)}</td>${valueCells}</tr>`;
+    }).join("");
+    htmlSections.push(
+      `<div style="margin-bottom:18px"><div style="margin:0 0 6px;font-family:Arial,sans-serif;font-size:15px;font-weight:700;color:#111">${group.title}</div><table style="border-collapse:collapse;width:100%;min-width:560px;font-family:Arial,sans-serif;font-size:13px"><thead><tr><th style="border:1px solid #777;padding:7px 9px;background:#c8d6e5;color:#111;text-align:left">Field</th>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`,
+    );
+  }
+  return {
+    plainText: plainSections.join("\n\n"),
+    html: htmlSections.join(""),
+  };
+}
+
+function quoteHeading(quote: WovenDetail) {
+  const ref = quote.draft.customerRef || quote.draft.ourRef || `Quote ${quote.id}`;
+  return `${quote.draft.customerName || "Untitled"} — ${ref} — ${quote.quoteDate.slice(0, 10)}`;
 }
 
 function escapeHtml(value: string) {
@@ -676,16 +954,13 @@ function WovenSheet({
           <Band>Quote</Band>
           <Entry label="Date"><Input className="h-8 border-0 shadow-none" type="date" value={draft.quoteDate} onChange={(e) => patch({ quoteDate: e.target.value })} /></Entry>
           <Entry label="Sector"><SheetSelect value={draft.sector} onChange={(sector) => patch({ sector })} options={options("Sector")} /></Entry>
-          <Entry label="Customer">
-            <Input className="h-8 border-0 shadow-none" list="woven-customers" value={draft.customerName} onChange={(e) => patch({ customerName: e.target.value })} />
-            <datalist id="woven-customers">{customers.map((name) => <option key={name} value={name} />)}</datalist>
-          </Entry>
+          <Entry label="Customer"><SheetCombobox value={draft.customerName} onChange={(customerName) => patch({ customerName })} options={customers} placeholder="Type or select customer" /></Entry>
           <Entry label="Our ref"><Input className="h-8 border-0 shadow-none" value={draft.ourRef} onChange={(e) => patch({ ourRef: e.target.value })} /></Entry>
           <Entry label="Customer ref"><Input className="h-8 border-0 shadow-none" value={draft.customerRef} onChange={(e) => patch({ customerRef: e.target.value })} /></Entry>
           <Band>Bag specification</Band>
           <Entry label="Input unit"><SheetSelect value={draft.dimensionUnit} onChange={(dimensionUnit) => patch({ dimensionUnit })} options={options("DimensionUnit")} /></Entry>
           <Entry label="Type of fabric / bag"><SheetSelect value={draft.bagType} onChange={(bagType) => patch({ bagType })} options={options("BagType")} /></Entry>
-          <Entry label="Fabric colour"><SheetSelect value={draft.fabricColour} onChange={(fabricColour) => patch({ fabricColour })} options={options("Colour")} /></Entry>
+          <Entry label="Fabric colour"><SheetCombobox value={draft.fabricColour} onChange={(fabricColour) => patch({ fabricColour })} options={options("Colour")} placeholder="Type or select colour" /></Entry>
           <Entry label={`Face width ${dimensionSymbol(draft.dimensionUnit)}`}><SheetNum value={fromCm(draft.faceWidthCm, draft.dimensionUnit)} onChange={(value) => patch({ faceWidthCm: toCm(value, draft.dimensionUnit) })} /></Entry>
           <Entry label={`Gusset ${dimensionSymbol(draft.dimensionUnit)}`}><SheetNum value={fromCm(draft.gussetCm, draft.dimensionUnit)} onChange={(value) => patch({ gussetCm: toCm(value, draft.dimensionUnit) })} /></Entry>
           <Entry label={`Length ${dimensionSymbol(draft.dimensionUnit)}`}><SheetNum value={fromCm(draft.lengthCm, draft.dimensionUnit)} onChange={(value) => patch({ lengthCm: toCm(value, draft.dimensionUnit) })} /></Entry>
@@ -836,9 +1111,66 @@ function SheetNum({ value, onChange, placeholder }: { value: number | null; onCh
 
 function SheetSelect({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: string[] }) {
   return (
-    <select className="h-8 w-full bg-transparent px-3 text-sm outline-none" value={value} onChange={(e) => onChange(e.target.value)}>
-      {options.map((option) => <option key={option} value={option}>{option}</option>)}
-    </select>
+    <UiSelect value={value || undefined} onValueChange={onChange}>
+      <SelectTrigger className="h-8 rounded-none border-0 bg-transparent px-3 shadow-none focus:ring-0">
+        <SelectValue placeholder="Select…" />
+      </SelectTrigger>
+      <SelectContent>
+        {options.filter(Boolean).map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+      </SelectContent>
+    </UiSelect>
+  );
+}
+
+function SheetCombobox({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const exactMatch = options.some((option) => option.toLowerCase() === search.trim().toLowerCase());
+  return (
+    <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) setSearch(""); }}>
+      <PopoverTrigger asChild>
+        <button type="button" className="flex h-8 w-full items-center justify-between gap-2 bg-transparent px-3 text-left text-sm outline-none">
+          <span className={value ? "truncate" : "truncate text-muted-foreground"}>{value || placeholder}</span>
+          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        <Command shouldFilter>
+          <CommandInput value={search} onValueChange={setSearch} placeholder={placeholder} />
+          <CommandList>
+            <CommandEmpty>No matching option.</CommandEmpty>
+            <CommandGroup>
+              {value ? (
+                <CommandItem value="clear-current-value" onSelect={() => { onChange(""); setOpen(false); }}>
+                  Clear value
+                </CommandItem>
+              ) : null}
+              {search.trim() && !exactMatch ? (
+                <CommandItem value={`use ${search}`} onSelect={() => { onChange(search.trim()); setOpen(false); }}>
+                  Use “{search.trim()}”
+                </CommandItem>
+              ) : null}
+              {options.filter(Boolean).map((option) => (
+                <CommandItem key={option} value={option} onSelect={() => { onChange(option); setOpen(false); }}>
+                  <Check className={value === option ? "opacity-100" : "opacity-0"} />
+                  {option}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -907,7 +1239,7 @@ function Breakdown({ lines }: { lines: WovenResultLines }) {
 }
 type WovenResultLines = { group: string; label: string; value: number; unit: string }[];
 
-function MastersPanel({ masters, rates }: { masters: WovenMasters; rates: WovenRate[] }) {
+function MastersPanel({ masters, rates, onBack }: { masters: WovenMasters; rates: WovenRate[]; onBack: () => void }) {
   const client = useQueryClient();
   const [constants, setConstants] = useState<WovenConstant[]>(masters.constants);
   const [sector, setSector] = useState("Export");
@@ -982,7 +1314,14 @@ function MastersPanel({ masters, rates }: { masters: WovenMasters; rates: WovenR
   }
 
   return (
-    <section className="card-3d rounded-xl p-4 md:p-5">
+    <section className="card-3d space-y-4 rounded-xl p-4 md:p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button size="sm" variant="outline" onClick={onBack}><ArrowLeft /> Back to quote list</Button>
+        <div>
+          <h2 className="font-semibold">Quotation masters</h2>
+          <p className="text-xs text-muted-foreground">Manage rates, constants, customers, and lookup values.</p>
+        </div>
+      </div>
       <Tabs defaultValue="rates">
         <TabsList>
           <TabsTrigger value="rates">Raw material rates</TabsTrigger>
@@ -1085,13 +1424,54 @@ function Field({ label, value, onChange, type = "text" }: { label: string; value
   );
 }
 
-function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
+function ComboboxField({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  placeholder: string;
+}) {
   return (
-    <label className="space-y-1 text-xs">
+    <div className="space-y-1 text-xs">
       <span className="text-muted-foreground">{label}</span>
-      <select className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={value} onChange={(e) => onChange(e.target.value)}>
-        {options.map((option) => <option key={option || "blank"} value={option}>{option || "All"}</option>)}
-      </select>
-    </label>
+      <div className="rounded-md border border-input bg-background shadow-sm">
+        <SheetCombobox value={value} onChange={onChange} options={options} placeholder={placeholder} />
+      </div>
+    </div>
+  );
+}
+
+function Select({
+  label,
+  value,
+  onChange,
+  options,
+  labels = {},
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+  labels?: Record<string, string>;
+}) {
+  return (
+    <div className="space-y-1 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <UiSelect value={value || "__all"} onValueChange={(next) => onChange(next === "__all" ? "" : next)}>
+        <SelectTrigger className="bg-background">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.includes("") ? <SelectItem value="__all">All</SelectItem> : null}
+          {options.filter(Boolean).map((option) => <SelectItem key={option} value={option}>{labels[option] ?? option}</SelectItem>)}
+        </SelectContent>
+      </UiSelect>
+    </div>
   );
 }
