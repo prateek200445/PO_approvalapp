@@ -149,6 +149,26 @@ export interface WovenListPage {
   pageSize: number;
 }
 
+export interface WovenForex {
+  asOf: string;
+  rateFrom: string;
+  rateTo: string | null;
+  usedFallback: boolean;
+  sourceName: string;
+  sourceDollar: number;
+  quotationDollar: number;
+  euroRateDate: string;
+  euroUsedFallback: boolean;
+  euroSourceName: string;
+  sourceEuroUsd: number;
+  quotationEuroUsd: number;
+  gbpRateDate: string;
+  gbpUsedFallback: boolean;
+  gbpSourceName: string;
+  sourceGbpUsd: number;
+  quotationGbpUsd: number;
+}
+
 export interface WovenDetail extends WovenListItem {
   draft: WovenDraft;
   result: WovenResult;
@@ -215,6 +235,7 @@ async function read<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getWovenMasters = () => read<WovenMasters>("/api/woven-quote/masters");
 export const getWovenRates = () => read<WovenRate[]>("/api/woven-quote/rates");
+export const getWovenForex = (date: string) => read<WovenForex>(`/api/woven-quote/forex?date=${encodeURIComponent(date)}`);
 export const listWovenQuotes = (query: string) => read<WovenListPage>(`/api/woven-quote${query}`);
 export const getWovenQuote = (id: number) => read<WovenDetail>(`/api/woven-quote/${id}`);
 

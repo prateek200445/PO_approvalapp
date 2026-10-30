@@ -128,9 +128,13 @@ function DailyProductionPage() {
               <h2 className="text-sm font-semibold">Forex used (INR)</h2>
               <p className="mt-1 text-xs text-muted-foreground">
                 Converted as of {summary.fx.asOf}
-                {summary.fx.rateFrom ? ` · RBI row from ${summary.fx.rateFrom}` : ""}
+                {summary.fx.rateFrom ? ` · USD rate from ${summary.fx.rateFrom}` : ""}
                 {summary.fx.rateTo ? ` to ${summary.fx.rateTo}` : ""}
                 {summary.fx.usedFallback ? " · no row for today, used latest earlier rate" : ""}
+                {summary.fx.dollarSource ? ` · USD source: ${summary.fx.dollarSource}` : ""}
+                {summary.fx.euroSource ? ` · EUR source: ${summary.fx.euroSource}` : ""}
+                {summary.fx.gbpSource ? ` · GBP source: ${summary.fx.gbpSource}` : ""}
+                {" · CHF source: Currency_RBI"}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <FxPill label="USD" value={summary.fx.dollar} />

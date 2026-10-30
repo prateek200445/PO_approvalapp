@@ -22,6 +22,16 @@ public class WovenQuoteController : ControllerBase
     public async Task<IActionResult> Rates([FromQuery] string? sector, [FromQuery] string? code) =>
         Ok(await _service.GetRatesAsync(sector, code));
 
+    [HttpGet("forex")]
+    public async Task<IActionResult> Forex([FromQuery] DateTime? date)
+    {
+        var asOf = (date ?? DateTime.Today).Date;
+        var row = await _service.GetForexAsync(asOf);
+        return row is null
+            ? NotFound(new { message = $"No USD forex rate was found for {asOf:yyyy-MM-dd} or earlier." })
+            : Ok(row);
+    }
+
     [HttpPost("rates")]
     public async Task<IActionResult> SaveRate([FromBody] WovenQuoteRateWrite row)
     {

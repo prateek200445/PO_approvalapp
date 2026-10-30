@@ -1,5 +1,26 @@
 namespace POApprovalAPI.Models;
 
+public class WovenQuoteForex
+{
+    public DateTime AsOf { get; set; }
+    public DateTime RateFrom { get; set; }
+    public DateTime? RateTo { get; set; }
+    public bool UsedFallback { get; set; }
+    public string SourceName { get; set; } = "";
+    public decimal SourceDollar { get; set; }
+    public decimal QuotationDollar { get; set; }
+    public DateTime EuroRateDate { get; set; }
+    public bool EuroUsedFallback { get; set; }
+    public string EuroSourceName { get; set; } = "";
+    public decimal SourceEuroUsd { get; set; }
+    public decimal QuotationEuroUsd { get; set; }
+    public DateTime GbpRateDate { get; set; }
+    public bool GbpUsedFallback { get; set; }
+    public string GbpSourceName { get; set; } = "";
+    public decimal SourceGbpUsd { get; set; }
+    public decimal QuotationGbpUsd { get; set; }
+}
+
 public class WovenQuoteDraft
 {
     public string ProductType { get; set; } = "WovenBag";

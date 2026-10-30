@@ -80,6 +80,9 @@ public sealed class DailyProductionFxInfo
     public string RateFrom { get; set; } = "";
     public string RateTo { get; set; } = "";
     public bool UsedFallback { get; set; }
+    public string DollarSource { get; set; } = "";
+    public string EuroSource { get; set; } = "";
+    public string GbpSource { get; set; } = "";
     public double Dollar { get; set; }
     public double Euro { get; set; }
     public double Pound { get; set; }

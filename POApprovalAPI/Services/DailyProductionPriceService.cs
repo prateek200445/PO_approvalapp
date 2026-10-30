@@ -30,11 +30,13 @@ public class DailyProductionPriceService
 
     private readonly DatabaseService _database;
     private readonly IMemoryCache _cache;
+    private readonly ForexRateService _forex;
 
-    public DailyProductionPriceService(DatabaseService database, IMemoryCache cache)
+    public DailyProductionPriceService(DatabaseService database, IMemoryCache cache, ForexRateService forex)
     {
         _database = database;
         _cache = cache;
+        _forex = forex;
     }
 
     public bool TryGetExport(string token, out byte[]? bytes, out string fileName)
@@ -192,28 +194,34 @@ ORDER BY sysdate DESC",
             new { AsOf = asOf.Date },
             commandTimeout: CommandTimeoutSeconds);
 
-        if (window is not null && HasUsableFx(window))
-        {
-            window.AsOf = asOf.Date;
-            window.UsedFallback = false;
-            return window;
-        }
-
-        ct.ThrowIfCancellationRequested();
-        var fallback = await connection.QueryFirstOrDefaultAsync<FxSnapshot>(
-            select + @"
+        var fx = window is not null && HasUsableFx(window)
+            ? window
+            : await connection.QueryFirstOrDefaultAsync<FxSnapshot>(
+                select + @"
 WHERE CAST(sysdate AS date) <= CAST(@AsOf AS date)
 ORDER BY sysdate DESC",
-            new { AsOf = asOf.Date },
-            commandTimeout: CommandTimeoutSeconds);
+                new { AsOf = asOf.Date },
+                commandTimeout: CommandTimeoutSeconds) ?? new FxSnapshot();
 
-        if (fallback is null || !HasUsableFx(fallback))
-            throw new InvalidOperationException(
-                $"No RBI forex found in currency_rbi for {asOf:yyyy-MM-dd} (or earlier). Cannot convert to INR.");
+        var dollarTask = _forex.GetUsdInrAsync(asOf, ct);
+        var euroTask = _forex.GetEurInrAsync(asOf, ct);
+        var gbpTask = _forex.GetGbpInrAsync(asOf, ct);
+        await Task.WhenAll(dollarTask, euroTask, gbpTask);
+        var dollar = await dollarTask;
+        var euro = await euroTask;
+        var gbp = await gbpTask;
 
-        fallback.AsOf = asOf.Date;
-        fallback.UsedFallback = true;
-        return fallback;
+        fx.AsOf = asOf.Date;
+        fx.Dollar = (double)dollar.Rate;
+        fx.DollarSource = dollar.Source;
+        fx.Euro = (double)euro.Rate;
+        fx.EuroSource = euro.Source;
+        fx.Pound = (double)gbp.Rate;
+        fx.GbpSource = gbp.Source;
+        fx.RateFrom = dollar.RateDate;
+        fx.RateTo = dollar.RateDate;
+        fx.UsedFallback = dollar.UsedFallback || euro.UsedFallback || gbp.UsedFallback;
+        return fx;
     }
 
     private static bool HasUsableFx(FxSnapshot fx) =>
@@ -376,6 +384,9 @@ WHERE LTRIM(RTRIM(MarketingInvNo)) IN @Icos",
                 RateFrom = fx.RateFrom?.ToString("yyyy-MM-dd") ?? "",
                 RateTo = fx.RateTo?.ToString("yyyy-MM-dd") ?? "",
                 UsedFallback = fx.UsedFallback,
+                DollarSource = fx.DollarSource,
+                EuroSource = fx.EuroSource,
+                GbpSource = fx.GbpSource,
                 Dollar = fx.Dollar,
                 Euro = fx.Euro,
                 Pound = fx.Pound,
@@ -795,6 +806,9 @@ WHERE LTRIM(RTRIM(MarketingInvNo)) IN @Icos",
         public DateTime? RateFrom { get; set; }
         public DateTime? RateTo { get; set; }
         public bool UsedFallback { get; set; }
+        public string DollarSource { get; set; } = "";
+        public string EuroSource { get; set; } = "";
+        public string GbpSource { get; set; } = "";
         public double Dollar { get; set; }
         public double Euro { get; set; }
         public double Pound { get; set; }

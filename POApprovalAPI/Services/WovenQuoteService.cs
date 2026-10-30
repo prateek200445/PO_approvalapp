@@ -14,13 +14,15 @@ public class WovenQuoteService
 
     private readonly DatabaseService _database;
     private readonly IWebHostEnvironment _environment;
+    private readonly ForexRateService _forex;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _ready;
 
-    public WovenQuoteService(DatabaseService database, IWebHostEnvironment environment)
+    public WovenQuoteService(DatabaseService database, IWebHostEnvironment environment, ForexRateService forex)
     {
         _database = database;
         _environment = environment;
+        _forex = forex;
     }
 
     public async Task<WovenQuoteMasters> GetMastersAsync()
@@ -43,6 +45,37 @@ public class WovenQuoteService
                 ) latest ON latest.MaterialCode = r.MaterialCode AND latest.Sector = r.Sector AND latest.EffectiveDate = r.EffectiveDate
                 ORDER BY r.Sector, r.MaterialCode
                 """)).ToList(),
+        };
+    }
+
+    public async Task<WovenQuoteForex?> GetForexAsync(DateTime asOf)
+    {
+        var usdTask = _forex.GetUsdInrAsync(asOf);
+        var euroTask = _forex.GetEurUsdAsync(asOf);
+        var gbpTask = _forex.GetGbpUsdAsync(asOf);
+        await Task.WhenAll(usdTask, euroTask, gbpTask);
+        var usd = await usdTask;
+        var euro = await euroTask;
+        var gbp = await gbpTask;
+        return new WovenQuoteForex
+        {
+            AsOf = usd.AsOf,
+            RateFrom = usd.RateDate,
+            RateTo = usd.RateDate,
+            UsedFallback = usd.UsedFallback,
+            SourceName = usd.Source,
+            SourceDollar = usd.Rate,
+            QuotationDollar = usd.Rate - 2m,
+            EuroRateDate = euro.RateDate,
+            EuroUsedFallback = euro.UsedFallback,
+            EuroSourceName = euro.Source,
+            SourceEuroUsd = euro.Rate,
+            QuotationEuroUsd = euro.Rate - 0.03m,
+            GbpRateDate = gbp.RateDate,
+            GbpUsedFallback = gbp.UsedFallback,
+            GbpSourceName = gbp.Source,
+            SourceGbpUsd = gbp.Rate,
+            QuotationGbpUsd = gbp.Rate - 0.03m,
         };
     }
 

@@ -55,6 +55,9 @@ export type DailyProductionFxInfo = {
   rateFrom: string;
   rateTo: string;
   usedFallback: boolean;
+  dollarSource: string;
+  euroSource: string;
+  gbpSource: string;
   dollar: number;
   euro: number;
   pound: number;
@@ -125,6 +128,9 @@ function mapFx(raw: unknown): DailyProductionFxInfo | null {
     rateFrom: str(row.rateFrom ?? row.RateFrom),
     rateTo: str(row.rateTo ?? row.RateTo),
     usedFallback: Boolean(row.usedFallback ?? row.UsedFallback),
+    dollarSource: str(row.dollarSource ?? row.DollarSource),
+    euroSource: str(row.euroSource ?? row.EuroSource),
+    gbpSource: str(row.gbpSource ?? row.GbpSource),
     dollar: num(row.dollar ?? row.Dollar),
     euro: num(row.euro ?? row.Euro),
     pound: num(row.pound ?? row.Pound),

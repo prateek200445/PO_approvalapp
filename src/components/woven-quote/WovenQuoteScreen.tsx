@@ -30,6 +30,7 @@ import { useAuth } from "@/lib/auth-context";
 import {
   createWovenQuote,
   deleteWovenQuote,
+  getWovenForex,
   getWovenMasters,
   getWovenQuote,
   getWovenRates,
@@ -42,6 +43,7 @@ import {
   type WovenConstant,
   type WovenDetail,
   type WovenDraft,
+  type WovenForex,
   type WovenMasters,
   type WovenRate,
   type WovenResult,
@@ -442,6 +444,12 @@ function QuoteEditor({
   const leaveDecisionRef = useRef<((decision: LeaveDecision) => void) | null>(null);
   draftRef.current = draft;
   idRef.current = quoteId;
+  const forex = useQuery({
+    queryKey: ["woven-forex", draft.quoteDate],
+    queryFn: () => getWovenForex(draft.quoteDate),
+    enabled: /^\d{4}-\d{2}-\d{2}$/.test(draft.quoteDate),
+    staleTime: 5 * 60 * 1000,
+  });
   const routeBlocker = useBlocker({
     shouldBlockFn: () => isDirty,
     withResolver: true,
@@ -476,6 +484,18 @@ function QuoteEditor({
       live = false;
     };
   }, [quoteId]);
+
+  useEffect(() => {
+    if (quoteId != null || !forex.data) return;
+    setDraft((current) => current.quoteDate === forex.data.asOf.slice(0, 10)
+      ? {
+          ...current,
+          usdInr: forex.data.quotationDollar,
+          euroPerUsd: forex.data.quotationEuroUsd,
+          gbpPerUsd: forex.data.quotationGbpUsd,
+        }
+      : current);
+  }, [forex.data, quoteId]);
 
   const result = useMemo(
     () => calculateWovenQuote(draft, ratesAsOf(rates, draft.sector, draft.quoteDate), masters.constants, masters.materials),
@@ -621,7 +641,7 @@ function QuoteEditor({
           </div>
         </div>
         {draft.productType === "WovenBag" ? (
-          <WovenSheet draft={draft} patch={patch} options={options} materials={masters.materials} customers={customers} result={result} />
+          <WovenSheet draft={draft} patch={patch} options={options} materials={masters.materials} customers={customers} result={result} forex={forex.data} />
         ) : (
           <AdStarSpec draft={draft} patch={patch} />
         )}
@@ -936,6 +956,7 @@ function WovenSheet({
   materials,
   customers,
   result,
+  forex,
 }: {
   draft: WovenDraft;
   patch: (partial: Partial<WovenDraft>) => void;
@@ -943,6 +964,7 @@ function WovenSheet({
   materials: WovenMasters["materials"];
   customers: string[];
   result: WovenResult;
+  forex?: WovenForex;
 }) {
   const coatingWaste = result.lines.find((line) => line.label === "Coating wastage");
   const isFabric = draft.bagType === "Flat Fabric" || draft.bagType === "Tubular Fabric";
@@ -1011,9 +1033,27 @@ function WovenSheet({
           <Entry label="Payment days"><SheetNum value={draft.paymentDays} onChange={(paymentDays) => patch({ paymentDays })} /></Entry>
           <Entry label="Profit %"><SheetNum value={draft.profitPercent} onChange={(profitPercent) => patch({ profitPercent })} /></Entry>
           <Calc label="Quote Rs/kg" value={formatQty(result.quotePerKg, 2)} />
-          <Entry label="USD / INR"><SheetNum value={draft.usdInr} onChange={(usdInr) => patch({ usdInr })} /></Entry>
-          <Entry label="Euro per USD"><SheetNum value={draft.euroPerUsd} onChange={(euroPerUsd) => patch({ euroPerUsd })} /></Entry>
-          <Entry label="GBP per USD"><SheetNum value={draft.gbpPerUsd} onChange={(gbpPerUsd) => patch({ gbpPerUsd })} /></Entry>
+          {forex ? (
+            <Calc
+              label={`${forex.sourceName} USD / INR (${forex.rateFrom.slice(0, 10)}${forex.usedFallback ? ", fallback" : ""})`}
+              value={formatQty(forex.sourceDollar, 4)}
+            />
+          ) : null}
+          <Entry label="USD / INR (forex − 2)"><SheetNum value={draft.usdInr} onChange={(usdInr) => patch({ usdInr })} /></Entry>
+          {forex ? (
+            <Calc
+              label={`${forex.euroSourceName} USD per EUR (${forex.euroRateDate.slice(0, 10)}${forex.euroUsedFallback ? ", fallback" : ""})`}
+              value={formatQty(forex.sourceEuroUsd, 4)}
+            />
+          ) : null}
+          <Entry label="USD per EUR (forex − 0.03)"><SheetNum value={draft.euroPerUsd} onChange={(euroPerUsd) => patch({ euroPerUsd })} /></Entry>
+          {forex ? (
+            <Calc
+              label={`${forex.gbpSourceName} USD per GBP (${forex.gbpRateDate.slice(0, 10)}${forex.gbpUsedFallback ? ", fallback" : ""})`}
+              value={formatQty(forex.sourceGbpUsd, 4)}
+            />
+          ) : null}
+          <Entry label="USD per GBP (forex − 0.03)"><SheetNum value={draft.gbpPerUsd} onChange={(gbpPerUsd) => patch({ gbpPerUsd })} /></Entry>
           <Entry label="Freight USD/kg"><SheetNum value={draft.freightUsdPerKg} onChange={(freightUsdPerKg) => patch({ freightUsdPerKg })} /></Entry>
           <Entry label="Commission USD/kg"><SheetNum value={draft.commissionUsdPerKg} onChange={(commissionUsdPerKg) => patch({ commissionUsdPerKg })} /></Entry>
           <Calc label="FOB USD/kg" value={formatQty(result.fobUsdPerKg, 4)} />

@@ -117,6 +117,11 @@ builder.Services.AddScoped<Gstr1ReturnService>();
 builder.Services.AddSingleton<IcegateService>();
 builder.Services.AddScoped<BomService>();
 builder.Services.AddScoped<BomCreationService>();
+builder.Services.AddHttpClient<ForexRateService>(client =>
+{
+    client.BaseAddress = new Uri("https://api.frankfurter.dev/");
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
 builder.Services.AddScoped<DailyProductionPriceService>();
 builder.Services.AddScoped<FibcBuyersService>();
 builder.Services.AddScoped<ExhibitionLeadService>();
