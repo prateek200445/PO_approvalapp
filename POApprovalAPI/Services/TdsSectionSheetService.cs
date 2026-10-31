@@ -94,6 +94,7 @@ public sealed class TdsSectionSheetService
               AND v.LedgerName = @Ledger
               AND v.amount > 0
               AND ISNULL(j.CrPartyName, '') NOT LIKE 'TDS Payable%'
+              AND NOT (ISNULL(j.CrPartyName, '') LIKE '%K.P. Woven%' AND ISNULL(j.CrPartyName, '') LIKE '%Sales%')
               AND NOT (
                     j.CrPartyName IS NOT NULL
                     AND dbo.fn_Get_Ledger_InterUnit(v.CompanyName, j.CrPartyName, CONVERT(date, v.Date)) = 1
@@ -227,6 +228,7 @@ public sealed class TdsSectionSheetService
               AND v.LedgerName = @Ledger
               AND v.amount > 0
               AND ISNULL(j.CrPartyName, '') NOT LIKE 'TDS Payable%'
+              AND NOT (ISNULL(j.CrPartyName, '') LIKE '%K.P. Woven%' AND ISNULL(j.CrPartyName, '') LIKE '%Sales%')
               AND NOT (
                     j.CrPartyName IS NOT NULL
                     AND dbo.fn_Get_Ledger_InterUnit(v.CompanyName, j.CrPartyName, CONVERT(date, v.Date)) = 1
@@ -403,6 +405,8 @@ public sealed class TdsSectionSheetService
         foreach (var debit in debitRows)
         {
             if (debit.Contra.StartsWith("TDS Payable", StringComparison.OrdinalIgnoreCase)) continue;
+            if (debit.Contra.Contains("K.P. Woven", StringComparison.OrdinalIgnoreCase)
+                && debit.Contra.Contains("Sales", StringComparison.OrdinalIgnoreCase)) continue;
             if (debit.Contra.Length > 0)
             {
                 var inter = await connection.ExecuteScalarAsync<int?>(
@@ -520,6 +524,7 @@ public sealed class TdsSectionSheetService
                     CASE
                         WHEN v.amount <= 0 THEN 'credit'
                         WHEN j.CrPartyName LIKE 'TDS Payable%' THEN 'transfer'
+                        WHEN j.CrPartyName LIKE '%K.P. Woven%' AND j.CrPartyName LIKE '%Sales%' THEN 'group-unit'
                         WHEN j.CrPartyName IS NOT NULL
                              AND dbo.fn_Get_Ledger_InterUnit(v.CompanyName, j.CrPartyName, CONVERT(date, v.Date)) = 1 THEN 'group-unit'
                         ELSE 'reversal'
@@ -596,6 +601,7 @@ public sealed class TdsSectionSheetService
               AND ISNULL(pv.AccessableValue, 0) > 0
               AND LTRIM(RTRIM(pv.SupplierName)) NOT LIKE '%- Purchase'
               AND LTRIM(RTRIM(pv.SupplierName)) NOT LIKE '%-Purchase'
+              AND NOT (LTRIM(RTRIM(pv.SupplierName)) LIKE '%K.P. Woven%' AND LTRIM(RTRIM(pv.SupplierName)) LIKE '%Sales%')
             GROUP BY LTRIM(RTRIM(pv.SupplierName))
             HAVING SUM(CAST(pv.AccessableValue AS decimal(18, 2))) >= 5000000;
 
@@ -758,7 +764,7 @@ public sealed class TdsSectionSheetService
             From = from.ToString("yyyy-MM-dd"),
             To = to.ToString("yyyy-MM-dd"),
             ReversalDebit = reversal,
-            Liability = raw.Sum(r => r.Tds) - reversal,
+            Liability = Math.Max(0, raw.Sum(r => r.Tds) - reversal),
             RoundOffRemoved = roundOff.Count,
             DuplicatesRemoved = duplicatesRemoved,
             Lines = lines,

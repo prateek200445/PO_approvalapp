@@ -61,6 +61,7 @@ public sealed class TdsLiabilityService
                 CASE
                     WHEN l.Debit = 0 THEN 'credit'
                     WHEN j.CrPartyName LIKE 'TDS Payable%' THEN 'transfer'
+                    WHEN j.CrPartyName LIKE '%K.P. Woven%' AND j.CrPartyName LIKE '%Sales%' THEN 'group-unit'
                     WHEN j.CrPartyName IS NOT NULL
                          AND dbo.fn_Get_Ledger_InterUnit(l.CompanyName, j.CrPartyName, l.Dt) = 1 THEN 'group-unit'
                     ELSE 'reversal'
@@ -147,7 +148,8 @@ public sealed class TdsLiabilityService
                 sections = Sections.ToDictionary(s => s, _ => 0m);
                 byUnit[cell.Unit] = sections;
             }
-            sections[cell.Section] = cell.Credit - cell.Reversal;
+            var net = cell.Credit - cell.Reversal;
+            sections[cell.Section] = net < 0 ? 0 : net;
         }
 
         var units = byUnit
