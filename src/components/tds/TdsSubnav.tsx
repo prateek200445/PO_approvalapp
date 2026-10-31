@@ -4,6 +4,11 @@ import { cn } from "@/lib/utils";
 const items = [
   { to: "/tds/liability" as const, label: "Liability" },
   { to: "/tds/94a" as const, label: "94A" },
+  { to: "/tds/94c" as const, label: "94C" },
+  { to: "/tds/94h" as const, label: "94H" },
+  { to: "/tds/94i" as const, label: "94I" },
+  { to: "/tds/94j" as const, label: "94J" },
+  { to: "/tds/94q" as const, label: "94Q" },
 ];
 
 export function TdsSubnav() {
@@ -11,7 +16,7 @@ export function TdsSubnav() {
 
   return (
     <nav
-      className="flex w-full gap-1 rounded-xl border border-border/80 bg-card/80 p-1 shadow-soft sm:w-fit"
+      className="flex w-full flex-wrap gap-1 rounded-xl border border-border/80 bg-card/80 p-1 shadow-soft sm:w-fit"
       aria-label="TDS sections"
     >
       {items.map((item) => {

@@ -52,6 +52,11 @@ import { Route as AppAdvancePaymentsRouteImport } from './routes/_app/advance-pa
 import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
 import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
 import { Route as AppTdsLiabilityRouteImport } from './routes/_app/tds.liability'
+import { Route as AppTds94qRouteImport } from './routes/_app/tds.94q'
+import { Route as AppTds94jRouteImport } from './routes/_app/tds.94j'
+import { Route as AppTds94iRouteImport } from './routes/_app/tds.94i'
+import { Route as AppTds94hRouteImport } from './routes/_app/tds.94h'
+import { Route as AppTds94cRouteImport } from './routes/_app/tds.94c'
 import { Route as AppTds94aRouteImport } from './routes/_app/tds.94a'
 import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
 import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
@@ -281,6 +286,31 @@ const AppTdsLiabilityRoute = AppTdsLiabilityRouteImport.update({
   path: '/liability',
   getParentRoute: () => AppTdsRoute,
 } as any)
+const AppTds94qRoute = AppTds94qRouteImport.update({
+  id: '/94q',
+  path: '/94q',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTds94jRoute = AppTds94jRouteImport.update({
+  id: '/94j',
+  path: '/94j',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTds94iRoute = AppTds94iRouteImport.update({
+  id: '/94i',
+  path: '/94i',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTds94hRoute = AppTds94hRouteImport.update({
+  id: '/94h',
+  path: '/94h',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTds94cRoute = AppTds94cRouteImport.update({
+  id: '/94c',
+  path: '/94c',
+  getParentRoute: () => AppTdsRoute,
+} as any)
 const AppTds94aRoute = AppTds94aRouteImport.update({
   id: '/94a',
   path: '/94a',
@@ -411,6 +441,11 @@ export interface FileRoutesByFullPath {
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
   '/tds/94a': typeof AppTds94aRoute
+  '/tds/94c': typeof AppTds94cRoute
+  '/tds/94h': typeof AppTds94hRoute
+  '/tds/94i': typeof AppTds94iRoute
+  '/tds/94j': typeof AppTds94jRoute
+  '/tds/94q': typeof AppTds94qRoute
   '/tds/liability': typeof AppTdsLiabilityRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/bom/': typeof AppBomIndexRoute
@@ -468,6 +503,11 @@ export interface FileRoutesByTo {
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
   '/tds/94a': typeof AppTds94aRoute
+  '/tds/94c': typeof AppTds94cRoute
+  '/tds/94h': typeof AppTds94hRoute
+  '/tds/94i': typeof AppTds94iRoute
+  '/tds/94j': typeof AppTds94jRoute
+  '/tds/94q': typeof AppTds94qRoute
   '/tds/liability': typeof AppTdsLiabilityRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/bom': typeof AppBomIndexRoute
@@ -528,6 +568,11 @@ export interface FileRoutesById {
   '/_app/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/_app/po/$poNo': typeof AppPoPoNoRoute
   '/_app/tds/94a': typeof AppTds94aRoute
+  '/_app/tds/94c': typeof AppTds94cRoute
+  '/_app/tds/94h': typeof AppTds94hRoute
+  '/_app/tds/94i': typeof AppTds94iRoute
+  '/_app/tds/94j': typeof AppTds94jRoute
+  '/_app/tds/94q': typeof AppTds94qRoute
   '/_app/tds/liability': typeof AppTdsLiabilityRoute
   '/_app/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/_app/bom/': typeof AppBomIndexRoute
@@ -588,6 +633,11 @@ export interface FileRouteTypes {
     | '/payment/$paymentNo'
     | '/po/$poNo'
     | '/tds/94a'
+    | '/tds/94c'
+    | '/tds/94h'
+    | '/tds/94i'
+    | '/tds/94j'
+    | '/tds/94q'
     | '/tds/liability'
     | '/workorder/$poNo'
     | '/bom/'
@@ -645,6 +695,11 @@ export interface FileRouteTypes {
     | '/payment/$paymentNo'
     | '/po/$poNo'
     | '/tds/94a'
+    | '/tds/94c'
+    | '/tds/94h'
+    | '/tds/94i'
+    | '/tds/94j'
+    | '/tds/94q'
     | '/tds/liability'
     | '/workorder/$poNo'
     | '/bom'
@@ -704,6 +759,11 @@ export interface FileRouteTypes {
     | '/_app/payment/$paymentNo'
     | '/_app/po/$poNo'
     | '/_app/tds/94a'
+    | '/_app/tds/94c'
+    | '/_app/tds/94h'
+    | '/_app/tds/94i'
+    | '/_app/tds/94j'
+    | '/_app/tds/94q'
     | '/_app/tds/liability'
     | '/_app/workorder/$poNo'
     | '/_app/bom/'
@@ -1019,6 +1079,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTdsLiabilityRouteImport
       parentRoute: typeof AppTdsRoute
     }
+    '/_app/tds/94q': {
+      id: '/_app/tds/94q'
+      path: '/94q'
+      fullPath: '/tds/94q'
+      preLoaderRoute: typeof AppTds94qRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/94j': {
+      id: '/_app/tds/94j'
+      path: '/94j'
+      fullPath: '/tds/94j'
+      preLoaderRoute: typeof AppTds94jRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/94i': {
+      id: '/_app/tds/94i'
+      path: '/94i'
+      fullPath: '/tds/94i'
+      preLoaderRoute: typeof AppTds94iRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/94h': {
+      id: '/_app/tds/94h'
+      path: '/94h'
+      fullPath: '/tds/94h'
+      preLoaderRoute: typeof AppTds94hRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/94c': {
+      id: '/_app/tds/94c'
+      path: '/94c'
+      fullPath: '/tds/94c'
+      preLoaderRoute: typeof AppTds94cRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
     '/_app/tds/94a': {
       id: '/_app/tds/94a'
       path: '/94a'
@@ -1165,11 +1260,21 @@ const AppIntercompanyRouteWithChildren = AppIntercompanyRoute._addFileChildren(
 
 interface AppTdsRouteChildren {
   AppTds94aRoute: typeof AppTds94aRoute
+  AppTds94cRoute: typeof AppTds94cRoute
+  AppTds94hRoute: typeof AppTds94hRoute
+  AppTds94iRoute: typeof AppTds94iRoute
+  AppTds94jRoute: typeof AppTds94jRoute
+  AppTds94qRoute: typeof AppTds94qRoute
   AppTdsLiabilityRoute: typeof AppTdsLiabilityRoute
 }
 
 const AppTdsRouteChildren: AppTdsRouteChildren = {
   AppTds94aRoute: AppTds94aRoute,
+  AppTds94cRoute: AppTds94cRoute,
+  AppTds94hRoute: AppTds94hRoute,
+  AppTds94iRoute: AppTds94iRoute,
+  AppTds94jRoute: AppTds94jRoute,
+  AppTds94qRoute: AppTds94qRoute,
   AppTdsLiabilityRoute: AppTdsLiabilityRoute,
 }
 

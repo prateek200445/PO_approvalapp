@@ -88,7 +88,9 @@ function quarterSpan(fyStart: number, quarter: number) {
 
 async function read<T>(path: string): Promise<T> {
   const response = await fetch(getApiUrl(path));
-  const payload = (await response.json()) as T & { message?: string };
+  const text = await response.text();
+  if (!text) throw new Error("The server returned an empty response. Restart the API and try the quarter again.");
+  const payload = JSON.parse(text) as T & { message?: string };
   if (!response.ok) throw new Error(payload.message || "Request failed");
   return payload;
 }
@@ -115,6 +117,19 @@ export interface TdsSectionLine {
   originalTds: number;
 }
 
+export interface TdsUnbookedLine {
+  unit: string;
+  date: string;
+  voucherType: string;
+  voucherNo: string;
+  party: string;
+  pan: string;
+  principal: number;
+  rate: number;
+  tds: number;
+  covered?: boolean;
+}
+
 export interface TdsSectionSheet {
   section: string;
   group: string;
@@ -127,9 +142,21 @@ export interface TdsSectionSheet {
   lines: TdsSectionLine[];
   totalTds: number;
   totalPrincipal: number;
+  unbooked?: TdsUnbookedLine[];
+  unbookedTds?: number;
 }
 
 export function getTds94A(group: string, from: string, to: string) {
   const params = new URLSearchParams({ group, from, to });
   return read<TdsSectionSheet>(`/api/tds/94a?${params}`);
+}
+
+export function getTds94C(group: string, from: string, to: string) {
+  const params = new URLSearchParams({ group, from, to });
+  return read<TdsSectionSheet>(`/api/tds/94c?${params}`);
+}
+
+export function getTdsSection(section: "94H" | "94I" | "94J" | "94Q", group: string, from: string, to: string) {
+  const params = new URLSearchParams({ group, from, to });
+  return read<TdsSectionSheet>(`/api/tds/${section.toLowerCase()}?${params}`);
 }
