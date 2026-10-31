@@ -29,6 +29,7 @@ import {
   ReceiptText,
   FileSpreadsheet,
   Calculator,
+  BadgePercent,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useLayoutEffect, useState, type ComponentType } from "react";
@@ -61,6 +62,7 @@ type AppPath =
   | "/intercompany"
   | "/ledgers"
   | "/gst"
+  | "/tds"
   | "/item-stock"
   | "/domestic-invoice"
   | "/export-bill-overdue"
@@ -280,6 +282,12 @@ export function AppShell() {
       icon: ReceiptText,
       label: "GST Compliance",
       match: (p) => p === "/gst" || p.startsWith("/gst/"),
+    },
+    {
+      to: "/tds",
+      icon: BadgePercent,
+      label: "TDS",
+      match: (p) => p === "/tds" || p.startsWith("/tds/"),
     },
     {
       to: "/domestic-invoice",

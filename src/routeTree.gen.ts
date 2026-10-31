@@ -15,6 +15,7 @@ import { Route as ExhibitionProductRouteImport } from './routes/exhibition.produ
 import { Route as ExhibitionDealerRouteImport } from './routes/exhibition.dealer'
 import { Route as AppWovenQuoteRouteImport } from './routes/_app/woven-quote'
 import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
+import { Route as AppTdsRouteImport } from './routes/_app/tds'
 import { Route as AppSalesDashboardRouteImport } from './routes/_app/sales-dashboard'
 import { Route as AppReconciliationRouteImport } from './routes/_app/reconciliation'
 import { Route as AppProfileRouteImport } from './routes/_app/profile'
@@ -50,6 +51,8 @@ import { Route as AppAssistantRouteImport } from './routes/_app/assistant'
 import { Route as AppAdvancePaymentsRouteImport } from './routes/_app/advance-payments'
 import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
 import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
+import { Route as AppTdsLiabilityRouteImport } from './routes/_app/tds.liability'
+import { Route as AppTds94aRouteImport } from './routes/_app/tds.94a'
 import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
 import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
 import { Route as AppIntercompanyTransactionsRouteImport } from './routes/_app/intercompany.transactions'
@@ -91,6 +94,11 @@ const AppWovenQuoteRoute = AppWovenQuoteRouteImport.update({
 const AppWorkordersRoute = AppWorkordersRouteImport.update({
   id: '/workorders',
   path: '/workorders',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTdsRoute = AppTdsRouteImport.update({
+  id: '/tds',
+  path: '/tds',
   getParentRoute: () => AppRoute,
 } as any)
 const AppSalesDashboardRoute = AppSalesDashboardRouteImport.update({
@@ -268,6 +276,16 @@ const AppWorkorderPoNoRoute = AppWorkorderPoNoRouteImport.update({
   path: '/workorder/$poNo',
   getParentRoute: () => AppRoute,
 } as any)
+const AppTdsLiabilityRoute = AppTdsLiabilityRouteImport.update({
+  id: '/liability',
+  path: '/liability',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTds94aRoute = AppTds94aRouteImport.update({
+  id: '/94a',
+  path: '/94a',
+  getParentRoute: () => AppTdsRoute,
+} as any)
 const AppPoPoNoRoute = AppPoPoNoRouteImport.update({
   id: '/po/$poNo',
   path: '/po/$poNo',
@@ -374,6 +392,7 @@ export interface FileRoutesByFullPath {
   '/profile': typeof AppProfileRoute
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
+  '/tds': typeof AppTdsRouteWithChildren
   '/workorders': typeof AppWorkordersRoute
   '/woven-quote': typeof AppWovenQuoteRoute
   '/exhibition/dealer': typeof ExhibitionDealerRoute
@@ -391,6 +410,8 @@ export interface FileRoutesByFullPath {
   '/intercompany/transactions': typeof AppIntercompanyTransactionsRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
+  '/tds/94a': typeof AppTds94aRoute
+  '/tds/liability': typeof AppTdsLiabilityRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/bom/': typeof AppBomIndexRoute
 }
@@ -428,6 +449,7 @@ export interface FileRoutesByTo {
   '/profile': typeof AppProfileRoute
   '/reconciliation': typeof AppReconciliationRoute
   '/sales-dashboard': typeof AppSalesDashboardRoute
+  '/tds': typeof AppTdsRouteWithChildren
   '/workorders': typeof AppWorkordersRoute
   '/woven-quote': typeof AppWovenQuoteRoute
   '/exhibition/dealer': typeof ExhibitionDealerRoute
@@ -445,6 +467,8 @@ export interface FileRoutesByTo {
   '/intercompany/transactions': typeof AppIntercompanyTransactionsRoute
   '/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/po/$poNo': typeof AppPoPoNoRoute
+  '/tds/94a': typeof AppTds94aRoute
+  '/tds/liability': typeof AppTdsLiabilityRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/bom': typeof AppBomIndexRoute
 }
@@ -485,6 +509,7 @@ export interface FileRoutesById {
   '/_app/profile': typeof AppProfileRoute
   '/_app/reconciliation': typeof AppReconciliationRoute
   '/_app/sales-dashboard': typeof AppSalesDashboardRoute
+  '/_app/tds': typeof AppTdsRouteWithChildren
   '/_app/workorders': typeof AppWorkordersRoute
   '/_app/woven-quote': typeof AppWovenQuoteRoute
   '/exhibition/dealer': typeof ExhibitionDealerRoute
@@ -502,6 +527,8 @@ export interface FileRoutesById {
   '/_app/intercompany/transactions': typeof AppIntercompanyTransactionsRoute
   '/_app/payment/$paymentNo': typeof AppPaymentPaymentNoRoute
   '/_app/po/$poNo': typeof AppPoPoNoRoute
+  '/_app/tds/94a': typeof AppTds94aRoute
+  '/_app/tds/liability': typeof AppTdsLiabilityRoute
   '/_app/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/_app/bom/': typeof AppBomIndexRoute
 }
@@ -542,6 +569,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reconciliation'
     | '/sales-dashboard'
+    | '/tds'
     | '/workorders'
     | '/woven-quote'
     | '/exhibition/dealer'
@@ -559,6 +587,8 @@ export interface FileRouteTypes {
     | '/intercompany/transactions'
     | '/payment/$paymentNo'
     | '/po/$poNo'
+    | '/tds/94a'
+    | '/tds/liability'
     | '/workorder/$poNo'
     | '/bom/'
   fileRoutesByTo: FileRoutesByTo
@@ -596,6 +626,7 @@ export interface FileRouteTypes {
     | '/profile'
     | '/reconciliation'
     | '/sales-dashboard'
+    | '/tds'
     | '/workorders'
     | '/woven-quote'
     | '/exhibition/dealer'
@@ -613,6 +644,8 @@ export interface FileRouteTypes {
     | '/intercompany/transactions'
     | '/payment/$paymentNo'
     | '/po/$poNo'
+    | '/tds/94a'
+    | '/tds/liability'
     | '/workorder/$poNo'
     | '/bom'
   id:
@@ -652,6 +685,7 @@ export interface FileRouteTypes {
     | '/_app/profile'
     | '/_app/reconciliation'
     | '/_app/sales-dashboard'
+    | '/_app/tds'
     | '/_app/workorders'
     | '/_app/woven-quote'
     | '/exhibition/dealer'
@@ -669,6 +703,8 @@ export interface FileRouteTypes {
     | '/_app/intercompany/transactions'
     | '/_app/payment/$paymentNo'
     | '/_app/po/$poNo'
+    | '/_app/tds/94a'
+    | '/_app/tds/liability'
     | '/_app/workorder/$poNo'
     | '/_app/bom/'
   fileRoutesById: FileRoutesById
@@ -722,6 +758,13 @@ declare module '@tanstack/react-router' {
       path: '/workorders'
       fullPath: '/workorders'
       preLoaderRoute: typeof AppWorkordersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/tds': {
+      id: '/_app/tds'
+      path: '/tds'
+      fullPath: '/tds'
+      preLoaderRoute: typeof AppTdsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/sales-dashboard': {
@@ -969,6 +1012,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkorderPoNoRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/tds/liability': {
+      id: '/_app/tds/liability'
+      path: '/liability'
+      fullPath: '/tds/liability'
+      preLoaderRoute: typeof AppTdsLiabilityRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/94a': {
+      id: '/_app/tds/94a'
+      path: '/94a'
+      fullPath: '/tds/94a'
+      preLoaderRoute: typeof AppTds94aRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
     '/_app/po/$poNo': {
       id: '/_app/po/$poNo'
       path: '/po/$poNo'
@@ -1106,6 +1163,19 @@ const AppIntercompanyRouteWithChildren = AppIntercompanyRoute._addFileChildren(
   AppIntercompanyRouteChildren,
 )
 
+interface AppTdsRouteChildren {
+  AppTds94aRoute: typeof AppTds94aRoute
+  AppTdsLiabilityRoute: typeof AppTdsLiabilityRoute
+}
+
+const AppTdsRouteChildren: AppTdsRouteChildren = {
+  AppTds94aRoute: AppTds94aRoute,
+  AppTdsLiabilityRoute: AppTdsLiabilityRoute,
+}
+
+const AppTdsRouteWithChildren =
+  AppTdsRoute._addFileChildren(AppTdsRouteChildren)
+
 interface AppRouteChildren {
   AppAdvancePaymentsRoute: typeof AppAdvancePaymentsRoute
   AppAssistantRoute: typeof AppAssistantRoute
@@ -1140,6 +1210,7 @@ interface AppRouteChildren {
   AppProfileRoute: typeof AppProfileRoute
   AppReconciliationRoute: typeof AppReconciliationRoute
   AppSalesDashboardRoute: typeof AppSalesDashboardRoute
+  AppTdsRoute: typeof AppTdsRouteWithChildren
   AppWorkordersRoute: typeof AppWorkordersRoute
   AppWovenQuoteRoute: typeof AppWovenQuoteRoute
   AppAdvancePaymentPaymentNoRoute: typeof AppAdvancePaymentPaymentNoRoute
@@ -1186,6 +1257,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppProfileRoute: AppProfileRoute,
   AppReconciliationRoute: AppReconciliationRoute,
   AppSalesDashboardRoute: AppSalesDashboardRoute,
+  AppTdsRoute: AppTdsRouteWithChildren,
   AppWorkordersRoute: AppWorkordersRoute,
   AppWovenQuoteRoute: AppWovenQuoteRoute,
   AppAdvancePaymentPaymentNoRoute: AppAdvancePaymentPaymentNoRoute,

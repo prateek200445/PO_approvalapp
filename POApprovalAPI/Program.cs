@@ -93,6 +93,8 @@ builder.Services.AddScoped<SalesDashboardService>();
 builder.Services.AddScoped<BankRequirementsService>();
 builder.Services.AddScoped<BankDocumentPackService>();
 builder.Services.AddScoped<GstLiabilityService>();
+builder.Services.AddScoped<TdsLiabilityService>();
+builder.Services.AddScoped<TdsSectionSheetService>();
 builder.Services.AddScoped<GstItc04Service>();
 builder.Services.AddScoped<CustomReportService>();
 builder.Services.Configure<OrderBookSummaryOptions>(
