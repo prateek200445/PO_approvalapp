@@ -102,6 +102,37 @@ export function isExhibitionOnlyUser(username?: string | null): boolean {
   return canAccessExhibitionLeads(username);
 }
 
+/**
+ * Factory gate roles. Keep in sync with POApprovalAPI appsettings.json → Gate.
+ * A login may be listed in more than one role.
+ */
+export const GATE_WATCHMEN = ["prakash"] as const;
+export const GATE_FACTORY_MANAGERS = ["prakash"] as const;
+export const GATE_ADMINS = ["prakash"] as const;
+export const GATE_MANAGEMENT = ["prakash", "aman", "anil", "dilendra", "pritesh"] as const;
+
+function listed(username: string | null | undefined, users: readonly string[]): boolean {
+  if (!username) return false;
+  const key = username.trim().toLowerCase();
+  return users.some((user) => user.toLowerCase() === key);
+}
+
+export function canOperateGate(username?: string | null): boolean {
+  return listed(username, GATE_ADMINS) || listed(username, GATE_FACTORY_MANAGERS) || listed(username, GATE_WATCHMEN);
+}
+
+export function canViewGateRegister(username?: string | null): boolean {
+  return listed(username, GATE_ADMINS) || listed(username, GATE_FACTORY_MANAGERS) || listed(username, GATE_MANAGEMENT);
+}
+
+export function canCorrectGate(username?: string | null): boolean {
+  return listed(username, GATE_ADMINS) || listed(username, GATE_FACTORY_MANAGERS);
+}
+
+export function canManageGates(username?: string | null): boolean {
+  return listed(username, GATE_ADMINS);
+}
+
 /** Path prefixes a restricted login may open; null = no restriction. */
 export function allowedPathsFor(username?: string | null): string[] | null {
   if (isHrPortalOnlyUser(username)) return ["/hr-reports", "/profile"];

@@ -30,6 +30,7 @@ import {
   FileSpreadsheet,
   Calculator,
   BadgePercent,
+  Truck,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useLayoutEffect, useState, type ComponentType } from "react";
@@ -43,6 +44,8 @@ import {
   BILL_PAYMENT_ENTRY_ENABLED,
   canAccessExhibitionLeads,
   canAccessOrderBookSummary,
+  canOperateGate,
+  canViewGateRegister,
   hrHomePath,
   isExhibitionOnlyUser,
   isHrPortalOnlyUser,
@@ -68,6 +71,8 @@ type AppPath =
   | "/export-bill-overdue"
   | "/daily-production"
   | "/plant-consumption"
+  | "/gate"
+  | "/gate-register"
   | "/daily-reports"
   | "/custom-report"
   | "/hr-reports"
@@ -330,6 +335,26 @@ export function AppShell() {
       label: "Plant entry",
       match: (p) => p.startsWith("/plant-consumption"),
     },
+    ...(canOperateGate(user?.username)
+      ? [
+          {
+            to: "/gate" as const,
+            icon: Truck,
+            label: "Factory Gate",
+            match: (p: string) => p === "/gate",
+          },
+        ]
+      : []),
+    ...(canViewGateRegister(user?.username)
+      ? [
+          {
+            to: "/gate-register" as const,
+            icon: Truck,
+            label: "Gate Register",
+            match: (p: string) => p.startsWith("/gate-register"),
+          },
+        ]
+      : []),
     {
       to: "/daily-reports",
       icon: ClipboardList,

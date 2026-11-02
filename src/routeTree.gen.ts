@@ -34,6 +34,8 @@ import { Route as AppHrReportsRouteImport } from './routes/_app/hr-reports'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppGstBillRecoRouteImport } from './routes/_app/gst-bill-reco'
 import { Route as AppGstRouteImport } from './routes/_app/gst'
+import { Route as AppGateRegisterRouteImport } from './routes/_app/gate-register'
+import { Route as AppGateRouteImport } from './routes/_app/gate'
 import { Route as AppFibcBuyersRouteImport } from './routes/_app/fibc-buyers'
 import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
 import { Route as AppExhibitionLeadsRouteImport } from './routes/_app/exhibition-leads'
@@ -194,6 +196,16 @@ const AppGstBillRecoRoute = AppGstBillRecoRouteImport.update({
 const AppGstRoute = AppGstRouteImport.update({
   id: '/gst',
   path: '/gst',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGateRegisterRoute = AppGateRegisterRouteImport.update({
+  id: '/gate-register',
+  path: '/gate-register',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGateRoute = AppGateRouteImport.update({
+  id: '/gate',
+  path: '/gate',
   getParentRoute: () => AppRoute,
 } as any)
 const AppFibcBuyersRoute = AppFibcBuyersRouteImport.update({
@@ -404,6 +416,8 @@ export interface FileRoutesByFullPath {
   '/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
+  '/gate': typeof AppGateRoute
+  '/gate-register': typeof AppGateRegisterRoute
   '/gst': typeof AppGstRoute
   '/gst-bill-reco': typeof AppGstBillRecoRoute
   '/history': typeof AppHistoryRoute
@@ -466,6 +480,8 @@ export interface FileRoutesByTo {
   '/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
+  '/gate': typeof AppGateRoute
+  '/gate-register': typeof AppGateRegisterRoute
   '/gst': typeof AppGstRoute
   '/gst-bill-reco': typeof AppGstBillRecoRoute
   '/history': typeof AppHistoryRoute
@@ -531,6 +547,8 @@ export interface FileRoutesById {
   '/_app/exhibition-leads': typeof AppExhibitionLeadsRoute
   '/_app/export-bill-overdue': typeof AppExportBillOverdueRoute
   '/_app/fibc-buyers': typeof AppFibcBuyersRouteWithChildren
+  '/_app/gate': typeof AppGateRoute
+  '/_app/gate-register': typeof AppGateRegisterRoute
   '/_app/gst': typeof AppGstRoute
   '/_app/gst-bill-reco': typeof AppGstBillRecoRoute
   '/_app/history': typeof AppHistoryRoute
@@ -596,6 +614,8 @@ export interface FileRouteTypes {
     | '/exhibition-leads'
     | '/export-bill-overdue'
     | '/fibc-buyers'
+    | '/gate'
+    | '/gate-register'
     | '/gst'
     | '/gst-bill-reco'
     | '/history'
@@ -658,6 +678,8 @@ export interface FileRouteTypes {
     | '/exhibition-leads'
     | '/export-bill-overdue'
     | '/fibc-buyers'
+    | '/gate'
+    | '/gate-register'
     | '/gst'
     | '/gst-bill-reco'
     | '/history'
@@ -722,6 +744,8 @@ export interface FileRouteTypes {
     | '/_app/exhibition-leads'
     | '/_app/export-bill-overdue'
     | '/_app/fibc-buyers'
+    | '/_app/gate'
+    | '/_app/gate-register'
     | '/_app/gst'
     | '/_app/gst-bill-reco'
     | '/_app/history'
@@ -951,6 +975,20 @@ declare module '@tanstack/react-router' {
       path: '/gst'
       fullPath: '/gst'
       preLoaderRoute: typeof AppGstRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/gate-register': {
+      id: '/_app/gate-register'
+      path: '/gate-register'
+      fullPath: '/gate-register'
+      preLoaderRoute: typeof AppGateRegisterRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/gate': {
+      id: '/_app/gate'
+      path: '/gate'
+      fullPath: '/gate'
+      preLoaderRoute: typeof AppGateRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/fibc-buyers': {
@@ -1297,6 +1335,8 @@ interface AppRouteChildren {
   AppExhibitionLeadsRoute: typeof AppExhibitionLeadsRoute
   AppExportBillOverdueRoute: typeof AppExportBillOverdueRoute
   AppFibcBuyersRoute: typeof AppFibcBuyersRouteWithChildren
+  AppGateRoute: typeof AppGateRoute
+  AppGateRegisterRoute: typeof AppGateRegisterRoute
   AppGstRoute: typeof AppGstRoute
   AppGstBillRecoRoute: typeof AppGstBillRecoRoute
   AppHistoryRoute: typeof AppHistoryRoute
@@ -1344,6 +1384,8 @@ const AppRouteChildren: AppRouteChildren = {
   AppExhibitionLeadsRoute: AppExhibitionLeadsRoute,
   AppExportBillOverdueRoute: AppExportBillOverdueRoute,
   AppFibcBuyersRoute: AppFibcBuyersRouteWithChildren,
+  AppGateRoute: AppGateRoute,
+  AppGateRegisterRoute: AppGateRegisterRoute,
   AppGstRoute: AppGstRoute,
   AppGstBillRecoRoute: AppGstBillRecoRoute,
   AppHistoryRoute: AppHistoryRoute,

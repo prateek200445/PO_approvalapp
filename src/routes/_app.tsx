@@ -11,6 +11,8 @@ import { getSalesCompanies } from "@/lib/sales-dashboard-api";
 import {
   allowedPathsFor,
   canAccessExhibitionLeads,
+  canOperateGate,
+  canViewGateRegister,
   hrHomePath,
 } from "@/lib/feature-flags";
 
@@ -37,6 +39,12 @@ export const Route = createFileRoute("/_app")({
       }
       if (path.startsWith("/exhibition-leads") && !canAccessExhibitionLeads(username)) {
         throw redirect({ to: hrHomePath(username) });
+      }
+      if (path.startsWith("/gate-register") && !canViewGateRegister(username)) {
+        throw redirect({ to: canOperateGate(username) ? "/gate" : hrHomePath(username) });
+      }
+      if (path === "/gate" && !canOperateGate(username)) {
+        throw redirect({ to: canViewGateRegister(username) ? "/gate-register" : hrHomePath(username) });
       }
     } catch (e) {
       if (isRedirect(e)) throw e;

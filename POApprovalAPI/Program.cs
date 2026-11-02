@@ -127,6 +127,7 @@ builder.Services.AddHttpClient<ForexRateService>(client =>
 builder.Services.AddScoped<DailyProductionPriceService>();
 builder.Services.AddScoped<FibcBuyersService>();
 builder.Services.AddScoped<ExhibitionLeadService>();
+builder.Services.AddScoped<GateService>();
 builder.Services.AddScoped<WovenQuoteService>();
 builder.Services.AddScoped<BankStatementService>();
 builder.Services.Configure<HrReportsOptions>(
