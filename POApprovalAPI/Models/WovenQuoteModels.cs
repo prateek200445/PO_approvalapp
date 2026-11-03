@@ -104,6 +104,10 @@ public class WovenQuoteDraft
     public decimal? AdSeaFreight { get; set; }
     public decimal? AdPcsPerBale { get; set; }
     public decimal? AdPcsPerPallet { get; set; }
+    /// <summary>Workbook columns from late 2026 use patch width as bag width minus patch.</summary>
+    public bool AdUseNetWidth { get; set; }
+    public decimal? AdPatchExtraGsm { get; set; }
+    public decimal? AdValvePatchAdd { get; set; }
 }
 
 public class WovenQuoteLine

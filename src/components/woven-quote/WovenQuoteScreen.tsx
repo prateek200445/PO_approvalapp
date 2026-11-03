@@ -1046,14 +1046,14 @@ function WovenSheet({
               value={formatQty(forex.sourceEuroUsd, 4)}
             />
           ) : null}
-          <Entry label="USD per EUR (forex − 0.03)"><SheetNum value={draft.euroPerUsd} onChange={(euroPerUsd) => patch({ euroPerUsd })} /></Entry>
+          <Entry label="USD per EUR"><SheetNum value={draft.euroPerUsd} onChange={(euroPerUsd) => patch({ euroPerUsd })} /></Entry>
           {forex ? (
             <Calc
               label={`${forex.gbpSourceName} USD per GBP (${forex.gbpRateDate.slice(0, 10)}${forex.gbpUsedFallback ? ", fallback" : ""})`}
               value={formatQty(forex.sourceGbpUsd, 4)}
             />
           ) : null}
-          <Entry label="USD per GBP (forex − 0.03)"><SheetNum value={draft.gbpPerUsd} onChange={(gbpPerUsd) => patch({ gbpPerUsd })} /></Entry>
+          <Entry label="USD per GBP"><SheetNum value={draft.gbpPerUsd} onChange={(gbpPerUsd) => patch({ gbpPerUsd })} /></Entry>
           <Entry label="Freight USD/kg"><SheetNum value={draft.freightUsdPerKg} onChange={(freightUsdPerKg) => patch({ freightUsdPerKg })} /></Entry>
           <Entry label="Commission USD/kg"><SheetNum value={draft.commissionUsdPerKg} onChange={(commissionUsdPerKg) => patch({ commissionUsdPerKg })} /></Entry>
           <Calc label="FOB USD/kg" value={formatQty(result.fobUsdPerKg, 4)} />

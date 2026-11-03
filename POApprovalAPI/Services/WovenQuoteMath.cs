@@ -331,14 +331,19 @@ public static class WovenQuoteMath
         decimal valve = Z(d.AdValveLength);
         decimal extended = Z(d.AdExtendedValve);
         decimal gsm = Z(d.AdFabricGsm) + Z(d.AdCoatingGsm) + Z(d.AdBoppGsm);
-        decimal extra = K(c, "adPatchGsmExtra", 20m);
+        decimal extra = d.AdUseNetWidth ? Z(d.AdPatchExtraGsm, K(c, "adPatchGsmExtra", 20m)) : K(c, "adPatchGsmExtra", 20m);
         decimal density = K(c, "density", 0.92m);
+        decimal patchWidth = d.AdUseNetWidth ? width - patch : width;
+        decimal valvePatch = patch + (d.AdUseNetWidth ? Z(d.AdValvePatchAdd) : 0m);
+        decimal valveGsm = d.AdUseNetWidth
+            ? Z(d.AdFabricGsm) + Z(d.AdCoatingGsm) + extra
+            : Z(d.AdFabricGsm) + Z(d.AdCoatingGsm) + Z(d.AdCoatingGsm);
         decimal bag = d.AdOpenMouth
             ? width * 2m * (length + patch / 2m + K(c, "adOpenLengthExtra", 1.5m)) / 10000m * gsm
-              + (gsm + extra) * width * patch / 10000m
+              + (gsm + extra) * patchWidth * patch / 10000m
             : width * 2m * (length + patch + K(c, "adClosedLengthExtra", 3m)) / 10000m * gsm
-              + width * patch * 2m * (gsm + extra) / 10000m
-              + patch * (valve + extended) * 2m / 10000m * (Z(d.AdFabricGsm) + Z(d.AdCoatingGsm) + Z(d.AdCoatingGsm));
+              + patchWidth * patch * 2m * (gsm + extra) / 10000m
+              + valvePatch * (valve + extended) * 2m / 10000m * valveGsm;
         decimal liner = (width + K(c, "adLinerWidthExtra", 3m)) * 2m * (length + patch) * Z(d.AdLinerMicron) * density / 10000m;
         decimal total = bag + liner;
         decimal pp = Rate(rates, "PP");

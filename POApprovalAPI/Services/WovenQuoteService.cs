@@ -70,12 +70,12 @@ public class WovenQuoteService
             EuroUsedFallback = euro.UsedFallback,
             EuroSourceName = euro.Source,
             SourceEuroUsd = euro.Rate,
-            QuotationEuroUsd = euro.Rate - 0.03m,
+            QuotationEuroUsd = euro.Rate,
             GbpRateDate = gbp.RateDate,
             GbpUsedFallback = gbp.UsedFallback,
             GbpSourceName = gbp.Source,
             SourceGbpUsd = gbp.Rate,
-            QuotationGbpUsd = gbp.Rate - 0.03m,
+            QuotationGbpUsd = gbp.Rate,
         };
     }
 

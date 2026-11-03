@@ -82,6 +82,9 @@ export interface WovenDraft {
   adSeaFreight: number | null;
   adPcsPerBale: number | null;
   adPcsPerPallet: number | null;
+  adUseNetWidth: boolean;
+  adPatchExtraGsm: number | null;
+  adValvePatchAdd: number | null;
 }
 
 export interface WovenLine {

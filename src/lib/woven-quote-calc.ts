@@ -84,6 +84,9 @@ export function blankWovenDraft(): WovenDraft {
     adSeaFreight: 0,
     adPcsPerBale: null,
     adPcsPerPallet: null,
+    adUseNetWidth: false,
+    adPatchExtraGsm: null,
+    adValvePatchAdd: null,
   };
 }
 
@@ -343,11 +346,16 @@ function adStar(d: WovenDraft, rates: Record<string, number>, c: Record<string, 
   const length = z(d.adLength);
   const patch = z(d.adPatch);
   const gsm = z(d.adFabricGsm) + z(d.adCoatingGsm) + z(d.adBoppGsm);
-  const extra = k(c, "adPatchGsmExtra", 20);
+  const extra = d.adUseNetWidth ? z(d.adPatchExtraGsm, k(c, "adPatchGsmExtra", 20)) : k(c, "adPatchGsmExtra", 20);
   const density = k(c, "density", 0.92);
+  const patchWidth = d.adUseNetWidth ? width - patch : width;
+  const valvePatch = patch + (d.adUseNetWidth ? z(d.adValvePatchAdd) : 0);
+  const valveGsm = d.adUseNetWidth
+    ? z(d.adFabricGsm) + z(d.adCoatingGsm) + extra
+    : z(d.adFabricGsm) + z(d.adCoatingGsm) + z(d.adCoatingGsm);
   const bag = d.adOpenMouth
-    ? (width * 2 * (length + patch / 2 + k(c, "adOpenLengthExtra", 1.5))) / 10000 * gsm + ((gsm + extra) * width * patch) / 10000
-    : (width * 2 * (length + patch + k(c, "adClosedLengthExtra", 3))) / 10000 * gsm + (width * patch * 2 * (gsm + extra)) / 10000 + (patch * (z(d.adValveLength) + z(d.adExtendedValve)) * 2) / 10000 * (z(d.adFabricGsm) + z(d.adCoatingGsm) + z(d.adCoatingGsm));
+    ? (width * 2 * (length + patch / 2 + k(c, "adOpenLengthExtra", 1.5))) / 10000 * gsm + ((gsm + extra) * patchWidth * patch) / 10000
+    : (width * 2 * (length + patch + k(c, "adClosedLengthExtra", 3))) / 10000 * gsm + (patchWidth * patch * 2 * (gsm + extra)) / 10000 + (valvePatch * (z(d.adValveLength) + z(d.adExtendedValve)) * 2) / 10000 * valveGsm;
   const liner = ((width + k(c, "adLinerWidthExtra", 3)) * 2 * (length + patch) * z(d.adLinerMicron) * density) / 10000;
   const total = bag + liner;
   const pp = rate(rates, "PP");
