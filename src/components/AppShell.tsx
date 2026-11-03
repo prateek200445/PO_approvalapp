@@ -47,6 +47,7 @@ import {
   canOperateGate,
   canViewGateRegister,
   hrHomePath,
+  isBagQuoteOnlyUser,
   isExhibitionOnlyUser,
   isHrPortalOnlyUser,
 } from "@/lib/feature-flags";
@@ -100,8 +101,9 @@ export function AppShell() {
   const path = routerState.location.pathname;
   const hrOnly = isHrPortalOnlyUser(user?.username);
   const exhibitionOnly = isExhibitionOnlyUser(user?.username);
-  // Single-section logins (HR, Exhibition Leads) skip approvals inbox, search and prefetches.
-  const restricted = hrOnly || exhibitionOnly;
+  const quoteOnly = isBagQuoteOnlyUser(user?.username);
+  // Single-section logins skip approvals inbox, search and prefetches.
+  const restricted = hrOnly || exhibitionOnly || quoteOnly;
   const fullScreenReport =
     path.includes("export-bill-overdue") || path.includes("order-book-summary");
   const wideContent = path.startsWith("/bank-statement-import");
@@ -189,6 +191,13 @@ export function AppShell() {
     icon: QrCode,
     label: "Exhibition Leads",
     match: (p) => p.startsWith("/exhibition-leads"),
+  };
+
+  const bagQuoteNavItem: NavItem = {
+    to: "/woven-quote",
+    icon: Calculator,
+    label: "Bag quotation",
+    match: (p) => p.startsWith("/woven-quote"),
   };
 
   const approvalNav: NavItem[] = [
@@ -375,14 +384,19 @@ export function AppShell() {
     },
     ...(canAccessExhibitionLeads(user?.username) ? [exhibitionNavItem] : []),
     { to: "/bom", icon: Layers, label: "BOM Report", match: (p) => p.startsWith("/bom") },
-    { to: "/woven-quote", icon: Calculator, label: "Bag quotation", match: (p) => p.startsWith("/woven-quote") },
+    bagQuoteNavItem,
   ];
 
   const accountNav: NavItem[] = [
     { to: "/profile", icon: User, label: "Profile", match: (p) => p.startsWith("/profile") },
   ];
 
-  const desktopGroups: { title: string; items: NavItem[] }[] = exhibitionOnly
+  const desktopGroups: { title: string; items: NavItem[] }[] = quoteOnly
+    ? [
+        { title: "Quotation", items: [bagQuoteNavItem] },
+        { title: "Account", items: accountNav },
+      ]
+    : exhibitionOnly
     ? [
         { title: "Exhibition", items: [exhibitionNavItem] },
         { title: "Account", items: accountNav },
@@ -509,7 +523,7 @@ export function AppShell() {
                 </span>
               )}
             </button>
-            <Link to="/dashboard" className="flex min-w-0 items-center gap-2.5">
+            <Link to={hrHomePath(user?.username)} className="flex min-w-0 items-center gap-2.5">
               <img
                 src={dark ? "/hcp_logo_dark.png" : "/hcp_logo.jpeg"}
                 alt="HCP Logo"
@@ -517,20 +531,22 @@ export function AppShell() {
               />
               <div className="leading-tight">
                 <div className="text-sm font-semibold">HCP</div>
-                <div className="text-[11px] text-muted-foreground">Approvals Portal</div>
+                <div className="text-[11px] text-muted-foreground">{quoteOnly ? "Bag quotation" : "Approvals Portal"}</div>
               </div>
             </Link>
           </div>
 
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new Event("po-open-search"))}
-              className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
-              aria-label="Search pending"
-            >
-              <Search className="h-4 w-4" />
-            </button>
+            {!restricted ? (
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new Event("po-open-search"))}
+                className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                aria-label="Search pending"
+              >
+                <Search className="h-4 w-4" />
+              </button>
+            ) : null}
             <button
               onClick={toggleTheme}
               className="rounded-md p-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -589,7 +605,7 @@ export function AppShell() {
             >
               <div className="truncate text-sm font-semibold">HCP</div>
               <div className="truncate text-[11px] text-muted-foreground">
-                {hrOnly ? "HR Portal" : exhibitionOnly ? "Exhibition Leads" : "Approvals Portal"}
+                {hrOnly ? "HR Portal" : exhibitionOnly ? "Exhibition Leads" : quoteOnly ? "Bag quotation" : "Approvals Portal"}
               </div>
             </div>
           </div>

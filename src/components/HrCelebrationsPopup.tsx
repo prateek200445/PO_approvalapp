@@ -4,6 +4,7 @@ import { Award, Cake, PartyPopper } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/lib/auth-context";
+import { isBagQuoteOnlyUser } from "@/lib/feature-flags";
 import { getHrCelebrations, type HrCelebrationPerson } from "@/lib/hr-engagement-api";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +28,7 @@ export function HrCelebrationsPopup() {
   const query = useQuery({
     queryKey: ["hr-celebrations", username, todayKey()],
     queryFn: () => getHrCelebrations(username),
-    enabled: username.length > 0,
+    enabled: username.length > 0 && !isBagQuoteOnlyUser(username),
     staleTime: 30 * 60_000,
     retry: false,
     refetchOnWindowFocus: false,

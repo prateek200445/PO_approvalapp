@@ -103,6 +103,17 @@ export function isExhibitionOnlyUser(username?: string | null): boolean {
 }
 
 /**
+ * These logins only get Bag quotation (no approvals, reports, or other nav).
+ */
+export const BAG_QUOTE_ONLY_USERS = ["bhavin123"] as const;
+
+export function isBagQuoteOnlyUser(username?: string | null): boolean {
+  if (!username) return false;
+  const key = username.trim().toLowerCase();
+  return BAG_QUOTE_ONLY_USERS.some((user) => user.toLowerCase() === key);
+}
+
+/**
  * Factory gate roles. Keep in sync with POApprovalAPI appsettings.json → Gate.
  * A login may be listed in more than one role.
  */
@@ -137,11 +148,13 @@ export function canManageGates(username?: string | null): boolean {
 export function allowedPathsFor(username?: string | null): string[] | null {
   if (isHrPortalOnlyUser(username)) return ["/hr-reports", "/profile"];
   if (isExhibitionOnlyUser(username)) return ["/exhibition-leads", "/profile"];
+  if (isBagQuoteOnlyUser(username)) return ["/woven-quote", "/profile"];
   return null;
 }
 
-export function hrHomePath(username?: string | null): "/hr-reports" | "/exhibition-leads" | "/dashboard" {
+export function hrHomePath(username?: string | null): "/hr-reports" | "/exhibition-leads" | "/woven-quote" | "/dashboard" {
   if (isHrPortalOnlyUser(username)) return "/hr-reports";
   if (isExhibitionOnlyUser(username)) return "/exhibition-leads";
+  if (isBagQuoteOnlyUser(username)) return "/woven-quote";
   return "/dashboard";
 }
