@@ -139,3 +139,19 @@ ON t.FactoryCode = s.FactoryCode AND t.GateCode = s.GateCode
 WHEN NOT MATCHED THEN
     INSERT (FactoryCode, FactoryName, GateCode, GateName, IsActive)
     VALUES (s.FactoryCode, s.FactoryName, s.GateCode, s.GateName, 1);
+GO
+
+IF COL_LENGTH(N'dbo.GateVehicleEntries', N'DocumentType') IS NULL
+    ALTER TABLE dbo.GateVehicleEntries ADD DocumentType VARCHAR(2) NULL;
+IF COL_LENGTH(N'dbo.GateVehicleEntries', N'DocumentNo') IS NULL
+    ALTER TABLE dbo.GateVehicleEntries ADD DocumentNo NVARCHAR(40) NULL;
+GO
+
+IF NOT EXISTS (
+    SELECT 1 FROM sys.check_constraints
+    WHERE name = N'CK_GateVehicleEntries_DocumentType'
+      AND parent_object_id = OBJECT_ID(N'dbo.GateVehicleEntries')
+)
+    ALTER TABLE dbo.GateVehicleEntries
+        ADD CONSTRAINT CK_GateVehicleEntries_DocumentType
+        CHECK (DocumentType IS NULL OR DocumentType IN ('PO', 'WO'));

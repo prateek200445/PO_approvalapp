@@ -37,6 +37,8 @@ export interface GateEntry {
   driverName: string;
   driverMobile: string | null;
   partyName: string | null;
+  documentType: string | null;
+  documentNo: string | null;
   purposeCode: string;
   purposeName: string;
   remarks: string | null;
@@ -125,6 +127,8 @@ function mapEntry(row: Record<string, unknown>): GateEntry {
     driverName: text(row.driverName ?? row.DriverName),
     driverMobile: nullable(row.driverMobile ?? row.DriverMobile),
     partyName: nullable(row.partyName ?? row.PartyName),
+    documentType: nullable(row.documentType ?? row.DocumentType),
+    documentNo: nullable(row.documentNo ?? row.DocumentNo),
     purposeCode: text(row.purposeCode ?? row.PurposeCode),
     purposeName: text(row.purposeName ?? row.PurposeName),
     remarks: nullable(row.remarks ?? row.Remarks),
@@ -217,16 +221,79 @@ export async function listInsideVehicles(username: string, factoryCode: string, 
   return payload.map(mapEntry);
 }
 
+export interface GateDocumentLine {
+  itemCode: string | null;
+  itemDesc: string | null;
+  qty: number | null;
+  rate: number | null;
+  total: number | null;
+}
+
+export interface GateDocument {
+  documentType: "PO" | "WO";
+  documentNo: string;
+  supplierName: string | null;
+  companyName: string | null;
+  department: string | null;
+  currency: string | null;
+  totalAmount: number | null;
+  deliveryDate: string | null;
+  lines: GateDocumentLine[];
+}
+
+export interface GateDocumentLookup {
+  needsChoice: boolean;
+  choices: string[];
+  document: GateDocument | null;
+}
+
+function mapDocument(row: Record<string, unknown> | null | undefined): GateDocument | null {
+  if (!row) return null;
+  const kind = text(row.documentType ?? row.DocumentType);
+  const lines = (row.lines ?? row.Lines ?? []) as Record<string, unknown>[];
+  return {
+    documentType: kind === "WO" ? "WO" : "PO",
+    documentNo: text(row.documentNo ?? row.DocumentNo),
+    supplierName: nullable(row.supplierName ?? row.SupplierName),
+    companyName: nullable(row.companyName ?? row.CompanyName),
+    department: nullable(row.department ?? row.Department),
+    currency: nullable(row.currency ?? row.Currency),
+    totalAmount: num(row.totalAmount ?? row.TotalAmount),
+    deliveryDate: nullable(row.deliveryDate ?? row.DeliveryDate),
+    lines: lines.map((line) => ({
+      itemCode: nullable(line.itemCode ?? line.ItemCode),
+      itemDesc: nullable(line.itemDesc ?? line.ItemDesc),
+      qty: num(line.qty ?? line.Qty),
+      rate: num(line.rate ?? line.Rate),
+      total: num(line.total ?? line.Total),
+    })),
+  };
+}
+
+export async function lookupGateDocument(username: string, number: string, documentType?: string): Promise<GateDocumentLookup> {
+  const params = new URLSearchParams({ username, number });
+  if (documentType) params.set("documentType", documentType);
+  const response = await fetch(getApiUrl(`/api/gate/document?${params}`));
+  if (!response.ok) throw new Error(await readError(response, "Could not open that PO or work order."));
+  const payload = (await response.json()) as Record<string, unknown>;
+  const choices = (payload.choices ?? payload.Choices ?? []) as unknown[];
+  return {
+    needsChoice: Boolean(payload.needsChoice ?? payload.NeedsChoice),
+    choices: choices.map((choice) => String(choice)),
+    document: mapDocument((payload.document ?? payload.Document) as Record<string, unknown> | undefined),
+  };
+}
+
 export async function createGateEntry(body: {
   username: string;
   factoryCode: string;
   gateId: number;
   vehicleNumber: string;
   driverName: string;
-  driverMobile?: string;
+  driverMobile: string;
   partyName?: string;
-  purposeCode: string;
-  remarks?: string;
+  documentType: "PO" | "WO";
+  documentNo: string;
 }): Promise<GateEntry> {
   const response = await fetch(getApiUrl("/api/gate/entries"), {
     method: "POST",

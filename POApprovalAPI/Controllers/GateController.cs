@@ -22,6 +22,14 @@ public class GateController : ControllerBase
     public Task<IActionResult> Context([FromQuery] string username, CancellationToken ct) =>
         Run(() => _service.GetContextAsync(username, ct));
 
+    [HttpGet("document")]
+    public Task<IActionResult> Document(
+        [FromQuery] string username,
+        [FromQuery] string number,
+        [FromQuery] string? documentType,
+        CancellationToken ct) =>
+        Run(() => _service.LookupDocumentAsync(username, number, documentType, ct));
+
     [HttpGet("inside")]
     public Task<IActionResult> Inside(
         [FromQuery] string username,

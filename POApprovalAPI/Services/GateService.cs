@@ -71,9 +71,13 @@ ORDER BY SortOrder, PurposeName", cancellationToken: ct))).ToList();
         var mobile = NormalizeMobile(request.DriverMobile);
         var party = OptionalText(request.PartyName, 200);
         var remarks = OptionalText(request.Remarks, 500);
-        var purposeCode = (request.PurposeCode ?? "").Trim().ToUpperInvariant();
-        if (purposeCode.Length == 0)
-            throw new ArgumentException("Vehicle purpose is required.");
+        var documentType = (request.DocumentType ?? "").Trim().ToUpperInvariant();
+        var documentNo = (request.DocumentNo ?? "").Trim();
+        if (documentType is not ("PO" or "WO") || documentNo.Length == 0)
+            throw new ArgumentException("Open the PO or work order before registering the vehicle.");
+        if (mobile == null)
+            throw new ArgumentException("Driver number is required.");
+        var purposeCode = "MATERIAL_IN";
         if (request.GateId <= 0)
             throw new ArgumentException("Gate is required.");
 
@@ -98,6 +102,10 @@ WHERE PurposeCode = @PurposeCode AND IsActive = 1",
         if (purposeId == null)
             throw new ArgumentException("Vehicle purpose is not valid.");
 
+        var document = await LoadDocumentAsync(connection, tx, documentNo, documentType, ct);
+        if (document == null)
+            throw new ArgumentException($"No {documentType} was found for {documentNo}.");
+
         var number = await NextNumberAsync(connection, tx, factory, ct);
         long entryId;
         try
@@ -106,11 +114,11 @@ WHERE PurposeCode = @PurposeCode AND IsActive = 1",
                 new CommandDefinition(@"
 INSERT INTO dbo.GateVehicleEntries
     (GateEntryNumber, FactoryCode, GateId, VehicleNumber, DriverName, DriverMobile, PartyName,
-     PurposeId, Remarks, Status, EntryUserId)
+     PurposeId, Remarks, Status, EntryUserId, DocumentType, DocumentNo)
 OUTPUT INSERTED.EntryId
 VALUES
     (@Number, @Factory, @GateId, @Vehicle, @Driver, @Mobile, @Party,
-     @PurposeId, @Remarks, N'INSIDE', @User)",
+     @PurposeId, @Remarks, N'INSIDE', @User, @DocumentType, @DocumentNo)",
                     new
                     {
                         Number = number,
@@ -123,6 +131,8 @@ VALUES
                         PurposeId = purposeId.Value,
                         Remarks = remarks,
                         User = access.User,
+                        DocumentType = document.DocumentType,
+                        DocumentNo = document.DocumentNo,
                     }, tx, cancellationToken: ct));
         }
         catch (SqlException ex) when (ex.Number is 2601 or 2627)
@@ -134,6 +144,51 @@ VALUES
         tx.Commit();
         return await GetEntryAsync(connection, null, entryId, ct)
             ?? throw new InvalidOperationException("The entry was saved but could not be read back.");
+    }
+
+    public async Task<GateDocumentLookupDto> LookupDocumentAsync(string? username, string? number, string? documentType, CancellationToken ct)
+    {
+        Require(username, a => a.CanOperate, "Only a watchman, factory manager, or admin can open a PO or work order.");
+        var documentNo = (number ?? "").Trim();
+        if (documentNo.Length < 2)
+            throw new ArgumentException("Enter the PO or work order number.");
+
+        await EnsureSchemaAsync(ct);
+        using var connection = _database.CreateConnection();
+        var requested = NullIfEmpty(documentType)?.ToUpperInvariant();
+        if (requested != null && requested is not ("PO" or "WO"))
+            throw new ArgumentException("Document type must be PO or WO.");
+
+        var choices = (await connection.QueryAsync<string>(
+            new CommandDefinition(@"
+SELECT 'PO'
+WHERE EXISTS (SELECT 1 FROM ApprovePO WHERE LTRIM(RTRIM(PoNo)) = @No)
+   OR EXISTS (SELECT 1 FROM ApprovePOHOD WHERE LTRIM(RTRIM(PoNo)) = @No)
+UNION
+SELECT 'WO'
+WHERE EXISTS (SELECT 1 FROM ApproveWorkOrder WHERE LTRIM(RTRIM(PoNo)) = @No)",
+                new { No = documentNo }, cancellationToken: ct))).ToList();
+
+        if (choices.Count == 0)
+        {
+            var inView = await connection.QuerySingleAsync<int>(
+                new CommandDefinition("SELECT CASE WHEN EXISTS (SELECT 1 FROM Vw_PurchaseOrder WHERE LTRIM(RTRIM(PurchaseCode)) = @No) THEN 1 ELSE 0 END",
+                    new { No = documentNo }, cancellationToken: ct));
+            if (inView == 0)
+                throw new KeyNotFoundException("No PO or work order was found for that number.");
+            choices.Add("PO");
+        }
+
+        if (requested == null && choices.Count > 1)
+            return new GateDocumentLookupDto { NeedsChoice = true, Choices = choices };
+
+        var kind = requested ?? choices[0];
+        if (!choices.Contains(kind))
+            throw new KeyNotFoundException($"No {kind} was found for {documentNo}.");
+
+        var document = await LoadDocumentAsync(connection, null, documentNo, kind, ct)
+            ?? throw new KeyNotFoundException($"No {kind} was found for {documentNo}.");
+        return new GateDocumentLookupDto { Document = document };
     }
 
     public async Task<GateEntryDto> ExitAsync(long entryId, GateExitRequest request, CancellationToken ct)
@@ -347,7 +402,7 @@ ORDER BY e.EntryAt ASC",
         var sheet = workbook.Worksheets.Add("Gate Register");
         var headers = new[]
         {
-            "Gate Entry Number", "Factory", "Entry Gate", "Vehicle Number", "Driver", "Mobile",
+            "Gate Entry Number", "Document", "Factory", "Entry Gate", "Vehicle Number", "Driver", "Mobile",
             "Supplier / Customer", "Purpose", "Remarks", "Status", "Entry Time", "Entry User",
             "Exit Time", "Exit User", "Exit Gate", "Exit Remarks", "Minutes Inside", "Long Stay",
         };
@@ -359,28 +414,29 @@ ORDER BY e.EntryAt ASC",
             var row = rows[i];
             var line = i + 2;
             sheet.Cell(line, 1).Value = row.GateEntryNumber;
-            sheet.Cell(line, 2).Value = row.FactoryName;
-            sheet.Cell(line, 3).Value = row.GateName;
-            sheet.Cell(line, 4).Value = row.VehicleNumber;
-            sheet.Cell(line, 5).Value = row.DriverName;
-            sheet.Cell(line, 6).Value = row.DriverMobile ?? "";
-            sheet.Cell(line, 7).Value = row.PartyName ?? "";
-            sheet.Cell(line, 8).Value = row.PurposeName;
-            sheet.Cell(line, 9).Value = row.Remarks ?? "";
-            sheet.Cell(line, 10).Value = row.Status;
-            sheet.Cell(line, 11).Value = row.EntryAt;
-            sheet.Cell(line, 12).Value = row.EntryUserId;
-            if (row.ExitAt.HasValue) sheet.Cell(line, 13).Value = row.ExitAt.Value;
-            sheet.Cell(line, 14).Value = row.ExitUserId ?? "";
-            sheet.Cell(line, 15).Value = row.ExitGateName ?? "";
-            sheet.Cell(line, 16).Value = row.ExitRemarks ?? "";
-            if (row.DurationMinutes.HasValue) sheet.Cell(line, 17).Value = row.DurationMinutes.Value;
-            sheet.Cell(line, 18).Value = row.IsLongStay ? "Yes" : "";
+            sheet.Cell(line, 2).Value = string.IsNullOrEmpty(row.DocumentNo) ? "" : $"{row.DocumentType} {row.DocumentNo}";
+            sheet.Cell(line, 3).Value = row.FactoryName;
+            sheet.Cell(line, 4).Value = row.GateName;
+            sheet.Cell(line, 5).Value = row.VehicleNumber;
+            sheet.Cell(line, 6).Value = row.DriverName;
+            sheet.Cell(line, 7).Value = row.DriverMobile ?? "";
+            sheet.Cell(line, 8).Value = row.PartyName ?? "";
+            sheet.Cell(line, 9).Value = row.PurposeName;
+            sheet.Cell(line, 10).Value = row.Remarks ?? "";
+            sheet.Cell(line, 11).Value = row.Status;
+            sheet.Cell(line, 12).Value = row.EntryAt;
+            sheet.Cell(line, 13).Value = row.EntryUserId;
+            if (row.ExitAt.HasValue) sheet.Cell(line, 14).Value = row.ExitAt.Value;
+            sheet.Cell(line, 15).Value = row.ExitUserId ?? "";
+            sheet.Cell(line, 16).Value = row.ExitGateName ?? "";
+            sheet.Cell(line, 17).Value = row.ExitRemarks ?? "";
+            if (row.DurationMinutes.HasValue) sheet.Cell(line, 18).Value = row.DurationMinutes.Value;
+            sheet.Cell(line, 19).Value = row.IsLongStay ? "Yes" : "";
         }
 
         sheet.Row(1).Style.Font.Bold = true;
-        sheet.Column(11).Style.DateFormat.Format = "yyyy-mm-dd hh:mm";
-        sheet.Column(13).Style.DateFormat.Format = "yyyy-mm-dd hh:mm";
+        sheet.Column(12).Style.DateFormat.Format = "yyyy-mm-dd hh:mm";
+        sheet.Column(14).Style.DateFormat.Format = "yyyy-mm-dd hh:mm";
         sheet.Columns().AdjustToContents();
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
@@ -485,6 +541,8 @@ SELECT
     e.DriverName,
     e.DriverMobile,
     e.PartyName,
+    e.DocumentType,
+    e.DocumentNo,
     p.PurposeCode,
     p.PurposeName,
     e.Remarks,
@@ -502,6 +560,75 @@ SELECT
         ELSE CAST(0 AS bit)
     END AS IsLongStay
 " + FromSql;
+
+    private static async Task<GateDocumentDto?> LoadDocumentAsync(
+        SqlConnection connection,
+        SqlTransaction? tx,
+        string documentNo,
+        string documentType,
+        CancellationToken ct)
+    {
+        var rows = (await connection.QueryAsync(
+            new CommandDefinition(@"
+SELECT
+    LTRIM(RTRIM(v.PurchaseCode)) AS PurchaseCode,
+    NULLIF(LTRIM(RTRIM(v.FirmName)), N'') AS FirmName,
+    NULLIF(LTRIM(RTRIM(v.CompanyName)), N'') AS CompanyName,
+    NULLIF(LTRIM(RTRIM(v.DepttName)), N'') AS DepttName,
+    NULLIF(LTRIM(RTRIM(v.Currency)), N'') AS Currency,
+    NULLIF(LTRIM(RTRIM(v.ItemCode)), N'') AS ItemCode,
+    NULLIF(LTRIM(RTRIM(v.ItemDesc)), N'') AS ItemDesc,
+    v.Qty,
+    v.Rate,
+    v.Total,
+    v.TotalAmount,
+    v.deliverydate
+FROM Vw_PurchaseOrder v
+WHERE LTRIM(RTRIM(v.PurchaseCode)) = @No",
+                new { No = documentNo }, tx, cancellationToken: ct))).ToList();
+        if (rows.Count == 0) return null;
+
+        var first = rows[0];
+        return new GateDocumentDto
+        {
+            DocumentType = documentType,
+            DocumentNo = TextOf(first.PurchaseCode) ?? documentNo,
+            SupplierName = TextOf(first.FirmName),
+            CompanyName = TextOf(first.CompanyName),
+            Department = TextOf(first.DepttName),
+            Currency = TextOf(first.Currency),
+            TotalAmount = DecimalOf(first.TotalAmount),
+            DeliveryDate = DateOf(first.deliverydate),
+            Lines = rows.Take(40).Select(row => new GateDocumentLineDto
+            {
+                ItemCode = TextOf(row.ItemCode),
+                ItemDesc = TextOf(row.ItemDesc),
+                Qty = DecimalOf(row.Qty),
+                Rate = DecimalOf(row.Rate),
+                Total = DecimalOf(row.Total),
+            }).ToList(),
+        };
+    }
+
+    private static string? TextOf(object? value)
+    {
+        if (value == null || value is DBNull) return null;
+        var text = Convert.ToString(value)?.Trim();
+        return string.IsNullOrEmpty(text) ? null : text;
+    }
+
+    private static decimal? DecimalOf(object? value)
+    {
+        if (value == null || value is DBNull) return null;
+        return Convert.ToDecimal(value);
+    }
+
+    private static DateTime? DateOf(object? value)
+    {
+        if (value == null || value is DBNull) return null;
+        if (value is DateTime date) return date;
+        return DateTime.TryParse(Convert.ToString(value), out var parsed) ? parsed : null;
+    }
 
     private async Task<GateEntryDto?> GetEntryAsync(SqlConnection connection, SqlTransaction? tx, long entryId, CancellationToken ct)
     {

@@ -14,6 +14,8 @@ import {
   getGateContext,
   getGateSummary,
   listInsideVehicles,
+  lookupGateDocument,
+  type GateDocument,
   type GateEntry,
 } from "@/lib/gate-api";
 
@@ -138,7 +140,6 @@ function GateDeskPage() {
           username={username}
           factoryCode={factoryCode}
           gateId={Number(gateId)}
-          purposes={context.data?.purposes ?? []}
           onSaved={refresh}
         />
       ) : null}
@@ -182,27 +183,55 @@ function EntryForm({
   username,
   factoryCode,
   gateId,
-  purposes,
   onSaved,
 }: {
   username: string;
   factoryCode: string;
   gateId: number;
-  purposes: { purposeCode: string; purposeName: string }[];
   onSaved: () => void;
 }) {
+  const [documentNo, setDocumentNo] = useState("");
+  const [document, setDocument] = useState<GateDocument | null>(null);
+  const [choices, setChoices] = useState<string[]>([]);
+  const [looking, setLooking] = useState(false);
+  const [lookupError, setLookupError] = useState("");
   const [vehicleNumber, setVehicleNumber] = useState("");
   const [driverName, setDriverName] = useState("");
   const [driverMobile, setDriverMobile] = useState("");
   const [partyName, setPartyName] = useState("");
-  const [purposeCode, setPurposeCode] = useState(purposes[0]?.purposeCode ?? "");
-  const [remarks, setRemarks] = useState("");
   const [saved, setSaved] = useState<GateEntry | null>(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    if (!purposeCode && purposes[0]) setPurposeCode(purposes[0].purposeCode);
-  }, [purposeCode, purposes]);
+  async function openDocument(documentType?: string) {
+    setLookupError("");
+    setSaved(null);
+    setLooking(true);
+    try {
+      const result = await lookupGateDocument(username, documentNo, documentType);
+      if (result.needsChoice) {
+        setDocument(null);
+        setChoices(result.choices);
+        return;
+      }
+      setChoices([]);
+      setDocument(result.document);
+      setPartyName(result.document?.supplierName ?? "");
+      setVehicleNumber("");
+      setDriverName("");
+      setDriverMobile("");
+    } catch (err) {
+      setDocument(null);
+      setChoices([]);
+      setLookupError(err instanceof Error ? err.message : "Could not open that PO or work order.");
+    } finally {
+      setLooking(false);
+    }
+  }
+
+  function openFullDocument(doc: GateDocument) {
+    const path = doc.documentType === "WO" ? "workorder" : "po";
+    window.open(`/${path}/${encodeURIComponent(doc.documentNo)}`, "_blank", "noopener");
+  }
 
   const mutation = useMutation({
     mutationFn: () => createGateEntry({
@@ -213,16 +242,18 @@ function EntryForm({
       driverName,
       driverMobile,
       partyName,
-      purposeCode,
-      remarks,
+      documentType: document!.documentType,
+      documentNo: document!.documentNo,
     }),
     onSuccess: (entry) => {
       setSaved(entry);
       setError("");
+      setDocument(null);
+      setDocumentNo("");
       setVehicleNumber("");
       setDriverName("");
       setDriverMobile("");
-      setRemarks("");
+      setPartyName("");
       onSaved();
     },
     onError: (err) => {
@@ -232,49 +263,111 @@ function EntryForm({
   });
 
   return (
-    <form
-      className="space-y-3 rounded-2xl border bg-card p-4 shadow-sm"
-      onSubmit={(event) => {
-        event.preventDefault();
-        setError("");
-        mutation.mutate();
-      }}
-    >
-      <Field label="Vehicle number" required>
-        <Input className="h-12 text-base uppercase md:text-base" value={vehicleNumber} onChange={(event) => setVehicleNumber(event.target.value)} autoComplete="off" required />
-      </Field>
-      <Field label="Driver name" required>
-        <Input className="h-12 text-base md:text-base" value={driverName} onChange={(event) => setDriverName(event.target.value)} required />
-      </Field>
-      <Field label="Driver mobile">
-        <Input className="h-12 text-base md:text-base" inputMode="tel" value={driverMobile} onChange={(event) => setDriverMobile(event.target.value)} />
-      </Field>
-      <Field label="Supplier / customer">
-        <Input className="h-12 text-base md:text-base" value={partyName} onChange={(event) => setPartyName(event.target.value)} />
-      </Field>
-      <GateSelect
-        label="Purpose *"
-        value={purposeCode}
-        onChange={setPurposeCode}
-        options={purposes.map((purpose) => ({ value: purpose.purposeCode, label: purpose.purposeName }))}
-        triggerClassName="h-12 text-base"
-      />
-      <Field label="Remarks">
-        <Input className="h-12 text-base md:text-base" value={remarks} onChange={(event) => setRemarks(event.target.value)} />
-      </Field>
-      {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+    <div className="space-y-3">
+      <form
+        className="space-y-3 rounded-2xl border bg-card p-4 shadow-sm"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void openDocument();
+        }}
+      >
+        <Field label="PO or work order number" required>
+          <Input
+            className="h-12 text-base md:text-base"
+            value={documentNo}
+            onChange={(event) => setDocumentNo(event.target.value)}
+            autoComplete="off"
+            placeholder="Enter the number given at the gate"
+            required
+          />
+        </Field>
+        {lookupError ? <p className="text-sm text-destructive" role="alert">{lookupError}</p> : null}
+        {choices.length > 0 ? (
+          <div className="grid grid-cols-2 gap-2">
+            {choices.map((choice) => (
+              <Button key={choice} type="button" variant="outline" className="h-12" onClick={() => void openDocument(choice)}>
+                Open {choice === "WO" ? "work order" : "PO"}
+              </Button>
+            ))}
+          </div>
+        ) : null}
+        <Button type="submit" className="h-12 w-full text-base" disabled={looking || documentNo.trim().length < 2}>
+          {looking ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Open document
+        </Button>
+      </form>
+
+      {document ? (
+        <form
+          className="space-y-3 rounded-2xl border bg-card p-4 shadow-sm"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setError("");
+            mutation.mutate();
+          }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {document.documentType === "WO" ? "Work order" : "Purchase order"}
+              </div>
+              <div className="font-mono text-lg font-semibold">{document.documentNo}</div>
+              <div className="text-sm">{document.supplierName || "Supplier not on the document"}</div>
+              {document.companyName ? <div className="text-xs text-muted-foreground">{document.companyName}</div> : null}
+              {document.department ? <div className="text-xs text-muted-foreground">{document.department}</div> : null}
+            </div>
+            <button type="button" className="text-sm font-medium text-primary" onClick={() => openFullDocument(document)}>
+              Open full page
+            </button>
+          </div>
+          <div className="max-h-56 overflow-auto rounded-xl border">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-2 py-2 font-medium">Item</th>
+                  <th className="px-2 py-2 font-medium">Qty</th>
+                  <th className="px-2 py-2 font-medium">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {document.lines.map((line, index) => (
+                  <tr key={`${line.itemCode ?? "item"}-${index}`} className="border-t">
+                    <td className="px-2 py-2">{line.itemDesc || line.itemCode || "—"}</td>
+                    <td className="px-2 py-2 tabular-nums">{line.qty ?? "—"}</td>
+                    <td className="px-2 py-2 tabular-nums">{line.total ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Field label="Vehicle number" required>
+            <Input className="h-12 text-base uppercase md:text-base" value={vehicleNumber} onChange={(event) => setVehicleNumber(event.target.value)} autoComplete="off" required />
+          </Field>
+          <Field label="Driver name" required>
+            <Input className="h-12 text-base md:text-base" value={driverName} onChange={(event) => setDriverName(event.target.value)} required />
+          </Field>
+          <Field label="Driver number" required>
+            <Input className="h-12 text-base md:text-base" inputMode="tel" value={driverMobile} onChange={(event) => setDriverMobile(event.target.value)} required />
+          </Field>
+          <Field label="Supplier">
+            <Input className="h-12 text-base md:text-base" value={partyName} onChange={(event) => setPartyName(event.target.value)} />
+          </Field>
+          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+          <Button type="submit" className="h-12 w-full text-base" disabled={mutation.isPending || !factoryCode || !gateId}>
+            {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Register entry
+          </Button>
+        </form>
+      ) : null}
+
       {saved ? (
         <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-3 text-sm">
           <div className="flex items-center gap-2 font-semibold"><CheckCircle2 className="h-4 w-4" /> Vehicle is inside</div>
           <div className="mt-1 font-mono text-base">{saved.gateEntryNumber}</div>
-          <div className="text-muted-foreground">{saved.vehicleNumber} · {formatGateTime(saved.entryAt)}</div>
+          <div className="text-muted-foreground">{saved.documentType} {saved.documentNo} · {saved.vehicleNumber} · {formatGateTime(saved.entryAt)}</div>
         </div>
       ) : null}
-      <Button type="submit" className="h-12 w-full text-base" disabled={mutation.isPending || !factoryCode || !gateId}>
-        {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        Register entry
-      </Button>
-    </form>
+    </div>
   );
 }
 
@@ -344,7 +437,7 @@ function InsideList({
               <div>
                 <div className="font-mono text-lg font-semibold">{entry.vehicleNumber}</div>
                 <div className="text-sm">{entry.driverName}</div>
-                <div className="text-xs text-muted-foreground">{entry.gateEntryNumber} · {entry.purposeName}</div>
+                <div className="text-xs text-muted-foreground">{entry.gateEntryNumber}{entry.documentNo ? ` · ${entry.documentType} ${entry.documentNo}` : ""} · {entry.purposeName}</div>
                 <div className="text-xs text-muted-foreground">In {formatGateTime(entry.entryAt)} · {entry.gateName}</div>
                 {entry.partyName ? <div className="text-xs text-muted-foreground">{entry.partyName}</div> : null}
                 {entry.isLongStay ? <div className="mt-1 text-xs font-semibold text-amber-700 dark:text-amber-300">Long stay</div> : null}

@@ -214,7 +214,7 @@ function GateRegisterPage() {
               <tr key={entry.entryId} className="border-t align-top">
                 <td className="px-3 py-2">
                   <button type="button" className="font-mono text-xs font-semibold text-primary" onClick={() => setSelected(entry)}>{entry.gateEntryNumber}</button>
-                  <div className="text-xs text-muted-foreground">{entry.factoryCode} · {entry.gateName}</div>
+                  <div className="text-xs text-muted-foreground">{entry.documentNo ? `${entry.documentType} ${entry.documentNo}` : entry.factoryCode} · {entry.gateName}</div>
                 </td>
                 <td className="px-3 py-2 font-mono">{entry.vehicleNumber}</td>
                 <td className="px-3 py-2">{entry.driverName}<div className="text-xs text-muted-foreground">{entry.driverMobile}</div></td>
@@ -239,7 +239,7 @@ function GateRegisterPage() {
                 <span className="text-xs font-semibold">{entry.status}</span>
               </div>
               <div className="text-sm">{entry.driverName} · {entry.purposeName}</div>
-              <div className="text-xs text-muted-foreground">{entry.gateEntryNumber} · in {formatGateTime(entry.entryAt)}</div>
+              <div className="text-xs text-muted-foreground">{entry.gateEntryNumber}{entry.documentNo ? ` · ${entry.documentType} ${entry.documentNo}` : ""} · in {formatGateTime(entry.entryAt)}</div>
               {entry.isLongStay ? <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">Long stay</div> : null}
             </button>
           </li>
@@ -316,6 +316,7 @@ function EntryDetail({
           <button type="button" className="text-sm text-muted-foreground" onClick={onClose}>Close</button>
         </div>
         <dl className="mt-3 space-y-1 text-sm">
+          <Row label="Document" value={entry.documentNo ? `${entry.documentType} ${entry.documentNo}` : "—"} />
           <Row label="Driver" value={entry.driverName} />
           <Row label="Mobile" value={entry.driverMobile || "—"} />
           <Row label="Party" value={entry.partyName || "—"} />

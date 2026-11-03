@@ -52,6 +52,8 @@ public class GateEntryDto
     public string DriverName { get; set; } = "";
     public string? DriverMobile { get; set; }
     public string? PartyName { get; set; }
+    public string? DocumentType { get; set; }
+    public string? DocumentNo { get; set; }
     public string PurposeCode { get; set; } = "";
     public string PurposeName { get; set; } = "";
     public string? Remarks { get; set; }
@@ -107,6 +109,8 @@ public class GateEntryCreateRequest
     public string? DriverName { get; set; }
     public string? DriverMobile { get; set; }
     public string? PartyName { get; set; }
+    public string? DocumentType { get; set; }
+    public string? DocumentNo { get; set; }
     public string? PurposeCode { get; set; }
     public string? Remarks { get; set; }
 }
@@ -137,6 +141,35 @@ public class GateCreateRequest
     public string? FactoryName { get; set; }
     public string? GateCode { get; set; }
     public string? GateName { get; set; }
+}
+
+public class GateDocumentLineDto
+{
+    public string? ItemCode { get; set; }
+    public string? ItemDesc { get; set; }
+    public decimal? Qty { get; set; }
+    public decimal? Rate { get; set; }
+    public decimal? Total { get; set; }
+}
+
+public class GateDocumentDto
+{
+    public string DocumentType { get; set; } = "";
+    public string DocumentNo { get; set; } = "";
+    public string? SupplierName { get; set; }
+    public string? CompanyName { get; set; }
+    public string? Department { get; set; }
+    public string? Currency { get; set; }
+    public decimal? TotalAmount { get; set; }
+    public DateTime? DeliveryDate { get; set; }
+    public List<GateDocumentLineDto> Lines { get; set; } = [];
+}
+
+public class GateDocumentLookupDto
+{
+    public bool NeedsChoice { get; set; }
+    public List<string> Choices { get; set; } = [];
+    public GateDocumentDto? Document { get; set; }
 }
 
 public class GateRegisterQuery
