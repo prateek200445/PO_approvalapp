@@ -1,5 +1,6 @@
 using System.Data;
 using System.Globalization;
+using System.Reflection;
 using ClosedXML.Excel;
 using Microsoft.Data.SqlClient;
 using POApprovalAPI.Models;
@@ -29,6 +30,8 @@ public class GstBillRecoService
         "VEHICLE HIRE CHARGES - WITH GST", "C & F  CHARGES - EXPORT", "OTHER ALL",
         "TCS", "TDS",
     ];
+
+    private static int _billProcedureReady;
 
     private readonly DatabaseService _database;
     private readonly Gst2BSnapshotService _snapshots;
@@ -380,7 +383,7 @@ DECLARE @Code varchar(50) = (
 
 IF OBJECT_ID('dbo.dms_ref', 'U') IS NOT NULL AND OBJECT_ID('dbo.dms_files', 'U') IS NOT NULL
 BEGIN
-    SELECT r.RefType, r.RefEntryNo, COUNT_BIG(*) AS AttachmentCount
+    SELECT @Code AS IndentCode, r.RefType, r.RefEntryNo, COUNT_BIG(*) AS AttachmentCount
     FROM dbo.dms_ref r WITH (NOLOCK)
     INNER JOIN dbo.dms_files f WITH (NOLOCK) ON f.RefId = r.RefId
     WHERE @Code <> ''
@@ -390,12 +393,30 @@ BEGIN
 END
 """;
         cmd.Parameters.Add("@CompanyName", SqlDbType.VarChar, 150).Value = companyName;
+        var years = rows
+            .Where(row => row.VoucherDate.HasValue)
+            .Select(row => FinancialYear(row.VoucherDate!.Value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (years.Count == 0)
+            return;
+        var yearClauses = new List<string>();
+        for (var index = 0; index < years.Count; index++)
+        {
+            var parameterName = "@Fy" + index.ToString(CultureInfo.InvariantCulture);
+            yearClauses.Add($"CHARINDEX('/' + {parameterName} + '/', r.RefEntryNo) > 0");
+            cmd.Parameters.Add(parameterName, SqlDbType.VarChar, 10).Value = years[index];
+        }
+        cmd.CommandText = cmd.CommandText.Replace(
+            "AND r.RefEntryNo LIKE @Code + '/%'",
+            "AND r.RefEntryNo LIKE @Code + '/%' AND (" + string.Join(" OR ", yearClauses) + ")");
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        var references = new List<(string Type, string Entry, int Count)>();
+        var references = new List<(string Code, string Type, string Entry, int Count)>();
         while (await reader.ReadAsync(ct))
         {
             references.Add((
+                Convert.ToString(reader["IndentCode"])?.Trim() ?? "",
                 Convert.ToString(reader["RefType"])?.Trim() ?? "",
                 Convert.ToString(reader["RefEntryNo"])?.Trim() ?? "",
                 Convert.ToInt32(reader["AttachmentCount"], CultureInfo.InvariantCulture)));
@@ -404,16 +425,68 @@ END
         foreach (var row in rows)
         {
             var fy = FinancialYear(row.VoucherDate!.Value);
-            var voucherSuffix = "/" + row.VoucherNo.Trim();
-            var match = references.FirstOrDefault(reference =>
-                reference.Entry.Contains("/" + fy + "/", StringComparison.OrdinalIgnoreCase) &&
-                reference.Entry.EndsWith(voucherSuffix, StringComparison.OrdinalIgnoreCase));
+            var voucherNo = row.VoucherNo.Trim();
+            var voucherType = row.VoucherType.Trim();
+            var candidates = references
+                .Where(reference => AttachmentReferenceMatches(reference.Code, reference.Entry, fy, voucherNo))
+                .ToList();
+            var typed = candidates
+                .Where(reference => AttachmentTypeMatches(reference.Type, reference.Entry, voucherType))
+                .ToList();
+            var pool = typed.Count > 0 ? typed : candidates;
+            var match = pool
+                .OrderBy(reference => reference.Entry.Count(ch => ch == '/'))
+                .ThenBy(reference => reference.Entry, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
             if (match.Count <= 0)
                 continue;
             row.AttachmentCount = match.Count;
             row.DmsRefType = match.Type;
             row.DmsRefEntryNo = match.Entry;
         }
+    }
+
+    /// <summary>
+    /// Company code, financial year, and voucher number must each be their own segment.
+    /// Voucher type is used to choose among those matches, so a different type with the same number is not preferred.
+    /// </summary>
+    private static bool AttachmentReferenceMatches(string code, string entry, string fy, string voucherNo)
+    {
+        if (code.Length == 0 || fy.Length == 0 || voucherNo.Length == 0)
+            return false;
+        var parts = entry.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length < 3)
+            return false;
+        if (!parts[0].Equals(code, StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!parts[^1].Equals(voucherNo, StringComparison.OrdinalIgnoreCase))
+            return false;
+        return parts.Any(part => part.Equals(fy, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool AttachmentTypeMatches(string refType, string entry, string voucherType)
+    {
+        if (voucherType.Length == 0)
+            return false;
+        if (refType.Equals(voucherType, StringComparison.OrdinalIgnoreCase))
+            return true;
+        var wanted = Norm(voucherType);
+        if (wanted.Length == 0)
+            return false;
+        if (Norm(refType) == wanted)
+            return true;
+        return entry.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(part => Norm(part) == wanted || SameVoucherFamily(Norm(part), wanted));
+    }
+
+    private static bool SameVoucherFamily(string left, string right)
+    {
+        if (left.Length < 3 || right.Length < 3)
+            return false;
+        return (left.StartsWith("PUR", StringComparison.Ordinal) && right.StartsWith("PUR", StringComparison.Ordinal))
+            || (left.StartsWith("JOUR", StringComparison.Ordinal) && right.StartsWith("JOUR", StringComparison.Ordinal))
+            || (left.Contains("CREDIT", StringComparison.Ordinal) && right.Contains("CREDIT", StringComparison.Ordinal))
+            || (left.Contains("DEBIT", StringComparison.Ordinal) && right.Contains("DEBIT", StringComparison.Ordinal));
     }
 
     private static string FinancialYear(DateTime date)
@@ -639,103 +712,70 @@ END";
         return -1;
     }
 
+    private static async Task EnsureBillProcedureAsync(SqlConnection connection, CancellationToken ct)
+    {
+        if (Volatile.Read(ref _billProcedureReady) == 1)
+            return;
+        var resourceName = typeof(GstBillRecoService).Assembly.GetManifestResourceNames()
+            .FirstOrDefault(name => name.EndsWith("AppGstRecoBills.sql", StringComparison.Ordinal));
+        if (resourceName == null)
+            throw new InvalidOperationException("The bill reconciliation procedure script is missing from the API.");
+        await using var stream = typeof(GstBillRecoService).Assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException("The bill reconciliation procedure script could not be opened.");
+        using var text = new StreamReader(stream);
+        var sql = await text.ReadToEndAsync(ct);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandTimeout = 60;
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync(ct);
+        Volatile.Write(ref _billProcedureReady, 1);
+    }
+
     private async Task<List<ErpLine>> LoadErpAsync(string company, DateTime from, DateTime to, CancellationToken ct)
     {
         await using var connection = _database.CreateConnection();
+        await EnsureBillProcedureAsync(connection, ct);
         await using var cmd = connection.CreateCommand();
-        cmd.CommandText = "dbo.sp_Columner_All";
+        cmd.CommandText = "dbo.AppGstRecoBills";
         cmd.CommandType = CommandType.StoredProcedure;
         cmd.CommandTimeout = TimeoutSeconds;
         cmd.Parameters.Add("@CompanyName", SqlDbType.VarChar, 100).Value = company;
-        cmd.Parameters.Add("@DateFrom", SqlDbType.Date).Value = from;
-        cmd.Parameters.Add("@DateTo", SqlDbType.Date).Value = to;
-        cmd.Parameters.Add("@LedgerName", SqlDbType.VarChar, 110).Value = DBNull.Value;
-        cmd.Parameters.Add("@VoucherType", SqlDbType.VarChar, 100).Value = DBNull.Value;
-        cmd.Parameters.Add("@AddVoucherType", SqlDbType.VarChar, 100).Value = DBNull.Value;
-        cmd.Parameters.Add("@currType", SqlDbType.VarChar, 10).Value = DBNull.Value;
-        cmd.Parameters.Add("@IntSum", SqlDbType.Int).Value = 0;
+        cmd.Parameters.Add("@FromDate", SqlDbType.DateTime).Value = from;
+        cmd.Parameters.Add("@ToDate", SqlDbType.DateTime).Value = to;
 
         var rows = new List<ErpLine>();
-        var invoices = new List<ErpLine>();
-        var vouchers = new Dictionary<string, ErpLine>(StringComparer.OrdinalIgnoreCase);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var ordinal = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var classic = false;
-        var seen = new List<string>();
-        while (true)
-        {
-            ordinal.Clear();
-            var names = new List<string>();
-            for (var i = 0; i < reader.FieldCount; i++)
-            {
-                names.Add(reader.GetName(i));
-                ordinal[Norm(reader.GetName(i))] = i;
-            }
-            seen.Add(string.Join(", ", names));
-            if (ordinal.ContainsKey("BILLNO") && ordinal.ContainsKey("GSTNO"))
-            {
-                classic = true;
-                break;
-            }
-            if (ordinal.ContainsKey("INVNO") && ordinal.ContainsKey("SUPPLIERGSTNO") && invoices.Count == 0)
-                invoices.AddRange(await ReadInvoiceSummaryAsync(reader, ordinal, company, ct));
-            else if (ordinal.ContainsKey("BILLNO") && ordinal.ContainsKey("VOUCHERNO"))
-                await ReadVoucherSummaryAsync(reader, ordinal, vouchers, ct);
-            if (!await reader.NextResultAsync(ct))
-                break;
-        }
-        if (!classic)
-        {
-            if (invoices.Count == 0)
-                throw new ArgumentException(
-                    "GST summary did not return bill number and GST number columns. Result sets: " +
-                    string.Join(" || ", seen));
-            foreach (var invoice in invoices)
-            {
-                if (vouchers.TryGetValue(NormBill(invoice.BillNo), out var voucher))
-                {
-                    invoice.VoucherType = voucher.VoucherType;
-                    invoice.VoucherNo = voucher.VoucherNo;
-                    invoice.VoucherDate = voucher.VoucherDate;
-                    invoice.RefNo = voucher.RefNo;
-                    invoice.Party = voucher.Party;
-                    invoice.GrossAmount = voucher.GrossAmount;
-                }
-            }
-            return invoices;
-        }
-        var otherAllAt = FindColumn(reader, "OtherAll");
-        var otherAllLedgerAt = FindOtherAllLedger(reader, otherAllAt);
-        if (otherAllAt < 0 && otherAllLedgerAt < 0)
-            throw new ArgumentException("GST summary did not return an Other All column.");
+        for (var i = 0; i < reader.FieldCount; i++)
+            ordinal[Norm(reader.GetName(i))] = i;
+        if (!ordinal.ContainsKey("BILLNO") || !ordinal.ContainsKey("GSTIN") || !ordinal.ContainsKey("BASIC"))
+            throw new ArgumentException("Purchase bills did not return bill number, GSTIN, and basic value.");
 
         while (await reader.ReadAsync(ct))
         {
             var billNo = Text(reader, ordinal, "BILLNO");
-            var gst = NormGst(Text(reader, ordinal, "GSTNO"));
+            var gst = NormGst(Text(reader, ordinal, "GSTIN"));
             var billDate = DateOf(reader, ordinal, "BILLDATE");
-            if (billNo.Length == 0 || gst.Length == 0 || billDate == null)
+            if (billNo.Length == 0 || gst.Length == 0 || billDate == null || !InRange(billDate.Value, from, to))
                 continue;
 
-            var cgst = SumTax(reader, ordinal, "CGST", input: true);
-            var sgst = SumTax(reader, ordinal, "SGST", input: true);
-            var igst = SumTax(reader, ordinal, "IGST", input: true);
+            var basic = MoneyAt(reader, ordinal, "BASIC") ?? 0;
+            var cgst = MoneyAt(reader, ordinal, "CGST") ?? 0;
+            var sgst = MoneyAt(reader, ordinal, "SGST") ?? 0;
+            var igst = MoneyAt(reader, ordinal, "IGST") ?? 0;
             if (!KeepErpTax(cgst, sgst, igst))
                 continue;
 
-            var ledgers = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var name in LedgerColumns)
-            {
-                if (Norm(name) == "OTHERALL" && otherAllLedgerAt >= 0)
-                {
-                    ledgers[name] = Money(reader, otherAllLedgerAt);
-                    continue;
-                }
-                if (ordinal.TryGetValue(Norm(name), out var at))
-                    ledgers[name] = Money(reader, at);
-            }
-
-            var taxableCandidates = TaxableCandidatesWithFreight(reader, otherAllAt, otherAllLedgerAt);
+            var freight = MoneyAt(reader, ordinal, "FREIGHT") ?? 0;
+            var other = MoneyAt(reader, ordinal, "OTHERCHARGE") ?? 0;
+            var loading = MoneyAt(reader, ordinal, "LOADING") ?? 0;
+            var packing = MoneyAt(reader, ordinal, "PACKING") ?? 0;
+            var charges = Math.Abs(freight) + Math.Abs(other) + Math.Abs(loading) + Math.Abs(packing);
+            var sign = basic < 0 || (basic == 0 && cgst + sgst + igst < 0) ? -1m : 1m;
+            var basicAbs = Math.Abs(basic);
+            var candidates = new List<decimal> { sign * basicAbs };
+            if (charges > TaxEpsilon)
+                candidates.Add(sign * (basicAbs + charges));
             rows.Add(new ErpLine
             {
                 CompanyName = company,
@@ -751,19 +791,195 @@ END";
                 RefNo = Text(reader, ordinal, "REFNO"),
                 Ledger = Text(reader, ordinal, "LEDGER"),
                 GrossAmount = MoneyAt(reader, ordinal, "GROSSAMOUNT"),
-                ValueAmount = MoneyAt(reader, ordinal, "VALUE"),
-                Taxable = taxableCandidates[0],
-                TaxableCandidates = taxableCandidates,
-                TotalC = MoneyAt(reader, ordinal, "TOTALC"),
-                OtherAll = otherAllAt >= 0 ? Money(reader, otherAllAt) : null,
+                ValueAmount = basic,
+                Taxable = candidates[0],
+                TaxableCandidates = candidates,
+                OtherAll = other + loading + packing,
                 Cgst = cgst,
                 Sgst = sgst,
                 Igst = igst,
-                Ledgers = ledgers,
+                Ledgers = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["FREIGHT INWARD EXPENSE (WITH GST)"] = freight,
+                    ["OTHER ALL"] = other + loading + packing,
+                },
             });
         }
 
+        await reader.CloseAsync();
+        rows.AddRange(await LoadAdjustmentVouchersAsync(connection, company, from, to, ct));
+        return NetSignedBills(rows);
+    }
+
+    /// <summary>
+    /// Journal and debit-note vouchers carry the reversals. Reading them from the voucher
+    /// tables avoids the full GST summary. A later net combines a reversal with the purchase
+    /// that has the same bill number, date, and GSTIN.
+    /// </summary>
+    private static async Task<List<ErpLine>> LoadAdjustmentVouchersAsync(
+        SqlConnection connection,
+        string company,
+        DateTime from,
+        DateTime to,
+        CancellationToken ct)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandTimeout = TimeoutSeconds;
+        cmd.CommandText = """
+SELECT
+    ISNULL(j.JournalType, 'Journal') AS VoucherType,
+    CONVERT(varchar(40), j.JournalNo) AS VoucherNo,
+    j.sysdate AS VoucherDate,
+    MAX(CASE WHEN j.BillDate IS NOT NULL THEN LTRIM(RTRIM(ISNULL(j.MRNo, ''))) ELSE '' END) AS BillNo,
+    MAX(j.BillDate) AS BillDate,
+    MAX(party.PartyName) AS Party,
+    MAX(party.Gstin) AS Gstin,
+    SUM(CASE WHEN (j.PartyName LIKE '%CGST%INPUT%' OR j.PartyName LIKE '%INPUT%CGST%') AND j.PartyName NOT LIKE '%OUTPUT%'
+        THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS Cgst,
+    SUM(CASE WHEN (j.PartyName LIKE '%SGST%INPUT%' OR j.PartyName LIKE '%INPUT%SGST%') AND j.PartyName NOT LIKE '%OUTPUT%'
+        THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS Sgst,
+    SUM(CASE WHEN (j.PartyName LIKE '%IGST%INPUT%' OR j.PartyName LIKE '%INPUT%IGST%') AND j.PartyName NOT LIKE '%OUTPUT%'
+        THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS Igst,
+    SUM(CASE WHEN j.PartyName NOT LIKE '%GST%' AND j.PartyName NOT LIKE 'TCS%' AND j.PartyName NOT LIKE 'TDS%'
+              AND (lm.Category IS NULL OR lm.Category NOT IN ('Customer-Supplier', 'Customer', 'Supplier', 'Service Provider', 'Bank Accounts'))
+        THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS Taxable
+FROM Journal j WITH (NOLOCK)
+LEFT JOIN LedgerMaster lm WITH (NOLOCK)
+    ON lm.CompanyName = j.CompanyName AND lm.LedgerName = j.PartyName
+OUTER APPLY (
+    SELECT TOP 1 p.PartyName, LTRIM(RTRIM(ISNULL(pl.NewGSTNo, ''))) AS Gstin
+    FROM Journal p WITH (NOLOCK)
+    INNER JOIN LedgerMaster pl WITH (NOLOCK)
+        ON pl.CompanyName = p.CompanyName AND pl.LedgerName = p.PartyName
+    WHERE p.CompanyName = j.CompanyName AND p.JournalNo = j.JournalNo AND p.sysdate = j.sysdate
+      AND pl.Category IN ('Customer-Supplier', 'Customer', 'Supplier', 'Service Provider')
+      AND LTRIM(RTRIM(ISNULL(pl.NewGSTNo, ''))) <> ''
+    ORDER BY ABS(ISNULL(p.Debit, 0) - ISNULL(p.Credit, 0)) DESC
+) party
+WHERE j.CompanyName = @Company
+  AND j.sysdate >= @From AND j.sysdate < @ToExclusive
+GROUP BY j.JournalType, j.JournalNo, j.sysdate
+
+UNION ALL
+
+SELECT
+    'Debit Note' AS VoucherType,
+    CONVERT(varchar(40), d.DebitNoteNumber) AS VoucherNo,
+    d.sysdate AS VoucherDate,
+    LTRIM(RTRIM(ISNULL(d.BillNo, ''))) AS BillNo,
+    d.billDate AS BillDate,
+    d.PartyName AS Party,
+    LTRIM(RTRIM(ISNULL(lm.NewGSTNo, ''))) AS Gstin,
+    -ISNULL(i.Cgst, 0) AS Cgst,
+    -ISNULL(i.Sgst, 0) AS Sgst,
+    -ISNULL(i.Igst, 0) AS Igst,
+    -ISNULL(i.Taxable, 0) AS Taxable
+FROM DebitNote d WITH (NOLOCK)
+LEFT JOIN LedgerMaster lm WITH (NOLOCK)
+    ON lm.CompanyName = d.CompanyName AND lm.LedgerName = d.PartyName
+LEFT JOIN (
+    SELECT CompanyName, DebitNoteNumber,
+           SUM(TRY_CONVERT(decimal(18, 2), CGSTAmount)) AS Cgst,
+           SUM(TRY_CONVERT(decimal(18, 2), SGSTAmount)) AS Sgst,
+           SUM(TRY_CONVERT(decimal(18, 2), IGSTAmount)) AS Igst,
+           SUM(TRY_CONVERT(decimal(18, 2), AmountDifference)) AS Taxable
+    FROM DebitNoteItem WITH (NOLOCK)
+    GROUP BY CompanyName, DebitNoteNumber
+) i ON i.CompanyName = d.CompanyName AND i.DebitNoteNumber = d.DebitNoteNumber
+WHERE d.CompanyName = @Company
+  AND d.sysdate >= @From AND d.sysdate < @ToExclusive;
+""";
+        cmd.Parameters.Add("@Company", SqlDbType.VarChar, 100).Value = company;
+        cmd.Parameters.Add("@From", SqlDbType.DateTime).Value = from;
+        cmd.Parameters.Add("@ToExclusive", SqlDbType.DateTime).Value = to.Date.AddDays(1);
+
+        var rows = new List<ErpLine>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var ordinal = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < reader.FieldCount; i++)
+            ordinal[Norm(reader.GetName(i))] = i;
+        while (await reader.ReadAsync(ct))
+        {
+            var billNo = Text(reader, ordinal, "BILLNO");
+            var gst = NormGst(Text(reader, ordinal, "GSTIN"));
+            var billDate = DateOf(reader, ordinal, "BILLDATE");
+            if (billNo.Length == 0 || gst.Length == 0 || billDate == null || !InRange(billDate.Value, from, to))
+                continue;
+            var cgst = MoneyAt(reader, ordinal, "CGST") ?? 0;
+            var sgst = MoneyAt(reader, ordinal, "SGST") ?? 0;
+            var igst = MoneyAt(reader, ordinal, "IGST") ?? 0;
+            if (!KeepErpTax(cgst, sgst, igst))
+                continue;
+            var taxable = MoneyAt(reader, ordinal, "TAXABLE") ?? 0;
+            rows.Add(new ErpLine
+            {
+                CompanyName = company,
+                BillNo = billNo,
+                BillParts = BillParts(billNo),
+                BillDate = billDate.Value,
+                GstNo = gst,
+                FullKey = Key(NormBill(billNo), billDate.Value, gst),
+                Party = Text(reader, ordinal, "PARTY"),
+                VoucherType = Text(reader, ordinal, "VOUCHERTYPE"),
+                VoucherNo = Text(reader, ordinal, "VOUCHERNO"),
+                VoucherDate = DateOf(reader, ordinal, "VOUCHERDATE"),
+                RefNo = billNo,
+                GrossAmount = taxable + cgst + sgst + igst,
+                ValueAmount = taxable,
+                Taxable = taxable,
+                TaxableCandidates = [taxable],
+                Cgst = cgst,
+                Sgst = sgst,
+                Igst = igst,
+                Ledgers = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase),
+            });
+        }
         return rows;
+    }
+
+    /// <summary>
+    /// Adds a reversal to the purchase with the same bill. Equal and opposite GST cancels the bill.
+    /// A debit note with its own bill number stays on its own and can match the portal debit note.
+    /// </summary>
+    private static List<ErpLine> NetSignedBills(List<ErpLine> rows)
+    {
+        var netted = new List<ErpLine>();
+        foreach (var group in rows.GroupBy(row => row.FullKey, StringComparer.OrdinalIgnoreCase))
+        {
+            var items = group.ToList();
+            if (items.Count == 1)
+            {
+                netted.Add(items[0]);
+                continue;
+            }
+
+            var cgst = items.Sum(row => row.Cgst);
+            var sgst = items.Sum(row => row.Sgst);
+            var igst = items.Sum(row => row.Igst);
+            if (!KeepErpTax(cgst, sgst, igst))
+                continue;
+
+            var taxable = items.Sum(row => row.Taxable);
+            var keeper = items
+                .OrderByDescending(row => IsAdjustmentVoucher(row.VoucherType) ? 0 : 1)
+                .ThenByDescending(row => Math.Abs(row.Cgst) + Math.Abs(row.Sgst) + Math.Abs(row.Igst))
+                .First();
+            keeper.Cgst = cgst;
+            keeper.Sgst = sgst;
+            keeper.Igst = igst;
+            keeper.Taxable = taxable;
+            keeper.TaxableCandidates = [taxable];
+            keeper.ValueAmount = taxable;
+            keeper.GrossAmount = items.Sum(row => row.GrossAmount ?? 0);
+            netted.Add(keeper);
+        }
+        return netted;
+    }
+
+    private static bool IsAdjustmentVoucher(string voucherType)
+    {
+        var token = Norm(voucherType);
+        return token.Contains("JOURNAL", StringComparison.Ordinal) || token.Contains("DEBIT", StringComparison.Ordinal);
     }
 
     private static async Task<List<ErpLine>> ReadInvoiceSummaryAsync(
@@ -812,25 +1028,61 @@ END";
     private static async Task ReadVoucherSummaryAsync(
         SqlDataReader reader,
         Dictionary<string, int> ordinal,
-        Dictionary<string, ErpLine> vouchers,
+        Dictionary<string, List<ErpLine>> vouchers,
+        DateTime from,
+        DateTime to,
         CancellationToken ct)
     {
+        var fromYear = FinancialYear(from);
+        var toYear = FinancialYear(to);
         while (await reader.ReadAsync(ct))
         {
             var billNo = NormBill(Text(reader, ordinal, "BILLNO"));
-            if (billNo.Length == 0 || vouchers.ContainsKey(billNo))
+            var voucherDate = DateOf(reader, ordinal, "REFDATE");
+            if (billNo.Length == 0 || voucherDate is null)
                 continue;
-            vouchers[billNo] = new ErpLine
+            var year = FinancialYear(voucherDate.Value);
+            if (!year.Equals(fromYear, StringComparison.Ordinal) && !year.Equals(toYear, StringComparison.Ordinal))
+                continue;
+            if (!vouchers.TryGetValue(billNo, out var list))
+            {
+                list = [];
+                vouchers[billNo] = list;
+            }
+            list.Add(new ErpLine
             {
                 BillNo = billNo,
                 VoucherType = Text(reader, ordinal, "VOUCHERTYPE"),
                 VoucherNo = Text(reader, ordinal, "VOUCHERNO"),
-                VoucherDate = DateOf(reader, ordinal, "REFDATE"),
+                VoucherDate = voucherDate,
                 RefNo = Text(reader, ordinal, "REFNO"),
                 Party = Text(reader, ordinal, "PARTY"),
                 GrossAmount = MoneyAt(reader, ordinal, "GROSSAMOUNT"),
-            };
+            });
         }
+    }
+
+    /// <summary>
+    /// Keeps the voucher from the same financial year as the bill, closest to the bill date.
+    /// A repeated bill number must not inherit the first historical voucher.
+    /// </summary>
+    private static ErpLine? SelectVoucher(IReadOnlyList<ErpLine> candidates, DateTime billDate)
+    {
+        var year = FinancialYear(billDate);
+        ErpLine? best = null;
+        var bestDistance = int.MaxValue;
+        foreach (var candidate in candidates)
+        {
+            if (candidate.VoucherDate is not DateTime date || FinancialYear(date) != year)
+                continue;
+            var distance = Math.Abs((date.Date - billDate.Date).Days);
+            if (distance < bestDistance)
+            {
+                best = candidate;
+                bestDistance = distance;
+            }
+        }
+        return best;
     }
 
     private static List<GstBillRecoRow> BuildRows(
@@ -1423,6 +1675,29 @@ END";
         public decimal CgstSgst { get; set; }
         public string Period { get; set; } = "";
         public string Month { get; set; } = "";
+    }
+
+    private sealed class PurchaseBill
+    {
+        public string BillNo { get; set; } = "";
+        public DateTime BillDate { get; set; }
+        public string GstNo { get; set; } = "";
+        public string Party { get; set; } = "";
+        public string Ledger { get; set; } = "";
+        public string VoucherType { get; set; } = "";
+        public string VoucherNo { get; set; } = "";
+        public DateTime? VoucherDate { get; set; }
+        public string RefNo { get; set; } = "";
+        public decimal VoucherWeight { get; set; } = -1;
+        public decimal Basic { get; set; }
+        public decimal Cgst { get; set; }
+        public decimal Sgst { get; set; }
+        public decimal Igst { get; set; }
+        public decimal Freight { get; set; }
+        public decimal Other { get; set; }
+        public decimal Loading { get; set; }
+        public decimal Packing { get; set; }
+        public decimal GrossAmount { get; set; }
     }
 
     private sealed class ErpLine

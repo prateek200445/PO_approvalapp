@@ -35,6 +35,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Scripts\CreateGateVehicle.sql" />
+    <EmbeddedResource Include="Sql\AppGstRecoBills.sql" />
   </ItemGroup>
 
   <ItemGroup>
