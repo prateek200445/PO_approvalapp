@@ -127,7 +127,9 @@ ORDER BY GroupLabel";
         if (inRange.Count == 0)
             throw new ArgumentException($"Saved {saved} portal bills. None of them fall in the selected dates.");
 
-        var erpParts = await Task.WhenAll(matchingMembers.Select(member => LoadErpAsync(member.Name, from, to, ct)));
+        var billFrom = PreviousFinancialYearStart(from);
+        var earlier = await LoadEarlierPortalAsync(company, billFrom, from, inRange, ct);
+        var erpParts = await Task.WhenAll(matchingMembers.Select(member => LoadErpAsync(member.Name, from, to, billFrom, ct)));
         var erpRows = erpParts.SelectMany(part => part).ToList();
 
         var result = new GstBillRecoResult
@@ -146,13 +148,15 @@ ORDER BY GroupLabel";
         if (matchingMembers.Count > 1)
             result.Warning = $"Combined {matchingMembers.Count} ERP units in {company} that use GSTIN {buyerGstin}.";
 
-        result.Rows = BuildRows(company, erpRows, inRange, amountTolerance);
+        result.Rows = BuildRows(company, erpRows, inRange, amountTolerance, earlier);
+        NoteEarlierMatches(result, from);
         await AddAttachmentReferencesAsync(result.Rows, ct);
         result.Matched = result.Rows.Count(r => r.Status == "Matched");
         result.PotentialMatch = result.Rows.Count(r => r.Status == "Potential match");
         result.Mismatch = result.Rows.Count(r => r.Status == "Mismatch");
         result.MissingInErp = result.Rows.Count(r => r.Status == "Missing in ERP");
         result.MissingIn2B = result.Rows.Count(r => r.Status == "Missing in 2B");
+        result.DateDifference = result.Rows.Count(r => r.Status == "Matched" && r.DateDiffers);
         return result;
     }
 
@@ -186,7 +190,9 @@ ORDER BY GroupLabel";
         if (matchingMembers.Count == 0)
             throw new ArgumentException($"No ERP units in {company} use the stored GSTIN.");
 
-        var erpParts = await Task.WhenAll(matchingMembers.Select(member => LoadErpAsync(member.Name, from, to, ct)));
+        var billFrom = PreviousFinancialYearStart(from);
+        var earlier = await LoadEarlierPortalAsync(company, billFrom, from, parsed.Rows, ct);
+        var erpParts = await Task.WhenAll(matchingMembers.Select(member => LoadErpAsync(member.Name, from, to, billFrom, ct)));
         var erpRows = erpParts.SelectMany(part => part).ToList();
         var result = new GstBillRecoResult
         {
@@ -202,13 +208,15 @@ ORDER BY GroupLabel";
         };
         if (matchingMembers.Count > 1)
             result.Warning = $"Combined {matchingMembers.Count} ERP units in {company} that use the stored GSTIN.";
-        result.Rows = BuildRows(company, erpRows, parsed.Rows, amountTolerance);
+        result.Rows = BuildRows(company, erpRows, parsed.Rows, amountTolerance, earlier);
+        NoteEarlierMatches(result, from);
         await AddAttachmentReferencesAsync(result.Rows, ct);
         result.Matched = result.Rows.Count(r => r.Status == "Matched");
         result.PotentialMatch = result.Rows.Count(r => r.Status == "Potential match");
         result.Mismatch = result.Rows.Count(r => r.Status == "Mismatch");
         result.MissingInErp = result.Rows.Count(r => r.Status == "Missing in ERP");
         result.MissingIn2B = result.Rows.Count(r => r.Status == "Missing in 2B");
+        result.DateDifference = result.Rows.Count(r => r.Status == "Matched" && r.DateDiffers);
         return result;
     }
 
@@ -258,7 +266,7 @@ ORDER BY GroupLabel";
 
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add("Bill Reco");
-        var headers = new List<string> { "Status", "Taxable difference", "2B taxable", "2B IGST", "2B CGST + SGST", "Document type" };
+        var headers = new List<string> { "Status", "How matched", "2B bill no", "Date differs", "2B bill date", "Taxable difference", "2B taxable", "2B IGST", "2B CGST + SGST", "Document type" };
         headers.AddRange(FormatColumns);
 
         for (var c = 0; c < headers.Count; c++)
@@ -277,6 +285,10 @@ ORDER BY GroupLabel";
             var values = new List<object?>
             {
                 row.Status,
+                row.MatchReason,
+                row.TwoBBillNo,
+                row.DateDiffers ? "Yes" : "",
+                row.TwoBBillDate,
                 row.Difference,
                 row.TwoBTaxable,
                 row.TwoBIgst,
@@ -493,6 +505,59 @@ END
     {
         var start = date.Month >= 4 ? date.Year : date.Year - 1;
         return $"{start % 100:00}-{(start + 1) % 100:00}";
+    }
+
+    private static DateTime PreviousFinancialYearStart(DateTime date)
+    {
+        var startYear = date.Month >= 4 ? date.Year : date.Year - 1;
+        return new DateTime(startYear - 1, 4, 1);
+    }
+
+    /// <summary>
+    /// Stored 2B from the previous financial year. It can match a bill booked in the selected
+    /// months, and an unmatched invoice from those earlier months is not reported as missing.
+    /// </summary>
+    private async Task<List<TwoBLine>> LoadEarlierPortalAsync(
+        string company,
+        DateTime billFrom,
+        DateTime from,
+        IReadOnlyList<TwoBLine> current,
+        CancellationToken ct)
+    {
+        if (billFrom.Date >= from.Date)
+            return [];
+        var documents = await _snapshots.GetDocumentsAsync(company, billFrom, from.AddDays(-1), purchaseOnly: true, ct);
+        var rows = FromDocuments(documents).Rows
+            .Where(row => current.All(existing => !string.Equals(existing.Key, row.Key, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        var nextId = current.Count == 0 ? 1 : current.Max(row => row.Id) + 1;
+        foreach (var row in rows)
+            row.Id = nextId++;
+        return rows;
+    }
+
+    private static void NoteEarlierMatches(GstBillRecoResult result, DateTime from)
+    {
+        var monthStart = new DateTime(from.Year, from.Month, 1);
+        var used = result.Rows.Count(row =>
+            row.Status is "Matched" or "Potential match" or "Mismatch"
+            && PeriodBefore(row.TwoBPeriod, monthStart));
+        if (used == 0)
+            return;
+        var note = $"{used} bill(s) booked in this range matched GSTR-2B from the previous financial year. Unmatched invoices from those months are not listed as missing in ERP.";
+        result.Warning = string.IsNullOrEmpty(result.Warning) ? note : result.Warning + " " + note;
+    }
+
+    private static bool PeriodBefore(string period, DateTime monthStart)
+    {
+        if (string.IsNullOrWhiteSpace(period))
+            return false;
+        foreach (var part in period.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (TryPeriodMonth(part, out var month) && month < monthStart)
+                return true;
+        }
+        return false;
     }
 
     private async Task<string> CompanyNameForGstinAsync(string gstin, CancellationToken ct)
@@ -731,7 +796,7 @@ END";
         Volatile.Write(ref _billProcedureReady, 1);
     }
 
-    private async Task<List<ErpLine>> LoadErpAsync(string company, DateTime from, DateTime to, CancellationToken ct)
+    private async Task<List<ErpLine>> LoadErpAsync(string company, DateTime from, DateTime to, DateTime billFrom, CancellationToken ct)
     {
         await using var connection = _database.CreateConnection();
         await EnsureBillProcedureAsync(connection, ct);
@@ -742,6 +807,8 @@ END";
         cmd.Parameters.Add("@CompanyName", SqlDbType.VarChar, 100).Value = company;
         cmd.Parameters.Add("@FromDate", SqlDbType.DateTime).Value = from;
         cmd.Parameters.Add("@ToDate", SqlDbType.DateTime).Value = to;
+        if (billFrom.Date < from.Date)
+            cmd.Parameters.Add("@BillFrom", SqlDbType.DateTime).Value = billFrom.Date;
 
         var rows = new List<ErpLine>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -756,7 +823,7 @@ END";
             var billNo = Text(reader, ordinal, "BILLNO");
             var gst = NormGst(Text(reader, ordinal, "GSTIN"));
             var billDate = DateOf(reader, ordinal, "BILLDATE");
-            if (billNo.Length == 0 || gst.Length == 0 || billDate == null || !InRange(billDate.Value, from, to))
+            if (billNo.Length == 0 || gst.Length == 0 || billDate == null || !InRange(billDate.Value, billFrom, to))
                 continue;
 
             var basic = MoneyAt(reader, ordinal, "BASIC") ?? 0;
@@ -807,7 +874,7 @@ END";
         }
 
         await reader.CloseAsync();
-        rows.AddRange(await LoadAdjustmentVouchersAsync(connection, company, from, to, ct));
+        rows.AddRange(await LoadAdjustmentVouchersAsync(connection, company, from, to, billFrom, ct));
         return NetSignedBills(rows);
     }
 
@@ -821,6 +888,7 @@ END";
         string company,
         DateTime from,
         DateTime to,
+        DateTime billFrom,
         CancellationToken ct)
     {
         await using var cmd = connection.CreateCommand();
@@ -903,7 +971,7 @@ WHERE d.CompanyName = @Company
             var billNo = Text(reader, ordinal, "BILLNO");
             var gst = NormGst(Text(reader, ordinal, "GSTIN"));
             var billDate = DateOf(reader, ordinal, "BILLDATE");
-            if (billNo.Length == 0 || gst.Length == 0 || billDate == null || !InRange(billDate.Value, from, to))
+            if (billNo.Length == 0 || gst.Length == 0 || billDate == null || !InRange(billDate.Value, billFrom, to))
                 continue;
             var cgst = MoneyAt(reader, ordinal, "CGST") ?? 0;
             var sgst = MoneyAt(reader, ordinal, "SGST") ?? 0;
@@ -1089,46 +1157,28 @@ WHERE d.CompanyName = @Company
         string company,
         List<ErpLine> erpRows,
         List<TwoBLine> twoBRows,
-        decimal tolerance)
+        decimal tolerance,
+        List<TwoBLine>? earlierRows = null)
     {
-        var twoBGroups = twoBRows
-            .GroupBy(r => r.Key)
-            .ToDictionary(g => g.Key, g => g.ToList());
-
         var claimed = new HashSet<int>();
         var assignments = new List<(ErpLine Erp, List<TwoBLine> Hits)>();
-        var pendingParts = new List<ErpLine>();
-        foreach (var group in erpRows.GroupBy(row => row.FullKey))
+        AssignPortalHits(erpRows, twoBRows, claimed, assignments, tolerance);
+        if (earlierRows is { Count: > 0 })
         {
-            if (twoBGroups.TryGetValue(group.Key, out var hits))
+            var stillOpen = new List<ErpLine>();
+            assignments.RemoveAll(item =>
             {
-                foreach (var hit in hits)
-                    claimed.Add(hit.Id);
-                foreach (var erp in group)
-                    assignments.Add((erp, hits));
-            }
-            else
-            {
-                pendingParts.AddRange(group);
-            }
+                if (item.Hits.Count > 0)
+                    return false;
+                stillOpen.Add(item.Erp);
+                return true;
+            });
+            if (stillOpen.Count > 0)
+                AssignPortalHits(stillOpen, earlierRows, claimed, assignments, tolerance);
         }
 
-        foreach (var erp in pendingParts)
-        {
-            var hits = new List<TwoBLine>();
-            foreach (var part in erp.BillParts)
-            {
-                if (part == NormBill(erp.BillNo))
-                    continue;
-                if (!twoBGroups.TryGetValue(Key(part, erp.BillDate, erp.GstNo), out var partHits))
-                    continue;
-                hits.AddRange(partHits.Where(hit => !claimed.Contains(hit.Id)));
-            }
-            hits = hits.Distinct().ToList();
-            foreach (var hit in hits)
-                claimed.Add(hit.Id);
-            assignments.Add((erp, hits));
-        }
+        var portalPool = earlierRows == null ? twoBRows : twoBRows.Concat(earlierRows).ToList();
+        LinkExceptions(assignments, portalPool, claimed, tolerance);
 
         var clusters = new List<List<(ErpLine Erp, List<TwoBLine> Hits)>>();
         var bySignature = new Dictionary<string, List<(ErpLine Erp, List<TwoBLine> Hits)>>();
@@ -1162,7 +1212,7 @@ WHERE d.CompanyName = @Company
             SelectBestTaxableCandidates(cluster, twoAbs);
             var erpAbs = cluster.Sum(c => Math.Abs(c.Erp.Taxable));
             var difference = Math.Round(erpAbs - twoAbs, 2);
-            var status = hits.Count == 0
+            var baseStatus = hits.Count == 0
                 ? "Missing in 2B"
                 : Math.Abs(difference) <= tolerance
                     ? "Matched"
@@ -1173,19 +1223,26 @@ WHERE d.CompanyName = @Company
             var twoBTaxable = hits.Count == 0 ? (decimal?)null : hits.Sum(h => h.Taxable);
             var twoBIgst = hits.Count == 0 ? (decimal?)null : hits.Sum(h => h.Igst);
             var twoBCgst = hits.Count == 0 ? (decimal?)null : hits.Sum(h => h.CgstSgst);
+            var portalDates = hits.Select(hit => hit.BillDate.Date).Distinct().ToList();
 
             foreach (var item in cluster)
             {
                 var erp = item.Erp;
+                var datesDiffer = portalDates.Count > 0 && portalDates.Any(date => date != erp.BillDate.Date);
+                var lineStatus = ExceptionStatus(baseStatus, erp.MatchReason);
                 output.Add(new GstBillRecoRow
                 {
-                    Status = status,
+                    Status = lineStatus,
+                    MatchReason = erp.MatchReason,
+                    TwoBBillNo = string.Join(", ", hits.Select(hit => hit.BillNo).Where(bill => bill.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)),
                     CompanyName = erp.CompanyName,
                     VoucherType = erp.VoucherType,
                     VoucherNo = erp.VoucherNo,
                     VoucherDate = erp.VoucherDate,
                     RefNo = erp.RefNo,
                     BillDate = erp.BillDate,
+                    TwoBBillDate = portalDates.Count == 0 ? null : portalDates[0],
+                    DateDiffers = datesDiffer,
                     BillNo = erp.BillNo,
                     Ledger = erp.Ledger,
                     Party = erp.Party,
@@ -1614,6 +1671,544 @@ WHERE d.CompanyName = @Company
     private static string Key(string billNo, DateTime billDate, string gstNo)
         => billNo + "|" + billDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "|" + gstNo;
 
+    /// <summary>
+    /// Comparison form of a bill number. Slashes, dashes, and other punctuation are ignored.
+    /// A number with fewer than three letters or digits keeps its exact text.
+    /// </summary>
+    private static string MatchBill(string? value)
+    {
+        var text = NormBill(value);
+        var alnum = new string(text.Where(char.IsLetterOrDigit).ToArray());
+        return alnum.Length >= 3 ? alnum : text;
+    }
+
+    private static string MatchDateKey(string billNo, DateTime billDate, string gstNo)
+        => MatchBill(billNo) + "|" + billDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "|" + gstNo;
+
+    /// <summary>
+    /// Matches ERP bills to one portal pool. Unmatched ERP rows stay in the assignment list with no hits.
+    /// </summary>
+    private static void AssignPortalHits(
+        List<ErpLine> erpRows,
+        List<TwoBLine> twoBRows,
+        HashSet<int> claimed,
+        List<(ErpLine Erp, List<TwoBLine> Hits)> assignments,
+        decimal tolerance)
+    {
+        var twoBGroups = twoBRows
+            .GroupBy(r => r.Key)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var pending = new List<ErpLine>();
+        foreach (var group in erpRows.GroupBy(row => row.FullKey))
+        {
+            if (twoBGroups.TryGetValue(group.Key, out var hits))
+            {
+                foreach (var hit in hits)
+                    claimed.Add(hit.Id);
+                foreach (var erp in group)
+                    assignments.Add((erp, hits));
+            }
+            else
+            {
+                pending.AddRange(group);
+            }
+        }
+
+        var twoBByMatchDate = twoBRows
+            .GroupBy(row => MatchDateKey(row.BillNo, row.BillDate, row.GstNo))
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+        var afterNumber = new List<ErpLine>();
+        foreach (var group in pending.GroupBy(row => MatchDateKey(row.BillNo, row.BillDate, row.GstNo)))
+        {
+            if (twoBByMatchDate.TryGetValue(group.Key, out var hits))
+            {
+                var open = hits.Where(hit => !claimed.Contains(hit.Id)).ToList();
+                if (open.Count > 0)
+                {
+                    foreach (var hit in open)
+                        claimed.Add(hit.Id);
+                    foreach (var erp in group)
+                        assignments.Add((erp, open));
+                    continue;
+                }
+            }
+            afterNumber.AddRange(group);
+        }
+
+        var afterParts = new List<ErpLine>();
+        foreach (var erp in afterNumber)
+        {
+            var hits = new List<TwoBLine>();
+            foreach (var part in erp.BillParts)
+            {
+                if (MatchBill(part) == MatchBill(erp.BillNo))
+                    continue;
+                if (twoBGroups.TryGetValue(Key(part, erp.BillDate, erp.GstNo), out var exactParts))
+                    hits.AddRange(exactParts.Where(hit => !claimed.Contains(hit.Id)));
+                if (twoBByMatchDate.TryGetValue(MatchDateKey(part, erp.BillDate, erp.GstNo), out var looseParts))
+                    hits.AddRange(looseParts.Where(hit => !claimed.Contains(hit.Id)));
+            }
+            hits = hits.Distinct().ToList();
+            if (hits.Count == 0)
+            {
+                afterParts.Add(erp);
+                continue;
+            }
+            foreach (var hit in hits)
+                claimed.Add(hit.Id);
+            assignments.Add((erp, hits));
+        }
+
+        AssignNearestDates(afterParts, twoBRows, claimed, assignments, tolerance);
+    }
+
+    private const string ReasonRelated = "Related bill number";
+    private const string ReasonAsset = "Asset voucher";
+    private const string ReasonAmount = "Same amount, different bill";
+
+    /// <summary>
+    /// Pairs rows that are still missing on both sides when they are the same document written
+    /// differently. Each accepted pair keeps a reason so the screen can show how it was handled.
+    /// </summary>
+    private static void LinkExceptions(
+        List<(ErpLine Erp, List<TwoBLine> Hits)> assignments,
+        List<TwoBLine> portalRows,
+        HashSet<int> claimed,
+        decimal tolerance)
+    {
+        var open = new List<ErpLine>();
+        assignments.RemoveAll(item =>
+        {
+            if (item.Hits.Count > 0)
+                return false;
+            open.Add(item.Erp);
+            return true;
+        });
+        var portal = portalRows.Where(row => !claimed.Contains(row.Id)).ToList();
+        if (open.Count == 0 || portal.Count == 0)
+        {
+            foreach (var erp in open)
+                assignments.Add((erp, []));
+            return;
+        }
+
+        LinkRelatedBills(open, portal, claimed, assignments, tolerance);
+        LinkAssetVouchers(open, portal, claimed, assignments, tolerance);
+        LinkSameAmount(open, portal, claimed, assignments, tolerance);
+        foreach (var erp in open)
+            assignments.Add((erp, []));
+    }
+
+    private static void LinkRelatedBills(
+        List<ErpLine> open,
+        List<TwoBLine> portal,
+        HashSet<int> claimed,
+        List<(ErpLine Erp, List<TwoBLine> Hits)> assignments,
+        decimal tolerance)
+    {
+        var pairs = new List<(int Rank, int Distance, decimal Gap, int ErpIndex, int PortalIndex)>();
+        for (var erpIndex = 0; erpIndex < open.Count; erpIndex++)
+        {
+            var erp = open[erpIndex];
+            for (var portalIndex = 0; portalIndex < portal.Count; portalIndex++)
+            {
+                var hit = portal[portalIndex];
+                if (!string.Equals(erp.GstNo, hit.GstNo, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (!BillsLookRelated(erp.BillNo, hit.BillNo))
+                    continue;
+                if (!RelatedTaxOk(erp, hit, tolerance))
+                    continue;
+                var gap = Math.Abs(Math.Abs(erp.Taxable) - Math.Abs(hit.Taxable));
+                pairs.Add((gap <= tolerance ? 0 : 1, Math.Abs((erp.BillDate.Date - hit.BillDate.Date).Days), gap, erpIndex, portalIndex));
+            }
+        }
+
+        TakeGreedyPairs(open, portal, claimed, assignments, pairs, ReasonRelated);
+    }
+
+    private static void LinkAssetVouchers(
+        List<ErpLine> open,
+        List<TwoBLine> portal,
+        HashSet<int> claimed,
+        List<(ErpLine Erp, List<TwoBLine> Hits)> assignments,
+        decimal tolerance)
+    {
+        var pairs = new List<(ErpLine Erp, TwoBLine Hit)>();
+        foreach (var erp in open)
+        {
+            if (!IsAssetVoucher(erp))
+                continue;
+            foreach (var hit in portal)
+            {
+                if (claimed.Contains(hit.Id) || !string.Equals(erp.GstNo, hit.GstNo, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (AssetTaxOk(erp, hit, tolerance))
+                    pairs.Add((erp, hit));
+            }
+        }
+
+        TakeUniquePairs(open, portal, claimed, assignments, pairs, ReasonAsset);
+    }
+
+    private static void LinkSameAmount(
+        List<ErpLine> open,
+        List<TwoBLine> portal,
+        HashSet<int> claimed,
+        List<(ErpLine Erp, List<TwoBLine> Hits)> assignments,
+        decimal tolerance)
+    {
+        var pairs = new List<(ErpLine Erp, TwoBLine Hit)>();
+        foreach (var erp in open)
+        {
+            foreach (var hit in portal)
+            {
+                if (claimed.Contains(hit.Id) || !string.Equals(erp.GstNo, hit.GstNo, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (BillsLookRelated(erp.BillNo, hit.BillNo))
+                    continue;
+                if (erp.TaxableCandidates.Any(candidate => Math.Abs(Math.Abs(candidate) - Math.Abs(hit.Taxable)) <= tolerance))
+                    pairs.Add((erp, hit));
+            }
+        }
+
+        TakeUniquePairs(open, portal, claimed, assignments, pairs, ReasonAmount);
+    }
+
+    private static void TakeGreedyPairs(
+        List<ErpLine> open,
+        List<TwoBLine> portal,
+        HashSet<int> claimed,
+        List<(ErpLine Erp, List<TwoBLine> Hits)> assignments,
+        List<(int Rank, int Distance, decimal Gap, int ErpIndex, int PortalIndex)> pairs,
+        string reason)
+    {
+        pairs.Sort((left, right) =>
+        {
+            var byRank = left.Rank.CompareTo(right.Rank);
+            if (byRank != 0)
+                return byRank;
+            var byDistance = left.Distance.CompareTo(right.Distance);
+            return byDistance != 0 ? byDistance : left.Gap.CompareTo(right.Gap);
+        });
+        var usedErp = new bool[open.Count];
+        var usedPortal = new bool[portal.Count];
+        var taken = new List<ErpLine>();
+        foreach (var pair in pairs)
+        {
+            if (usedErp[pair.ErpIndex] || usedPortal[pair.PortalIndex] || claimed.Contains(portal[pair.PortalIndex].Id))
+                continue;
+            usedErp[pair.ErpIndex] = true;
+            usedPortal[pair.PortalIndex] = true;
+            var erp = open[pair.ErpIndex];
+            var hit = portal[pair.PortalIndex];
+            erp.MatchReason = reason;
+            claimed.Add(hit.Id);
+            assignments.Add((erp, [hit]));
+            taken.Add(erp);
+        }
+
+        foreach (var erp in taken)
+            open.Remove(erp);
+    }
+
+    private static void TakeUniquePairs(
+        List<ErpLine> open,
+        List<TwoBLine> portal,
+        HashSet<int> claimed,
+        List<(ErpLine Erp, List<TwoBLine> Hits)> assignments,
+        List<(ErpLine Erp, TwoBLine Hit)> pairs,
+        string reason)
+    {
+        var byErp = pairs.GroupBy(pair => pair.Erp).Where(group => group.Count() == 1).Select(group => group.First()).ToList();
+        var unique = byErp.GroupBy(pair => pair.Hit.Id).Where(group => group.Count() == 1).Select(group => group.First());
+        var taken = new List<ErpLine>();
+        foreach (var pair in unique)
+        {
+            if (claimed.Contains(pair.Hit.Id) || !open.Contains(pair.Erp))
+                continue;
+            pair.Erp.MatchReason = reason;
+            claimed.Add(pair.Hit.Id);
+            assignments.Add((pair.Erp, [pair.Hit]));
+            taken.Add(pair.Erp);
+        }
+
+        foreach (var erp in taken)
+            open.Remove(erp);
+        _ = portal;
+    }
+
+    private static string ExceptionStatus(string status, string reason)
+    {
+        if (reason == ReasonAmount && status is "Matched" or "Mismatch")
+            return "Potential match";
+        if (reason == ReasonRelated && status == "Mismatch")
+            return "Potential match";
+        return status;
+    }
+
+    private static bool RelatedTaxOk(ErpLine erp, TwoBLine hit, decimal tolerance)
+    {
+        if (TaxAgrees(erp, [hit], tolerance))
+            return true;
+        var scale = Math.Max(Math.Abs(erp.Taxable), Math.Abs(hit.Taxable));
+        return scale > TaxEpsilon && Math.Abs(Math.Abs(erp.Taxable) - Math.Abs(hit.Taxable)) <= scale * 0.05m;
+    }
+
+    private static bool AssetTaxOk(ErpLine erp, TwoBLine hit, decimal tolerance)
+    {
+        if (!erp.TaxableCandidates.Any(candidate => Math.Abs(Math.Abs(candidate) - Math.Abs(hit.Taxable)) <= tolerance))
+            return false;
+        var erpGst = Math.Abs(erp.Igst) + Math.Abs(erp.Cgst) + Math.Abs(erp.Sgst);
+        var portalGst = Math.Abs(hit.Igst) + Math.Abs(hit.CgstSgst);
+        return Math.Abs(erpGst - portalGst) <= Math.Max(tolerance, 1m);
+    }
+
+    private static bool IsAssetVoucher(ErpLine erp) =>
+        NormBill(erp.BillNo).StartsWith("CAP", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Same rule as ledger reconciliation: the serial matches after the financial year and
+    /// leading zeros are removed. A prefix may contain the other prefix (AG and G).
+    /// </summary>
+    private static bool BillsLookRelated(string? billNoA, string? billNoB)
+    {
+        if (string.IsNullOrWhiteSpace(billNoA) || string.IsNullOrWhiteSpace(billNoB))
+            return false;
+        if (string.Equals(MatchBill(billNoA), MatchBill(billNoB), StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var tokensA = TokenizeBillNo(billNoA);
+        var tokensB = TokenizeBillNo(billNoB);
+        if (tokensA.Numeric.Count == 0 || tokensB.Numeric.Count == 0)
+            return false;
+        if (!HasStrongNumericCore(tokensA.Numeric, tokensB.Numeric))
+            return false;
+        if (tokensA.Alpha.Count > 0 && tokensB.Alpha.Count > 0 && !AlphasCompatible(tokensA.Alpha, tokensB.Alpha))
+            return false;
+        return BillSerials(billNoA).Overlaps(BillSerials(billNoB));
+    }
+
+    private static (HashSet<string> Numeric, HashSet<string> Alpha) TokenizeBillNo(string value)
+    {
+        var numeric = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var alpha = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var text = value.ToLowerInvariant();
+        var index = 0;
+        while (index < text.Length)
+        {
+            if (char.IsLetter(text[index]))
+            {
+                var start = index;
+                while (index < text.Length && char.IsLetter(text[index]))
+                    index++;
+                while (index < text.Length && char.IsDigit(text[index]))
+                    index++;
+                alpha.Add(text[start..index]);
+            }
+            else if (char.IsDigit(text[index]))
+            {
+                var start = index;
+                while (index < text.Length && char.IsDigit(text[index]))
+                    index++;
+                numeric.Add(StripLeadingZeros(text[start..index]));
+            }
+            else
+            {
+                index++;
+            }
+        }
+
+        return (numeric, alpha);
+    }
+
+    private static bool AlphasCompatible(HashSet<string> left, HashSet<string> right)
+    {
+        if (left.Overlaps(right))
+            return true;
+        foreach (var a in left)
+        {
+            foreach (var b in right)
+            {
+                if (a.Contains(b, StringComparison.OrdinalIgnoreCase) || b.Contains(a, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasStrongNumericCore(HashSet<string> numsA, HashSet<string> numsB)
+    {
+        var primaryA = PrimaryBillToken(numsA);
+        var primaryB = PrimaryBillToken(numsB);
+        if (primaryA.Length > 0 && primaryB.Length > 0 && !string.Equals(primaryA, primaryB, StringComparison.OrdinalIgnoreCase))
+            return false;
+        if (!numsA.Overlaps(numsB))
+            return false;
+        var fyA = FinancialYearTokens(numsA);
+        var fyB = FinancialYearTokens(numsB);
+        return fyA.Count == 0 || fyB.Count == 0 || fyA.Overlaps(fyB);
+    }
+
+    private static string PrimaryBillToken(HashSet<string> numericTokens)
+    {
+        return numericTokens
+            .Select(token => int.TryParse(token, out var value) ? (Token: token, Value: value, Len: token.Length) : (Token: "", Value: -1, Len: 0))
+            .Where(item => item.Value >= 100 || item.Len >= 3)
+            .OrderByDescending(item => item.Value)
+            .Select(item => item.Token)
+            .FirstOrDefault() ?? "";
+    }
+
+    private static HashSet<string> FinancialYearTokens(HashSet<string> numericTokens)
+    {
+        var years = numericTokens
+            .Where(token => token.Length <= 2 && int.TryParse(token, out var year) && year is >= 0 and <= 99)
+            .Select(int.Parse)
+            .Distinct()
+            .ToList();
+        var pairs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var year in years)
+        {
+            if (years.Contains(year + 1) || years.Contains(year - 1))
+                pairs.Add(year.ToString("00"));
+        }
+
+        return pairs;
+    }
+
+    private static HashSet<string> BillSerials(string? value)
+    {
+        var numbers = new List<string>();
+        var text = value ?? "";
+        var index = 0;
+        while (index < text.Length)
+        {
+            if (char.IsLetter(text[index]))
+            {
+                while (index < text.Length && char.IsLetter(text[index]))
+                    index++;
+                while (index < text.Length && char.IsDigit(text[index]))
+                    index++;
+            }
+            else if (char.IsDigit(text[index]))
+            {
+                var start = index;
+                while (index < text.Length && char.IsDigit(text[index]))
+                    index++;
+                numbers.Add(StripLeadingZeros(text[start..index]));
+            }
+            else
+            {
+                index++;
+            }
+        }
+
+        for (var k = 0; k + 1 < numbers.Count; k++)
+        {
+            if (numbers[k].Length > 2 || numbers[k + 1].Length > 2)
+                continue;
+            if (int.Parse(numbers[k + 1]) != int.Parse(numbers[k]) + 1)
+                continue;
+            numbers.RemoveRange(k, 2);
+            break;
+        }
+
+        return new HashSet<string>(numbers, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string StripLeadingZeros(string digits)
+    {
+        var trimmed = digits.TrimStart('0');
+        return trimmed.Length == 0 ? "0" : trimmed;
+    }
+
+    /// <summary>
+    /// Links a remaining ERP bill to the nearest portal date when the bill number and GSTIN agree
+    /// and the taxable value or the GST amount is within tolerance.
+    /// </summary>
+    private static void AssignNearestDates(
+        List<ErpLine> erpRows,
+        List<TwoBLine> twoBRows,
+        HashSet<int> claimed,
+        List<(ErpLine Erp, List<TwoBLine> Hits)> assignments,
+        decimal tolerance)
+    {
+        var portalGroups = twoBRows
+            .Where(row => !claimed.Contains(row.Id))
+            .GroupBy(row => row.Key)
+            .Select(group => group.ToList())
+            .ToList();
+        var portalByBill = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
+        for (var portalIndex = 0; portalIndex < portalGroups.Count; portalIndex++)
+        {
+            var portal = portalGroups[portalIndex][0];
+            var bucket = MatchBill(portal.BillNo) + "|" + portal.GstNo;
+            if (!portalByBill.TryGetValue(bucket, out var indexes))
+            {
+                indexes = [];
+                portalByBill[bucket] = indexes;
+            }
+            indexes.Add(portalIndex);
+        }
+        var pairs = new List<(int Distance, decimal Gap, int ErpIndex, int PortalIndex)>();
+        for (var erpIndex = 0; erpIndex < erpRows.Count; erpIndex++)
+        {
+            var erp = erpRows[erpIndex];
+            var bill = MatchBill(erp.BillNo);
+            if (bill.Length < 3)
+                continue;
+            if (!portalByBill.TryGetValue(bill + "|" + erp.GstNo, out var indexes))
+                continue;
+            foreach (var portalIndex in indexes)
+            {
+                var hits = portalGroups[portalIndex];
+                if (!TaxAgrees(erp, hits, tolerance))
+                    continue;
+                var distance = Math.Abs((erp.BillDate.Date - hits[0].BillDate.Date).Days);
+                if (distance == 0)
+                    continue;
+                var gap = Math.Abs(Math.Abs(erp.Taxable) - hits.Sum(hit => Math.Abs(hit.Taxable)));
+                pairs.Add((distance, gap, erpIndex, portalIndex));
+            }
+        }
+
+        pairs.Sort((left, right) =>
+        {
+            var byDistance = left.Distance.CompareTo(right.Distance);
+            return byDistance != 0 ? byDistance : left.Gap.CompareTo(right.Gap);
+        });
+        var usedErp = new bool[erpRows.Count];
+        var usedPortal = new bool[portalGroups.Count];
+        foreach (var pair in pairs)
+        {
+            if (usedErp[pair.ErpIndex] || usedPortal[pair.PortalIndex])
+                continue;
+            usedErp[pair.ErpIndex] = true;
+            usedPortal[pair.PortalIndex] = true;
+            var hits = portalGroups[pair.PortalIndex];
+            foreach (var hit in hits)
+                claimed.Add(hit.Id);
+            assignments.Add((erpRows[pair.ErpIndex], hits));
+        }
+
+        for (var index = 0; index < erpRows.Count; index++)
+        {
+            if (!usedErp[index])
+                assignments.Add((erpRows[index], []));
+        }
+    }
+
+    private static bool TaxAgrees(ErpLine erp, List<TwoBLine> hits, decimal tolerance)
+    {
+        var portalTaxable = hits.Sum(hit => Math.Abs(hit.Taxable));
+        if (erp.TaxableCandidates.Any(candidate => Math.Abs(Math.Abs(candidate) - portalTaxable) <= tolerance))
+            return true;
+        return TaxMatches([(erp, hits)], hits, tolerance);
+    }
+
     private static string NormBill(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -1723,6 +2318,7 @@ WHERE d.CompanyName = @Company
         public decimal Cgst { get; set; }
         public decimal Sgst { get; set; }
         public decimal Igst { get; set; }
+        public string MatchReason { get; set; } = "";
         public Dictionary<string, decimal?> Ledgers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 }

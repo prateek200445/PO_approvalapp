@@ -17,6 +17,7 @@ public class GstBillRecoResult
     public int Mismatch { get; set; }
     public int MissingInErp { get; set; }
     public int MissingIn2B { get; set; }
+    public int DateDifference { get; set; }
     public List<GstBillRecoRow> Rows { get; set; } = [];
 }
 
@@ -29,6 +30,11 @@ public class GstBillRecoRow
     public DateTime? VoucherDate { get; set; }
     public string RefNo { get; set; } = "";
     public DateTime? BillDate { get; set; }
+    public DateTime? TwoBBillDate { get; set; }
+    public bool DateDiffers { get; set; }
+    /// <summary>Why a non-exact pair was accepted: related bill number, asset voucher, or same amount.</summary>
+    public string MatchReason { get; set; } = "";
+    public string TwoBBillNo { get; set; } = "";
     public string BillNo { get; set; } = "";
     public string Ledger { get; set; } = "";
     public string Party { get; set; } = "";

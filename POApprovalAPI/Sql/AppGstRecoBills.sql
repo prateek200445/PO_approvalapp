@@ -2,7 +2,8 @@
 (
     @CompanyName varchar(100),
     @FromDate datetime,
-    @ToDate datetime
+    @ToDate datetime,
+    @BillFrom datetime = NULL
 )
 AS
 BEGIN
@@ -30,7 +31,8 @@ BEGIN
     WHERE sv.CompanyName = @CompanyName
       AND sv.SysDate BETWEEN @FromDate AND @ToDate
       AND sv.SupplierInvDate IS NOT NULL
-      AND CONVERT(date, sv.SupplierInvDate) BETWEEN CONVERT(date, @FromDate) AND CONVERT(date, @ToDate)
+      AND CONVERT(date, sv.SupplierInvDate) >= CONVERT(date, ISNULL(@BillFrom, @FromDate))
+      AND CONVERT(date, sv.SupplierInvDate) <= CONVERT(date, @ToDate)
     GROUP BY
         sv.sysdate, sv.StoreInwardNo, sv.yr, sv.SupplierName, l.NewGSTNo, sv.VoucherType,
         sv.GeneralPurchaseNo, sv.SupplierInvNo, sv.SupplierInvDate, sv.PurchaseLedger, sv.BillAMount;

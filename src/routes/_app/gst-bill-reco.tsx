@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, Globe2, Loader2, Paperclip, Search, Square, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, Globe2, HelpCircle, Loader2, Paperclip, Search, Square, X, XCircle } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { DatePickerField } from "@/components/DatePickerField";
@@ -36,7 +36,20 @@ const PAGE_SIZE = 25;
 const fieldClass =
   "flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
-type StatusFilter = "issues" | "all" | "Matched" | "Potential match" | "Mismatch" | "Missing in ERP" | "Missing in 2B";
+type StatusFilter =
+  | "issues"
+  | "all"
+  | "Matched"
+  | "Date difference"
+  | "Potential match"
+  | "Mismatch"
+  | "Missing in ERP"
+  | "Missing in 2B"
+  | "Related bill number"
+  | "Asset voucher"
+  | "Same amount, different bill";
+
+const REASON_FILTERS = ["Related bill number", "Asset voucher", "Same amount, different bill"] as const;
 
 const PIE_COLORS = {
   Matched: "#16a34a",
@@ -90,6 +103,7 @@ function GstBillRecoPage() {
   } | null>(null);
   const [searchNonce, setSearchNonce] = useState(0);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("issues");
+  const [helpOpen, setHelpOpen] = useState(false);
   const [billFilter, setBillFilter] = useState("");
   const [partyFilter, setPartyFilter] = useState("");
   const [gstFilter, setGstFilter] = useState("");
@@ -241,12 +255,22 @@ function GstBillRecoPage() {
 
   return (
     <div className="space-y-5">
-      <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">GST Bill Reconciliation</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          Upload the monthly GSTR-2B workbook and compare it with the ERP GST summary. A bill matches only when bill
-          number, bill date, and GSTIN all agree. The portal taxable value is compared with either ERP Other All value plus freight and C&amp;F. A matching GST amount is shown as a potential match when taxable differs. Each upload is saved. The summary can take a few minutes.
+          Upload the monthly GSTR-2B workbook and compare it with the ERP GST summary. A bill matches when the bill
+          number and GSTIN agree. Slashes and dashes in the bill number are ignored, and the nearest date is used when the tax agrees. A related bill number, an asset voucher, or the same taxable value can also be paired, and the row says which rule was used. Bills booked in these months with an invoice date in the previous financial year are matched to the stored 2B for that year. Unmatched invoices from those earlier months are left off this list. The portal taxable value is compared with either ERP Other All value plus freight and C&amp;F. A matching GST amount is shown as a potential match when taxable differs. Each upload is saved. The summary can take a few minutes.
         </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setHelpOpen(true)}
+          className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md border border-input bg-card px-3 text-sm font-medium hover:bg-secondary"
+        >
+          <HelpCircle className="h-4 w-4" />
+          How matching works
+        </button>
       </div>
 
       <div className="grid gap-4 rounded-xl border border-border bg-card p-4 shadow-sm md:grid-cols-2 xl:grid-cols-6">
@@ -377,6 +401,10 @@ function GstBillRecoPage() {
               <option value="issues">Problems only</option>
               <option value="all">All results</option>
               <option value="Matched">Matched</option>
+              <option value="Date difference">Matched, date differs</option>
+              <option value="Related bill number">Related bill number</option>
+              <option value="Asset voucher">Asset voucher</option>
+              <option value="Same amount, different bill">Same amount, different bill</option>
               <option value="Potential match">Potential match</option>
               <option value="Mismatch">Mismatch</option>
               <option value="Missing in ERP">Missing in ERP</option>
@@ -425,14 +453,35 @@ function GstBillRecoPage() {
                 {pageRows.map((row, index) => (
                   <tr
                     key={`${row.billNo}-${row.gstNo}-${row.voucherNo}-${index}`}
-                    className="cursor-pointer border-b border-border/70 hover:bg-muted/60"
+                    className={cn(
+                      "cursor-pointer border-b border-border/70 hover:bg-muted/60",
+                      row.dateDiffers && "bg-amber-500/10",
+                    )}
                     onClick={() => setSelected(row)}
                   >
                     <td className="whitespace-nowrap px-4 py-3">
-                      <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${statusClass(row.status)}`}>{row.status}</span>
+                      <div className="flex flex-col items-start gap-1">
+                        <span className={`inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ${statusClass(row.status)}`}>{row.status}</span>
+                        {row.dateDiffers && (
+                          <span className="inline-flex whitespace-nowrap rounded-full bg-amber-500/20 px-2.5 py-1 text-xs font-medium text-amber-800 dark:text-amber-200">Date differs</span>
+                        )}
+                        {row.matchReason && (
+                          <span className="inline-flex whitespace-nowrap rounded-full bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-800 dark:text-sky-200">{row.matchReason}</span>
+                        )}
+                      </div>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-medium">{row.billNo}</td>
-                    <td className="whitespace-nowrap px-4 py-3">{formatIsoDate(row.billDate)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-medium">
+                      <div>{row.billNo}</div>
+                      {row.twoBBillNo && row.twoBBillNo.toLowerCase() !== row.billNo.toLowerCase() && (
+                        <div className="text-xs font-medium text-sky-800 dark:text-sky-200">2B {row.twoBBillNo}</div>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <div>{formatIsoDate(row.billDate)}</div>
+                      {row.dateDiffers && (
+                        <div className="text-xs font-medium text-amber-800 dark:text-amber-200">2B {formatIsoDate(row.twoBBillDate)}</div>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap px-4 py-3">{row.gstNo}</td>
                     <td className="max-w-[250px] truncate whitespace-nowrap px-4 py-3" title={row.party}>{row.party}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right tabular-nums">{formatMoney(row.erpTaxable)}</td>
@@ -487,6 +536,7 @@ function GstBillRecoPage() {
           {selected && <BillSheet row={selected} onClose={() => setSelected(null)} />}
         </>
       )}
+      {helpOpen && <HelpDrawer onClose={() => setHelpOpen(false)} />}
     </div>
   );
 }
@@ -497,7 +547,15 @@ function filterRows(rows: GstBillRecoRow[], status: StatusFilter, bill: string, 
   const gstText = gst.trim().toLowerCase();
   return rows.filter((row) => {
     if (status === "issues" && row.status === "Matched") return false;
-    if (status !== "issues" && status !== "all" && row.status !== status) return false;
+    if (status === "Date difference" && !(row.status === "Matched" && row.dateDiffers)) return false;
+    if ((REASON_FILTERS as readonly string[]).includes(status) && row.matchReason !== status) return false;
+    if (
+      status !== "issues" &&
+      status !== "all" &&
+      status !== "Date difference" &&
+      !(REASON_FILTERS as readonly string[]).includes(status) &&
+      row.status !== status
+    ) return false;
     if (billText && !row.billNo.toLowerCase().includes(billText)) return false;
     if (partyText && !row.party.toLowerCase().includes(partyText)) return false;
     if (gstText && !row.gstNo.toLowerCase().includes(gstText)) return false;
@@ -515,7 +573,7 @@ function Overview({
   onFilter: (next: StatusFilter) => void;
 }) {
   const slices = [
-    { key: "Matched" as const, name: "Matched", value: result.matched, filter: "Matched" as StatusFilter, tone: "success" as const, icon: CheckCircle2, hint: "Bill, date, and GSTIN agree" },
+    { key: "Matched" as const, name: "Matched", value: result.matched, filter: "Matched" as StatusFilter, tone: "success" as const, icon: CheckCircle2, hint: "Bill number and GSTIN agree" },
     { key: "Potential match" as const, name: "Potential match", value: result.potentialMatch, filter: "Potential match" as StatusFilter, tone: "primary" as const, icon: Search, hint: "Bill and GST agree; taxable differs" },
     { key: "Mismatch" as const, name: "Mismatch", value: result.mismatch, filter: "Mismatch" as StatusFilter, tone: "warning" as const, icon: AlertTriangle, hint: "Same bill. Taxable differs." },
     { key: "Missing in ERP" as const, name: "Missing in ERP", value: result.missingInErp, filter: "Missing in ERP" as StatusFilter, tone: "danger" as const, icon: XCircle, hint: "On the 2B file only" },
@@ -541,7 +599,38 @@ function Overview({
       <div className="grid items-center gap-5 lg:grid-cols-[1fr_minmax(280px,360px)_1fr]">
         <div className="space-y-3">
           <StatCard label="Portal bills saved" value={result.savedRows} description="Stored from the 2B upload" icon={FileSpreadsheet} />
-          <StatCard label="Matched" value={result.matched} description="Bill, date, and GSTIN agree" tone="success" icon={CheckCircle2} active={statusFilter === "Matched"} onClick={() => apply("Matched")} />
+          <StatCard label="Matched" value={result.matched} description="Bill number and GSTIN agree" tone="success" icon={CheckCircle2} active={statusFilter === "Matched"} onClick={() => apply("Matched")} />
+          <button
+            type="button"
+            onClick={() => apply("Date difference")}
+            className={cn(
+              "w-full rounded-lg border px-3 py-2 text-left text-xs transition",
+              statusFilter === "Date difference"
+                ? "border-amber-500/50 bg-amber-500/15 font-medium text-amber-900 dark:text-amber-100"
+                : "border-amber-500/30 bg-amber-500/10 text-amber-900 hover:bg-amber-500/15 dark:text-amber-100",
+            )}
+          >
+            <span className="font-semibold tabular-nums">{result.dateDifference.toLocaleString("en-IN")}</span> matched with a different date
+          </button>
+          {REASON_FILTERS.map((reason) => {
+            const count = result.rows.filter((row) => row.matchReason === reason).length;
+            if (count === 0) return null;
+            return (
+              <button
+                key={reason}
+                type="button"
+                onClick={() => apply(reason)}
+                className={cn(
+                  "w-full rounded-lg border px-3 py-2 text-left text-xs transition",
+                  statusFilter === reason
+                    ? "border-sky-500/50 bg-sky-500/15 font-medium text-sky-950 dark:text-sky-100"
+                    : "border-sky-500/30 bg-sky-500/10 text-sky-950 hover:bg-sky-500/15 dark:text-sky-100",
+                )}
+              >
+                <span className="font-semibold tabular-nums">{count.toLocaleString("en-IN")}</span> {reason.toLowerCase()}
+              </button>
+            );
+          })}
           <StatCard label="Potential match" value={result.potentialMatch} description="Bill and GST agree; taxable differs" icon={Search} active={statusFilter === "Potential match"} onClick={() => apply("Potential match")} />
           <StatCard label="Mismatch" value={result.mismatch} description="Same bill. Taxable differs." tone="warning" icon={AlertTriangle} active={statusFilter === "Mismatch"} onClick={() => apply("Mismatch")} />
         </div>
@@ -801,8 +890,8 @@ function BillSheet({ row, onClose }: { row: GstBillRecoRow; onClose: () => void 
   }
 
   const fields: { label: string; erp: string; portal: string }[] = [
-    { label: "Bill no", erp: row.billNo || "—", portal: row.billNo || "—" },
-    { label: "Bill date", erp: formatIsoDate(row.billDate) || "—", portal: formatIsoDate(row.billDate) || "—" },
+    { label: "Bill no", erp: row.status === "Missing in ERP" ? "—" : row.billNo || "—", portal: row.status === "Missing in 2B" ? "—" : row.twoBBillNo || row.billNo || "—" },
+    { label: "Bill date", erp: formatIsoDate(row.billDate) || "—", portal: formatIsoDate(row.twoBBillDate ?? row.billDate) || "—" },
     { label: "GSTIN", erp: row.gstNo || "—", portal: row.gstNo || "—" },
     { label: "Party", erp: row.party || "—", portal: row.party || "—" },
     { label: "Taxable", erp: formatMoney(row.erpTaxable) || "—", portal: formatMoney(row.twoBTaxable) || "—" },
@@ -818,7 +907,15 @@ function BillSheet({ row, onClose }: { row: GstBillRecoRow; onClose: () => void 
       <div className="h-full w-full max-w-xl overflow-y-auto border-l border-border bg-card p-5 shadow-xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusClass(row.status)}`}>{row.status}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusClass(row.status)}`}>{row.status}</span>
+              {row.dateDiffers && (
+                <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-200">Date differs</span>
+              )}
+              {row.matchReason && (
+                <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-medium text-sky-800 dark:text-sky-200">{row.matchReason}</span>
+              )}
+            </div>
             <h2 className="mt-2 text-lg font-semibold">{row.billNo || "Bill"}</h2>
             <p className="text-sm text-muted-foreground">{row.party}</p>
           </div>
@@ -836,7 +933,7 @@ function BillSheet({ row, onClose }: { row: GstBillRecoRow; onClose: () => void 
           </thead>
           <tbody>
             {fields.map((field) => (
-              <tr key={field.label} className="border-b border-border/70">
+              <tr key={field.label} className={cn("border-b border-border/70", field.label === "Bill date" && row.dateDiffers && "bg-amber-500/10", field.label === "Bill no" && row.matchReason && "bg-sky-500/10")}>
                 <td className="py-2 pr-3 text-muted-foreground">{field.label}</td>
                 <td className="py-2 pr-3">{field.erp}</td>
                 <td className="py-2">{field.portal}</td>
@@ -882,6 +979,73 @@ function BillSheet({ row, onClose }: { row: GstBillRecoRow; onClose: () => void 
             </div>
           </section>
         )}
+      </div>
+    </div>
+  );
+}
+
+function HelpDrawer({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
+      <div className="flex h-full w-full max-w-md flex-col border-l border-border bg-card shadow-2xl sm:max-w-lg" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Guide</div>
+            <h2 className="mt-1 text-lg font-semibold tracking-tight">How matching works</h2>
+            <p className="mt-1 text-sm text-muted-foreground">ERP purchase bills compared with GSTR-2B. A handled pair keeps the rule on the row.</p>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-5">
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">1. What we match on</h3>
+            <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
+              <li><b className="text-foreground">Bill number and supplier GSTIN first.</b> Slashes, dashes, and spaces are ignored.</li>
+              <li>The nearest date is used when the taxable value or the GST amount agrees.</li>
+              <li>A bill booked in the selected months whose invoice date is in the previous financial year is matched to the stored 2B for that year. Other invoices from those months stay off this list.</li>
+              <li>The supplier GSTIN has to agree. The same short bill number from two suppliers is never paired.</li>
+            </ul>
+          </section>
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">2. Exceptions that still have a match</h3>
+            <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
+              <li>
+                <b className="text-foreground">Related bill number.</b> The serial is the same after the year and leading zeros are removed, as in ledger reconciliation.{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">SR/059/26-27</code> pairs with{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">59</code>, and{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">G-0007</code> with{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">G-007</code>. A prefix may contain the other prefix, so{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">25-26/AG/166</code> pairs with{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">25-26/G/166</code>. Tax within tolerance is Matched. Tax within 5% stays a potential match.
+              </li>
+              <li>
+                <b className="text-foreground">Asset voucher.</b> An ERP bill numbered{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">CAP 136</code> is the asset voucher. It pairs with the one portal invoice of that supplier that has the same taxable value and the same GST.
+              </li>
+              <li>
+                <b className="text-foreground">Same amount, different bill.</b> Same supplier and the same taxable value, and only one open bill on each side. This stays a potential match so it can be reviewed. It is not treated as an ordinary match.
+              </li>
+            </ul>
+          </section>
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">3. Status meanings</h3>
+            <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
+              <li><b className="text-foreground">Matched.</b> Bill and GSTIN agree, or a related bill number or asset voucher agreed on tax.</li>
+              <li><b className="text-foreground">Date differs.</b> The row is matched and the portal date is not the ERP bill date. Filter these from the overview.</li>
+              <li><b className="text-foreground">Potential match.</b> The GST amount agrees while taxable differs, the related bill is within 5%, or the same amount was paired for review.</li>
+              <li><b className="text-foreground">Mismatch.</b> The bill number agrees and the taxable value does not.</li>
+              <li><b className="text-foreground">Missing in ERP / Missing in 2B.</b> No counterpart was found. Transporter invoices with no ERP bill, and credit notes with no matching note, stay here.</li>
+            </ul>
+          </section>
+          <section className="space-y-2">
+            <h3 className="text-sm font-semibold">4. How a handled row is marked</h3>
+            <p className="text-sm text-muted-foreground">
+              The status pill stays Matched or Potential match. A second pill names the rule. The bill sheet shows the ERP number and the 2B number on the same row, and the Excel export has a “How matched” column.
+            </p>
+          </section>
+        </div>
       </div>
     </div>
   );

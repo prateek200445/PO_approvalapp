@@ -8,6 +8,10 @@ export type GstBillRecoRow = {
   voucherDate: string | null;
   refNo: string;
   billDate: string | null;
+  twoBBillDate: string | null;
+  dateDiffers: boolean;
+  matchReason: string;
+  twoBBillNo: string;
   billNo: string;
   ledger: string;
   party: string;
@@ -48,6 +52,7 @@ export type GstBillRecoResult = {
   mismatch: number;
   missingInErp: number;
   missingIn2B: number;
+  dateDifference: number;
   rows: GstBillRecoRow[];
 };
 
@@ -85,6 +90,10 @@ function rowFrom(raw: Record<string, unknown>): GstBillRecoRow {
     voucherDate: raw.voucherDate == null ? null : str(raw.voucherDate),
     refNo: str(raw.refNo),
     billDate: raw.billDate == null ? null : str(raw.billDate),
+    twoBBillDate: raw.twoBBillDate == null ? null : str(raw.twoBBillDate),
+    dateDiffers: raw.dateDiffers === true,
+    matchReason: str(raw.matchReason),
+    twoBBillNo: str(raw.twoBBillNo),
     billNo: str(raw.billNo),
     ledger: str(raw.ledger),
     party: str(raw.party),
@@ -181,6 +190,7 @@ function resultFrom(payload: Record<string, unknown>): GstBillRecoResult {
     mismatch: num(payload.mismatch) ?? 0,
     missingInErp: num(payload.missingInErp) ?? 0,
     missingIn2B: num(payload.missingIn2B) ?? rows.filter((row) => row.status === "Missing in 2B").length,
+    dateDifference: num(payload.dateDifference) ?? rows.filter((row) => row.status === "Matched" && row.dateDiffers).length,
     rows,
   };
 }
