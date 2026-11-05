@@ -47,9 +47,11 @@ type StatusFilter =
   | "Missing in 2B"
   | "Related bill number"
   | "Asset voucher"
-  | "Same amount, different bill";
+  | "Asset voucher, same date"
+  | "Same amount, different bill"
+  | "Reversal netted";
 
-const REASON_FILTERS = ["Related bill number", "Asset voucher", "Same amount, different bill"] as const;
+const REASON_FILTERS = ["Related bill number", "Asset voucher", "Asset voucher, same date", "Same amount, different bill", "Reversal netted"] as const;
 
 const PIE_COLORS = {
   Matched: "#16a34a",
@@ -260,7 +262,7 @@ function GstBillRecoPage() {
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">GST Bill Reconciliation</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           Upload the monthly GSTR-2B workbook and compare it with the ERP GST summary. A bill matches when the bill
-          number and GSTIN agree. Slashes and dashes in the bill number are ignored, and the nearest date is used when the tax agrees. A related bill number, an asset voucher, or the same taxable value can also be paired, and the row says which rule was used. Bills booked in these months with an invoice date in the previous financial year are matched to the stored 2B for that year. Unmatched invoices from those earlier months are left off this list. The portal taxable value is compared with either ERP Other All value plus freight and C&amp;F. A matching GST amount is shown as a potential match when taxable differs. Each upload is saved. The summary can take a few minutes.
+          number and GSTIN agree. Slashes and dashes in the bill number are ignored, and the nearest date is used when the tax agrees. A related bill number, an asset voucher, an asset voucher on the same date, the same taxable value, or a reversal journal can also be paired, and the row says which rule was used. Bills booked in these months with an invoice date in the previous financial year are matched to the stored 2B for that year. Unmatched invoices from those earlier months are left off this list. The portal taxable value is compared with either ERP Other All value plus freight and C&amp;F. A matching GST amount is shown as a potential match when taxable differs. Each upload is saved. The summary can take a few minutes.
         </p>
         </div>
         <button
@@ -404,7 +406,9 @@ function GstBillRecoPage() {
               <option value="Date difference">Matched, date differs</option>
               <option value="Related bill number">Related bill number</option>
               <option value="Asset voucher">Asset voucher</option>
+              <option value="Asset voucher, same date">Asset voucher, same date</option>
               <option value="Same amount, different bill">Same amount, different bill</option>
+              <option value="Reversal netted">Reversal netted</option>
               <option value="Potential match">Potential match</option>
               <option value="Mismatch">Mismatch</option>
               <option value="Missing in ERP">Missing in ERP</option>
@@ -1025,14 +1029,22 @@ function HelpDrawer({ onClose }: { onClose: () => void }) {
                 <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">CAP 136</code> is the asset voucher. It pairs with the one portal invoice of that supplier that has the same taxable value and the same GST.
               </li>
               <li>
+                <b className="text-foreground">Asset voucher, same date.</b> When several CAP bills share one taxable value, a bill is paired only if that date has one open CAP bill and one portal invoice of the same amount and GST.{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">CAP 6</code> on 9 Apr pairs with invoice{" "}
+                <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">11</code> on 9 Apr. Two bills on the same day, such as Retailez CAP 67 and CAP 68, stay unmatched.
+              </li>
+              <li>
                 <b className="text-foreground">Same amount, different bill.</b> Same supplier and the same taxable value, and only one open bill on each side. This stays a potential match so it can be reviewed. It is not treated as an ordinary match.
+              </li>
+              <li>
+                <b className="text-foreground">Reversal netted.</b> A journal marked <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">R-</code>, <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">Reversed</code>, or <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">_rev</code> is added to the original bill when the date and GSTIN agree. If the GST cancels, both rows are left off the list. If a balance remains, that balance is matched to 2B. A journal that only repeats a bill already matched, either the opposite amount that day or the same number with a short prefix, is also left off the list.
               </li>
             </ul>
           </section>
           <section className="space-y-2">
             <h3 className="text-sm font-semibold">3. Status meanings</h3>
             <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
-              <li><b className="text-foreground">Matched.</b> Bill and GSTIN agree, or a related bill number or asset voucher agreed on tax.</li>
+              <li><b className="text-foreground">Matched.</b> Bill and GSTIN agree, or a related bill number, asset voucher, or netted reversal agreed on tax.</li>
               <li><b className="text-foreground">Date differs.</b> The row is matched and the portal date is not the ERP bill date. Filter these from the overview.</li>
               <li><b className="text-foreground">Potential match.</b> The GST amount agrees while taxable differs, the related bill is within 5%, or the same amount was paired for review.</li>
               <li><b className="text-foreground">Mismatch.</b> The bill number agrees and the taxable value does not.</li>

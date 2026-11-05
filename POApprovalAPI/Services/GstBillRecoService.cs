@@ -1006,11 +1006,13 @@ WHERE d.CompanyName = @Company
     }
 
     /// <summary>
-    /// Adds a reversal to the purchase with the same bill. Equal and opposite GST cancels the bill.
+    /// Adds a reversal to the purchase with the same bill. A journal marked as a reversal
+    /// (R-, Reversed, _rev) is folded onto that bill first. Equal and opposite GST cancels the bill.
     /// A debit note with its own bill number stays on its own and can match the portal debit note.
     /// </summary>
     private static List<ErpLine> NetSignedBills(List<ErpLine> rows)
     {
+        FoldMarkedReversals(rows);
         var netted = new List<ErpLine>();
         foreach (var group in rows.GroupBy(row => row.FullKey, StringComparer.OrdinalIgnoreCase))
         {
@@ -1042,6 +1044,49 @@ WHERE d.CompanyName = @Company
             netted.Add(keeper);
         }
         return netted;
+    }
+
+    /// <summary>
+    /// Points R- / Reversed / _rev journals at the original bill when that bill is in the same run,
+    /// on the same date and GSTIN. The existing net then sums them or drops both when GST cancels.
+    /// </summary>
+    private static void FoldMarkedReversals(List<ErpLine> rows)
+    {
+        var byBill = new Dictionary<string, ErpLine>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+        {
+            var key = Key(NormBill(row.BillNo), row.BillDate, row.GstNo);
+            if (!byBill.ContainsKey(key))
+                byBill[key] = row;
+        }
+
+        foreach (var row in rows)
+        {
+            var basis = ReversalBasis(row.BillNo);
+            if (basis.Length == 0)
+                continue;
+            if (!byBill.TryGetValue(Key(basis, row.BillDate, row.GstNo), out var original) || ReferenceEquals(original, row))
+                continue;
+            row.BillNo = original.BillNo;
+            row.BillParts = original.BillParts;
+            row.FullKey = original.FullKey;
+            original.MatchReason = ReasonReversal;
+            row.MatchReason = ReasonReversal;
+        }
+    }
+
+    private static string ReversalBasis(string? billNo)
+    {
+        var text = NormBill(billNo);
+        string[] suffixes = ["REVERSED", "_REV", "-REV", "/REV"];
+        foreach (var suffix in suffixes)
+        {
+            if (text.Length <= suffix.Length || !text.EndsWith(suffix, StringComparison.Ordinal))
+                continue;
+            return text[..^suffix.Length].TrimEnd('-', '_', '/');
+        }
+
+        return text.StartsWith("R-", StringComparison.Ordinal) && text.Length > 2 ? text[2..] : "";
     }
 
     private static bool IsAdjustmentVoucher(string voucherType)
@@ -1290,11 +1335,67 @@ WHERE d.CompanyName = @Company
             });
         }
 
-        return output
+        return DropRepeatedJournals(output, tolerance)
             .OrderBy(r => StatusOrder(r.Status))
             .ThenBy(r => r.BillDate)
             .ThenBy(r => r.BillNo, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>
+    /// Drops a journal still missing in 2B when it repeats a bill already matched:
+    /// the opposite amount on the same day, or the same bill number with a short letter prefix.
+    /// </summary>
+    private static List<GstBillRecoRow> DropRepeatedJournals(List<GstBillRecoRow> rows, decimal tolerance)
+    {
+        var matched = rows.Where(row => row.Status == "Matched" && row.BillDate != null).ToList();
+        if (matched.Count == 0)
+            return rows;
+
+        return rows.Where(row => !IsRepeatedJournal(row, matched, tolerance)).ToList();
+    }
+
+    private static bool IsRepeatedJournal(GstBillRecoRow open, List<GstBillRecoRow> matched, decimal tolerance)
+    {
+        if (open.Status != "Missing in 2B" || open.BillDate == null || !IsAdjustmentVoucher(open.VoucherType))
+            return false;
+        var openTax = open.ErpTaxable ?? 0;
+        if (Math.Abs(openTax) <= TaxEpsilon)
+            return false;
+        var openGst = Math.Abs(open.Cgst ?? 0) + Math.Abs(open.Sgst ?? 0) + Math.Abs(open.Igst ?? 0);
+
+        foreach (var hit in matched)
+        {
+            if (hit.BillDate!.Value.Date != open.BillDate.Value.Date)
+                continue;
+            if (!string.Equals(open.GstNo, hit.GstNo, StringComparison.OrdinalIgnoreCase))
+                continue;
+            var hitTax = hit.ErpTaxable ?? 0;
+            if (Math.Abs(Math.Abs(openTax) - Math.Abs(hitTax)) > tolerance)
+                continue;
+            var hitGst = Math.Abs(hit.Cgst ?? 0) + Math.Abs(hit.Sgst ?? 0) + Math.Abs(hit.Igst ?? 0);
+            if (Math.Abs(openGst - hitGst) > Math.Max(tolerance, 1m))
+                continue;
+            var opposite = Math.Sign(openTax) != Math.Sign(hitTax);
+            if (opposite || BillIsPrefixedTwin(open.BillNo, hit.BillNo))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool BillIsPrefixedTwin(string? openBill, string? matchedBill)
+    {
+        var left = MatchBill(openBill);
+        var right = MatchBill(matchedBill);
+        if (left.Length < 3 || right.Length < 3 || string.Equals(left, right, StringComparison.OrdinalIgnoreCase))
+            return false;
+        var longer = left.Length >= right.Length ? left : right;
+        var shorter = left.Length >= right.Length ? right : left;
+        if (!longer.EndsWith(shorter, StringComparison.OrdinalIgnoreCase))
+            return false;
+        var prefix = longer[..^shorter.Length];
+        return prefix.Length is >= 1 and <= 3 && prefix.All(char.IsLetter);
     }
 
     private static void SelectBestTaxableCandidates(
@@ -1765,7 +1866,9 @@ WHERE d.CompanyName = @Company
 
     private const string ReasonRelated = "Related bill number";
     private const string ReasonAsset = "Asset voucher";
+    private const string ReasonAssetDate = "Asset voucher, same date";
     private const string ReasonAmount = "Same amount, different bill";
+    private const string ReasonReversal = "Reversal netted";
 
     /// <summary>
     /// Pairs rows that are still missing on both sides when they are the same document written
@@ -1796,6 +1899,7 @@ WHERE d.CompanyName = @Company
         LinkRelatedBills(open, portal, claimed, assignments, tolerance);
         LinkAssetVouchers(open, portal, claimed, assignments, tolerance);
         LinkSameAmount(open, portal, claimed, assignments, tolerance);
+        LinkAssetSameDate(open, portal, claimed, assignments, tolerance);
         foreach (var erp in open)
             assignments.Add((erp, []));
     }
@@ -1874,6 +1978,36 @@ WHERE d.CompanyName = @Company
         }
 
         TakeUniquePairs(open, portal, claimed, assignments, pairs, ReasonAmount);
+    }
+
+    /// <summary>
+    /// Asset bills that share a taxable value are left open by the unique-amount rule.
+    /// Pair one when the bill date belongs to exactly one open CAP bill and one portal invoice of that amount.
+    /// </summary>
+    private static void LinkAssetSameDate(
+        List<ErpLine> open,
+        List<TwoBLine> portal,
+        HashSet<int> claimed,
+        List<(ErpLine Erp, List<TwoBLine> Hits)> assignments,
+        decimal tolerance)
+    {
+        var pairs = new List<(ErpLine Erp, TwoBLine Hit)>();
+        foreach (var erp in open)
+        {
+            if (!IsAssetVoucher(erp))
+                continue;
+            foreach (var hit in portal)
+            {
+                if (claimed.Contains(hit.Id) || !string.Equals(erp.GstNo, hit.GstNo, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (erp.BillDate.Date != hit.BillDate.Date)
+                    continue;
+                if (AssetTaxOk(erp, hit, tolerance))
+                    pairs.Add((erp, hit));
+            }
+        }
+
+        TakeUniquePairs(open, portal, claimed, assignments, pairs, ReasonAssetDate);
     }
 
     private static void TakeGreedyPairs(
