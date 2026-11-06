@@ -1,7 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { ImportJvScreen } from "@/components/tds/ImportJvScreen";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/_app/tds/import-jv")({
-  head: () => ({ meta: [{ title: "Import JV — PO Portal" }] }),
-  component: ImportJvScreen,
+  beforeLoad: () => {
+    throw redirect({ to: "/import-jv" });
+  },
+  component: () => null,
 });

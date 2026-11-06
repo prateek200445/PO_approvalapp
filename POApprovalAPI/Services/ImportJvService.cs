@@ -53,57 +53,146 @@ public sealed class ImportJvService
         return list;
     }
 
-    public byte[] BuildTemplate()
+    public async Task<byte[]> BuildTemplateAsync(string group, string company)
     {
+        var groupName = (group ?? "").Trim();
+        var companyName = (company ?? "").Trim();
+        if (groupName.Length == 0) throw new ArgumentException("Choose a group.");
+        if (companyName.Length == 0) throw new ArgumentException("Choose a company, then download the template so ledger dropdowns are for that unit.");
+
+        using var connection = _database.CreateConnection();
+        var unit = await connection.QueryFirstOrDefaultAsync<ImportJvUnitOption>(
+            """
+            SELECT LTRIM(RTRIM(Name)) AS Name, SrNo AS CompanyId
+            FROM FactoryInfo WITH (NOLOCK)
+            WHERE LTRIM(RTRIM(Name)) = @Company
+              AND LTRIM(RTRIM(GroupName)) = @Group
+            """,
+            new { Company = companyName, Group = groupName });
+        if (unit is null || unit.CompanyId == 0)
+            throw new ArgumentException("That company is not in the selected group.");
+
+        var ledgers = (await connection.QueryAsync<string>(
+            """
+            SELECT DISTINCT LTRIM(RTRIM(LedgerName))
+            FROM LedgerMaster WITH (NOLOCK)
+            WHERE LTRIM(RTRIM(CompanyName)) = @Company
+              AND ISNULL(LTRIM(RTRIM(LedgerName)), '') <> ''
+            ORDER BY 1
+            """,
+            new { Company = unit.Name })).ToList();
+
         using var workbook = new XLWorkbook();
-        var sheet = workbook.AddWorksheet("Import JV");
-        var headers = new[]
+        var list = workbook.AddWorksheet("Ledgers");
+        if (ledgers.Count == 0)
+            list.Cell(1, 1).Value = "(no ledgers)";
+        else
         {
-            "Credit Ledger", "Invoice number", "Invoice Date", "Invoice Value",
-            "Interest Expense - Factoring", "Bank Charges- Others",
-            "IGST Input", "CGST Input", "SGST Input",
-            "TDS -194A (Interest)", "TDS -194C (Contractor)", "TDS -194H (Commission)",
-            "TDS -194I (Rent)", "TDS -194J (Professional)", "TDS -194Q (Goods)",
-            "Entry Date",
-        };
-        for (var i = 0; i < headers.Length; i++)
+            for (var i = 0; i < ledgers.Count; i++)
+                list.Cell(i + 1, 1).Value = ledgers[i];
+        }
+        list.Column(1).Width = 48;
+        list.Hide();
+
+        var sheet = workbook.AddWorksheet("Import JV");
+        var headers = new List<string>();
+        for (var i = 1; i <= 5; i++)
+        {
+            headers.Add($"Credit Ledger {i}");
+            headers.Add($"Credit Amount {i}");
+        }
+        for (var i = 1; i <= 5; i++)
+        {
+            headers.Add($"Debit Ledger {i}");
+            headers.Add($"Debit Amount {i}");
+        }
+        headers.AddRange(["Invoice number", "Invoice Date", "Invoice Value", "Entry Date", "Narration",
+            "Credit Total", "Debit Total", "Status"]);
+
+        for (var i = 0; i < headers.Count; i++)
             sheet.Cell(1, i + 1).Value = headers[i];
         sheet.Row(1).Style.Font.Bold = true;
-        for (var c = 1; c <= 4; c++)
-            sheet.Cell(1, c).Style.Fill.BackgroundColor = XLColor.FromHtml("#D9E2F3");
-        for (var c = 5; c <= 9; c++)
-            sheet.Cell(1, c).Style.Fill.BackgroundColor = XLColor.FromHtml("#FFF2CC");
-        for (var c = 10; c <= 15; c++)
+        sheet.Row(1).Style.Alignment.WrapText = true;
+        sheet.Row(1).Height = 30;
+        for (var c = 1; c <= 10; c++)
             sheet.Cell(1, c).Style.Fill.BackgroundColor = XLColor.FromHtml("#E2EFDA");
-        sheet.Cell(1, 16).Style.Fill.BackgroundColor = XLColor.FromHtml("#D9E2F3");
+        for (var c = 11; c <= 20; c++)
+            sheet.Cell(1, c).Style.Fill.BackgroundColor = XLColor.FromHtml("#FFF2CC");
+        for (var c = 21; c <= 25; c++)
+            sheet.Cell(1, c).Style.Fill.BackgroundColor = XLColor.FromHtml("#D9E2F3");
+        for (var c = 26; c <= 28; c++)
+            sheet.Cell(1, c).Style.Fill.BackgroundColor = XLColor.FromHtml("#FCE4D6");
+
+        const int lastData = 201;
+        var listRef = $"Ledgers!$A$1:$A${Math.Max(ledgers.Count, 1)}";
+        var ledgerCols = new[] { 1, 3, 5, 7, 9, 11, 13, 15, 17, 19 };
+        foreach (var col in ledgerCols)
+        {
+            var dv = sheet.Range(2, col, lastData, col).CreateDataValidation();
+            dv.IgnoreBlanks = true;
+            dv.InCellDropdown = true;
+            dv.AllowedValues = XLAllowedValues.List;
+            dv.List(listRef, true);
+            dv.ShowErrorMessage = true;
+            dv.ErrorStyle = XLErrorStyle.Stop;
+            dv.ErrorTitle = "Ledger";
+            dv.ErrorMessage = "That ledger is not in ERP for this company. Pick a name from the dropdown.";
+        }
+
+        for (var r = 2; r <= lastData; r++)
+        {
+            sheet.Cell(r, 26).FormulaA1 = $"B{r}+D{r}+F{r}+H{r}+J{r}";
+            sheet.Cell(r, 27).FormulaA1 = $"L{r}+N{r}+P{r}+R{r}+T{r}";
+            sheet.Cell(r, 28).FormulaA1 =
+                $"IF(AND(Z{r}=0,AA{r}=0),\"\",IF(ROUND(ABS(Z{r}-AA{r}),2)<=0.05,\"OK\",\"Amounts don't reconcile\"))";
+            sheet.Cell(r, 26).Style.NumberFormat.Format = "#,##0.00";
+            sheet.Cell(r, 27).Style.NumberFormat.Format = "#,##0.00";
+        }
+
+        var statusRange = sheet.Range(2, 28, lastData, 28);
+        var red = statusRange.AddConditionalFormat().WhenEquals("Amounts don't reconcile");
+        red.Fill.SetBackgroundColor(XLColor.FromHtml("#FFC7CE"));
+        red.Font.SetFontColor(XLColor.FromHtml("#9C0006"));
+        var ok = statusRange.AddConditionalFormat().WhenEquals("OK");
+        ok.Fill.SetBackgroundColor(XLColor.FromHtml("#C6EFCE"));
+        ok.Font.SetFontColor(XLColor.FromHtml("#006100"));
 
         sheet.Cell(2, 1).Value = "Alonso Logistics India Pvt Ltd";
-        sheet.Cell(2, 2).Value = "EXMUMDN0926/1791";
-        sheet.Cell(2, 3).Value = "01-09-2026";
-        sheet.Cell(2, 4).Value = 4720;
-        sheet.Cell(2, 5).Value = 4000;
-        sheet.Cell(2, 7).Value = 720;
-        sheet.Cell(2, 11).Value = 80;
-        sheet.Cell(2, 16).Value = "01-09-2026";
+        sheet.Cell(2, 2).Value = 4720;
+        sheet.Cell(2, 3).Value = "TDS -194C (Contractor)";
+        sheet.Cell(2, 4).Value = 80;
+        sheet.Cell(2, 11).Value = "Interest Expense - Factoring";
+        sheet.Cell(2, 12).Value = 4000;
+        sheet.Cell(2, 13).Value = "IGST Input";
+        sheet.Cell(2, 14).Value = 720;
+        sheet.Cell(2, 15).Value = "Alonso Logistics India Pvt Ltd";
+        sheet.Cell(2, 16).Value = 80;
+        sheet.Cell(2, 21).Value = "EXMUMDN0926/1791";
+        sheet.Cell(2, 22).Value = "01-09-2026";
+        sheet.Cell(2, 23).Value = 4720;
+        sheet.Cell(2, 24).Value = "01-09-2026";
+        sheet.Cell(2, 25).Value = "Import JV with TDS";
 
         sheet.SheetView.FreezeRows(1);
-        sheet.Columns().AdjustToContents(1, 20, 14, 42);
+        sheet.SheetView.FreezeColumns(2);
+        for (var c = 1; c <= 28; c++)
+            sheet.Column(c).Width = c % 2 == 1 && c <= 20 ? 28 : 14;
+        sheet.Column(21).Width = 22;
+        sheet.Column(25).Width = 28;
+        sheet.Column(28).Width = 28;
 
         var notes = workbook.AddWorksheet("How to fill");
-        notes.Cell(1, 1).Value = "What the accountant fills";
+        notes.Cell(1, 1).Value = $"Import JV — {unit.Name}";
         notes.Cell(1, 1).Style.Font.Bold = true;
         var lines = new[]
         {
-            "One Excel row = one journal. Rename debit columns to the real expense ledgers. Leave unused columns blank.",
-            "Blue headers: who is paid and the bill. Yellow: expense / GST (these are DEBITS). Green: TDS section (these are CREDITS).",
-            "Credit Ledger = party name exactly as in ERP (the vendor). Invoice Value = full bill including GST, before TDS.",
-            "Put the TDS amount only in the matching green column. 194C freight, 194J professional, 194I rent, 194A interest, 194H commission, 194Q goods.",
-            "Do not type the party debit for TDS and do not add TDS Payable. The import creates: Dr party (TDS amount) and Cr TDS -194… itself.",
-            "Blank TDS cells = no TDS on that row (bank reverse rows stay as they are).",
-            "Worked example row 2: expense 4000 + IGST 720 = bill 4720, TDS 194C 80 (2% of 4000).",
-            "That posts as: Dr expense 4000, Dr IGST 720, Cr party 4720, Dr party 80, Cr TDS -194C 80. Party outstanding becomes 4640.",
-            "Stored in Journal (one line per ledger), JournalItem (two New Ref on the same invoice: 4720 and 80), AccountBills if the bill is new.",
-            "In ERP journal / ledger, click the amount to open the voucher. TDS 94C sheet picks up the 80 credit on TDS -194C (Contractor).",
+            "Choose this file only for the company named above. Ledger cells have a dropdown of that company's ledgers.",
+            "One row = one journal. Up to 5 credits and 5 debits. Leave unused pairs blank.",
+            "Green = credit (party, TDS -194C, bank). Yellow = debit (expense, GST, party TDS). Blue = invoice / date / narration.",
+            "Orange Status must show OK. If it is red, Credit Total and Debit Total do not match — fix the amounts before upload. Import will also refuse the row.",
+            "TDS: Credit Ledger 2 = TDS -194C (Contractor) (or 194J / 194I / …) and its amount. Debit the same party for that TDS amount so the row balances. If you skip the party debit, import still adds it, but Status stays red until you add it.",
+            "Do not use TDS Payable here.",
+            "Row 2 is the worked example: Cr Alonso 4720 + Cr TDS 80; Dr expense 4000 + Dr IGST 720 + Dr Alonso 80. Status = OK.",
         };
         for (var i = 0; i < lines.Length; i++)
             notes.Cell(i + 2, 1).Value = lines[i];
@@ -252,7 +341,7 @@ public sealed class ImportJvService
             var debit = voucher.Lines.Sum(l => l.Debit);
             var credit = voucher.Lines.Sum(l => l.Credit);
             if (Math.Abs(debit - credit) > BalanceTolerance)
-                voucher.Errors.Add($"Debit {debit:0.00} does not equal credit {credit:0.00}.");
+                voucher.Errors.Add($"Amounts don't reconcile. Debit {debit:0.00} vs credit {credit:0.00}.");
 
             voucher.Errors = voucher.Errors.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             voucher.Warnings = voucher.Warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -328,7 +417,7 @@ public sealed class ImportJvService
                     Credit = (double)line.Credit,
                     Narration = line.Remark ?? "",
                     UserName = username,
-                    NarrationFinal = voucher.InvoiceNo,
+                    NarrationFinal = string.IsNullOrWhiteSpace(voucher.Narration) ? voucher.InvoiceNo : voucher.Narration,
                     DrPartyName = voucher.DrPartyName,
                     CrPartyName = voucher.CrPartyName,
                     Yr = yr,
@@ -422,23 +511,37 @@ public sealed class ImportJvService
             throw new ArgumentException("The first row must be column headers.");
 
         var map = MapHeaders(table.Headers);
-        if (map.CreditLedger < 0)
-            throw new ArgumentException("The sheet needs a Credit Ledger column.");
-        if (map.InvoiceNo < 0 || map.InvoiceDate < 0 || map.InvoiceValue < 0)
-            throw new ArgumentException("The sheet needs Invoice number, Invoice Date and Invoice Value columns.");
+        if (map.PairLayout)
+        {
+            if (map.CreditLedgers[0] < 0 || map.DebitLedgers[0] < 0)
+                throw new ArgumentException("The sheet needs Credit Ledger 1 / Credit Amount 1 and Debit Ledger 1 / Debit Amount 1.");
+        }
+        else
+        {
+            if (map.CreditLedger < 0)
+                throw new ArgumentException("Use the new template (Credit Ledger 1, Debit Ledger 1, amounts) or the old Credit Ledger column.");
+            if (map.InvoiceNo < 0 || map.InvoiceDate < 0 || map.InvoiceValue < 0)
+                throw new ArgumentException("The sheet needs Invoice number, Invoice Date and Invoice Value columns.");
+        }
 
         var preview = new ImportJvPreview
         {
             FileName = Path.GetFileName(name),
-            DebitColumns = map.Debits.Select(d => table.Headers[d]).ToList(),
-            TdsColumns = map.Tds.Select(d => table.Headers[d]).ToList(),
+            DebitColumns = map.PairLayout
+                ? Enumerable.Range(1, 5).Select(i => $"Debit Ledger {i}").ToList()
+                : map.Debits.Select(d => table.Headers[d]).ToList(),
+            TdsColumns = map.PairLayout
+                ? Enumerable.Range(1, 5).Select(i => $"Credit Ledger {i}").ToList()
+                : map.Tds.Select(d => table.Headers[d]).ToList(),
         };
 
         var rowNumber = 1;
         foreach (var cells in table.Rows)
         {
             rowNumber++;
-            var voucher = ParseRow(rowNumber, cells, table.Headers, map);
+            var voucher = map.PairLayout
+                ? ParsePairRow(rowNumber, cells, map)
+                : ParseRow(rowNumber, cells, table.Headers, map);
             if (voucher is null) continue;
             preview.Vouchers.Add(voucher);
             if (preview.Vouchers.Count > MaxRows)
@@ -448,6 +551,172 @@ public sealed class ImportJvService
         if (preview.Vouchers.Count == 0)
             throw new ArgumentException("No data rows were found.");
         return preview;
+    }
+
+    private ImportJvVoucher? ParsePairRow(int rowNumber, List<string> cells, HeaderMap map)
+    {
+        string Cell(int index) => index >= 0 && index < cells.Count ? cells[index].Trim() : "";
+
+        var credits = new List<(string Ledger, decimal Amount)>();
+        var debits = new List<(string Ledger, decimal Amount)>();
+        for (var i = 0; i < 5; i++)
+        {
+            var cName = Cell(map.CreditLedgers[i]);
+            var cAmt = ParseAmount(Cell(map.CreditAmounts[i]));
+            if (cName.Length > 0 || cAmt != 0) credits.Add((cName, cAmt));
+            var dName = Cell(map.DebitLedgers[i]);
+            var dAmt = ParseAmount(Cell(map.DebitAmounts[i]));
+            if (dName.Length > 0 || dAmt != 0) debits.Add((dName, dAmt));
+        }
+
+        var invoiceNo = Cell(map.InvoiceNo);
+        var narration = Cell(map.Narration);
+        if (credits.Count == 0 && debits.Count == 0 && invoiceNo.Length == 0 && narration.Length == 0)
+            return null;
+
+        var voucher = new ImportJvVoucher
+        {
+            Row = rowNumber,
+            InvoiceNo = invoiceNo,
+            Narration = narration,
+        };
+
+        foreach (var (ledger, amount) in credits)
+        {
+            if (ledger.Length == 0) voucher.Errors.Add("A credit amount has no ledger. Pick Credit Ledger from the dropdown.");
+            else if (amount < 0) voucher.Errors.Add($"{ledger} credit is negative.");
+            else if (amount == 0) voucher.Errors.Add($"{ledger} credit amount is empty.");
+        }
+        foreach (var (ledger, amount) in debits)
+        {
+            if (ledger.Length == 0) voucher.Errors.Add("A debit amount has no ledger. Pick Debit Ledger from the dropdown.");
+            else if (amount < 0) voucher.Errors.Add($"{ledger} debit is negative.");
+            else if (amount == 0) voucher.Errors.Add($"{ledger} debit amount is empty.");
+        }
+
+        var enteredCr = credits.Where(x => x.Ledger.Length > 0 && x.Amount > 0).Sum(x => x.Amount);
+        var enteredDr = debits.Where(x => x.Ledger.Length > 0 && x.Amount > 0).Sum(x => x.Amount);
+
+        if (!TryParseDate(Cell(map.InvoiceDate), out var invoiceDate))
+        {
+            if (Cell(map.InvoiceDate).Length > 0)
+                voucher.Errors.Add("Invoice Date is not a date (use dd-MM-yyyy).");
+        }
+        else voucher.InvoiceDate = invoiceDate;
+
+        var entryRaw = Cell(map.EntryDate);
+        if (entryRaw.Length == 0)
+        {
+            voucher.EntryDate = voucher.InvoiceDate;
+            if (voucher.InvoiceDate != default)
+                voucher.Warnings.Add("Entry Date was empty, so Invoice Date was used.");
+        }
+        else if (!TryParseDate(entryRaw, out var entryDate))
+        {
+            voucher.EntryDate = voucher.InvoiceDate;
+            voucher.Warnings.Add($"Entry Date '{entryRaw}' is not a valid date; Invoice Date was used.");
+        }
+        else voucher.EntryDate = entryDate;
+
+        if (voucher.EntryDate == default && voucher.InvoiceDate == default)
+            voucher.Errors.Add("Entry Date or Invoice Date is required.");
+
+        voucher.InvoiceValue = ParseAmount(Cell(map.InvoiceValue));
+        if (map.JournalNo >= 0)
+        {
+            var raw = Cell(map.JournalNo);
+            if (raw.Length > 0 && int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var no) && no > 0)
+                voucher.RequestedJournalNo = no;
+        }
+
+        var party = credits.FirstOrDefault(x => x.Ledger.Length > 0 && !IsTdsSection(x.Ledger)).Ledger;
+        voucher.CreditLedger = party;
+
+        foreach (var (ledger, amount) in credits.Where(x => x.Ledger.Length > 0 && x.Amount > 0))
+        {
+            var tds = IsTdsSection(ledger);
+            if (ledger.StartsWith("TDS Payable", StringComparison.OrdinalIgnoreCase))
+                voucher.Warnings.Add($"{ledger} is a transfer ledger. Deduction at booking uses TDS -194…");
+            voucher.Lines.Add(new ImportJvLine
+            {
+                Type = "CR",
+                Ledger = ledger,
+                Credit = amount,
+                IsTds = tds,
+                BillNo = !tds && ledger.Equals(party, StringComparison.OrdinalIgnoreCase) ? invoiceNo : null,
+                BillDate = voucher.InvoiceDate,
+                BillAmount = !tds && ledger.Equals(party, StringComparison.OrdinalIgnoreCase) ? amount : 0,
+            });
+        }
+
+        foreach (var (ledger, amount) in debits.Where(x => x.Ledger.Length > 0 && x.Amount > 0))
+        {
+            var partyTds = party.Length > 0 && ledger.Equals(party, StringComparison.OrdinalIgnoreCase);
+            voucher.Lines.Add(new ImportJvLine
+            {
+                Type = "DR",
+                Ledger = ledger,
+                Debit = amount,
+                IsPartyTds = partyTds,
+                BillNo = partyTds ? invoiceNo : null,
+                BillDate = voucher.InvoiceDate,
+                BillAmount = partyTds ? amount : 0,
+            });
+        }
+
+        ApplyAutoTdsPartyDebit(voucher, invoiceNo);
+
+        var tdsTotal = voucher.Lines.Where(l => l.IsTds).Sum(l => l.Credit);
+        voucher.TdsTotal = tdsTotal;
+        voucher.TdsAccessableAmount = tdsTotal <= 0
+            ? 0
+            : voucher.Lines.Where(l => l.Debit > 0 && !l.IsPartyTds && !IsGstOrRoundOff(l.Ledger)).Sum(l => l.Debit);
+
+        if (voucher.InvoiceValue == 0)
+        {
+            var partyCredit = voucher.Lines.Where(l => l.Type == "CR" && !l.IsTds).Sum(l => l.Credit);
+            if (partyCredit > 0) voucher.InvoiceValue = partyCredit;
+        }
+
+        if (Math.Abs(enteredDr - enteredCr) > BalanceTolerance)
+        {
+            var finalDr = voucher.Lines.Sum(l => l.Debit);
+            var finalCr = voucher.Lines.Sum(l => l.Credit);
+            if (Math.Abs(finalDr - finalCr) > BalanceTolerance)
+                voucher.Errors.Add($"Amounts don't reconcile. Debit {enteredDr:0.00} vs credit {enteredCr:0.00}.");
+            else
+                voucher.Warnings.Add("Excel Status was red until the party TDS debit was added. The posted journal balances.");
+        }
+
+        if (voucher.Lines.Count == 0 && voucher.Errors.Count == 0)
+            return null;
+        return voucher;
+    }
+
+    private static void ApplyAutoTdsPartyDebit(ImportJvVoucher voucher, string invoiceNo)
+    {
+        var party = voucher.CreditLedger;
+        if (string.IsNullOrWhiteSpace(party)) return;
+
+        foreach (var tds in voucher.Lines.Where(l => l.IsTds && l.Credit > 0).ToList())
+        {
+            var already = voucher.Lines.Any(l =>
+                l.IsPartyTds
+                && l.Ledger.Equals(party, StringComparison.OrdinalIgnoreCase)
+                && Math.Abs(l.Debit - tds.Credit) <= BalanceTolerance);
+            if (already) continue;
+            voucher.Lines.Add(new ImportJvLine
+            {
+                Type = "DR",
+                Ledger = party,
+                Debit = tds.Credit,
+                IsPartyTds = true,
+                BillNo = invoiceNo,
+                BillDate = voucher.InvoiceDate,
+                BillAmount = tds.Credit,
+            });
+            voucher.Warnings.Add($"Added party debit {tds.Credit:0.00} on {party} for {tds.Ledger} so the journal balances.");
+        }
     }
 
     private ImportJvVoucher? ParseRow(int rowNumber, List<string> cells, List<string> headers, HeaderMap map)
@@ -593,6 +862,7 @@ public sealed class ImportJvService
     private static HeaderMap MapHeaders(List<string> headers)
     {
         var map = new HeaderMap();
+        map.PairLayout = headers.Select(NormalizeHeader).Any(k => k is "creditledger1" or "debitledger1");
         for (var i = 0; i < headers.Count; i++)
         {
             var key = NormalizeHeader(headers[i]);
@@ -602,25 +872,46 @@ public sealed class ImportJvService
                     map.JournalNo = i;
                 continue;
             }
-            if (key is "creditledger" or "credit") map.CreditLedger = i;
+            if (key is "credittotal" or "debittotal" or "status" or "difference" or "reconcile")
+                continue;
+            if (key is "narration" or "narrationfinal" or "remark") map.Narration = i;
+            else if (TrySlot(key, "creditledger", out var cLedger)) map.CreditLedgers[cLedger] = i;
+            else if (TrySlot(key, "creditamount", out var cAmt)) map.CreditAmounts[cAmt] = i;
+            else if (TrySlot(key, "debitledger", out var dLedger)) map.DebitLedgers[dLedger] = i;
+            else if (TrySlot(key, "debitamount", out var dAmt)) map.DebitAmounts[dAmt] = i;
+            else if (key is "creditledger" or "credit") map.CreditLedger = i;
             else if (key is "invoicenumber" or "invoiceno" or "billno" or "billnumber") map.InvoiceNo = i;
             else if (key is "invoicedate" or "billdate") map.InvoiceDate = i;
-            else if (key is "invoicevalue" or "invoiceamount" or "amount") map.InvoiceValue = i;
+            else if (key is "invoicevalue" or "invoiceamount") map.InvoiceValue = i;
             else if (key is "entrydate" or "voucherdate" or "date") map.EntryDate = i;
             else if (key is "journalno" or "journalnumber" or "voucherno") map.JournalNo = i;
             else if (headers[i].TrimStart().StartsWith("TDS", StringComparison.OrdinalIgnoreCase))
                 map.Tds.Add(i);
-            else
+            else if (!map.PairLayout)
                 map.Debits.Add(i);
         }
         return map;
+    }
+
+    private static bool TrySlot(string key, string prefix, out int index)
+    {
+        index = 0;
+        if (!key.StartsWith(prefix, StringComparison.Ordinal) || key.Length != prefix.Length + 1)
+            return false;
+        var n = key[^1] - '0';
+        if (n is < 1 or > 5) return false;
+        index = n - 1;
+        return true;
     }
 
     private static SheetTable ReadExcel(Stream stream)
     {
         using var workbook = new XLWorkbook(stream);
         var sheet = workbook.Worksheets.FirstOrDefault(w =>
-                        !string.Equals(w.Name, "How to fill", StringComparison.OrdinalIgnoreCase))
+                        string.Equals(w.Name, "Import JV", StringComparison.OrdinalIgnoreCase))
+                    ?? workbook.Worksheets.FirstOrDefault(w =>
+                        !string.Equals(w.Name, "How to fill", StringComparison.OrdinalIgnoreCase)
+                        && !string.Equals(w.Name, "Ledgers", StringComparison.OrdinalIgnoreCase))
                     ?? workbook.Worksheets.First();
         var range = sheet.RangeUsed();
         if (range is null) throw new ArgumentException("The Excel sheet is empty.");
@@ -749,6 +1040,13 @@ public sealed class ImportJvService
     private static string NormalizeHeader(string header) =>
         new string((header ?? "").Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
 
+    private static bool IsTdsSection(string ledger)
+    {
+        var name = (ledger ?? "").Trim();
+        return name.StartsWith("TDS -", StringComparison.OrdinalIgnoreCase)
+               || name.StartsWith("TDS-", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsGstOrRoundOff(string ledger)
     {
         var name = ledger ?? "";
@@ -774,6 +1072,12 @@ public sealed class ImportJvService
         public int InvoiceValue = -1;
         public int EntryDate = -1;
         public int JournalNo = -1;
+        public int Narration = -1;
+        public bool PairLayout;
+        public int[] CreditLedgers { get; } = [-1, -1, -1, -1, -1];
+        public int[] CreditAmounts { get; } = [-1, -1, -1, -1, -1];
+        public int[] DebitLedgers { get; } = [-1, -1, -1, -1, -1];
+        public int[] DebitAmounts { get; } = [-1, -1, -1, -1, -1];
         public List<int> Debits { get; } = [];
         public List<int> Tds { get; } = [];
     }
@@ -814,6 +1118,7 @@ public sealed class ImportJvVoucher
     public int Row { get; set; }
     public string CreditLedger { get; set; } = "";
     public string InvoiceNo { get; set; } = "";
+    public string Narration { get; set; } = "";
     public DateTime InvoiceDate { get; set; }
     public DateTime EntryDate { get; set; }
     public decimal InvoiceValue { get; set; }

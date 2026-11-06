@@ -30,6 +30,7 @@ import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summa
 import { Route as AppItemStockRouteImport } from './routes/_app/item-stock'
 import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
 import { Route as AppIndentsRouteImport } from './routes/_app/indents'
+import { Route as AppImportJvRouteImport } from './routes/_app/import-jv'
 import { Route as AppHrReportsRouteImport } from './routes/_app/hr-reports'
 import { Route as AppHistoryRouteImport } from './routes/_app/history'
 import { Route as AppGstBillRecoRouteImport } from './routes/_app/gst-bill-reco'
@@ -177,6 +178,11 @@ const AppIntercompanyRoute = AppIntercompanyRouteImport.update({
 const AppIndentsRoute = AppIndentsRouteImport.update({
   id: '/indents',
   path: '/indents',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppImportJvRoute = AppImportJvRouteImport.update({
+  id: '/import-jv',
+  path: '/import-jv',
   getParentRoute: () => AppRoute,
 } as any)
 const AppHrReportsRoute = AppHrReportsRouteImport.update({
@@ -428,6 +434,7 @@ export interface FileRoutesByFullPath {
   '/gst-bill-reco': typeof AppGstBillRecoRoute
   '/history': typeof AppHistoryRoute
   '/hr-reports': typeof AppHrReportsRoute
+  '/import-jv': typeof AppImportJvRoute
   '/indents': typeof AppIndentsRoute
   '/intercompany': typeof AppIntercompanyRouteWithChildren
   '/item-stock': typeof AppItemStockRoute
@@ -493,6 +500,7 @@ export interface FileRoutesByTo {
   '/gst-bill-reco': typeof AppGstBillRecoRoute
   '/history': typeof AppHistoryRoute
   '/hr-reports': typeof AppHrReportsRoute
+  '/import-jv': typeof AppImportJvRoute
   '/indents': typeof AppIndentsRoute
   '/intercompany': typeof AppIntercompanyRouteWithChildren
   '/item-stock': typeof AppItemStockRoute
@@ -561,6 +569,7 @@ export interface FileRoutesById {
   '/_app/gst-bill-reco': typeof AppGstBillRecoRoute
   '/_app/history': typeof AppHistoryRoute
   '/_app/hr-reports': typeof AppHrReportsRoute
+  '/_app/import-jv': typeof AppImportJvRoute
   '/_app/indents': typeof AppIndentsRoute
   '/_app/intercompany': typeof AppIntercompanyRouteWithChildren
   '/_app/item-stock': typeof AppItemStockRoute
@@ -629,6 +638,7 @@ export interface FileRouteTypes {
     | '/gst-bill-reco'
     | '/history'
     | '/hr-reports'
+    | '/import-jv'
     | '/indents'
     | '/intercompany'
     | '/item-stock'
@@ -694,6 +704,7 @@ export interface FileRouteTypes {
     | '/gst-bill-reco'
     | '/history'
     | '/hr-reports'
+    | '/import-jv'
     | '/indents'
     | '/intercompany'
     | '/item-stock'
@@ -761,6 +772,7 @@ export interface FileRouteTypes {
     | '/_app/gst-bill-reco'
     | '/_app/history'
     | '/_app/hr-reports'
+    | '/_app/import-jv'
     | '/_app/indents'
     | '/_app/intercompany'
     | '/_app/item-stock'
@@ -959,6 +971,13 @@ declare module '@tanstack/react-router' {
       path: '/indents'
       fullPath: '/indents'
       preLoaderRoute: typeof AppIndentsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/import-jv': {
+      id: '/_app/import-jv'
+      path: '/import-jv'
+      fullPath: '/import-jv'
+      preLoaderRoute: typeof AppImportJvRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/hr-reports': {
@@ -1362,6 +1381,7 @@ interface AppRouteChildren {
   AppGstBillRecoRoute: typeof AppGstBillRecoRoute
   AppHistoryRoute: typeof AppHistoryRoute
   AppHrReportsRoute: typeof AppHrReportsRoute
+  AppImportJvRoute: typeof AppImportJvRoute
   AppIndentsRoute: typeof AppIndentsRoute
   AppIntercompanyRoute: typeof AppIntercompanyRouteWithChildren
   AppItemStockRoute: typeof AppItemStockRoute
@@ -1411,6 +1431,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppGstBillRecoRoute: AppGstBillRecoRoute,
   AppHistoryRoute: AppHistoryRoute,
   AppHrReportsRoute: AppHrReportsRoute,
+  AppImportJvRoute: AppImportJvRoute,
   AppIndentsRoute: AppIndentsRoute,
   AppIntercompanyRoute: AppIntercompanyRouteWithChildren,
   AppItemStockRoute: AppItemStockRoute,

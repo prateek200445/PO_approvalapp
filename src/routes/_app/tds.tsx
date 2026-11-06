@@ -17,7 +17,7 @@ function TdsLayout() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">TDS</h1>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          TDS filing for a group. Import JV posts expense journals with TDS from Excel so the 26Q sheets pick them up.
+          TDS filing for a group. Liability is the 26Q working; later steps sit beside it.
         </p>
       </div>
       <TdsSubnav />

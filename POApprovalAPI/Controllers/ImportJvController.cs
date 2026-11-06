@@ -32,13 +32,26 @@ public class ImportJvController : ControllerBase
     }
 
     [HttpGet("template")]
-    public IActionResult Template()
+    public async Task<IActionResult> Template([FromQuery] string group, [FromQuery] string company)
     {
-        var bytes = _service.BuildTemplate();
-        return File(
-            bytes,
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "ImportJV-TDS.xlsx");
+        try
+        {
+            var bytes = await _service.BuildTemplateAsync(group, company);
+            var safe = new string((company ?? "ImportJV").Where(ch => char.IsLetterOrDigit(ch) || ch is ' ' or '-').ToArray()).Trim();
+            if (safe.Length == 0) safe = "ImportJV";
+            return File(
+                bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                $"ImportJV-{safe}.xlsx");
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPost("preview")]

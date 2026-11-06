@@ -21,6 +21,7 @@ export interface ImportJvVoucher {
   row: number;
   creditLedger: string;
   invoiceNo: string;
+  narration?: string;
   invoiceDate: string;
   entryDate: string;
   invoiceValue: number;
@@ -70,8 +71,9 @@ export async function getImportJvUnits(group: string): Promise<ImportJvUnit[]> {
   return readJson<ImportJvUnit[]>(response);
 }
 
-export function importJvTemplateUrl() {
-  return getApiUrl("/api/import-jv/template");
+export function importJvTemplateUrl(group: string, company: string) {
+  const params = new URLSearchParams({ group, company });
+  return getApiUrl(`/api/import-jv/template?${params}`);
 }
 
 export async function previewImportJv(input: {

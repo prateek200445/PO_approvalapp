@@ -167,11 +167,20 @@ export function ImportJvScreen() {
           />
         </div>
         <div className="flex items-end">
-          <Button variant="outline" className="w-full" asChild>
-            <a href={importJvTemplateUrl()} download="ImportJV-TDS.xlsx">
-              <Download className="h-4 w-4" />
-              Download template
-            </a>
+          <Button
+            variant="outline"
+            className="w-full"
+            disabled={!group || !company}
+            onClick={() => {
+              if (!group || !company) {
+                toast.error("Choose group and company first so ledger dropdowns are for that unit.");
+                return;
+              }
+              window.location.href = importJvTemplateUrl(group, company);
+            }}
+          >
+            <Download className="h-4 w-4" />
+            Download JV template
           </Button>
         </div>
       </div>
@@ -212,7 +221,7 @@ export function ImportJvScreen() {
             <FileSpreadsheet className="mx-auto h-8 w-8 text-primary" />
             <p className="mt-3 text-sm font-medium">Drop the Import JV Excel here</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Same layout as ERP Import JV. Add TDS -194… amount columns for deduction; the party debit is created for you.
+              Use the company template. Status in Excel must be OK (credit total = debit total) or import will refuse the row.
             </p>
             <Button
               className="mt-4"
@@ -236,15 +245,11 @@ export function ImportJvScreen() {
             <Stat label="Errors" value={String(preview.errorCount)} bad={preview.errorCount > 0} />
           </div>
 
-          {preview.tdsColumns.length > 0 ? (
-            <p className="text-xs text-muted-foreground">
-              TDS credit columns: {preview.tdsColumns.join(", ")}
+          {preview.errorCount > 0 ? (
+            <p className="text-xs text-destructive">
+              Red rows do not reconcile or have a missing ledger. Fix the sheet; Post stays off until every row is OK.
             </p>
-          ) : (
-            <p className="text-xs text-amber-700 dark:text-amber-400">
-              No column starts with TDS. Journals will post without TDS lines — add a header such as TDS -194C (Contractor).
-            </p>
-          )}
+          ) : null}
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
             <div className="overflow-hidden rounded-2xl border border-border/80 bg-card shadow-soft">
@@ -386,6 +391,7 @@ function JournalPreview({ voucher }: { voucher: ImportJvVoucher }) {
           <h2 className="text-sm font-semibold">Journal preview</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             Entry {formatJvDate(voucher.entryDate)}
+            {voucher.narration ? ` · ${voucher.narration}` : ""}
             {voucher.requestedJournalNo ? ` · requested JV ${voucher.requestedJournalNo}` : ""}
           </p>
         </div>
@@ -467,9 +473,8 @@ function AccountantGuide() {
     <div className="space-y-3 rounded-2xl border border-border/80 bg-card p-4 text-sm shadow-soft">
       <h2 className="text-sm font-semibold">Tell the accountant this</h2>
       <p className="text-muted-foreground">
-        All six TDS sections are columns. Put the amount only in the one that applies; leave the rest blank.
-        Expense and GST columns are yellow debits. Green TDS columns are credits. Do not add a party debit for TDS —
-        the import does that.
+        Download the template after choosing the company — ledger cells are a dropdown of that unit&apos;s ledgers.
+        Up to 5 credits and 5 debits. Orange Status must read OK; if it is red, credit and debit totals do not match and import will not post.
       </p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[640px] border-collapse text-xs">
@@ -492,9 +497,8 @@ function AccountantGuide() {
         </table>
       </div>
       <p className="text-xs text-muted-foreground">
-        Example: bill 4,720 (expense 4,000 + IGST 720) with 194C ₹80. Excel has 80 only in TDS -194C.
-        Posted journal: Dr expense 4,000, Dr IGST 720, Cr party 4,720, Dr party 80, Cr TDS -194C 80.
-        Party bill becomes 4,640. Check it in the preview on the right before posting. Delete the demo JV from ERP if you posted a test.
+        Example: Cr Alonso 4,720 + Cr TDS -194C 80. Dr expense 4,000 + Dr IGST 720 + Dr Alonso 80.
+        Pick TDS -194C (Contractor) (or 194J / 194I / …) from the credit dropdown. Put the party TDS debit on the debit side so Status is OK.
       </p>
     </div>
   );

@@ -31,6 +31,7 @@ import {
   Calculator,
   BadgePercent,
   Truck,
+  Upload,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useEffect, useLayoutEffect, useState, type ComponentType } from "react";
@@ -67,6 +68,7 @@ type AppPath =
   | "/ledgers"
   | "/gst"
   | "/tds"
+  | "/import-jv"
   | "/item-stock"
   | "/domestic-invoice"
   | "/export-bill-overdue"
@@ -106,7 +108,7 @@ export function AppShell() {
   const restricted = hrOnly || exhibitionOnly || quoteOnly;
   const fullScreenReport =
     path.includes("export-bill-overdue") || path.includes("order-book-summary");
-  const wideContent = path.startsWith("/bank-statement-import") || path.startsWith("/tds/import-jv");
+  const wideContent = path.startsWith("/bank-statement-import") || path.startsWith("/import-jv");
   const isCopilot = path.startsWith("/assistant");
   const assistantLoading = useRouterState({
     select: (s) =>
@@ -302,6 +304,12 @@ export function AppShell() {
       icon: BadgePercent,
       label: "TDS",
       match: (p) => p === "/tds" || p.startsWith("/tds/"),
+    },
+    {
+      to: "/import-jv",
+      icon: Upload,
+      label: "Import JV",
+      match: (p) => p.startsWith("/import-jv"),
     },
     {
       to: "/domestic-invoice",
