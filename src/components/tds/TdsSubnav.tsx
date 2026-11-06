@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 
 const items = [
   { to: "/tds/liability" as const, label: "Liability" },
+  { to: "/tds/import-jv" as const, label: "Import JV" },
   { to: "/tds/94a" as const, label: "94A" },
   { to: "/tds/94c" as const, label: "94C" },
   { to: "/tds/94h" as const, label: "94H" },

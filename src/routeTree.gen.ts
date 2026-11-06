@@ -54,6 +54,7 @@ import { Route as AppAdvancePaymentsRouteImport } from './routes/_app/advance-pa
 import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
 import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
 import { Route as AppTdsLiabilityRouteImport } from './routes/_app/tds.liability'
+import { Route as AppTdsImportJvRouteImport } from './routes/_app/tds.import-jv'
 import { Route as AppTds94qRouteImport } from './routes/_app/tds.94q'
 import { Route as AppTds94jRouteImport } from './routes/_app/tds.94j'
 import { Route as AppTds94iRouteImport } from './routes/_app/tds.94i'
@@ -298,6 +299,11 @@ const AppTdsLiabilityRoute = AppTdsLiabilityRouteImport.update({
   path: '/liability',
   getParentRoute: () => AppTdsRoute,
 } as any)
+const AppTdsImportJvRoute = AppTdsImportJvRouteImport.update({
+  id: '/import-jv',
+  path: '/import-jv',
+  getParentRoute: () => AppTdsRoute,
+} as any)
 const AppTds94qRoute = AppTds94qRouteImport.update({
   id: '/94q',
   path: '/94q',
@@ -460,6 +466,7 @@ export interface FileRoutesByFullPath {
   '/tds/94i': typeof AppTds94iRoute
   '/tds/94j': typeof AppTds94jRoute
   '/tds/94q': typeof AppTds94qRoute
+  '/tds/import-jv': typeof AppTdsImportJvRoute
   '/tds/liability': typeof AppTdsLiabilityRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/bom/': typeof AppBomIndexRoute
@@ -524,6 +531,7 @@ export interface FileRoutesByTo {
   '/tds/94i': typeof AppTds94iRoute
   '/tds/94j': typeof AppTds94jRoute
   '/tds/94q': typeof AppTds94qRoute
+  '/tds/import-jv': typeof AppTdsImportJvRoute
   '/tds/liability': typeof AppTdsLiabilityRoute
   '/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/bom': typeof AppBomIndexRoute
@@ -591,6 +599,7 @@ export interface FileRoutesById {
   '/_app/tds/94i': typeof AppTds94iRoute
   '/_app/tds/94j': typeof AppTds94jRoute
   '/_app/tds/94q': typeof AppTds94qRoute
+  '/_app/tds/import-jv': typeof AppTdsImportJvRoute
   '/_app/tds/liability': typeof AppTdsLiabilityRoute
   '/_app/workorder/$poNo': typeof AppWorkorderPoNoRoute
   '/_app/bom/': typeof AppBomIndexRoute
@@ -658,6 +667,7 @@ export interface FileRouteTypes {
     | '/tds/94i'
     | '/tds/94j'
     | '/tds/94q'
+    | '/tds/import-jv'
     | '/tds/liability'
     | '/workorder/$poNo'
     | '/bom/'
@@ -722,6 +732,7 @@ export interface FileRouteTypes {
     | '/tds/94i'
     | '/tds/94j'
     | '/tds/94q'
+    | '/tds/import-jv'
     | '/tds/liability'
     | '/workorder/$poNo'
     | '/bom'
@@ -788,6 +799,7 @@ export interface FileRouteTypes {
     | '/_app/tds/94i'
     | '/_app/tds/94j'
     | '/_app/tds/94q'
+    | '/_app/tds/import-jv'
     | '/_app/tds/liability'
     | '/_app/workorder/$poNo'
     | '/_app/bom/'
@@ -1117,6 +1129,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppTdsLiabilityRouteImport
       parentRoute: typeof AppTdsRoute
     }
+    '/_app/tds/import-jv': {
+      id: '/_app/tds/import-jv'
+      path: '/import-jv'
+      fullPath: '/tds/import-jv'
+      preLoaderRoute: typeof AppTdsImportJvRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
     '/_app/tds/94q': {
       id: '/_app/tds/94q'
       path: '/94q'
@@ -1303,6 +1322,7 @@ interface AppTdsRouteChildren {
   AppTds94iRoute: typeof AppTds94iRoute
   AppTds94jRoute: typeof AppTds94jRoute
   AppTds94qRoute: typeof AppTds94qRoute
+  AppTdsImportJvRoute: typeof AppTdsImportJvRoute
   AppTdsLiabilityRoute: typeof AppTdsLiabilityRoute
 }
 
@@ -1313,6 +1333,7 @@ const AppTdsRouteChildren: AppTdsRouteChildren = {
   AppTds94iRoute: AppTds94iRoute,
   AppTds94jRoute: AppTds94jRoute,
   AppTds94qRoute: AppTds94qRoute,
+  AppTdsImportJvRoute: AppTdsImportJvRoute,
   AppTdsLiabilityRoute: AppTdsLiabilityRoute,
 }
 

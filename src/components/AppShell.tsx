@@ -106,7 +106,7 @@ export function AppShell() {
   const restricted = hrOnly || exhibitionOnly || quoteOnly;
   const fullScreenReport =
     path.includes("export-bill-overdue") || path.includes("order-book-summary");
-  const wideContent = path.startsWith("/bank-statement-import");
+  const wideContent = path.startsWith("/bank-statement-import") || path.startsWith("/tds/import-jv");
   const isCopilot = path.startsWith("/assistant");
   const assistantLoading = useRouterState({
     select: (s) =>
