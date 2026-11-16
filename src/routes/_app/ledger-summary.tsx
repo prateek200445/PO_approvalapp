@@ -67,7 +67,7 @@ function LedgerSummaryPage() {
       setLoadingCompanies(true);
       try {
         const res = await fetch(getApiUrl("/api/ledger-summary/companies"));
-        const data = await res.json();
+        const data = await readJson(res);
         if (!res.ok) throw new Error(data.message || "Failed to load companies");
         if (!cancelled) setCompanies(normalizeCompanies(data));
       } catch (err: any) {
@@ -97,7 +97,7 @@ function LedgerSummaryPage() {
             `/api/ledger-summary/ledgers?companies=${encodeURIComponent(debouncedCompanyValues.join(","))}`,
           ),
         );
-        const data = await res.json();
+        const data = await readJson(res);
         if (!res.ok) throw new Error(data.message || "Failed to load ledgers");
         const next = normalizeLedgers(data);
         if (!cancelled) {
@@ -156,28 +156,31 @@ function LedgerSummaryPage() {
     }
 
     setLoading(true);
+    const toastId = toast.loading("Loading ledger summary…");
     try {
-      const res = await fetch(getApiUrl("/api/ledger-summary/query-batch"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          companies: selectedCompanies.map((c) => ({
-            value: c.value,
-            label: c.label,
-            companyType: c.companyType,
-            companyName: c.companyName,
-            companyId: c.companyId,
-          })),
-          ledgerNames,
-          dateFrom,
-          dateTo,
-          currency: null,
-          interestCal: 0,
-        }),
+      const jobs = buildQueryJobs(selectedCompanies, ledgerNames);
+      let completed = 0;
+      const parts = await mapPool(jobs, 2, async (job) => {
+        const res = await fetch(getApiUrl("/api/ledger-summary/query-batch"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            companies: [toCompanyRef(job.company)],
+            ledgerNames: job.ledgerNames,
+            dateFrom,
+            dateTo,
+            currency: null,
+            interestCal: 0,
+          }),
+        });
+        const data = await readJson(res);
+        if (!res.ok) throw new Error(data.message || "Failed to load ledger summary");
+        completed += 1;
+        toast.loading(`Loading ${completed} of ${jobs.length}…`, { id: toastId });
+        return normalizeResult(data);
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Failed to load ledger summary");
-      const normalized = normalizeResult(data);
+
+      const normalized = mergeBatchResults(parts, selectedCompanies.length, ledgerNames.length);
       setResult(normalized);
       setApplied({
         companyLabels: selectedCompanies.map((c) => c.label),
@@ -185,9 +188,9 @@ function LedgerSummaryPage() {
         dateFrom,
         dateTo,
       });
-      toast.success(`Loaded ${normalized.rows.length.toLocaleString("en-IN")} transactions`);
+      toast.success(`Loaded ${normalized.rows.length.toLocaleString("en-IN")} transactions`, { id: toastId });
     } catch (err: any) {
-      toast.error(err.message || "Query failed");
+      toast.error(err.message || "Query failed", { id: toastId });
     } finally {
       setLoading(false);
     }
@@ -212,7 +215,7 @@ function LedgerSummaryPage() {
         }),
       });
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+        const data = await readJson(res).catch(() => ({} as any));
         throw new Error(data.message || "Export failed");
       }
       const blob = await res.blob();
@@ -857,6 +860,116 @@ function formatDateLong(value?: string | null) {
   const formatted = d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   dateFormatCache.set(value, formatted);
   return formatted;
+}
+
+const MAX_LEDGERS_PER_REQUEST = 6;
+
+type QueryJob = {
+  company: LedgerCompanyOption;
+  ledgerNames: string[];
+};
+
+function toCompanyRef(c: LedgerCompanyOption) {
+  return {
+    value: c.value,
+    label: c.label,
+    companyType: c.companyType,
+    companyName: c.companyName,
+    companyId: c.companyId,
+  };
+}
+
+function buildQueryJobs(companies: LedgerCompanyOption[], ledgers: string[]): QueryJob[] {
+  const jobs: QueryJob[] = [];
+  for (const company of companies) {
+    for (let i = 0; i < ledgers.length; i += MAX_LEDGERS_PER_REQUEST) {
+      jobs.push({ company, ledgerNames: ledgers.slice(i, i + MAX_LEDGERS_PER_REQUEST) });
+    }
+  }
+  return jobs;
+}
+
+async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  }
+  const n = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
+}
+
+async function readJson(res: Response): Promise<any> {
+  const text = await res.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    const snippet = text.replace(/\s+/g, " ").trim().slice(0, 240);
+    throw new Error(snippet || `Request failed (${res.status})`);
+  }
+}
+
+function mergeBatchResults(
+  parts: LedgerSummaryResult[],
+  companyCount: number,
+  ledgerCount: number,
+): LedgerSummaryResult {
+  const rows = withSharedRunningBalancePerLedger(parts.flatMap((p) => p.rows));
+  const openingBalance = rows.filter((r) => r.isOpening).reduce((sum, r) => sum + r.debit - r.credit, 0);
+  const debitTotal = parts.reduce((sum, p) => sum + p.debitTotal, 0);
+  const creditTotal = parts.reduce((sum, p) => sum + p.creditTotal, 0);
+  const closingByLedger = new Map<string, number>();
+  for (const row of rows) {
+    closingByLedger.set((row.ledgerName || "").trim().toLowerCase(), row.closing);
+  }
+  const closingBalance = [...closingByLedger.values()].reduce((sum, n) => sum + n, 0);
+
+  return {
+    openingBalance,
+    debitTotal,
+    creditTotal,
+    closingBalance,
+    companyCount,
+    ledgerCount,
+    pairCount: companyCount * ledgerCount,
+    rows,
+  };
+}
+
+function withSharedRunningBalancePerLedger(source: LedgerSummaryRow[]): LedgerSummaryRow[] {
+  const groups = new Map<string, LedgerSummaryRow[]>();
+  for (const row of source) {
+    const key = (row.ledgerName || "").trim().toLowerCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(row);
+  }
+
+  const result: LedgerSummaryRow[] = [];
+  const keys = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+  for (const key of keys) {
+    const ordered = [...groups.get(key)!].sort((a, b) => {
+      if (a.isOpening !== b.isOpening) return a.isOpening ? -1 : 1;
+      const da = a.date ? new Date(a.date).getTime() : 0;
+      const db = b.date ? new Date(b.date).getTime() : 0;
+      if (da !== db) return da - db;
+      const voucher = (a.voucherNo || "").localeCompare(b.voucherNo || "");
+      if (voucher !== 0) return voucher;
+      return (a.companyName || "").localeCompare(b.companyName || "");
+    });
+
+    let running = 0;
+    for (const row of ordered) {
+      running += row.debit - row.credit;
+      result.push({ ...row, closing: running });
+    }
+  }
+  return result;
 }
 
 function normalizeCompanies(data: any[]): LedgerCompanyOption[] {
