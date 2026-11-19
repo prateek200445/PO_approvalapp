@@ -33,6 +33,8 @@ export interface ImportJvVoucher {
   lines: ImportJvLine[];
   errors: string[];
   warnings: string[];
+  alreadyUploaded?: boolean;
+  existingJournalNo?: number | null;
 }
 
 export interface ImportJvPreview {
@@ -45,6 +47,7 @@ export interface ImportJvPreview {
   vouchers: ImportJvVoucher[];
   okCount: number;
   errorCount: number;
+  alreadyUploadedCount?: number;
   tdsCount: number;
   canPost: boolean;
 }

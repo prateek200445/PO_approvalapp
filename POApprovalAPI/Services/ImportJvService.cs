@@ -17,6 +17,7 @@ public sealed class ImportJvService
 {
     private const decimal BalanceTolerance = 0.05m;
     private const int MaxRows = 500;
+    private const int PostTimeoutSeconds = 180;
     private static readonly CultureInfo In = CultureInfo.GetCultureInfo("en-IN");
     private static readonly string[] DateFormats =
     [
@@ -190,6 +191,7 @@ public sealed class ImportJvService
             "One row = one journal. Up to 5 credits and 5 debits. Leave unused pairs blank.",
             "Green = credit (party, TDS -194C, bank). Yellow = debit (expense, GST, party TDS). Blue = invoice / date / narration.",
             "Orange Status must show OK. If it is red, Credit Total and Debit Total do not match — fix the amounts before upload. Import will also refuse the row.",
+            "Invoice number is required. It is stored on the journal as voucher/ref (MRNo). The same invoice cannot be posted twice for this company.",
             "TDS: Credit Ledger 2 = TDS -194C (Contractor) (or 194J / 194I / …) and its amount. Debit the same party for that TDS amount so the row balances. If you skip the party debit, import still adds it, but Status stays red until you add it.",
             "Do not use TDS Payable here.",
             "Row 2 is the worked example: Cr Alonso 4720 + Cr TDS 80; Dr expense 4000 + Dr IGST 720 + Dr Alonso 80. Status = OK.",
@@ -224,6 +226,10 @@ public sealed class ImportJvService
         if (preview.ErrorCount > 0)
             throw new ArgumentException($"Fix {preview.ErrorCount} row error(s) before posting.");
 
+        var toPost = preview.Vouchers.Where(v => !v.AlreadyUploaded).ToList();
+        if (toPost.Count == 0)
+            throw new ArgumentException("Every invoice in this file is already in ERP. Nothing new to post.");
+
         using var connection = _database.CreateConnection();
         using var tx = connection.BeginTransaction();
         try
@@ -231,7 +237,7 @@ public sealed class ImportJvService
             var posted = new List<int>();
             var nextByYear = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var voucher in preview.Vouchers)
+            foreach (var voucher in toPost)
             {
                 var yr = YearFrom(voucher.EntryDate);
                 if (!nextByYear.TryGetValue(yr, out var nextNo))
@@ -243,7 +249,8 @@ public sealed class ImportJvService
                         WHERE CompanyName = @Company AND yr = @Yr
                         """,
                         new { Company = preview.Company, Yr = yr },
-                        tx);
+                        tx,
+                        commandTimeout: PostTimeoutSeconds);
                     nextByYear[yr] = nextNo;
                 }
 
@@ -257,9 +264,13 @@ public sealed class ImportJvService
                     WHERE CompanyName = @Company AND yr = @Yr AND JournalNo = @No
                     """,
                     new { Company = preview.Company, Yr = yr, No = journalNo },
-                    tx);
+                    tx,
+                    commandTimeout: PostTimeoutSeconds);
                 if (exists > 0)
                     throw new InvalidOperationException($"Journal {journalNo} already exists for {preview.Company} in {yr}.");
+
+                if (await InvoiceAlreadyPostedAsync(connection, preview.Company, voucher.InvoiceNo, tx))
+                    throw new InvalidOperationException($"Invoice {voucher.InvoiceNo} is already in ERP for {preview.Company}.");
 
                 await InsertVoucherAsync(connection, tx, preview, voucher, journalNo, yr, user);
                 posted.Add(journalNo);
@@ -267,13 +278,18 @@ public sealed class ImportJvService
             }
 
             tx.Commit();
+            var skipped = preview.AlreadyUploadedCount;
+            var range = posted.Count == 0 ? "" : $" {posted.First()}–{posted.Last()}";
+            var message = $"Posted {posted.Count} journal{(posted.Count == 1 ? "" : "s")}{range} in {preview.Company}.";
+            if (skipped > 0)
+                message += $" Skipped {skipped} already in ERP.";
             return new ImportJvCommitResult
             {
                 Posted = posted.Count,
                 JournalNos = posted,
                 Company = preview.Company,
                 Year = posted.Count == 0 ? "" : YearFrom(preview.Vouchers[0].EntryDate),
-                Message = $"Posted {posted.Count} journal{(posted.Count == 1 ? "" : "s")} {posted.First()}–{posted.Last()} in {preview.Company}.",
+                Message = message,
             };
         }
         catch
@@ -310,6 +326,7 @@ public sealed class ImportJvService
             .SelectMany(v => v.Lines.Select(l => l.Ledger))
             .Concat(preview.Vouchers.Select(v => v.CreditLedger))
             .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Select(NormalizeName)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -319,16 +336,23 @@ public sealed class ImportJvService
         {
             foreach (var line in voucher.Lines)
             {
-                if (!ledgers.TryGetValue(line.Ledger, out var found))
+                var key = NormalizeName(line.Ledger);
+                if (!ledgers.ByKey.TryGetValue(key, out var found))
                 {
                     voucher.Errors.Add($"Ledger not in {unit.Name}: {line.Ledger}");
                     continue;
+                }
+                if (ledgers.DuplicateKeys.Contains(key))
+                {
+                    voucher.Warnings.Add(
+                        $"ERP has more than one ledger matching \"{found.Name}\" (extra spaces). Using ledger id {found.Id}.");
                 }
                 line.Ledger = found.Name;
                 line.LedgerId = found.Id;
             }
 
-            if (ledgers.TryGetValue(voucher.CreditLedger, out var party))
+            var partyKey = NormalizeName(voucher.CreditLedger);
+            if (ledgers.ByKey.TryGetValue(partyKey, out var party))
                 voucher.CreditLedger = party.Name;
 
             var largestDr = voucher.Lines.Where(l => l.Debit > 0).OrderByDescending(l => l.Debit).FirstOrDefault();
@@ -347,38 +371,181 @@ public sealed class ImportJvService
             voucher.Warnings = voucher.Warnings.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
-        preview.OkCount = preview.Vouchers.Count(v => v.Errors.Count == 0);
+        MarkFileDuplicates(preview);
+        await MarkAlreadyPostedAsync(connection, preview);
+
+        preview.AlreadyUploadedCount = preview.Vouchers.Count(v => v.AlreadyUploaded);
+        preview.OkCount = preview.Vouchers.Count(v => v.Errors.Count == 0 && !v.AlreadyUploaded);
         preview.ErrorCount = preview.Vouchers.Count(v => v.Errors.Count > 0);
         preview.TdsCount = preview.Vouchers.Count(v => v.TdsTotal > 0);
-        preview.CanPost = preview.Vouchers.Count > 0 && preview.ErrorCount == 0;
+        preview.CanPost = preview.OkCount > 0 && preview.ErrorCount == 0;
     }
 
-    private static async Task<Dictionary<string, LedgerHit>> LoadLedgersAsync(
+    private static async Task<LedgerLookup> LoadLedgersAsync(
         IDbConnection connection, string company, List<string> names)
     {
-        var map = new Dictionary<string, LedgerHit>(StringComparer.OrdinalIgnoreCase);
-        if (names.Count == 0) return map;
+        var lookup = new LedgerLookup();
+        var companyRows = (await connection.QueryAsync<LedgerHit>(
+            """
+            SELECT LTRIM(RTRIM(LedgerName)) AS Name, srno AS Id, LTRIM(RTRIM(CompanyName)) AS Company
+            FROM LedgerMaster WITH (NOLOCK)
+            WHERE LTRIM(RTRIM(CompanyName)) = @Company
+              AND ISNULL(LTRIM(RTRIM(LedgerName)), '') <> ''
+            """,
+            new { Company = company })).ToList();
 
-        var rows = await connection.QueryAsync<LedgerHit>(
+        IndexLedgers(lookup, companyRows, company, markDuplicates: true);
+
+        var missing = names
+            .Where(n => n.Length > 0 && !lookup.ByKey.ContainsKey(n))
+            .ToList();
+        if (missing.Count == 0) return lookup;
+
+        var extra = await connection.QueryAsync<LedgerHit>(
             """
             SELECT LTRIM(RTRIM(LedgerName)) AS Name, srno AS Id, LTRIM(RTRIM(CompanyName)) AS Company
             FROM LedgerMaster WITH (NOLOCK)
             WHERE LTRIM(RTRIM(LedgerName)) IN @Names
             """,
-            new { Names = names });
+            new { Names = missing });
+        IndexLedgers(lookup, extra, company, markDuplicates: false);
+        return lookup;
+    }
 
-        foreach (var row in rows)
+    private static void IndexLedgers(
+        LedgerLookup lookup,
+        IEnumerable<LedgerHit> rows,
+        string company,
+        bool markDuplicates)
+    {
+        var groups = rows
+            .Where(r => !string.IsNullOrWhiteSpace(r.Name))
+            .GroupBy(r => NormalizeName(r.Name), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in groups)
         {
-            if (!map.TryGetValue(row.Name, out var current))
+            var key = group.Key;
+            var chosen = ChooseLedger(group, company);
+            if (markDuplicates && group.Select(r => r.Id).Distinct().Count() > 1)
+                lookup.DuplicateKeys.Add(key);
+
+            if (!lookup.ByKey.TryGetValue(key, out var current))
             {
-                map[row.Name] = row;
+                lookup.ByKey[key] = chosen;
                 continue;
             }
-            var preferNew = string.Equals(row.Company, company, StringComparison.OrdinalIgnoreCase)
+
+            var preferNew = string.Equals(chosen.Company, company, StringComparison.OrdinalIgnoreCase)
                             && !string.Equals(current.Company, company, StringComparison.OrdinalIgnoreCase);
-            if (preferNew) map[row.Name] = row;
+            if (preferNew) lookup.ByKey[key] = chosen;
         }
-        return map;
+    }
+
+    private static LedgerHit ChooseLedger(IEnumerable<LedgerHit> rows, string company)
+    {
+        var list = rows.ToList();
+        var sameCompany = list
+            .Where(r => string.Equals(r.Company, company, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var pool = sameCompany.Count > 0 ? sameCompany : list;
+        return pool
+            .OrderBy(r => NormalizeName(r.Name) == r.Name ? 0 : 1)
+            .ThenBy(r => r.Id)
+            .First();
+    }
+
+    private static void MarkFileDuplicates(ImportJvPreview preview)
+    {
+        var firstRow = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var voucher in preview.Vouchers)
+        {
+            voucher.InvoiceNo = NormalizeName(voucher.InvoiceNo);
+            if (voucher.InvoiceNo.Length == 0)
+            {
+                voucher.Errors.Add("Invoice number is required.");
+                continue;
+            }
+
+            if (firstRow.TryGetValue(voucher.InvoiceNo, out var row))
+            {
+                voucher.Errors.Add($"Invoice {voucher.InvoiceNo} is also on row {row}. Duplicate invoices cannot be posted.");
+                continue;
+            }
+
+            firstRow[voucher.InvoiceNo] = voucher.Row;
+        }
+    }
+
+    private static async Task MarkAlreadyPostedAsync(IDbConnection connection, ImportJvPreview preview)
+    {
+        var invoices = preview.Vouchers
+            .Where(v => v.InvoiceNo.Length > 0 && v.Errors.Count == 0)
+            .Select(v => v.InvoiceNo)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (invoices.Count == 0) return;
+
+        var posted = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in await connection.QueryAsync<(string InvoiceNo, int JournalNo)>(
+            """
+            SELECT LTRIM(RTRIM(MRNo)) AS InvoiceNo, MIN(JournalNo) AS JournalNo
+            FROM Journal WITH (NOLOCK)
+            WHERE CompanyName = @Company
+              AND LTRIM(RTRIM(ISNULL(MRNo, ''))) IN @Invoices
+            GROUP BY LTRIM(RTRIM(MRNo))
+            """,
+            new { Company = preview.Company, Invoices = invoices }))
+        {
+            var key = NormalizeName(row.InvoiceNo);
+            if (key.Length > 0 && !posted.ContainsKey(key))
+                posted[key] = row.JournalNo;
+        }
+
+        foreach (var row in await connection.QueryAsync<(string InvoiceNo, int JournalNo)>(
+            """
+            SELECT LTRIM(RTRIM(BillNo)) AS InvoiceNo, MIN(JournalNo) AS JournalNo
+            FROM JournalItem WITH (NOLOCK)
+            WHERE CompanyName = @Company
+              AND LTRIM(RTRIM(ISNULL(BillNo, ''))) IN @Invoices
+            GROUP BY LTRIM(RTRIM(BillNo))
+            """,
+            new { Company = preview.Company, Invoices = invoices }))
+        {
+            var key = NormalizeName(row.InvoiceNo);
+            if (key.Length > 0 && !posted.ContainsKey(key))
+                posted[key] = row.JournalNo;
+        }
+
+        foreach (var voucher in preview.Vouchers)
+        {
+            if (voucher.Errors.Count > 0) continue;
+            if (!posted.TryGetValue(voucher.InvoiceNo, out var journalNo)) continue;
+            voucher.AlreadyUploaded = true;
+            voucher.ExistingJournalNo = journalNo;
+            voucher.Warnings.Add($"Already in ERP as journal {journalNo}. This row will not be posted again.");
+        }
+    }
+
+    private static async Task<bool> InvoiceAlreadyPostedAsync(
+        IDbConnection connection, string company, string invoiceNo, IDbTransaction tx)
+    {
+        var invoice = NormalizeName(invoiceNo);
+        if (invoice.Length == 0) return false;
+        var count = await connection.ExecuteScalarAsync<int>(
+            """
+            SELECT
+                CASE WHEN EXISTS (
+                    SELECT 1 FROM Journal WITH (NOLOCK)
+                    WHERE CompanyName = @Company AND LTRIM(RTRIM(ISNULL(MRNo, ''))) = @Invoice
+                ) OR EXISTS (
+                    SELECT 1 FROM JournalItem WITH (NOLOCK)
+                    WHERE CompanyName = @Company AND LTRIM(RTRIM(ISNULL(BillNo, ''))) = @Invoice
+                ) THEN 1 ELSE 0 END
+            """,
+            new { Company = company, Invoice = invoice },
+            tx,
+            commandTimeout: PostTimeoutSeconds);
+        return count > 0;
     }
 
     private static async Task InsertVoucherAsync(
@@ -401,7 +568,7 @@ public sealed class ImportJvService
                     TDSAccessableAmount, RecordLogId, SubLedgerName, companyId, PartyId, DrPartyID, CrPartyID)
                 VALUES (
                     @JournalNo, @Date, @Company, @Type, @PartyName, @Debit, @Credit,
-                    @Narration, @UserName, @NarrationFinal, 'Journal', 'no', '', '',
+                    @Narration, @UserName, @NarrationFinal, 'Journal', 'no', @MRNo, @MRNo,
                     @DrPartyName, @CrPartyName, @Yr, 'Rs.', 1, @BillDate, '',
                     @TdsBase, 0, '', @CompanyId, @PartyId, @DrPartyId, @CrPartyId);
                 SELECT CAST(SCOPE_IDENTITY() AS int);
@@ -418,6 +585,7 @@ public sealed class ImportJvService
                     Narration = line.Remark ?? "",
                     UserName = username,
                     NarrationFinal = string.IsNullOrWhiteSpace(voucher.Narration) ? voucher.InvoiceNo : voucher.Narration,
+                    MRNo = voucher.InvoiceNo ?? "",
                     DrPartyName = voucher.DrPartyName,
                     CrPartyName = voucher.CrPartyName,
                     Yr = yr,
@@ -428,7 +596,8 @@ public sealed class ImportJvService
                     DrPartyId = voucher.DrPartyId,
                     CrPartyId = voucher.CrPartyId,
                 },
-                tx);
+                tx,
+                commandTimeout: PostTimeoutSeconds);
 
             if (string.IsNullOrWhiteSpace(line.BillNo) || line.BillAmount <= 0)
                 continue;
@@ -442,7 +611,8 @@ public sealed class ImportJvService
                 WHERE CompanyName = @Company AND LedgerName = @Ledger AND BillNo = @BillNo
                 """,
                 new { Company = preview.Company, Ledger = line.Ledger, BillNo = line.BillNo },
-                tx);
+                tx,
+                commandTimeout: PostTimeoutSeconds);
             if (exists == 0)
             {
                 await connection.ExecuteAsync(
@@ -460,7 +630,8 @@ public sealed class ImportJvService
                         CompanyId = preview.CompanyId,
                         LedgerId = line.LedgerId,
                     },
-                    tx);
+                    tx,
+                    commandTimeout: PostTimeoutSeconds);
             }
 
             await connection.ExecuteAsync(
@@ -493,7 +664,8 @@ public sealed class ImportJvService
                     CompanyId = preview.CompanyId,
                     PartyId = line.LedgerId,
                 },
-                tx);
+                tx,
+                commandTimeout: PostTimeoutSeconds);
         }
     }
 
@@ -561,15 +733,15 @@ public sealed class ImportJvService
         var debits = new List<(string Ledger, decimal Amount)>();
         for (var i = 0; i < 5; i++)
         {
-            var cName = Cell(map.CreditLedgers[i]);
+            var cName = NormalizeName(Cell(map.CreditLedgers[i]));
             var cAmt = ParseAmount(Cell(map.CreditAmounts[i]));
             if (cName.Length > 0 || cAmt != 0) credits.Add((cName, cAmt));
-            var dName = Cell(map.DebitLedgers[i]);
+            var dName = NormalizeName(Cell(map.DebitLedgers[i]));
             var dAmt = ParseAmount(Cell(map.DebitAmounts[i]));
             if (dName.Length > 0 || dAmt != 0) debits.Add((dName, dAmt));
         }
 
-        var invoiceNo = Cell(map.InvoiceNo);
+        var invoiceNo = NormalizeName(Cell(map.InvoiceNo));
         var narration = Cell(map.Narration);
         if (credits.Count == 0 && debits.Count == 0 && invoiceNo.Length == 0 && narration.Length == 0)
             return null;
@@ -723,8 +895,8 @@ public sealed class ImportJvService
     {
         string Cell(int index) => index >= 0 && index < cells.Count ? cells[index].Trim() : "";
 
-        var creditLedger = Cell(map.CreditLedger);
-        var invoiceNo = Cell(map.InvoiceNo);
+        var creditLedger = NormalizeName(Cell(map.CreditLedger));
+        var invoiceNo = NormalizeName(Cell(map.InvoiceNo));
         if (creditLedger.Length == 0 && invoiceNo.Length == 0 && ParseAmount(Cell(map.InvoiceValue)) == 0)
             return null;
 
@@ -1040,9 +1212,16 @@ public sealed class ImportJvService
     private static string NormalizeHeader(string header) =>
         new string((header ?? "").Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
 
+    private static string NormalizeName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "";
+        var parts = value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(" ", parts);
+    }
+
     private static bool IsTdsSection(string ledger)
     {
-        var name = (ledger ?? "").Trim();
+        var name = NormalizeName(ledger);
         return name.StartsWith("TDS -", StringComparison.OrdinalIgnoreCase)
                || name.StartsWith("TDS-", StringComparison.OrdinalIgnoreCase);
     }
@@ -1090,6 +1269,12 @@ public sealed class ImportJvService
         public int Id { get; set; }
         public string Company { get; set; } = "";
     }
+
+    private sealed class LedgerLookup
+    {
+        public Dictionary<string, LedgerHit> ByKey { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> DuplicateKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+    }
 }
 
 public sealed class ImportJvUnitOption
@@ -1109,6 +1294,7 @@ public sealed class ImportJvPreview
     public List<ImportJvVoucher> Vouchers { get; set; } = [];
     public int OkCount { get; set; }
     public int ErrorCount { get; set; }
+    public int AlreadyUploadedCount { get; set; }
     public int TdsCount { get; set; }
     public bool CanPost { get; set; }
 }
@@ -1132,6 +1318,8 @@ public sealed class ImportJvVoucher
     public List<ImportJvLine> Lines { get; set; } = [];
     public List<string> Errors { get; set; } = [];
     public List<string> Warnings { get; set; } = [];
+    public bool AlreadyUploaded { get; set; }
+    public int? ExistingJournalNo { get; set; }
 }
 
 public sealed class ImportJvLine

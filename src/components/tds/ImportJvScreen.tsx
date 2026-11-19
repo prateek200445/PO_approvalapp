@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
+  BadgeCheck,
   CheckCircle2,
   Download,
   FileSpreadsheet,
@@ -89,7 +90,15 @@ export function ImportJvScreen() {
       setPreview(result);
       setSelectedRow(result.vouchers[0]?.row ?? null);
       if (result.errorCount > 0) toast.error(`${result.errorCount} row(s) need a fix before posting.`);
-      else toast.success(`Ready: ${result.okCount} journal${result.okCount === 1 ? "" : "s"}, ${result.tdsCount} with TDS.`);
+      else if (result.okCount === 0 && (result.alreadyUploadedCount ?? 0) > 0) {
+        toast.error("Every invoice is already in ERP. Nothing new to post.");
+      } else {
+        const uploaded = result.alreadyUploadedCount ?? 0;
+        toast.success(
+          `Ready: ${result.okCount} journal${result.okCount === 1 ? "" : "s"}, ${result.tdsCount} with TDS` +
+            (uploaded ? `, ${uploaded} already uploaded.` : "."),
+        );
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not read the file.");
       setPreview(null);
@@ -238,16 +247,26 @@ export function ImportJvScreen() {
 
       {preview ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-5">
             <Stat label="Journals" value={String(preview.vouchers.length)} />
             <Stat label="With TDS" value={String(preview.tdsCount)} />
             <Stat label="Ready" value={String(preview.okCount)} ok />
+            <Stat
+              label="Uploaded"
+              value={String(preview.alreadyUploadedCount ?? 0)}
+              uploaded={(preview.alreadyUploadedCount ?? 0) > 0}
+            />
             <Stat label="Errors" value={String(preview.errorCount)} bad={preview.errorCount > 0} />
           </div>
 
           {preview.errorCount > 0 ? (
             <p className="text-xs text-destructive">
-              Red rows do not reconcile or have a missing ledger. Fix the sheet; Post stays off until every row is OK.
+              Red rows do not reconcile, have a missing ledger, or repeat an invoice in this file. Fix the sheet; Post stays off until every remaining row is OK.
+            </p>
+          ) : null}
+          {(preview.alreadyUploadedCount ?? 0) > 0 ? (
+            <p className="text-xs text-sky-800 dark:text-sky-300">
+              Blue rows are already in ERP for this company and invoice. They will not be posted again.
             </p>
           ) : null}
 
@@ -269,6 +288,7 @@ export function ImportJvScreen() {
                     {preview.vouchers.map((row) => {
                       const active = selected?.row === row.row;
                       const bad = row.errors.length > 0;
+                      const uploaded = !!row.alreadyUploaded && !bad;
                       return (
                         <tr
                           key={row.row}
@@ -276,6 +296,7 @@ export function ImportJvScreen() {
                             "cursor-pointer border-b border-border/60 last:border-0",
                             active ? "bg-primary/8" : "hover:bg-muted/40",
                             bad ? "bg-destructive/5" : "",
+                            uploaded ? "bg-sky-50 dark:bg-sky-950/40" : "",
                           )}
                           onClick={() => setSelectedRow(row.row)}
                         >
@@ -297,6 +318,11 @@ export function ImportJvScreen() {
                                 <AlertCircle className="h-3.5 w-3.5" />
                                 {row.errors.length} error
                               </span>
+                            ) : uploaded ? (
+                              <span className="inline-flex items-center gap-1 text-sky-800 dark:text-sky-300">
+                                <BadgeCheck className="h-3.5 w-3.5" />
+                                Uploaded{row.existingJournalNo ? ` · JV ${row.existingJournalNo}` : ""}
+                              </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
                                 <CheckCircle2 className="h-3.5 w-3.5" />
@@ -317,10 +343,12 @@ export function ImportJvScreen() {
 
           <div className="flex flex-wrap items-center justify-end gap-3">
             <Button
-              disabled={!preview.canPost || posting}
+              disabled={!preview.canPost || posting || preview.okCount === 0}
               onClick={() => setConfirmOpen(true)}
             >
-              Post {preview.okCount} journal{preview.okCount === 1 ? "" : "s"} to ERP
+              {preview.okCount === 0
+                ? "Nothing new to post"
+                : `Post ${preview.okCount} journal${preview.okCount === 1 ? "" : "s"} to ERP`}
             </Button>
           </div>
         </>
@@ -332,12 +360,16 @@ export function ImportJvScreen() {
             <DialogTitle>Post journals to {company}?</DialogTitle>
             <DialogDescription>
               This writes Journal and JournalItem rows in ERP, including TDS credits and the matching party debit.
-              There is no undo from this screen.
+              Invoice number is stored as voucher/ref. There is no undo from this screen.
             </DialogDescription>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
             {preview?.okCount} voucher{preview?.okCount === 1 ? "" : "s"}
-            {preview?.tdsCount ? `, ${preview.tdsCount} with TDS` : ""}. Posted as {user?.username}.
+            {preview?.tdsCount ? `, ${preview.tdsCount} with TDS` : ""}
+            {(preview?.alreadyUploadedCount ?? 0) > 0
+              ? `, ${preview?.alreadyUploadedCount} already uploaded (skipped)`
+              : ""}
+            . Posted as {user?.username}.
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={posting}>
@@ -359,11 +391,13 @@ function Stat({
   value,
   ok,
   bad,
+  uploaded,
 }: {
   label: string;
   value: string;
   ok?: boolean;
   bad?: boolean;
+  uploaded?: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-border/80 bg-card px-4 py-3 shadow-soft">
@@ -373,6 +407,7 @@ function Stat({
           "mt-1 text-xl font-semibold tabular-nums",
           ok && "text-emerald-700 dark:text-emerald-400",
           bad && "text-destructive",
+          uploaded && "text-sky-800 dark:text-sky-300",
         )}
       >
         {value}
@@ -395,7 +430,11 @@ function JournalPreview({ voucher }: { voucher: ImportJvVoucher }) {
             {voucher.requestedJournalNo ? ` · requested JV ${voucher.requestedJournalNo}` : ""}
           </p>
         </div>
-        {voucher.tdsTotal > 0 ? (
+        {voucher.alreadyUploaded ? (
+          <span className="rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-medium text-sky-800 dark:bg-sky-950 dark:text-sky-300">
+            Uploaded{voucher.existingJournalNo ? ` JV ${voucher.existingJournalNo}` : ""}
+          </span>
+        ) : voucher.tdsTotal > 0 ? (
           <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
             TDS {money(voucher.tdsTotal)}
           </span>
