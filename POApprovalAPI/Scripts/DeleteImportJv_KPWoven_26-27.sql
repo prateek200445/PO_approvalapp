@@ -1,6 +1,7 @@
 -- Delete Import JV journals posted to K.P. WOVEN PRIVATE LIMITED (yr 26-27)
 -- from the portal as gstho1. Review the SELECT results before the DELETE.
 -- Ran 2026-11-19: 232 Journal lines + 232 JournalItem lines backed up then deleted; 0 remaining.
+-- Ran 2026-11-19 (remaining 3053, 3054, 3107, 3109, 3132): 12 Journal lines backed up then deleted; 0 remaining.
 --
 -- Do not delete a contiguous JournalNo range — other vouchers may sit in between.
 -- AccountBills rows are left in place unless you confirm they belong only to this import.
@@ -13,16 +14,17 @@ IF OBJECT_ID('tempdb..#Jv') IS NOT NULL DROP TABLE #Jv;
 CREATE TABLE #Jv (JournalNo int NOT NULL PRIMARY KEY);
 
 INSERT INTO #Jv (JournalNo) VALUES
+ (3053),(3054),
  (3057),(3058),(3059),(3060),
  (3061),(3062),(3063),(3064),(3065),(3066),(3067),(3068),(3069),(3070),
  (3071),(3072),(3073),(3074),(3075),(3076),(3077),(3078),(3079),(3080),
  (3081),(3082),(3083),(3084),(3085),(3086),(3087),
  (3088),(3089),(3090),(3091),(3092),(3093),(3094),(3095),(3096),(3097),
  (3098),(3099),(3100),(3101),(3102),(3103),
- (3104),(3105),(3106),
- (3110),(3111),
+ (3104),(3105),(3106),(3107),
+ (3109),(3110),(3111),
  (3112),(3113),(3114),(3115),(3116),(3117),(3118),(3119),(3120),(3121),
- (3122),(3123),(3124),(3125),(3126),(3127),(3128),(3129),(3130),(3131),
+ (3122),(3123),(3124),(3125),(3126),(3127),(3128),(3129),(3130),(3131),(3132),
  (3133),(3134);
 
 -- 1. Inspect. Stop here if anything is not this import.
