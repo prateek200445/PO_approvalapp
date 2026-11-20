@@ -73,6 +73,7 @@ import { Route as AppFibcBuyersBuyerIdRouteImport } from './routes/_app/fibc-buy
 import { Route as AppBomCustomersRouteImport } from './routes/_app/bom.customers'
 import { Route as AppBomCreateRouteImport } from './routes/_app/bom.create'
 import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
+import { Route as AppBankRequirementsBobLodgementRouteImport } from './routes/_app/bank-requirements_.bob-lodgement'
 import { Route as AppBankRequirementsDocumentPackRouteImport } from './routes/_app/bank-requirements_.document-pack'
 import { Route as AppAdvancePaymentPaymentNoRouteImport } from './routes/_app/advance-payment.$paymentNo'
 
@@ -398,6 +399,12 @@ const AppBomSplatRoute = AppBomSplatRouteImport.update({
   path: '/$',
   getParentRoute: () => AppBomRoute,
 } as any)
+const AppBankRequirementsBobLodgementRoute =
+  AppBankRequirementsBobLodgementRouteImport.update({
+    id: '/bank-requirements_/bob-lodgement',
+    path: '/bank-requirements/bob-lodgement',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppBankRequirementsDocumentPackRoute =
   AppBankRequirementsDocumentPackRouteImport.update({
     id: '/bank-requirements_/document-pack',
@@ -455,6 +462,7 @@ export interface FileRoutesByFullPath {
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
+  '/bank-requirements/bob-lodgement': typeof AppBankRequirementsBobLodgementRoute
   '/bank-requirements/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/bom/$': typeof AppBomSplatRoute
   '/bom/create': typeof AppBomCreateRoute
@@ -521,6 +529,7 @@ export interface FileRoutesByTo {
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
+  '/bank-requirements/bob-lodgement': typeof AppBankRequirementsBobLodgementRoute
   '/bank-requirements/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/bom/$': typeof AppBomSplatRoute
   '/bom/create': typeof AppBomCreateRoute
@@ -590,6 +599,7 @@ export interface FileRoutesById {
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/_app/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
+  '/_app/bank-requirements_/bob-lodgement': typeof AppBankRequirementsBobLodgementRoute
   '/_app/bank-requirements_/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/_app/bom/$': typeof AppBomSplatRoute
   '/_app/bom/create': typeof AppBomCreateRoute
@@ -659,6 +669,7 @@ export interface FileRouteTypes {
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/advance-payment/$paymentNo'
+    | '/bank-requirements/bob-lodgement'
     | '/bank-requirements/document-pack'
     | '/bom/$'
     | '/bom/create'
@@ -725,6 +736,7 @@ export interface FileRouteTypes {
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/advance-payment/$paymentNo'
+    | '/bank-requirements/bob-lodgement'
     | '/bank-requirements/document-pack'
     | '/bom/$'
     | '/bom/create'
@@ -793,6 +805,7 @@ export interface FileRouteTypes {
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/_app/advance-payment/$paymentNo'
+    | '/_app/bank-requirements_/bob-lodgement'
     | '/_app/bank-requirements_/document-pack'
     | '/_app/bom/$'
     | '/_app/bom/create'
@@ -1274,6 +1287,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBomSplatRouteImport
       parentRoute: typeof AppBomRoute
     }
+    '/_app/bank-requirements_/bob-lodgement': {
+      id: '/_app/bank-requirements_/bob-lodgement'
+      path: '/bank-requirements/bob-lodgement'
+      fullPath: '/bank-requirements/bob-lodgement'
+      preLoaderRoute: typeof AppBankRequirementsBobLodgementRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/bank-requirements_/document-pack': {
       id: '/_app/bank-requirements_/document-pack'
       path: '/bank-requirements/document-pack'
@@ -1400,6 +1420,7 @@ interface AppRouteChildren {
   AppWorkordersRoute: typeof AppWorkordersRoute
   AppWovenQuoteRoute: typeof AppWovenQuoteRoute
   AppAdvancePaymentPaymentNoRoute: typeof AppAdvancePaymentPaymentNoRoute
+  AppBankRequirementsBobLodgementRoute: typeof AppBankRequirementsBobLodgementRoute
   AppBankRequirementsDocumentPackRoute: typeof AppBankRequirementsDocumentPackRoute
   AppHrReportsDocumentsRoute: typeof AppHrReportsDocumentsRoute
   AppHrReportsEmployeeMasterRoute: typeof AppHrReportsEmployeeMasterRoute
@@ -1450,6 +1471,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppWorkordersRoute: AppWorkordersRoute,
   AppWovenQuoteRoute: AppWovenQuoteRoute,
   AppAdvancePaymentPaymentNoRoute: AppAdvancePaymentPaymentNoRoute,
+  AppBankRequirementsBobLodgementRoute: AppBankRequirementsBobLodgementRoute,
   AppBankRequirementsDocumentPackRoute: AppBankRequirementsDocumentPackRoute,
   AppHrReportsDocumentsRoute: AppHrReportsDocumentsRoute,
   AppHrReportsEmployeeMasterRoute: AppHrReportsEmployeeMasterRoute,
