@@ -72,7 +72,7 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
         var credential = session.Credential ?? throw new InvalidOperationException("GST login is not ready.");
         await page.Locator("#username").FillAsync(credential.Login);
         await page.Locator("#user_pass").FillAsync(credential.Password);
-        await page.Locator("#captcha").FillAsync((captcha ?? "").Trim());
+        await TypeLikeUserAsync(page.Locator("#captcha"), captcha);
         await page.Locator("button.btn-primary").First.ClickAsync();
         await page.WaitForTimeoutAsync(2_500);
 
@@ -96,7 +96,7 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
         var session = GetSession(sessionId);
         var otp = await FindOtpInputAsync(session.Page!)
             ?? throw new ArgumentException("The GST portal is not currently requesting an OTP.");
-        await otp.FillAsync((otpValue ?? "").Trim());
+        await TypeLikeUserAsync(otp, otpValue);
         await session.Page!.Locator("button.btn-primary").Last.ClickAsync();
         await session.Page.WaitForTimeoutAsync(2_500);
 
@@ -306,15 +306,17 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
         await SelectPortalFieldAsync(
             page,
             "Financial Year",
+            "fin",
             financialYear,
             $"{financialYearStart} - {(financialYearStart + 1) % 100:00}",
             $"{financialYearStart}-{financialYearStart + 1}");
         await page.WaitForTimeoutAsync(750);
-        await SelectPortalFieldAsync(page, "Quarter", QuarterLabel(month.Month));
+        await SelectPortalFieldAsync(page, "Quarter", "quarter", QuarterLabel(month.Month));
         await page.WaitForTimeoutAsync(750);
         await SelectPortalFieldAsync(
             page,
             "Period",
+            "mon",
             month.ToString("MMMM", CultureInfo.InvariantCulture),
             month.ToString("MMM", CultureInfo.InvariantCulture));
 
@@ -347,28 +349,39 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
 
     private static async Task<byte[]> DownloadGeneratedExcelAsync(IPage page, DateTime month)
     {
-        var ready = await FindExcelDownloadLinkAsync(page);
+        var ready = await ReadReadyExcelFilesAsync(page);
         if (ready is not null)
-            return NormalizeWorkbook(await ClickAndReadDownloadAsync(page, ready));
+            return ready;
 
         var generate = await WaitForGenerateExcelAsync(page);
-        try
-        {
-            return NormalizeWorkbook(await ClickAndReadDownloadAsync(page, generate));
-        }
-        catch (TimeoutException)
-        {
-            var ok = await FirstVisibleRoleAsync(page, AriaRole.Button, "^OK$");
-            if (ok is not null)
-                return NormalizeWorkbook(await ClickAndReadDownloadAsync(page, ok));
-        }
+        var direct = page.WaitForDownloadAsync(new PageWaitForDownloadOptions { Timeout = 240_000 });
+        _ = direct.ContinueWith(task => task.Exception, TaskContinuationOptions.OnlyOnFaulted);
+        await generate.ClickAsync();
 
-        var deadline = DateTime.UtcNow.AddMinutes(2);
+        var confirmed = false;
+        var deadline = DateTime.UtcNow.AddMinutes(4);
         while (DateTime.UtcNow < deadline)
         {
+            if (direct.IsCompletedSuccessfully)
+                return NormalizeWorkbook(await SaveDownloadAsync(direct.Result));
+
+            if (await IsVisibleAsync(page.GetByText("no record for GSTR 2B", new PageGetByTextOptions { Exact = false }).First))
+                throw new InvalidOperationException(
+                    $"GSTR-2B for {month:MMM yyyy} is not available on the GST portal yet.");
+
             var downloaded = await ReadReadyExcelFilesAsync(page);
             if (downloaded is not null)
                 return downloaded;
+
+            if (!confirmed)
+            {
+                var ok = await FirstVisibleRoleAsync(page, AriaRole.Button, "^OK$");
+                if (ok is not null)
+                {
+                    await ok.ClickAsync();
+                    confirmed = true;
+                }
+            }
             await page.WaitForTimeoutAsync(3_000);
         }
 
@@ -392,24 +405,25 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
 
     private static async Task<IPage> EnsureReturnsDashboardAsync(IPage page)
     {
-        if (page.Url.Contains("return.gst.gov.in/returns", StringComparison.OrdinalIgnoreCase))
+        var offline = await FirstVisibleRoleAsync(page, AriaRole.Button, "GENERATE\\s+EXCEL\\s+FILE\\s+TO\\s+DOWNLOAD");
+        var back = await FirstVisibleRoleAsync(page, AriaRole.Button, "^BACK$");
+        if (offline is not null && back is not null)
         {
-            var offline = await FirstVisibleRoleAsync(page, AriaRole.Button, "GENERATE\\s+EXCEL\\s+FILE\\s+TO\\s+DOWNLOAD");
-            var back = await FirstVisibleRoleAsync(page, AriaRole.Button, "^BACK$");
-            if (offline is not null && back is not null)
-            {
-                await back.ClickAsync();
-                await page.WaitForTimeoutAsync(1_500);
-            }
-            if (await page.Locator("select").CountAsync() > 0)
+            await back.ClickAsync();
+            if (await DashboardReadyAsync(page, 25))
                 return page;
         }
+        if (page.Url.Contains("return.gst.gov.in/returns", StringComparison.OrdinalIgnoreCase) &&
+            await DashboardReadyAsync(page, 5))
+            return page;
         return await NavigateToReturnsDashboardAsync(page);
     }
 
     private static async Task<byte[]?> ReadReadyExcelFilesAsync(IPage page)
     {
-        var links = await VisibleRolesAsync(page, AriaRole.Link, "download\\s+excel|click here to download");
+        var links = await VisibleDetailPartLinksAsync(page);
+        if (links.Count == 0)
+            links = await VisibleRolesAsync(page, AriaRole.Link, "download\\s+excel|click here to download");
         if (links.Count == 0)
             return null;
         var files = new List<byte[]>();
@@ -446,8 +460,20 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
         return text.Length == 0 ? "(none)" : text;
     }
 
-    private static Task<ILocator?> FindExcelDownloadLinkAsync(IPage page) =>
-        FirstVisibleRoleAsync(page, AriaRole.Link, "download\\s+excel|click here to download");
+    // Large returns are split into "GSTR-2B Details - Part N" files; the separate Summary file has no invoice rows.
+    private static async Task<List<ILocator>> VisibleDetailPartLinksAsync(IPage page)
+    {
+        var links = page.Locator(
+            "xpath=//td[not(.//td) and contains(normalize-space(.), 'Details')]/following-sibling::td//a");
+        var found = new List<ILocator>();
+        for (var index = 0; index < await links.CountAsync(); index++)
+        {
+            var link = links.Nth(index);
+            if (await IsVisibleAsync(link))
+                found.Add(link);
+        }
+        return found;
+    }
 
     private static async Task<ILocator?> FirstVisibleRoleAsync(IPage page, AriaRole role, string pattern)
     {
@@ -598,17 +624,31 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
 
     private static async Task<ILocator?> FirstVisibleAsync(IPage page, string selector, string text)
     {
-        var matches = page.Locator(selector).Filter(new LocatorFilterOptions
+        var filter = new LocatorFilterOptions
         {
             HasTextRegex = new Regex(Regex.Escape(text), RegexOptions.IgnoreCase)
-        });
+        };
+        var matches = page.Locator(selector).Filter(filter);
         for (var index = 0; index < await matches.CountAsync(); index++)
         {
             var match = matches.Nth(index);
-            if (await IsVisibleAsync(match))
-                return match;
+            if (!await IsVisibleAsync(match) || await HasVisibleMatchInsideAsync(match, selector, filter))
+                continue;
+            return match;
         }
         return null;
+    }
+
+    // A wrapper such as a full-width <li> also matches the text, but clicking its centre misses the link inside it.
+    private static async Task<bool> HasVisibleMatchInsideAsync(ILocator element, string selector, LocatorFilterOptions filter)
+    {
+        var inner = element.Locator(selector).Filter(filter);
+        for (var index = 0; index < await inner.CountAsync(); index++)
+        {
+            if (await IsVisibleAsync(inner.Nth(index)))
+                return true;
+        }
+        return false;
     }
 
     private static string NavigationSnapshotPath() => Path.Combine(Path.GetTempPath(), "gst-nav-debug.txt");
@@ -692,10 +732,19 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
         return null;
     }
 
-    private static async Task SelectPortalFieldAsync(IPage page, string label, params string[] choices)
+    private static async Task SelectPortalFieldAsync(IPage page, string label, string selectName, params string[] choices)
     {
         for (var attempt = 0; attempt < 60; attempt++)
         {
+            var named = page.Locator($"select[name='{selectName}']");
+            if (await named.CountAsync() > 0)
+            {
+                if (await SelectFromElementAsync(named.First, choices))
+                    return;
+                await page.WaitForTimeoutAsync(500);
+                continue;
+            }
+
             var labelled = page.GetByLabel(label, new PageGetByLabelOptions { Exact = false });
             for (var index = 0; index < await labelled.CountAsync(); index++)
             {
@@ -756,6 +805,11 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
         var download = await page.RunAndWaitForDownloadAsync(
             async () => await control.ClickAsync(),
             new PageRunAndWaitForDownloadOptions { Timeout = 120_000 });
+        return await SaveDownloadAsync(download);
+    }
+
+    private static async Task<byte[]> SaveDownloadAsync(IDownload download)
+    {
         var tempPath = Path.Combine(Path.GetTempPath(), "gst-2b-" + Guid.NewGuid().ToString("N") + ".xlsx");
         try
         {
@@ -990,6 +1044,13 @@ WHERE COALESCE(NULLIF(LTRIM(RTRIM(GroupName)), ''), LTRIM(RTRIM(Name))) = @Group
 
         var bytes = await image.ScreenshotAsync();
         return "data:image/png;base64," + Convert.ToBase64String(bytes);
+    }
+
+    // The portal clears its "invalid CAPTCHA" flag only on keydown, so a plain fill leaves the form blocked after one rejection.
+    private static async Task TypeLikeUserAsync(ILocator input, string? value)
+    {
+        await input.FillAsync("");
+        await input.PressSequentiallyAsync((value ?? "").Trim(), new LocatorPressSequentiallyOptions { Delay = 40 });
     }
 
     private static async Task<ILocator?> FindOtpInputAsync(IPage page)

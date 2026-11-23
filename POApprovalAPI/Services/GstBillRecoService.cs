@@ -32,6 +32,7 @@ public class GstBillRecoService
     ];
 
     private static int _billProcedureReady;
+    private static readonly SemaphoreSlim BillProcedureLock = new(1, 1);
 
     private readonly DatabaseService _database;
     private readonly Gst2BSnapshotService _snapshots;
@@ -781,19 +782,30 @@ END";
     {
         if (Volatile.Read(ref _billProcedureReady) == 1)
             return;
-        var resourceName = typeof(GstBillRecoService).Assembly.GetManifestResourceNames()
-            .FirstOrDefault(name => name.EndsWith("AppGstRecoBills.sql", StringComparison.Ordinal));
-        if (resourceName == null)
-            throw new InvalidOperationException("The bill reconciliation procedure script is missing from the API.");
-        await using var stream = typeof(GstBillRecoService).Assembly.GetManifestResourceStream(resourceName)
-            ?? throw new InvalidOperationException("The bill reconciliation procedure script could not be opened.");
-        using var text = new StreamReader(stream);
-        var sql = await text.ReadToEndAsync(ct);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandTimeout = 60;
-        cmd.CommandText = sql;
-        await cmd.ExecuteNonQueryAsync(ct);
-        Volatile.Write(ref _billProcedureReady, 1);
+        // Member companies load in parallel; altering the procedure while another call runs it fails that call.
+        await BillProcedureLock.WaitAsync(ct);
+        try
+        {
+            if (Volatile.Read(ref _billProcedureReady) == 1)
+                return;
+            var resourceName = typeof(GstBillRecoService).Assembly.GetManifestResourceNames()
+                .FirstOrDefault(name => name.EndsWith("AppGstRecoBills.sql", StringComparison.Ordinal));
+            if (resourceName == null)
+                throw new InvalidOperationException("The bill reconciliation procedure script is missing from the API.");
+            await using var stream = typeof(GstBillRecoService).Assembly.GetManifestResourceStream(resourceName)
+                ?? throw new InvalidOperationException("The bill reconciliation procedure script could not be opened.");
+            using var text = new StreamReader(stream);
+            var sql = await text.ReadToEndAsync(ct);
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandTimeout = 60;
+            cmd.CommandText = sql;
+            await cmd.ExecuteNonQueryAsync(ct);
+            Volatile.Write(ref _billProcedureReady, 1);
+        }
+        finally
+        {
+            BillProcedureLock.Release();
+        }
     }
 
     private async Task<List<ErpLine>> LoadErpAsync(string company, DateTime from, DateTime to, DateTime billFrom, CancellationToken ct)
