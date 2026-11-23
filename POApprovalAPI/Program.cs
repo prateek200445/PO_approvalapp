@@ -92,6 +92,7 @@ builder.Services.AddScoped<DmsRemoteFileService>();
 builder.Services.AddScoped<SalesDashboardService>();
 builder.Services.AddScoped<BankRequirementsService>();
 builder.Services.AddScoped<BankDocumentPackService>();
+builder.Services.AddScoped<BobLodgementService>();
 builder.Services.AddScoped<GstLiabilityService>();
 builder.Services.AddScoped<TdsLiabilityService>();
 builder.Services.AddScoped<TdsSectionSheetService>();
