@@ -78,8 +78,7 @@ public sealed class BobLodgementService
                 string.IsNullOrWhiteSpace(sb) && string.IsNullOrWhiteSpace(amountRaw))
                 continue;
 
-            _ = decimal.TryParse(amountRaw.Replace(",", ""), NumberStyles.Any, CultureInfo.InvariantCulture, out var amount)
-                || decimal.TryParse(amountRaw.Replace(",", ""), NumberStyles.Any, CultureInfo.GetCultureInfo("en-IN"), out amount);
+            var amount = ParseAmount(amountRaw);
 
             rows.Add(new BobLodgementExcelRow
             {
@@ -356,11 +355,51 @@ public sealed class BobLodgementService
             form.SetField("untitled114", compact);
             form.SetField("untitled117", compact);
 
+            // Pre-fill authorised signatory image for PIL / KPW in the seal boxes.
+            StampCompanySignature(stamper, profile);
+
             stamper.FormFlattening = false;
             stamper.Close();
         }
 
         return ms.ToArray();
+    }
+
+    private void StampCompanySignature(PdfStamper stamper, CompanyProfile profile)
+    {
+        if (string.IsNullOrWhiteSpace(profile.SignatureFile)) return;
+        var path = Path.Combine(_env.ContentRootPath, "Assets", "BobLodgement", profile.SignatureFile);
+        if (!File.Exists(path)) return;
+
+        iTextSharp.text.Image img;
+        try
+        {
+            img = iTextSharp.text.Image.GetInstance(path);
+        }
+        catch
+        {
+            return;
+        }
+
+        // PDF coords are bottom-left origin (A4 ≈ 595 x 842).
+        // Blank "Authorised Signatory with Company/Firm seal" box sits bottom-right,
+        // right of the Date field and above the label text.
+        // Page 1 — date untitled88 ~ [45,150]–[211,166]; box to the right.
+        StampSignatureOnPage(stamper, img, page: 1, x: 355f, y: 150f, maxWidth: 200f, maxHeight: 45f);
+        // Page 2 — date untitled114 ~ [48,132]–[203,154].
+        StampSignatureOnPage(stamper, img, page: 2, x: 355f, y: 150f, maxWidth: 200f, maxHeight: 45f);
+        // Page 3 — FEMA date untitled117 ~ [48,257]–[208,278].
+        StampSignatureOnPage(stamper, img, page: 3, x: 355f, y: 252f, maxWidth: 200f, maxHeight: 50f);
+    }
+
+    private static void StampSignatureOnPage(
+        PdfStamper stamper, iTextSharp.text.Image source, int page, float x, float y, float maxWidth, float maxHeight)
+    {
+        if (page < 1 || page > stamper.Reader.NumberOfPages) return;
+        var img = iTextSharp.text.Image.GetInstance(source);
+        img.ScaleToFit(maxWidth, maxHeight);
+        img.SetAbsolutePosition(x, y);
+        stamper.GetOverContent(page).AddImage(img);
     }
 
     private async Task<ErpShipment?> LoadShipmentAsync(
@@ -454,6 +493,7 @@ public sealed class BobLodgementService
             "Plastene India Limited (PIL)",
             "PIL",
             "bob-lodgement-pil.pdf",
+            "signature-pil.png",
             "Plastene India Limited%",
             "PLASTENE INDIA%",
             "SME",
@@ -469,6 +509,7 @@ public sealed class BobLodgementService
             "KP Woven Private Limited (KPW)",
             "KPW",
             "bob-lodgement-kpw.pdf",
+            "signature-kpw.png",
             "K.P. WOVEN%",
             "KP WOVEN%",
             "SME",
@@ -608,11 +649,42 @@ public sealed class BobLodgementService
 
     private static string CellText(IXLCell cell)
     {
-        if (cell.TryGetValue(out DateTime dt))
+        // ClosedXML's TryGetValue<DateTime> succeeds for ordinary amounts (Excel serials),
+        // e.g. 40119.1 → 2009-11-02 — so only treat real date-typed / date-formatted cells as dates.
+        if (IsDateCell(cell) && cell.TryGetValue(out DateTime dt))
             return dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         if (cell.TryGetValue(out double num))
             return num.ToString(CultureInfo.InvariantCulture);
         return cell.GetFormattedString()?.Trim() ?? cell.GetString()?.Trim() ?? "";
+    }
+
+    private static bool IsDateCell(IXLCell cell)
+    {
+        if (cell.DataType == XLDataType.DateTime) return true;
+        var fmt = cell.Style.NumberFormat.Format ?? "";
+        if (string.IsNullOrWhiteSpace(fmt) || fmt.Equals("General", StringComparison.OrdinalIgnoreCase))
+            return false;
+        // Date formats use y/d/M; skip plain number / accounting formats (0, #, , .).
+        if (fmt.IndexOfAny(['y', 'Y', 'd', 'D']) >= 0) return true;
+        // Month token in Excel is M/MM (not mm = minutes); avoid matching #,##0.00
+        return fmt.Contains('M') && !fmt.Contains('0') && !fmt.Contains('#');
+    }
+
+    private static decimal ParseAmount(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return 0m;
+        // Strip currency symbols / letters; keep digits, separators, sign.
+        var cleaned = new string(raw.Trim()
+            .Where(ch => char.IsDigit(ch) || ch is '.' or ',' or '-' or '(' or ')')
+            .ToArray());
+        if (cleaned.StartsWith('(') && cleaned.EndsWith(')'))
+            cleaned = "-" + cleaned.Trim('(', ')');
+        cleaned = cleaned.Replace(",", "");
+        if (decimal.TryParse(cleaned, NumberStyles.Any, CultureInfo.InvariantCulture, out var amount))
+            return amount;
+        if (decimal.TryParse(cleaned, NumberStyles.Any, CultureInfo.GetCultureInfo("en-IN"), out amount))
+            return amount;
+        return 0m;
     }
 
     private static string NormalizeDateText(string? raw)
@@ -633,27 +705,34 @@ public sealed class BobLodgementService
         bool Has(params string[] parts) => parts.All(p => n.Contains(p, StringComparison.Ordinal));
 
         if (Has("company") || n is "unit" or "entity") return "companyName";
-        if (Has("invoice") && Has("date")) return "invoiceDate";
+        // Currency before invoice — "Invoice Currency" must not become invoiceNo.
+        if (Has("currency") || n is "ccy" or "curr") return "currency";
+        if ((Has("invoice") && Has("date")) || n is "invdate" or "invdt") return "invoiceDate";
+        if (Has("amount") && Has("word")) return "amountWords";
+        // Skip INR / receipt amount columns so FC invoice amount wins.
+        if (Has("amount") && (Has("inr") || Has("rupee") || Has("receipt") || Has("recpt") || Has("rcpt")))
+            return null;
+        if (Has("amount") || Has("invoicevalue") || Has("invamount") || Has("fob") || Has("billamount")
+            || Has("commercialamount") || n is "value" or "invvalue" or "amt" or "invoiceamt")
+            return "amount";
         if (Has("invoice") || n is "invno" or "inv" or "commercialinvoice") return "invoiceNo";
         if (Has("buyer") && (Has("address") || Has("addr"))) return "buyerAddress";
         if (Has("buyer") && Has("country")) return "buyerCountry";
         if (Has("buyer") || Has("customer") || Has("consignee") || n is "drawee") return "buyerName";
-        if (Has("currency") || n is "ccy" or "curr") return "currency";
-        if (Has("amount") && Has("word")) return "amountWords";
-        if (Has("amount") || Has("invoicevalue") || Has("fob") || Has("billamount") || Has("commercialamount") || n is "value" or "invvalue")
-            return "amount";
         if ((Has("shipping") && Has("bill") && Has("date")) || Has("sbdate") || Has("shippingbdte")) return "shippingBillDate";
         if ((Has("shipping") && Has("bill")) || n is "sbno" or "sb" or "edf" or "shippingbillno") return "shippingBillNo";
-        if ((Has("bl") && Has("date")) || Has("billofladingdate") || Has("bldate")) return "blDate";
-        if (n is "bl" or "blno" || Has("billoflading") || Has("leading") || Has("fcr") || (Has("bl") && Has("no")))
+        // Avoid "Payment Due Days from BL Date" matching as blDate.
+        if (n is "bldate" or "billofladingdate" || (Has("bl") && Has("date") && !Has("due") && !Has("payment") && !Has("day")))
+            return "blDate";
+        if (n is "bl" or "blno" || Has("billoflading") || Has("fcr") || (Has("bl") && Has("no") && !Has("due")))
             return "blNo";
         if (Has("loading") || Has("pol") || n.Contains("portofloading", StringComparison.Ordinal)) return "portOfLoading";
         if (Has("discharge") || Has("destination") || Has("pod") || Has("finaldestination")) return "portOfDestination";
         if (Has("port") && Has("code")) return "portCode";
         if (Has("hsn") || Has("hscode") || (Has("hs") && Has("code"))) return "hsCode";
         if (Has("goods") || Has("commodity") || Has("description") || Has("product")) return "goods";
-        if (Has("usance") && Has("day")) return "usanceDays";
-        if (Has("terms") || Has("payment") || Has("tenor")) return "termsOfPayment";
+        if ((Has("usance") && Has("day")) || (Has("due") && Has("day"))) return "usanceDays";
+        if (Has("terms") || Has("tenor") || (Has("payment") && !Has("due"))) return "termsOfPayment";
         if (Has("country") && !Has("origin")) return "buyerCountry";
         return null;
     }
@@ -711,7 +790,7 @@ public sealed class BobLodgementService
     }
 
     private sealed record CompanyProfile(
-        string Id, string Title, string ShortLabel, string TemplateFile,
+        string Id, string Title, string ShortLabel, string TemplateFile, string SignatureFile,
         string CompanyLike, string CompanyLike2, string BranchName, string DefaultRequestType,
         string DefaultHsCode, string ExporterAddress, string ContactPerson, string Email, string Phone, string AccountNo);
 
