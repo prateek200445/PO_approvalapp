@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronRight, FileBarChart, FolderArchive, Landmark, Upload } from "lucide-react";
+import { ChevronRight, FileBarChart, FileText, FolderArchive, Landmark, Upload } from "lucide-react";
 
 export const Route = createFileRoute("/_app/bank-requirements")({
   head: () => ({ meta: [{ title: "Banking — PO Portal" }] }),
@@ -28,6 +28,12 @@ function BankingHubPage() {
           icon={FolderArchive}
           title="Bank Document Pack"
           description="Top 10 customers & suppliers (excl. group), monthly net sales / purchase splits, debtors ageing and stock statement for HPBL, KPW or PIL — one Excel workbook."
+        />
+        <HubCard
+          to="/bank-requirements/bob-lodgement"
+          icon={FileText}
+          title="BOB Lodgement"
+          description="Upload Container Dispatch / finance Excel, fill BOB lodgement for PIL or KPW, edit fields, download PDF."
         />
         <HubCard
           to="/bank-statement-import"
