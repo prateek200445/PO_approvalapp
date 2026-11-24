@@ -314,7 +314,7 @@ function ExportBillOverduePage() {
   });
 
   const agingQuery = useQuery({
-    queryKey: ["export-bill-aging", "erp-v3", company, groupName, dateFrom, asOf, refreshToken],
+    queryKey: ["export-bill-aging", "erp-v6-signed", company, groupName, dateFrom, asOf, refreshToken],
     queryFn: async () => {
       const refresh = bypassCacheRef.current;
       const data = await getExportBillAging({

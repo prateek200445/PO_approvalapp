@@ -27,4 +27,17 @@
     </None>
   </ItemGroup>
 
+  <!-- Standalone probe / verify utilities — do not compile into the API host. -->
+  <ItemGroup>
+    <Compile Remove="Scripts\**" />
+    <Content Remove="Scripts\**" />
+    <None Include="Scripts\**" />
+    <Compile Remove="bin_**\**" />
+    <Content Remove="bin_**\**" />
+    <None Remove="bin_**\**" />
+    <!-- Sales-dash WIP (depends on types not on this branch). -->
+    <Compile Remove="Documents\SalesTopTenExcelBuilder.cs" />
+    <Compile Remove="Services\HrCostingService.cs" />
+  </ItemGroup>
+
 </Project>

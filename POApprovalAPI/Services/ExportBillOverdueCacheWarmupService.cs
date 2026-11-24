@@ -1,7 +1,7 @@
 namespace POApprovalAPI.Services;
 
 /// <summary>
-/// Keeps Export Bill Overdue All-Companies data hot so the first UI open is a cache hit.
+/// Keeps Export Bill Overdue + Aging All-Companies data hot so the first UI open is a cache hit.
 /// </summary>
 public sealed class ExportBillOverdueCacheWarmupService : BackgroundService
 {
@@ -26,7 +26,7 @@ public sealed class ExportBillOverdueCacheWarmupService : BackgroundService
                 using var scope = _scopeFactory.CreateScope();
                 var service = scope.ServiceProvider.GetRequiredService<ExportBillOverdueService>();
                 await service.WarmDefaultCachesAsync(stoppingToken);
-                _logger.LogInformation("Export bill overdue caches warmed.");
+                _logger.LogInformation("Export bill overdue + aging caches warmed.");
             }
             catch (Exception ex)
             {
