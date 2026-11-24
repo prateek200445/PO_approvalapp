@@ -11,18 +11,112 @@ public class GstBillRecoController : ControllerBase
     private readonly GstBillRecoService _service;
     private readonly Gst2BSnapshotService _snapshots;
     private readonly GstPortalBrowserService _portal;
+    private readonly GstErpVoucherService _vouchers;
+    private readonly GstJournalEditService _journals;
+    private readonly GstRecoDecisionService _decisions;
     private readonly IConfiguration _configuration;
 
     public GstBillRecoController(
         GstBillRecoService service,
         Gst2BSnapshotService snapshots,
         GstPortalBrowserService portal,
+        GstErpVoucherService vouchers,
+        GstJournalEditService journals,
+        GstRecoDecisionService decisions,
         IConfiguration configuration)
     {
         _service = service;
         _snapshots = snapshots;
         _portal = portal;
+        _vouchers = vouchers;
+        _journals = journals;
+        _decisions = decisions;
         _configuration = configuration;
+    }
+
+    [HttpPost("decision")]
+    public async Task<IActionResult> SaveDecision([FromBody] GstRecoDecisionRequest request)
+    {
+        if (!IsAllowed(request.Username))
+            return StatusCode(403, new { message = "GST Bill Reconciliation is only available to Prakash." });
+        try
+        {
+            await _decisions.SaveAsync(request, request.Username!.Trim());
+            return Ok(new { message = request.Decision == GstRecoDecisionService.Missing
+                ? "Split into Missing in 2B and Missing in ERP."
+                : $"Marked as {request.Decision}." });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("decision/undo")]
+    public async Task<IActionResult> UndoDecision([FromBody] GstRecoDecisionRequest request)
+    {
+        if (!IsAllowed(request.Username))
+            return StatusCode(403, new { message = "GST Bill Reconciliation is only available to Prakash." });
+        await _decisions.DeleteAsync(request.CompanyName ?? "", request.DecisionKey ?? "");
+        return Ok(new { message = "Decision removed. The row is a potential match again." });
+    }
+
+    [HttpPost("journal/bill-no")]
+    public Task<IActionResult> ChangeJournalBillNo([FromBody] GstJournalActionRequest request, CancellationToken ct) =>
+        JournalActionAsync(request, user => _journals.ChangeBillNoAsync(request, user, ct));
+
+    [HttpPost("journal/reverse")]
+    public Task<IActionResult> ReverseJournal([FromBody] GstJournalActionRequest request, CancellationToken ct) =>
+        JournalActionAsync(request, user => _journals.PostReversalAsync(request, user, ct));
+
+    private async Task<IActionResult> JournalActionAsync(GstJournalActionRequest request, Func<string, Task<GstJournalActionResult>> action)
+    {
+        if (!IsAllowed(request.Username))
+            return StatusCode(403, new { message = "GST Bill Reconciliation is only available to Prakash." });
+        try
+        {
+            return Ok(await action(request.Username!.Trim()));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = $"The ERP update failed and nothing was changed: {ex.Message}" });
+        }
+    }
+
+    [HttpGet("voucher")]
+    public async Task<IActionResult> Voucher(
+        [FromQuery] string username,
+        [FromQuery] string source,
+        [FromQuery] string companyName,
+        [FromQuery] string? voucherType,
+        [FromQuery] string? voucherNo,
+        [FromQuery] DateTime voucherDate,
+        [FromQuery] string? refNo,
+        CancellationToken ct)
+    {
+        if (!IsAllowed(username))
+            return StatusCode(403, new { message = "GST Bill Reconciliation is only available to Prakash." });
+        try
+        {
+            var detail = await _vouchers.GetAsync(new GstErpVoucherRef
+            {
+                Source = source ?? "",
+                CompanyName = companyName ?? "",
+                VoucherType = voucherType ?? "",
+                VoucherNo = voucherNo ?? "",
+                VoucherDate = voucherDate,
+                RefNo = refNo ?? "",
+            }, ct);
+            return detail == null ? NotFound(new { message = "This voucher was not found in the ERP." }) : Ok(detail);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpGet("companies")]

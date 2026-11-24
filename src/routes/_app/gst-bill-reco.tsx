@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, Globe2, HelpCircle, Loader2, Paperclip, Search, Square, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, Eye, FileSpreadsheet, FileText, Globe2, HelpCircle, Loader2, Paperclip, Search, Square, X, XCircle } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { DatePickerField } from "@/components/DatePickerField";
@@ -13,16 +13,24 @@ import { canAccessGstBillReco } from "@/lib/feature-flags";
 import { downloadDmsFile, fetchDmsReferenceAttachments, formatFileSize } from "@/lib/dms-api";
 import { cn } from "@/lib/utils";
 import {
+  changeGstJournalBillNo,
   exportGstBillReco,
   formatIsoDate,
   formatMoney,
   getGstBillCompanies,
+  getGstErpVoucher,
+  postGstJournalReversal,
   runGstBillReco,
+  runGstBillRecoStored,
+  saveGstRecoDecision,
   startGstPortalFetch,
   submitGstPortalCaptcha,
   submitGstPortalOtp,
+  undoGstRecoDecision,
   type GstBillRecoResult,
   type GstBillRecoRow,
+  type GstErpVoucherRef,
+  type GstRecoDecision,
   type GstPortalStep,
 } from "@/lib/gst-bill-reco-api";
 
@@ -49,9 +57,10 @@ type StatusFilter =
   | "Asset voucher"
   | "Asset voucher, same date"
   | "Same amount, different bill"
-  | "Reversal netted";
+  | "Reversal netted"
+  | "Reversal of an earlier bill";
 
-const REASON_FILTERS = ["Related bill number", "Asset voucher", "Asset voucher, same date", "Same amount, different bill", "Reversal netted"] as const;
+const REASON_FILTERS = ["Related bill number", "Asset voucher", "Asset voucher, same date", "Same amount, different bill", "Reversal netted", "Reversal of an earlier bill"] as const;
 
 const PIE_COLORS = {
   Matched: "#16a34a",
@@ -112,6 +121,7 @@ function GstBillRecoPage() {
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
   const [selected, setSelected] = useState<GstBillRecoRow | null>(null);
+  const [voucherRow, setVoucherRow] = useState<GstBillRecoRow | null>(null);
   const [portalStep, setPortalStep] = useState<GstPortalStep | null>(null);
   const [portalValue, setPortalValue] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
@@ -221,6 +231,24 @@ function GstBillRecoPage() {
 
   function abort() {
     void queryClient.cancelQueries({ queryKey: ["gst-bill-reco"] });
+  }
+
+  async function refreshResult() {
+    if (!portalResult) {
+      if (submitted) setSearchNonce((value) => value + 1);
+      return;
+    }
+    try {
+      setPortalResult(await runGstBillRecoStored({
+        companyName: portalResult.companyName,
+        dateFrom: portalResult.dateFrom.slice(0, 10),
+        dateTo: portalResult.dateTo.slice(0, 10),
+        amountTolerance: portalResult.amountTolerance,
+        username: user?.username ?? "",
+      }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not refresh the reconciliation.");
+    }
   }
 
   async function download(current: GstBillRecoResult) {
@@ -409,6 +437,7 @@ function GstBillRecoPage() {
               <option value="Asset voucher, same date">Asset voucher, same date</option>
               <option value="Same amount, different bill">Same amount, different bill</option>
               <option value="Reversal netted">Reversal netted</option>
+              <option value="Reversal of an earlier bill">Reversal of an earlier bill</option>
               <option value="Potential match">Potential match</option>
               <option value="Mismatch">Mismatch</option>
               <option value="Missing in ERP">Missing in ERP</option>
@@ -472,6 +501,11 @@ function GstBillRecoPage() {
                         {row.matchReason && (
                           <span className="inline-flex whitespace-nowrap rounded-full bg-sky-500/15 px-2.5 py-1 text-xs font-medium text-sky-800 dark:text-sky-200">{row.matchReason}</span>
                         )}
+                        {row.decision && (
+                          <span className="inline-flex whitespace-nowrap rounded-full bg-violet-500/15 px-2.5 py-1 text-xs font-medium text-violet-800 dark:text-violet-200">
+                            {decisionLabel(row)}
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 font-medium">
@@ -495,6 +529,20 @@ function GstBillRecoPage() {
                     <td className="whitespace-nowrap px-4 py-3">
                       <div className="flex items-center gap-2 whitespace-nowrap">
                         <span>{row.voucherNo}</span>
+                        {row.erpVouchers.length > 0 && (
+                          <button
+                            type="button"
+                            className="inline-flex h-7 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs font-medium text-primary hover:bg-accent"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setVoucherRow(row);
+                            }}
+                            title={row.erpVouchers.length === 1 ? "View ERP voucher" : `View ${row.erpVouchers.length} ERP vouchers`}
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            {row.erpVouchers.length > 1 && row.erpVouchers.length}
+                          </button>
+                        )}
                         {row.attachmentCount > 0 && (
                           <button
                             type="button"
@@ -537,7 +585,27 @@ function GstBillRecoPage() {
               </Button>
             </div>
           </div>
-          {selected && <BillSheet row={selected} onClose={() => setSelected(null)} />}
+          {selected && (
+            <BillSheet
+              row={selected}
+              groupName={result.companyName}
+              username={user?.username ?? ""}
+              onClose={() => setSelected(null)}
+              onViewVouchers={() => setVoucherRow(selected)}
+              onDecided={async () => {
+                setSelected(null);
+                await refreshResult();
+              }}
+            />
+          )}
+          {voucherRow && (
+            <VoucherDialog
+              vouchers={voucherRow.erpVouchers}
+              username={user?.username ?? ""}
+              onClose={() => setVoucherRow(null)}
+              onErpChanged={refreshResult}
+            />
+          )}
         </>
       )}
       {helpOpen && <HelpDrawer onClose={() => setHelpOpen(false)} />}
@@ -872,8 +940,44 @@ function StatCard({
   );
 }
 
-function BillSheet({ row, onClose }: { row: GstBillRecoRow; onClose: () => void }) {
+function decisionLabel(row: GstBillRecoRow) {
+  const by = row.decisionBy ? ` by ${row.decisionBy}` : "";
+  return row.decision === "Missing" ? `Split${by}` : `Set${by}`;
+}
+
+function BillSheet({
+  row,
+  groupName,
+  username,
+  onClose,
+  onViewVouchers,
+  onDecided,
+}: {
+  row: GstBillRecoRow;
+  groupName: string;
+  username: string;
+  onClose: () => void;
+  onViewVouchers: () => void;
+  onDecided: () => Promise<void>;
+}) {
   const [downloadingFile, setDownloadingFile] = useState<number | null>(null);
+  const [decisionReason, setDecisionReason] = useState("");
+  const [deciding, setDeciding] = useState(false);
+
+  async function decide(decision: GstRecoDecision | null) {
+    setDeciding(true);
+    try {
+      const message = decision
+        ? await saveGstRecoDecision(groupName, row, decision, decisionReason.trim(), username)
+        : await undoGstRecoDecision(groupName, row, username);
+      toast.success(message);
+      await onDecided();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save the decision.");
+    } finally {
+      setDeciding(false);
+    }
+  }
   const attachments = useQuery({
     queryKey: ["dms-reference-attachments", row.dmsRefType, row.dmsRefEntryNo],
     queryFn: () => fetchDmsReferenceAttachments(row.dmsRefType, row.dmsRefEntryNo),
@@ -919,6 +1023,9 @@ function BillSheet({ row, onClose }: { row: GstBillRecoRow; onClose: () => void 
               {row.matchReason && (
                 <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-medium text-sky-800 dark:text-sky-200">{row.matchReason}</span>
               )}
+              {row.decision && (
+                <span className="rounded-full bg-violet-500/15 px-2 py-0.5 text-xs font-medium text-violet-800 dark:text-violet-200">{decisionLabel(row)}</span>
+              )}
             </div>
             <h2 className="mt-2 text-lg font-semibold">{row.billNo || "Bill"}</h2>
             <p className="text-sm text-muted-foreground">{row.party}</p>
@@ -945,6 +1052,60 @@ function BillSheet({ row, onClose }: { row: GstBillRecoRow; onClose: () => void 
             ))}
           </tbody>
         </table>
+        {row.status === "Potential match" && row.decisionKey && !row.decision && (
+          <section className="mt-5 space-y-3 rounded-lg border border-border p-3">
+            <div>
+              <h3 className="text-sm font-semibold">Decide this potential match</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Saved for this pair and applied on every run until either side's bill or amounts change. Missing splits it into Missing in 2B and Missing in ERP.
+              </p>
+            </div>
+            <Input value={decisionReason} onChange={(event) => setDecisionReason(event.target.value)} maxLength={500} placeholder="Reason (optional)" />
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => decide("Matched")} disabled={deciding}>
+                <CheckCircle2 className="mr-1.5 h-4 w-4" /> Matched
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => decide("Mismatch")} disabled={deciding}>
+                <XCircle className="mr-1.5 h-4 w-4" /> Mismatch
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => decide("Missing")} disabled={deciding}>
+                <AlertTriangle className="mr-1.5 h-4 w-4" /> Missing
+              </Button>
+              {deciding && <Loader2 className="h-4 w-4 animate-spin self-center text-muted-foreground" />}
+            </div>
+          </section>
+        )}
+        {row.decision && row.decisionKey && (
+          <section className="mt-5 flex items-center gap-3 rounded-lg border border-violet-500/40 bg-violet-500/5 p-3 text-sm">
+            <span className="mr-auto">
+              {row.decision === "Missing" ? "Split from a potential match" : `Marked ${row.decision}`}
+              {row.decisionBy ? ` by ${row.decisionBy}` : ""}.
+            </span>
+            <Button size="sm" variant="outline" onClick={() => decide(null)} disabled={deciding}>
+              {deciding && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+              Undo
+            </Button>
+          </section>
+        )}
+        {row.erpVouchers.length > 0 && (
+          <section className="mt-5 rounded-lg border border-border">
+            <header className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+              <Eye className="h-4 w-4 text-primary" />
+              <h3 className="text-sm font-semibold">ERP vouchers</h3>
+              <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={onViewVouchers}>
+                View details
+              </Button>
+            </header>
+            <ul className="divide-y divide-border/60 text-sm">
+              {row.erpVouchers.map((voucher, at) => (
+                <li key={`${voucher.source}-${voucher.voucherNo}-${voucher.voucherDate}-${at}`} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <span className="font-medium">{voucherLabel(voucher)}</span>
+                  <span className="text-muted-foreground">{formatIsoDate(voucher.voucherDate)}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {row.attachmentCount > 0 && (
           <section className="mt-5 rounded-lg border border-border">
             <header className="flex items-center gap-2 border-b border-border px-3 py-2.5">
@@ -983,6 +1144,221 @@ function BillSheet({ row, onClose }: { row: GstBillRecoRow; onClose: () => void 
             </div>
           </section>
         )}
+      </div>
+    </div>
+  );
+}
+
+function voucherLabel(voucher: GstErpVoucherRef) {
+  return [voucher.voucherType, voucher.voucherNo].filter(Boolean).join(" ") || "Voucher";
+}
+
+function voucherCell(value: string | number | null, numeric: boolean) {
+  if (value == null || value === "") return "";
+  if (numeric && typeof value === "number") return formatMoney(value);
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return formatIsoDate(value);
+  return String(value);
+}
+
+function VoucherDialog({
+  vouchers,
+  username,
+  onClose,
+  onErpChanged,
+}: {
+  vouchers: GstErpVoucherRef[];
+  username: string;
+  onClose: () => void;
+  onErpChanged: () => Promise<void>;
+}) {
+  const [index, setIndex] = useState(0);
+  const voucher = vouchers[Math.min(index, vouchers.length - 1)];
+  const detail = useQuery({
+    queryKey: ["gst-erp-voucher", voucher.source, voucher.companyName, voucher.voucherType, voucher.voucherNo, voucher.voucherDate, voucher.refNo],
+    queryFn: () => getGstErpVoucher(voucher, username),
+    staleTime: 10 * 60_000,
+  });
+  const [action, setAction] = useState<"bill" | "reverse" | null>(null);
+  const [newBillNo, setNewBillNo] = useState("");
+  const [reversalDate, setReversalDate] = useState(todayIso);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const editable = voucher.source === "Journal" && detail.data?.editable === true;
+
+  function selectVoucher(at: number) {
+    setIndex(at);
+    setAction(null);
+  }
+
+  function openAction(next: "bill" | "reverse") {
+    setAction(next);
+    setNewBillNo(detail.data?.billNo ?? "");
+    setReversalDate(todayIso());
+    setReason("");
+  }
+
+  async function submitAction() {
+    if (action === "bill" && !newBillNo.trim()) {
+      toast.error("Enter the new bill number.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const outcome = action === "bill"
+        ? await changeGstJournalBillNo(voucher, newBillNo.trim(), reason.trim(), username)
+        : await postGstJournalReversal(voucher, reversalDate, reason.trim(), username);
+      toast.success(outcome.message);
+      setAction(null);
+      await Promise.all([detail.refetch(), onErpChanged()]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "The ERP update failed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">ERP voucher · {voucher.companyName}</p>
+            <h2 className="mt-1 text-lg font-semibold">{detail.data?.title || voucherLabel(voucher)}</h2>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md border border-border p-2 text-muted-foreground hover:text-foreground" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {vouchers.length > 1 && (
+          <div className="flex flex-wrap gap-2 border-b border-border px-5 py-3">
+            {vouchers.map((item, at) => (
+              <button
+                key={`${item.source}-${item.voucherNo}-${item.voucherDate}-${at}`}
+                type="button"
+                onClick={() => selectVoucher(at)}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-medium",
+                  at === index ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {voucherLabel(item)} · {formatIsoDate(item.voucherDate)}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+          {detail.isLoading && (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading voucher…
+            </p>
+          )}
+          {detail.isError && <p className="text-sm text-destructive">{detail.error instanceof Error ? detail.error.message : "Could not load the voucher."}</p>}
+          {detail.data && (
+            <>
+              {editable && (
+                <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="mr-auto text-sm font-medium">Correct this journal in the ERP</span>
+                    <Button size="sm" variant={action === "bill" ? "default" : "outline"} onClick={() => openAction("bill")} disabled={saving}>
+                      Change bill no
+                    </Button>
+                    <Button size="sm" variant={action === "reverse" ? "default" : "outline"} onClick={() => openAction("reverse")} disabled={saving}>
+                      Post reversal
+                    </Button>
+                  </div>
+                  {action && (
+                    <div className="space-y-3">
+                      <p className="text-xs text-muted-foreground">
+                        {action === "bill"
+                          ? "Updates the bill number on every line of this journal and its bill references. Refused if a payment or adjustment is already against the old bill."
+                          : `Posts a new journal with every line of this one swapped Dr ↔ Cr, bill no Rev_${detail.data.billNo ?? ""}. It shows in the ledger summary and cancels this journal in the reconciliation.`}
+                      </p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {action === "bill" ? (
+                          <div className="space-y-1.5">
+                            <Label>New bill no</Label>
+                            <Input value={newBillNo} onChange={(event) => setNewBillNo(event.target.value)} maxLength={100} />
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5">
+                            <Label>Reversal date</Label>
+                            <DatePickerField value={reversalDate} onChange={setReversalDate} placeholder="Reversal date" />
+                          </div>
+                        )}
+                        <div className="space-y-1.5">
+                          <Label>Reason</Label>
+                          <Input value={reason} onChange={(event) => setReason(event.target.value)} maxLength={200} placeholder="Optional" />
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="ghost" onClick={() => setAction(null)} disabled={saving}>
+                          Cancel
+                        </Button>
+                        <Button size="sm" onClick={submitAction} disabled={saving}>
+                          {saving && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+                          {action === "bill" ? "Save to ERP" : "Post reversal to ERP"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                {detail.data.header.map((field) => (
+                  <div key={field.label} className={cn("min-w-0", field.label === "Narration" && "sm:col-span-2 lg:col-span-3")}>
+                    <dt className="text-xs text-muted-foreground">{field.label}</dt>
+                    <dd className="break-words font-medium">{voucherCell(field.value, typeof field.value === "number")}</dd>
+                  </div>
+                ))}
+              </dl>
+              {detail.data.sections
+                .filter((section) => section.rows.length > 0)
+                .map((section) => (
+                  <section key={section.title} className="rounded-lg border border-border">
+                    <h3 className="border-b border-border px-3 py-2 text-sm font-semibold">{section.title}</h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                            {section.columns.map((column) => (
+                              <th key={column.name} className={cn("whitespace-nowrap px-3 py-2", column.numeric && "text-right")}>{column.name}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {section.rows.map((row, rowIndex) => (
+                            <tr key={rowIndex} className="border-b border-border/60">
+                              {row.map((value, cellIndex) => (
+                                <td key={cellIndex} className={cn("px-3 py-2", section.columns[cellIndex]?.numeric ? "whitespace-nowrap text-right tabular-nums" : "min-w-[90px]")}>
+                                  {voucherCell(value, section.columns[cellIndex]?.numeric ?? false)}
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                        {section.columns.some((column) => column.total) && section.rows.length > 1 && (
+                          <tfoot>
+                            <tr className="font-semibold">
+                              {section.columns.map((column, cellIndex) => (
+                                <td key={column.name} className={cn("px-3 py-2", column.numeric && "text-right tabular-nums")}>
+                                  {column.total
+                                    ? formatMoney(section.rows.reduce((sum, row) => sum + (typeof row[cellIndex] === "number" ? (row[cellIndex] as number) : 0), 0))
+                                    : cellIndex === 0 ? "Total" : ""}
+                                </td>
+                              ))}
+                            </tr>
+                          </tfoot>
+                        )}
+                      </table>
+                    </div>
+                  </section>
+                ))}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1037,7 +1413,10 @@ function HelpDrawer({ onClose }: { onClose: () => void }) {
                 <b className="text-foreground">Same amount, different bill.</b> Same supplier and the same taxable value, and only one open bill on each side. This stays a potential match so it can be reviewed. It is not treated as an ordinary match.
               </li>
               <li>
-                <b className="text-foreground">Reversal netted.</b> A journal marked <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">R-</code>, <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">Reversed</code>, or <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">_rev</code> is added to the original bill when the date and GSTIN agree. If the GST cancels, both rows are left off the list. If a balance remains, that balance is matched to 2B. A journal that only repeats a bill already matched, either the opposite amount that day or the same number with a short prefix, is also left off the list.
+                <b className="text-foreground">Reversal netted.</b> A journal marked <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">R-</code>, <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">Reversed</code>, <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">Rev.</code>, or <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">_rev</code> (also <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">Rev_</code>, <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">(REV)</code>, <code className="rounded bg-secondary px-1 py-0.5 text-[11px]">Dup Reverse</code>) is added to the original bill with the same number and GSTIN, on the same date or else the nearest one. An unmarked journal that is the exact opposite of a bill from the same supplier, with the same bill date or a related number, is treated the same way. Reversals booked after the selected dates are included when the bill is in range. If the GST cancels, both rows are left off the list. If a balance remains, that balance is matched to 2B. A journal that only repeats a bill already matched, either the opposite amount that day or the same number with a short prefix, is also left off the list.
+              </li>
+              <li>
+                <b className="text-foreground">Reversal of an earlier bill.</b> A reversal whose original bill is outside the selected dates. It is never paired with the original bill in 2B and stays missing in 2B.
               </li>
             </ul>
           </section>

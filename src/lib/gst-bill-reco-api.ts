@@ -33,7 +33,34 @@ export type GstBillRecoRow = {
   attachmentCount: number;
   dmsRefType: string;
   dmsRefEntryNo: string;
+  erpVouchers: GstErpVoucherRef[];
   ledgers: Record<string, number | null>;
+  decisionKey: string;
+  decision: "" | GstRecoDecision;
+  decisionBy: string;
+};
+
+export type GstRecoDecision = "Matched" | "Mismatch" | "Missing";
+
+export type GstErpVoucherRef = {
+  source: string;
+  companyName: string;
+  voucherType: string;
+  voucherNo: string;
+  voucherDate: string | null;
+  refNo: string;
+};
+
+export type GstErpVoucherDetail = {
+  editable: boolean;
+  billNo: string | null;
+  title: string;
+  header: { label: string; value: string | number | null }[];
+  sections: {
+    title: string;
+    columns: { name: string; numeric: boolean; total: boolean }[];
+    rows: (string | number | null)[][];
+  }[];
 };
 
 export type GstBillRecoResult = {
@@ -115,6 +142,19 @@ function rowFrom(raw: Record<string, unknown>): GstBillRecoRow {
     attachmentCount: num(raw.attachmentCount) ?? 0,
     dmsRefType: str(raw.dmsRefType),
     dmsRefEntryNo: str(raw.dmsRefEntryNo),
+    decisionKey: str(raw.decisionKey),
+    decision: (["Matched", "Mismatch", "Missing"].includes(str(raw.decision)) ? str(raw.decision) : "") as GstBillRecoRow["decision"],
+    decisionBy: str(raw.decisionBy),
+    erpVouchers: Array.isArray(raw.erpVouchers)
+      ? (raw.erpVouchers as Record<string, unknown>[]).map((voucher) => ({
+          source: str(voucher.source),
+          companyName: str(voucher.companyName),
+          voucherType: str(voucher.voucherType),
+          voucherNo: str(voucher.voucherNo),
+          voucherDate: voucher.voucherDate == null ? null : str(voucher.voucherDate),
+          refNo: str(voucher.refNo),
+        }))
+      : [],
     ledgers,
   };
 }
@@ -243,6 +283,96 @@ export function submitGstPortalOtp(
   username: string,
 ): Promise<GstPortalStep> {
   return postPortal("otp", { sessionId, otp, username });
+}
+
+export async function getGstErpVoucher(voucher: GstErpVoucherRef, username: string): Promise<GstErpVoucherDetail> {
+  const query = new URLSearchParams({
+    username,
+    source: voucher.source,
+    companyName: voucher.companyName,
+    voucherType: voucher.voucherType,
+    voucherNo: voucher.voucherNo,
+    voucherDate: (voucher.voucherDate ?? "").slice(0, 10),
+    refNo: voucher.refNo,
+  });
+  const response = await fetch(getApiUrl(`/api/gst-bill-reco/voucher?${query}`));
+  if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as GstErpVoucherDetail;
+}
+
+export type GstJournalActionResult = { message: string; newJournalNo: string | null; year: string };
+
+async function postJournalAction(
+  path: "bill-no" | "reverse",
+  voucher: GstErpVoucherRef,
+  input: { username: string; newBillNo?: string; reversalDate?: string; reason?: string },
+): Promise<GstJournalActionResult> {
+  const response = await fetch(getApiUrl(`/api/gst-bill-reco/journal/${path}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...input,
+      companyName: voucher.companyName,
+      journalType: voucher.voucherType,
+      journalNo: voucher.voucherNo,
+      voucherDate: (voucher.voucherDate ?? "").slice(0, 10),
+    }),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return (await response.json()) as GstJournalActionResult;
+}
+
+export function changeGstJournalBillNo(voucher: GstErpVoucherRef, newBillNo: string, reason: string, username: string) {
+  return postJournalAction("bill-no", voucher, { username, newBillNo, reason });
+}
+
+export function postGstJournalReversal(voucher: GstErpVoucherRef, reversalDate: string, reason: string, username: string) {
+  return postJournalAction("reverse", voucher, { username, reversalDate, reason });
+}
+
+async function postDecision(path: "decision" | "decision/undo", body: Record<string, unknown>): Promise<string> {
+  const response = await fetch(getApiUrl(`/api/gst-bill-reco/${path}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return str(((await response.json()) as Record<string, unknown>).message);
+}
+
+export function saveGstRecoDecision(groupName: string, row: GstBillRecoRow, decision: GstRecoDecision, reason: string, username: string) {
+  return postDecision("decision", {
+    username,
+    companyName: groupName,
+    decisionKey: row.decisionKey,
+    decision,
+    billNo: row.billNo,
+    twoBBillNo: row.twoBBillNo,
+    gstNo: row.gstNo,
+    reason,
+  });
+}
+
+export function undoGstRecoDecision(groupName: string, row: GstBillRecoRow, username: string) {
+  return postDecision("decision/undo", { username, companyName: groupName, decisionKey: row.decisionKey });
+}
+
+export async function runGstBillRecoStored(input: {
+  companyName: string;
+  dateFrom: string;
+  dateTo: string;
+  amountTolerance: number;
+  username: string;
+}): Promise<GstBillRecoResult> {
+  const body = new FormData();
+  body.append("username", input.username);
+  body.append("companyName", input.companyName);
+  body.append("dateFrom", input.dateFrom);
+  body.append("dateTo", input.dateTo);
+  body.append("amountTolerance", String(input.amountTolerance));
+  const response = await fetch(getApiUrl("/api/gst-bill-reco/run-stored"), { method: "POST", body });
+  if (!response.ok) throw new Error(await readError(response));
+  return resultFrom((await response.json()) as Record<string, unknown>);
 }
 
 export async function exportGstBillReco(rows: GstBillRecoRow[], username: string): Promise<Blob> {

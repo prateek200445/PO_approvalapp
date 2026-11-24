@@ -45,6 +45,9 @@ BEGIN
         CONVERT(decimal(18, 2), SUM(CASE WHEN t.TaxledgerName LIKE '%SGST%' AND t.TypeTransaction = 'Store Inwards' THEN ISNULL(t.Amount, 0) ELSE 0 END)) AS Sgst,
         CONVERT(decimal(18, 2), SUM(CASE WHEN t.TaxledgerName LIKE '%IGST%' AND t.TypeTransaction = 'Store Inwards' THEN ISNULL(t.Amount, 0) ELSE 0 END)) AS Igst,
         CONVERT(decimal(18, 2), SUM(CASE WHEN t.TaxledgerName LIKE '%GST%INPUT%' THEN 0 WHEN t.TaxledgerName LIKE '%Freight%' THEN ISNULL(t.Amount, 0) ELSE 0 END)) AS Freight,
+        CONVERT(decimal(18, 2), SUM(CASE WHEN t.TaxledgerName LIKE '%GST%INPUT%' THEN 0
+            WHEN t.TaxledgerName LIKE '%Freight%' AND t.TaxledgerName LIKE '%WITH%GST%' AND t.TaxledgerName NOT LIKE '%WITHOUT%'
+            THEN ISNULL(t.Amount, 0) ELSE 0 END)) AS FreightGst,
         CONVERT(decimal(18, 2), SUM(CASE WHEN t.TaxledgerName LIKE '%Loading%' THEN ISNULL(t.Amount, 0) ELSE 0 END)) AS Loading,
         CONVERT(decimal(18, 2), SUM(CASE WHEN t.TaxledgerName LIKE '%Packing%Forward%' THEN ISNULL(t.Amount, 0) ELSE 0 END)) AS Packing,
         CONVERT(decimal(18, 2), SUM(CASE
@@ -82,6 +85,7 @@ BEGIN
         ISNULL(tax.Sgst, 0) AS Sgst,
         ISNULL(tax.Igst, 0) AS Igst,
         ISNULL(tax.Freight, 0) AS Freight,
+        ISNULL(tax.FreightGst, 0) AS FreightGst,
         ISNULL(tax.OtherCharge, 0) AS OtherCharge,
         ISNULL(tax.Loading, 0) AS Loading,
         ISNULL(tax.Packing, 0) AS Packing
@@ -100,6 +104,7 @@ BEGIN
         SUM(Sgst) AS Sgst,
         SUM(Igst) AS Igst,
         SUM(Freight) AS Freight,
+        SUM(FreightGst) AS FreightGst,
         SUM(OtherCharge) AS OtherCharge,
         SUM(Loading) AS Loading,
         SUM(Packing) AS Packing
@@ -122,6 +127,7 @@ BEGIN
         Sgst,
         Igst,
         Freight,
+        FreightGst,
         OtherCharge,
         Loading,
         Packing,
@@ -133,6 +139,7 @@ BEGIN
             b.Sgst,
             b.Igst,
             b.Freight,
+            b.FreightGst,
             b.OtherCharge,
             b.Loading,
             b.Packing,

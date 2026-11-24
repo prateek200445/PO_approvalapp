@@ -462,8 +462,8 @@ export interface FileRoutesByFullPath {
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
-  '/bank-requirements/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/bank-requirements/bob-lodgement': typeof AppBankRequirementsBobLodgementRoute
+  '/bank-requirements/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/bom/$': typeof AppBomSplatRoute
   '/bom/create': typeof AppBomCreateRoute
   '/bom/customers': typeof AppBomCustomersRoute
@@ -529,8 +529,8 @@ export interface FileRoutesByTo {
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
-  '/bank-requirements/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/bank-requirements/bob-lodgement': typeof AppBankRequirementsBobLodgementRoute
+  '/bank-requirements/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/bom/$': typeof AppBomSplatRoute
   '/bom/create': typeof AppBomCreateRoute
   '/bom/customers': typeof AppBomCustomersRoute
@@ -599,8 +599,8 @@ export interface FileRoutesById {
   '/exhibition/dealer': typeof ExhibitionDealerRoute
   '/exhibition/product': typeof ExhibitionProductRoute
   '/_app/advance-payment/$paymentNo': typeof AppAdvancePaymentPaymentNoRoute
-  '/_app/bank-requirements_/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/_app/bank-requirements_/bob-lodgement': typeof AppBankRequirementsBobLodgementRoute
+  '/_app/bank-requirements_/document-pack': typeof AppBankRequirementsDocumentPackRoute
   '/_app/bom/$': typeof AppBomSplatRoute
   '/_app/bom/create': typeof AppBomCreateRoute
   '/_app/bom/customers': typeof AppBomCustomersRoute
@@ -669,8 +669,8 @@ export interface FileRouteTypes {
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/advance-payment/$paymentNo'
-    | '/bank-requirements/document-pack'
     | '/bank-requirements/bob-lodgement'
+    | '/bank-requirements/document-pack'
     | '/bom/$'
     | '/bom/create'
     | '/bom/customers'
@@ -736,8 +736,8 @@ export interface FileRouteTypes {
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/advance-payment/$paymentNo'
-    | '/bank-requirements/document-pack'
     | '/bank-requirements/bob-lodgement'
+    | '/bank-requirements/document-pack'
     | '/bom/$'
     | '/bom/create'
     | '/bom/customers'
@@ -805,8 +805,8 @@ export interface FileRouteTypes {
     | '/exhibition/dealer'
     | '/exhibition/product'
     | '/_app/advance-payment/$paymentNo'
-    | '/_app/bank-requirements_/document-pack'
     | '/_app/bank-requirements_/bob-lodgement'
+    | '/_app/bank-requirements_/document-pack'
     | '/_app/bom/$'
     | '/_app/bom/create'
     | '/_app/bom/customers'
@@ -1420,8 +1420,8 @@ interface AppRouteChildren {
   AppWorkordersRoute: typeof AppWorkordersRoute
   AppWovenQuoteRoute: typeof AppWovenQuoteRoute
   AppAdvancePaymentPaymentNoRoute: typeof AppAdvancePaymentPaymentNoRoute
-  AppBankRequirementsDocumentPackRoute: typeof AppBankRequirementsDocumentPackRoute
   AppBankRequirementsBobLodgementRoute: typeof AppBankRequirementsBobLodgementRoute
+  AppBankRequirementsDocumentPackRoute: typeof AppBankRequirementsDocumentPackRoute
   AppHrReportsDocumentsRoute: typeof AppHrReportsDocumentsRoute
   AppHrReportsEmployeeMasterRoute: typeof AppHrReportsEmployeeMasterRoute
   AppIndentIndentNoRoute: typeof AppIndentIndentNoRoute
@@ -1471,8 +1471,8 @@ const AppRouteChildren: AppRouteChildren = {
   AppWorkordersRoute: AppWorkordersRoute,
   AppWovenQuoteRoute: AppWovenQuoteRoute,
   AppAdvancePaymentPaymentNoRoute: AppAdvancePaymentPaymentNoRoute,
-  AppBankRequirementsDocumentPackRoute: AppBankRequirementsDocumentPackRoute,
   AppBankRequirementsBobLodgementRoute: AppBankRequirementsBobLodgementRoute,
+  AppBankRequirementsDocumentPackRoute: AppBankRequirementsDocumentPackRoute,
   AppHrReportsDocumentsRoute: AppHrReportsDocumentsRoute,
   AppHrReportsEmployeeMasterRoute: AppHrReportsEmployeeMasterRoute,
   AppIndentIndentNoRoute: AppIndentIndentNoRoute,

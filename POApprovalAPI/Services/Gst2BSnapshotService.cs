@@ -33,6 +33,87 @@ public class Gst2BSnapshotService
         return token is "B2B" or "B2BA" || token.Contains("CDNR", StringComparison.Ordinal) || token is "B2BDNR" or "B2BDNRA";
     }
 
+    public static bool IsAmendmentSection(string section) => Token(section) is "B2BA" or "B2BCDNRA" or "B2BDNRA";
+
+    /// <summary>
+    /// A B2BA or CDNRA row replaces the supplier's original invoice or note, which may sit in an earlier month.
+    /// Drops each amended original and keeps only the latest amendment of it.
+    /// <paramref name="otherAmendments"/> are amendment rows outside <paramref name="documents"/> that still apply to them.
+    /// </summary>
+    public static List<Gst2BDocumentRow> ApplyAmendments(
+        IReadOnlyList<Gst2BDocumentRow> documents,
+        IEnumerable<Gst2BDocumentRow>? otherAmendments = null)
+    {
+        var amendments = documents.Concat(otherAmendments ?? [])
+            .Where(document => IsAmendmentSection(document.Section) && NormBill(document.OriginalDocumentNumber).Length > 0)
+            .ToList();
+        if (amendments.Count == 0)
+            return documents.ToList();
+
+        var latest = amendments
+            .GroupBy(AmendedKey, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(document => document.ReturnPeriod).First(),
+                StringComparer.OrdinalIgnoreCase);
+
+        var kept = new List<Gst2BDocumentRow>(documents.Count);
+        foreach (var document in documents)
+        {
+            if (IsAmendmentSection(document.Section))
+            {
+                if (NormBill(document.OriginalDocumentNumber).Length == 0 || ReferenceEquals(latest[AmendedKey(document)], document))
+                    kept.Add(document);
+                continue;
+            }
+
+            var key = OwnKey(document);
+            if (latest.TryGetValue(key, out var amendment) &&
+                (amendment.OriginalDocumentDate == null || amendment.OriginalDocumentDate.Value.Date == document.DocumentDate.Date))
+                continue;
+            kept.Add(document);
+        }
+        return kept;
+    }
+
+    /// <summary>
+    /// Adds the amendments from other periods that correct a document in <paramref name="documents"/>, then applies all amendments.
+    /// </summary>
+    public static List<Gst2BDocumentRow> WithAmendmentsFrom(
+        IReadOnlyList<Gst2BDocumentRow> documents,
+        IEnumerable<Gst2BDocumentRow> otherPeriods)
+    {
+        var targets = documents
+            .Select(document => IsAmendmentSection(document.Section) ? AmendedKey(document) : OwnKey(document))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var extra = otherPeriods
+            .Where(document => IsAmendmentSection(document.Section)
+                && NormBill(document.OriginalDocumentNumber).Length > 0
+                && targets.Contains(AmendedKey(document))
+                && !documents.Contains(document))
+            .ToList();
+        return ApplyAmendments(documents.Concat(extra).ToList());
+    }
+
+    public async Task<IReadOnlyList<Gst2BDocumentRow>> GetAmendmentsAfterAsync(string groupName, DateTime to, CancellationToken ct = default)
+    {
+        var next = new DateTime(to.Year, to.Month, 1).AddMonths(1);
+        var later = await GetDocumentsAsync(groupName, next, new DateTime(9999, 12, 1), purchaseOnly: true, ct);
+        return later.Where(document => IsAmendmentSection(document.Section)).ToList();
+    }
+
+    private static string AmendedKey(Gst2BDocumentRow amendment) =>
+        string.Join("|", NormGst(amendment.SupplierGstin), NormBill(amendment.OriginalDocumentNumber), IsNoteSection(amendment.Section));
+
+    private static string OwnKey(Gst2BDocumentRow document) =>
+        string.Join("|", NormGst(document.SupplierGstin), NormBill(document.DocumentNumber), IsNoteSection(document.Section));
+
+    private static bool IsNoteSection(string section)
+    {
+        var token = Token(section);
+        return token.Contains("CDN", StringComparison.Ordinal) || token.Contains("DNR", StringComparison.Ordinal);
+    }
+
     public static bool TryRead(Stream stream, out Gst2BSnapshot snapshot)
     {
         snapshot = null!;
@@ -692,7 +773,7 @@ ORDER BY CASE WHEN NULLIF(LTRIM(RTRIM(GroupName)), '') IS NULL THEN 1 ELSE 0 END
             row.Gstr1FilingDate = CellDate(cell) ?? ParseDate(text);
     }
 
-    private static bool TryFindHeader(IXLWorksheet sheet, out int headerRow)
+    internal static bool TryFindHeader(IXLWorksheet sheet, out int headerRow)
     {
         headerRow = 0;
         var lastRow = Math.Min(sheet.LastRowUsed()?.RowNumber() ?? 1, 12);

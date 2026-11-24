@@ -36,11 +36,13 @@ public class GstBillRecoService
 
     private readonly DatabaseService _database;
     private readonly Gst2BSnapshotService _snapshots;
+    private readonly GstRecoDecisionService _decisions;
 
-    public GstBillRecoService(DatabaseService database, Gst2BSnapshotService snapshots)
+    public GstBillRecoService(DatabaseService database, Gst2BSnapshotService snapshots, GstRecoDecisionService decisions)
     {
         _database = database;
         _snapshots = snapshots;
+        _decisions = decisions;
     }
 
     public async Task<IReadOnlyList<string>> GetCompaniesAsync(CancellationToken ct = default)
@@ -85,7 +87,8 @@ ORDER BY GroupLabel";
         if (Gst2BSnapshotService.TryRead(twoBFile, out var snapshot))
         {
             var stored = await _snapshots.SaveAsync(snapshot, "portal.xlsx", ct);
-            parsed = FromSnapshot(snapshot);
+            var laterAmendments = await _snapshots.GetAmendmentsAfterAsync(company, snapshot.ReturnPeriod, ct);
+            parsed = FromDocuments(Gst2BSnapshotService.WithAmendmentsFrom(snapshot.Documents, laterAmendments));
             saved = stored.InsertedRows;
         }
         else
@@ -150,7 +153,18 @@ ORDER BY GroupLabel";
             result.Warning = $"Combined {matchingMembers.Count} ERP units in {company} that use GSTIN {buyerGstin}.";
 
         result.Rows = BuildRows(company, erpRows, inRange, amountTolerance, earlier);
+        await FinishAsync(result, from, ct);
+        return result;
+    }
+
+    private async Task FinishAsync(GstBillRecoResult result, DateTime from, CancellationToken ct)
+    {
         NoteEarlierMatches(result, from);
+        result.Rows = (await _decisions.ApplyAsync(result.CompanyName, result.Rows))
+            .OrderBy(r => StatusOrder(r.Status))
+            .ThenBy(r => r.BillDate)
+            .ThenBy(r => r.BillNo, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         await AddAttachmentReferencesAsync(result.Rows, ct);
         result.Matched = result.Rows.Count(r => r.Status == "Matched");
         result.PotentialMatch = result.Rows.Count(r => r.Status == "Potential match");
@@ -158,7 +172,6 @@ ORDER BY GroupLabel";
         result.MissingInErp = result.Rows.Count(r => r.Status == "Missing in ERP");
         result.MissingIn2B = result.Rows.Count(r => r.Status == "Missing in 2B");
         result.DateDifference = result.Rows.Count(r => r.Status == "Matched" && r.DateDiffers);
-        return result;
     }
 
     public async Task<GstBillRecoResult> ReconcileStoredAsync(
@@ -178,7 +191,9 @@ ORDER BY GroupLabel";
         if (amountTolerance < 0)
             amountTolerance = 0;
 
-        var documents = await _snapshots.GetDocumentsAsync(company, from, to, purchaseOnly: true, ct);
+        var documents = Gst2BSnapshotService.WithAmendmentsFrom(
+            await _snapshots.GetDocumentsAsync(company, from, to, purchaseOnly: true, ct),
+            await _snapshots.GetAmendmentsAfterAsync(company, to, ct));
         var parsed = FromDocuments(documents);
         if (parsed.Rows.Count == 0)
             throw new ArgumentException("No frozen GSTR-2B purchase documents are stored for this group in those months.");
@@ -210,24 +225,15 @@ ORDER BY GroupLabel";
         if (matchingMembers.Count > 1)
             result.Warning = $"Combined {matchingMembers.Count} ERP units in {company} that use the stored GSTIN.";
         result.Rows = BuildRows(company, erpRows, parsed.Rows, amountTolerance, earlier);
-        NoteEarlierMatches(result, from);
-        await AddAttachmentReferencesAsync(result.Rows, ct);
-        result.Matched = result.Rows.Count(r => r.Status == "Matched");
-        result.PotentialMatch = result.Rows.Count(r => r.Status == "Potential match");
-        result.Mismatch = result.Rows.Count(r => r.Status == "Mismatch");
-        result.MissingInErp = result.Rows.Count(r => r.Status == "Missing in ERP");
-        result.MissingIn2B = result.Rows.Count(r => r.Status == "Missing in 2B");
-        result.DateDifference = result.Rows.Count(r => r.Status == "Matched" && r.DateDiffers);
+        await FinishAsync(result, from, ct);
         return result;
     }
 
-    private static TwoBParse FromSnapshot(Gst2BSnapshot snapshot) => FromDocuments(snapshot.Documents);
-
-    private static TwoBParse FromDocuments(IEnumerable<Gst2BDocumentRow> documents)
+    private static TwoBParse FromDocuments(IReadOnlyList<Gst2BDocumentRow> documents)
     {
         var rows = new List<TwoBLine>();
         var nextId = 1;
-        foreach (var document in documents)
+        foreach (var document in Gst2BSnapshotService.ApplyAmendments(documents))
         {
             if (!Gst2BSnapshotService.IsPurchaseSection(document.Section))
                 continue;
@@ -439,15 +445,9 @@ END
         {
             var fy = FinancialYear(row.VoucherDate!.Value);
             var voucherNo = row.VoucherNo.Trim();
-            var voucherType = row.VoucherType.Trim();
-            var candidates = references
-                .Where(reference => AttachmentReferenceMatches(reference.Code, reference.Entry, fy, voucherNo))
-                .ToList();
-            var typed = candidates
-                .Where(reference => AttachmentTypeMatches(reference.Type, reference.Entry, voucherType))
-                .ToList();
-            var pool = typed.Count > 0 ? typed : candidates;
-            var match = pool
+            var match = references
+                .Where(reference => AttachmentTypeMatches(reference.Type, row.ErpSource)
+                    && AttachmentReferenceMatches(reference.Code, reference.Entry, fy, voucherNo))
                 .OrderBy(reference => reference.Entry.Count(ch => ch == '/'))
                 .ThenBy(reference => reference.Entry, StringComparer.OrdinalIgnoreCase)
                 .FirstOrDefault();
@@ -461,7 +461,6 @@ END
 
     /// <summary>
     /// Company code, financial year, and voucher number must each be their own segment.
-    /// Voucher type is used to choose among those matches, so a different type with the same number is not preferred.
     /// </summary>
     private static bool AttachmentReferenceMatches(string code, string entry, string fy, string voucherNo)
     {
@@ -477,29 +476,24 @@ END
         return parts.Any(part => part.Equals(fy, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool AttachmentTypeMatches(string refType, string entry, string voucherType)
-    {
-        if (voucherType.Length == 0)
-            return false;
-        if (refType.Equals(voucherType, StringComparison.OrdinalIgnoreCase))
-            return true;
-        var wanted = Norm(voucherType);
-        if (wanted.Length == 0)
-            return false;
-        if (Norm(refType) == wanted)
-            return true;
-        return entry.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Any(part => Norm(part) == wanted || SameVoucherFamily(Norm(part), wanted));
-    }
+    private const string SourcePurchase = "Purchase";
+    private const string SourceJournal = "Journal";
+    private const string SourceDebitNote = "DebitNote";
 
-    private static bool SameVoucherFamily(string left, string right)
+    /// <summary>
+    /// Voucher numbers repeat across sales, receipts, payments, and work orders, so a voucher
+    /// only takes files filed under its own DMS type. Without one it shows no attachment.
+    /// </summary>
+    private static bool AttachmentTypeMatches(string refType, string source)
     {
-        if (left.Length < 3 || right.Length < 3)
-            return false;
-        return (left.StartsWith("PUR", StringComparison.Ordinal) && right.StartsWith("PUR", StringComparison.Ordinal))
-            || (left.StartsWith("JOUR", StringComparison.Ordinal) && right.StartsWith("JOUR", StringComparison.Ordinal))
-            || (left.Contains("CREDIT", StringComparison.Ordinal) && right.Contains("CREDIT", StringComparison.Ordinal))
-            || (left.Contains("DEBIT", StringComparison.Ordinal) && right.Contains("DEBIT", StringComparison.Ordinal));
+        var type = Norm(refType);
+        return source switch
+        {
+            SourcePurchase => type == "AC_PUR",
+            SourceJournal => type == "AC_JV",
+            SourceDebitNote => type.Contains("DEBIT", StringComparison.Ordinal) || type.EndsWith("_DN", StringComparison.Ordinal),
+            _ => false,
+        };
     }
 
     private static string FinancialYear(DateTime date)
@@ -527,7 +521,9 @@ END
     {
         if (billFrom.Date >= from.Date)
             return [];
-        var documents = await _snapshots.GetDocumentsAsync(company, billFrom, from.AddDays(-1), purchaseOnly: true, ct);
+        var documents = Gst2BSnapshotService.WithAmendmentsFrom(
+            await _snapshots.GetDocumentsAsync(company, billFrom, from.AddDays(-1), purchaseOnly: true, ct),
+            await _snapshots.GetAmendmentsAfterAsync(company, from.AddMonths(-1), ct));
         var rows = FromDocuments(documents).Rows
             .Where(row => current.All(existing => !string.Equals(existing.Key, row.Key, StringComparison.OrdinalIgnoreCase)))
             .ToList();
@@ -846,14 +842,17 @@ END";
                 continue;
 
             var freight = MoneyAt(reader, ordinal, "FREIGHT") ?? 0;
+            var freightGst = MoneyAt(reader, ordinal, "FREIGHTGST") ?? 0;
             var other = MoneyAt(reader, ordinal, "OTHERCHARGE") ?? 0;
             var loading = MoneyAt(reader, ordinal, "LOADING") ?? 0;
             var packing = MoneyAt(reader, ordinal, "PACKING") ?? 0;
             var charges = Math.Abs(freight) + Math.Abs(other) + Math.Abs(loading) + Math.Abs(packing);
             var sign = basic < 0 || (basic == 0 && cgst + sgst + igst < 0) ? -1m : 1m;
             var basicAbs = Math.Abs(basic);
-            var candidates = new List<decimal> { sign * basicAbs };
-            if (charges > TaxEpsilon)
+            var candidates = new List<decimal> { sign * (basicAbs + Math.Abs(freightGst)) };
+            if (Math.Abs(freightGst) > TaxEpsilon)
+                candidates.Add(sign * basicAbs);
+            if (charges > TaxEpsilon && Math.Abs(charges - Math.Abs(freightGst)) > TaxEpsilon)
                 candidates.Add(sign * (basicAbs + charges));
             rows.Add(new ErpLine
             {
@@ -877,9 +876,12 @@ END";
                 Cgst = cgst,
                 Sgst = sgst,
                 Igst = igst,
+                Source = SourcePurchase,
+                Vouchers = [VoucherRef(company, SourcePurchase, reader, ordinal, Text(reader, ordinal, "REFNO"))],
                 Ledgers = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["FREIGHT INWARD EXPENSE (WITH GST)"] = freight,
+                    ["FREIGHT INWARD EXPENSE (WITH GST)"] = freightGst,
+                    ["FREIGHT INWARD EXPENSE (WITHOUT GST)"] = freight - freightGst,
                     ["OTHER ALL"] = other + loading + packing,
                 },
             });
@@ -920,9 +922,18 @@ SELECT
         THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS Sgst,
     SUM(CASE WHEN (j.PartyName LIKE '%IGST%INPUT%' OR j.PartyName LIKE '%INPUT%IGST%') AND j.PartyName NOT LIKE '%OUTPUT%'
         THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS Igst,
-    SUM(CASE WHEN j.PartyName NOT LIKE '%GST%' AND j.PartyName NOT LIKE 'TCS%' AND j.PartyName NOT LIKE 'TDS%'
+    SUM(CASE WHEN j.PartyName NOT LIKE '%CGST%' AND j.PartyName NOT LIKE '%SGST%' AND j.PartyName NOT LIKE '%IGST%'
+              AND j.PartyName NOT LIKE '%UTGST%' AND j.PartyName NOT LIKE '%CESS%' AND j.PartyName NOT LIKE 'GST%'
+              AND j.PartyName NOT LIKE '%GST%INPUT%' AND j.PartyName NOT LIKE '%INPUT%GST%'
+              AND j.PartyName NOT LIKE '%GST%OUTPUT%' AND j.PartyName NOT LIKE '%OUTPUT%GST%'
+              AND j.PartyName NOT LIKE '%GST%PAYABLE%' AND j.PartyName NOT LIKE '%WITHOUT%GST%'
+              AND j.PartyName NOT LIKE 'TCS%' AND j.PartyName NOT LIKE 'TDS%'
               AND (lm.Category IS NULL OR lm.Category NOT IN ('Customer-Supplier', 'Customer', 'Supplier', 'Service Provider', 'Bank Accounts'))
-        THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS Taxable
+        THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS Taxable,
+    SUM(CASE WHEN j.PartyName LIKE '%FREIGHT%' AND j.PartyName LIKE '%WITH%GST%' AND j.PartyName NOT LIKE '%WITHOUT%'
+        THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS FreightGst,
+    'Journal' AS Source,
+    CASE WHEN j.sysdate >= @ToExclusive THEN 1 ELSE 0 END AS Late
 FROM Journal j WITH (NOLOCK)
 LEFT JOIN LedgerMaster lm WITH (NOLOCK)
     ON lm.CompanyName = j.CompanyName AND lm.LedgerName = j.PartyName
@@ -937,8 +948,11 @@ OUTER APPLY (
     ORDER BY ABS(ISNULL(p.Debit, 0) - ISNULL(p.Credit, 0)) DESC
 ) party
 WHERE j.CompanyName = @Company
-  AND j.sysdate >= @From AND j.sysdate < @ToExclusive
+  AND j.sysdate >= @From
 GROUP BY j.JournalType, j.JournalNo, j.sysdate
+HAVING j.sysdate < @ToExclusive
+    OR SUM(CASE WHEN j.PartyName LIKE '%GST%INPUT%' OR j.PartyName LIKE '%INPUT%GST%'
+           THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) < 0
 
 UNION ALL
 
@@ -953,7 +967,10 @@ SELECT
     -ISNULL(i.Cgst, 0) AS Cgst,
     -ISNULL(i.Sgst, 0) AS Sgst,
     -ISNULL(i.Igst, 0) AS Igst,
-    -ISNULL(i.Taxable, 0) AS Taxable
+    -ISNULL(i.Taxable, 0) AS Taxable,
+    CONVERT(decimal(18, 2), 0) AS FreightGst,
+    'DebitNote' AS Source,
+    0 AS Late
 FROM DebitNote d WITH (NOLOCK)
 LEFT JOIN LedgerMaster lm WITH (NOLOCK)
     ON lm.CompanyName = d.CompanyName AND lm.LedgerName = d.PartyName
@@ -991,6 +1008,13 @@ WHERE d.CompanyName = @Company
             if (!KeepErpTax(cgst, sgst, igst))
                 continue;
             var taxable = MoneyAt(reader, ordinal, "TAXABLE") ?? 0;
+            var freightGst = MoneyAt(reader, ordinal, "FREIGHTGST") ?? 0;
+            var candidates = new List<decimal> { taxable };
+            if (Math.Abs(freightGst) > TaxEpsilon)
+                candidates.Add(taxable - freightGst);
+            var ledgers = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+            if (Math.Abs(freightGst) > TaxEpsilon)
+                ledgers["FREIGHT INWARD EXPENSE (WITH GST)"] = freightGst;
             rows.Add(new ErpLine
             {
                 CompanyName = company,
@@ -1007,11 +1031,14 @@ WHERE d.CompanyName = @Company
                 GrossAmount = taxable + cgst + sgst + igst,
                 ValueAmount = taxable,
                 Taxable = taxable,
-                TaxableCandidates = [taxable],
+                TaxableCandidates = candidates,
                 Cgst = cgst,
                 Sgst = sgst,
                 Igst = igst,
-                Ledgers = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase),
+                Source = Text(reader, ordinal, "SOURCE"),
+                Late = (MoneyAt(reader, ordinal, "LATE") ?? 0) != 0,
+                Vouchers = [VoucherRef(company, Text(reader, ordinal, "SOURCE"), reader, ordinal, "")],
+                Ledgers = ledgers,
             });
         }
         return rows;
@@ -1053,53 +1080,98 @@ WHERE d.CompanyName = @Company
             keeper.TaxableCandidates = [taxable];
             keeper.ValueAmount = taxable;
             keeper.GrossAmount = items.Sum(row => row.GrossAmount ?? 0);
+            keeper.Vouchers = items
+                .SelectMany(row => row.Vouchers)
+                .OrderBy(voucher => voucher.VoucherDate)
+                .ToList();
             netted.Add(keeper);
         }
         return netted;
     }
 
     /// <summary>
-    /// Points R- / Reversed / _rev journals at the original bill when that bill is in the same run,
-    /// on the same date and GSTIN. The existing net then sums them or drops both when GST cancels.
+    /// Points reversal journals at the bill they reverse so the existing net sums them or drops both
+    /// when GST cancels. A journal marked as a reversal (R-, Rev_, Rev., _rev, Reversed, (REV), Dup Reverse)
+    /// folds onto the bill with that number and GSTIN, preferring the nearest date. An unmarked journal folds
+    /// when it is the exact opposite of a bill from the same supplier with the same bill date or a related number.
+    /// Reversals booked after the selected dates are dropped unless they fold onto a bill in range.
     /// </summary>
     private static void FoldMarkedReversals(List<ErpLine> rows)
     {
-        var byBill = new Dictionary<string, ErpLine>(StringComparer.OrdinalIgnoreCase);
-        foreach (var row in rows)
-        {
-            var key = Key(NormBill(row.BillNo), row.BillDate, row.GstNo);
-            if (!byBill.ContainsKey(key))
-                byBill[key] = row;
-        }
+        var byBill = rows
+            .Where(row => !IsReversalBill(row.BillNo))
+            .GroupBy(row => NormBill(row.BillNo) + "|" + row.GstNo, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
+        var folded = new HashSet<ErpLine>();
 
         foreach (var row in rows)
         {
             var basis = ReversalBasis(row.BillNo);
-            if (basis.Length == 0)
+            if (basis.Length == 0 || !byBill.TryGetValue(basis + "|" + row.GstNo, out var originals))
                 continue;
-            if (!byBill.TryGetValue(Key(basis, row.BillDate, row.GstNo), out var original) || ReferenceEquals(original, row))
+            Fold(row, originals
+                .OrderBy(candidate => Math.Abs((candidate.BillDate.Date - row.BillDate.Date).Days))
+                .First());
+        }
+
+        foreach (var row in rows)
+        {
+            if (folded.Contains(row) || IsReversalBill(row.BillNo) || !IsPlainJournal(row) || ErpGst(row) >= -TaxEpsilon)
                 continue;
+            var rowBill = MatchBill(row.BillNo);
+            var original = rows
+                .Where(candidate => !ReferenceEquals(candidate, row) && !folded.Contains(candidate)
+                    && string.Equals(candidate.GstNo, row.GstNo, StringComparison.OrdinalIgnoreCase)
+                    && ErpGst(candidate) > TaxEpsilon
+                    && Math.Abs(ErpGst(candidate) + ErpGst(row)) <= 1m
+                    && Math.Abs(candidate.Taxable + row.Taxable) <= 1m
+                    && (candidate.BillDate.Date == row.BillDate.Date || BillContains(rowBill, MatchBill(candidate.BillNo))))
+                .OrderBy(candidate => Math.Abs((candidate.BillDate.Date - row.BillDate.Date).Days))
+                .FirstOrDefault();
+            if (original != null)
+                Fold(row, original);
+        }
+
+        rows.RemoveAll(row => row.Late && !folded.Contains(row));
+
+        void Fold(ErpLine row, ErpLine original)
+        {
             row.BillNo = original.BillNo;
             row.BillParts = original.BillParts;
             row.FullKey = original.FullKey;
             original.MatchReason = ReasonReversal;
             row.MatchReason = ReasonReversal;
+            folded.Add(row);
+            folded.Add(original);
         }
     }
 
-    private static string ReversalBasis(string? billNo)
+    private static decimal ErpGst(ErpLine row) => row.Cgst + row.Sgst + row.Igst;
+
+    private static bool IsPlainJournal(ErpLine row) =>
+        row.Source == SourceJournal && Norm(row.VoucherType).StartsWith("JOURNAL", StringComparison.Ordinal);
+
+    private static bool BillContains(string text, string bill) =>
+        bill.Length >= 4 && text.Length > bill.Length && text.Contains(bill, StringComparison.Ordinal);
+
+    private static readonly System.Text.RegularExpressions.Regex ReversalPrefix = new(
+        @"^(?:R-|REV(?:ERSED?|ERSAL)?[-_./:])", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static readonly System.Text.RegularExpressions.Regex ReversalSuffix = new(
+        @"(?:[-_/.(](?:DUP)?REV(?:ERSED?|ERSAL)?\)?|(?:DUP)?REVERSED?)$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>Bill number a reversal points at, or empty when the bill is not marked as a reversal.</summary>
+    internal static string ReversalBasis(string? billNo)
     {
         var text = NormBill(billNo);
-        string[] suffixes = ["REVERSED", "_REV", "-REV", "/REV"];
-        foreach (var suffix in suffixes)
-        {
-            if (text.Length <= suffix.Length || !text.EndsWith(suffix, StringComparison.Ordinal))
-                continue;
-            return text[..^suffix.Length].TrimEnd('-', '_', '/');
-        }
-
-        return text.StartsWith("R-", StringComparison.Ordinal) && text.Length > 2 ? text[2..] : "";
+        var basis = ReversalSuffix.Replace(text, "");
+        if (basis.Length == text.Length)
+            basis = ReversalPrefix.Replace(text, "");
+        basis = basis.Trim('-', '_', '/', '.');
+        return basis.Length >= 3 && basis.Length < text.Length ? basis : "";
     }
+
+    private static bool IsReversalBill(string? billNo) => ReversalBasis(billNo).Length > 0;
 
     private static bool IsAdjustmentVoucher(string voucherType)
     {
@@ -1319,6 +1391,8 @@ WHERE d.CompanyName = @Company
                     MonthAsPer2B = month,
                     TwoBPeriod = period,
                     DocumentType = docType,
+                    ErpSource = erp.Source,
+                    ErpVouchers = erp.Vouchers,
                     Ledgers = erp.Ledgers,
                 });
             }
@@ -1735,6 +1809,16 @@ WHERE d.CompanyName = @Company
         return ParseDate(Convert.ToString(value));
     }
 
+    private static GstErpVoucherRef VoucherRef(string company, string source, SqlDataReader reader, Dictionary<string, int> ordinal, string refNo) => new()
+    {
+        Source = source,
+        CompanyName = company,
+        VoucherType = Text(reader, ordinal, "VOUCHERTYPE"),
+        VoucherNo = Text(reader, ordinal, "VOUCHERNO"),
+        VoucherDate = DateOf(reader, ordinal, "VOUCHERDATE"),
+        RefNo = refNo,
+    };
+
     private static decimal? MoneyAt(SqlDataReader reader, Dictionary<string, int> ordinal, string name)
     {
         return ordinal.TryGetValue(name, out var at) ? Money(reader, at) : null;
@@ -1881,6 +1965,7 @@ WHERE d.CompanyName = @Company
     private const string ReasonAssetDate = "Asset voucher, same date";
     private const string ReasonAmount = "Same amount, different bill";
     private const string ReasonReversal = "Reversal netted";
+    private const string ReasonReversalEntry = "Reversal of an earlier bill";
 
     /// <summary>
     /// Pairs rows that are still missing on both sides when they are the same document written
@@ -1897,6 +1982,11 @@ WHERE d.CompanyName = @Company
         {
             if (item.Hits.Count > 0)
                 return false;
+            if (IsReversalBill(item.Erp.BillNo))
+            {
+                item.Erp.MatchReason = ReasonReversalEntry;
+                return false;
+            }
             open.Add(item.Erp);
             return true;
         });
@@ -2355,7 +2445,7 @@ WHERE d.CompanyName = @Company
         return TaxMatches([(erp, hits)], hits, tolerance);
     }
 
-    private static string NormBill(string? value)
+    internal static string NormBill(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
             return "";
@@ -2465,6 +2555,10 @@ WHERE d.CompanyName = @Company
         public decimal Sgst { get; set; }
         public decimal Igst { get; set; }
         public string MatchReason { get; set; } = "";
+        public string Source { get; set; } = "";
+        /// <summary>Reversal journal booked after the selected dates; kept only when it nets onto a bill in range.</summary>
+        public bool Late { get; set; }
+        public List<GstErpVoucherRef> Vouchers { get; set; } = [];
         public Dictionary<string, decimal?> Ledgers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 }

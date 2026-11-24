@@ -246,7 +246,6 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
 
     private async Task<GstPortalStep> DownloadAsync(PortalSession session)
     {
-        var workbooks = new List<byte[]>();
         try
         {
             var page = session.Page!;
@@ -258,16 +257,13 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
                 var downloaded = await DownloadMonthAsync(page, month);
                 page = downloaded.Page;
                 session.Page = page;
-                workbooks.Add(downloaded.File);
                 await StoreMonthAsync(downloaded.File, month);
             }
 
-            session.CompletedWorkbooks.Add(CombineWorkbooks(workbooks));
             if (session.RemainingCredentials.Count > 0)
                 return await BeginNextCredentialAsync(session);
 
             var completed = Step(session, "complete", $"Fetched {Gst2BSnapshotService.FormatMonthSpan(months)} and stored them.");
-            completed.Workbooks = session.CompletedWorkbooks;
             await RemoveSessionAsync(session.Id);
             return completed;
         }
@@ -290,10 +286,14 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
             var result = await store.SavePortalFileAsync(stream, $"{month:yyyy-MM}.xlsx");
             if (result.AlreadyFrozen)
                 _logger.LogInformation("GSTR-2B {Period} for {Gstin} is already frozen.", month.ToString("yyyy-MM"), result.BuyerGstin);
+            else
+                _logger.LogInformation("GSTR-2B {Period} for {Gstin} stored: {Sections}.", month.ToString("yyyy-MM"), result.BuyerGstin, result.Sections);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "GSTR-2B {Period} downloaded but was not stored.", month.ToString("yyyy-MM"));
+            throw new InvalidOperationException(
+                $"GSTR-2B for {month:MMM yyyy} downloaded but could not be saved to the database: {ex.Message}", ex);
         }
     }
 
@@ -460,11 +460,11 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
         return text.Length == 0 ? "(none)" : text;
     }
 
-    // Large returns are split into "GSTR-2B Details - Part N" files; the separate Summary file has no invoice rows.
+    // Large returns are split into a Summary file (Read me with GSTIN and period) and "Details - Part N" files (B2B, B2BA, ...).
     private static async Task<List<ILocator>> VisibleDetailPartLinksAsync(IPage page)
     {
         var links = page.Locator(
-            "xpath=//td[not(.//td) and contains(normalize-space(.), 'Details')]/following-sibling::td//a");
+            "xpath=//td[not(.//td) and (contains(normalize-space(.), 'Details') or contains(normalize-space(.), 'Summary'))]/following-sibling::td//a");
         var found = new List<ILocator>();
         for (var index = 0; index < await links.CountAsync(); index++)
         {
@@ -830,47 +830,38 @@ public sealed class GstPortalBrowserService : IAsyncDisposable
         if (files.Count == 1)
             return files[0];
 
-        using var output = new XLWorkbook();
-        var target = output.Worksheets.Add("B2B");
-        var destinationRow = 1;
-
-        for (var fileIndex = 0; fileIndex < files.Count; fileIndex++)
+        // The 2B store needs the portal layout back in one workbook: Read me from the Summary, B2B, B2BA, ... from the parts.
+        using var output = new XLWorkbook(new MemoryStream(files[0]));
+        for (var fileIndex = 1; fileIndex < files.Count; fileIndex++)
         {
             using var input = new XLWorkbook(new MemoryStream(files[fileIndex]));
-            var source = input.Worksheets.FirstOrDefault(sheet =>
-                    Normalize(sheet.Name).Contains("B2B") &&
-                    (Normalize(sheet.Name).Contains("CNDN") || Normalize(sheet.Name).Contains("CN")))
-                ?? input.Worksheets.FirstOrDefault(sheet => Normalize(sheet.Name).Contains("B2B"))
-                ?? throw new InvalidOperationException("A downloaded workbook has no Invoice Wise 2B sheet.");
-
-            var lastRow = source.LastRowUsed()?.RowNumber() ?? 0;
-            var lastColumn = source.LastColumnUsed()?.ColumnNumber() ?? 0;
-            var headerRow = FindTwoBHeader(source, lastRow, lastColumn);
-            var firstRow = fileIndex == 0 ? 1 : headerRow + 1;
-            for (var row = firstRow; row <= lastRow; row++)
+            foreach (var source in input.Worksheets)
             {
-                for (var column = 1; column <= lastColumn; column++)
-                    target.Cell(destinationRow, column).Value = source.Cell(row, column).Value;
-                destinationRow++;
+                if (!output.Worksheets.TryGetWorksheet(source.Name, out var target))
+                {
+                    source.CopyTo(output, source.Name);
+                    continue;
+                }
+                if (!Gst2BSnapshotService.TryFindHeader(source, out var headerRow))
+                    continue;
+
+                var lastRow = source.LastRowUsed()?.RowNumber() ?? headerRow;
+                var lastColumn = source.LastColumnUsed()?.ColumnNumber() ?? 0;
+                var destinationRow = (target.LastRowUsed()?.RowNumber() ?? 0) + 1;
+                for (var row = headerRow + 1; row <= lastRow; row++)
+                {
+                    if (source.Row(row).IsEmpty())
+                        continue;
+                    for (var column = 1; column <= lastColumn; column++)
+                        target.Cell(destinationRow, column).Value = source.Cell(row, column).Value;
+                    destinationRow++;
+                }
             }
         }
 
         using var stream = new MemoryStream();
         output.SaveAs(stream);
         return stream.ToArray();
-    }
-
-    private static int FindTwoBHeader(IXLWorksheet sheet, int lastRow, int lastColumn)
-    {
-        for (var row = 1; row <= Math.Min(lastRow, 25); row++)
-        {
-            for (var column = 1; column <= lastColumn; column++)
-            {
-                if (Normalize(sheet.Cell(row, column).GetString()) == "2BPERIOD")
-                    return row;
-            }
-        }
-        throw new InvalidOperationException("A downloaded workbook has no 2B Period header.");
     }
 
     private async Task<List<PortalCredential>> ResolveCredentialsAsync(string groupLabel, CancellationToken ct)
@@ -1145,7 +1136,6 @@ WHERE COALESCE(NULLIF(LTRIM(RTRIM(GroupName)), ''), LTRIM(RTRIM(Name))) = @Group
         public PortalCredential? Credential { get; set; }
         public List<DateTime> MonthsToDownload { get; set; } = [];
         public Queue<PortalCredential> RemainingCredentials { get; set; } = new();
-        public List<byte[]> CompletedWorkbooks { get; set; } = [];
         public DateTimeOffset CreatedAt { get; set; }
     }
 }

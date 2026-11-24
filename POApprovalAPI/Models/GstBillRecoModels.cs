@@ -57,7 +57,92 @@ public class GstBillRecoRow
     public int AttachmentCount { get; set; }
     public string DmsRefType { get; set; } = "";
     public string DmsRefEntryNo { get; set; } = "";
+    /// <summary>ERP table the voucher came from (purchase, journal, debit note); decides which DMS reference type it can use.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string ErpSource { get; set; } = "";
+    /// <summary>Every ERP voucher behind this row: the bill itself plus any reversal or duplicate netted into it.</summary>
+    public List<GstErpVoucherRef> ErpVouchers { get; set; } = [];
     public Dictionary<string, decimal?> Ledgers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Set on potential matches, and kept on rows a decision was applied to, so the decision can be saved or undone.</summary>
+    public string DecisionKey { get; set; } = "";
+    /// <summary>Matched, Mismatch, or Missing when the user decided this potential match.</summary>
+    public string Decision { get; set; } = "";
+    public string DecisionBy { get; set; } = "";
+}
+
+public class GstRecoDecisionRequest
+{
+    public string? Username { get; set; }
+    public string? CompanyName { get; set; }
+    public string? DecisionKey { get; set; }
+    public string? Decision { get; set; }
+    public string? BillNo { get; set; }
+    public string? TwoBBillNo { get; set; }
+    public string? GstNo { get; set; }
+    public string? Reason { get; set; }
+}
+
+public class GstErpVoucherRef
+{
+    public string Source { get; set; } = "";
+    public string CompanyName { get; set; } = "";
+    public string VoucherType { get; set; } = "";
+    public string VoucherNo { get; set; } = "";
+    public DateTime? VoucherDate { get; set; }
+    /// <summary>Store inward number for purchase vouchers.</summary>
+    public string RefNo { get; set; } = "";
+}
+
+public class GstJournalActionRequest
+{
+    public string? Username { get; set; }
+    public string CompanyName { get; set; } = "";
+    public string JournalType { get; set; } = "";
+    public string JournalNo { get; set; } = "";
+    public DateTime VoucherDate { get; set; }
+    /// <summary>New bill number when changing the bill number.</summary>
+    public string? NewBillNo { get; set; }
+    /// <summary>Date of the reversal journal; today when empty.</summary>
+    public DateTime? ReversalDate { get; set; }
+    public string? Reason { get; set; }
+}
+
+public class GstJournalActionResult
+{
+    public string Message { get; set; } = "";
+    public string? NewJournalNo { get; set; }
+    public string? Year { get; set; }
+}
+
+public class GstErpVoucherDetail
+{
+    /// <summary>Journals can have their bill number changed or be reversed from the reconciliation screen.</summary>
+    public bool Editable { get; set; }
+    public string BillNo { get; set; } = "";
+    public string Title { get; set; } = "";
+    public List<GstErpVoucherField> Header { get; set; } = [];
+    public List<GstErpVoucherSection> Sections { get; set; } = [];
+}
+
+public class GstErpVoucherField
+{
+    public string Label { get; set; } = "";
+    public object? Value { get; set; }
+}
+
+public class GstErpVoucherSection
+{
+    public string Title { get; set; } = "";
+    public List<GstErpVoucherColumn> Columns { get; set; } = [];
+    public List<List<object?>> Rows { get; set; } = [];
+}
+
+public class GstErpVoucherColumn
+{
+    public string Name { get; set; } = "";
+    public bool Numeric { get; set; }
+    /// <summary>Show a column total under the table.</summary>
+    public bool Total { get; set; }
 }
 
 public class GstBillRecoExportRequest
