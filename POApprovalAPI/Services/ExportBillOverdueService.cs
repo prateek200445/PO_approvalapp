@@ -172,12 +172,15 @@ public class ExportBillOverdueService
         if (refresh)
         {
             _cache.Remove(universeKey);
-            _cache.Remove($"{universeKey}|{companyLabel}|xlsx-v11");
-            _cache.Remove($"{universeKey}|All Companies|xlsx-v11");
+            _cache.Remove(AgingReportCacheKey(universeKey, companyLabel, fromDate));
+            _cache.Remove(AgingReportCacheKey(universeKey, "All Companies", fromDate));
+            _cache.Remove($"{universeKey}|{companyLabel}|xlsx-v14|{fromDate:yyyy-MM-dd}");
+            _cache.Remove($"{universeKey}|All Companies|xlsx-v14|{fromDate:yyyy-MM-dd}");
         }
 
         var universe = await GetOrLoadRowsAsync(universeKey, asOfDate, selectedGroup);
-        var rows = OverdueOnly(await FilterRowsByCompanyAsync(universe, companyLabel))
+        var ic = await GetIntercompanyExclusionAsync();
+        var rows = OverdueOnly(ExcludeIntercompany(await FilterRowsByCompanyAsync(universe, companyLabel), ic))
             .Where(r => MatchesSearch(r, search))
             .ToList();
         var total = rows.Count;
@@ -190,16 +193,20 @@ public class ExportBillOverdueService
             DateFrom = fromDate.ToString("yyyy-MM-dd"),
             AsOf = asOfDate.ToString("yyyy-MM-dd"),
             GroupName = selectedGroup,
-            Source = "ERP FrmReceivable BindGrid (dueamount + Forex)",
+            Source = "ERP FrmReceivable BindGrid (dueamount); overdue grid excludes IC",
             Page = page,
             PageSize = pageSize,
             TotalCount = total,
         };
     }
 
+    /// <summary>
+    /// ERP FrmAgingReport1 default slabs extended with a 91–120 band (BETWEEN 1–30 … 91–120, then &gt;=121).
+    /// Matches FrmAgingReport1: DATEDIFF(DD, billdate, as-of) with BETWEEN / &gt;= bounds (day 0 is not in 1–30).
+    /// </summary>
     public static readonly string[] AgingBucketLabels =
     {
-        "1–30", "31–60", "61–90", "90–120", "121+",
+        "1–30", "31–60", "61–90", "91–120", "121+",
     };
 
     public static string AgingBucketHeading(string label) => $"{label} days";
@@ -219,21 +226,36 @@ public class ExportBillOverdueService
         var asOfDate = asOf.Date;
         var fromDate = ResolveDateFrom(dateFrom, asOfDate);
         var universeKey = UniverseCacheKey(asOfDate, selectedGroup);
+        var agingKey = AgingReportCacheKey(universeKey, companyLabel, fromDate);
 
         if (refresh)
         {
             _cache.Remove(universeKey);
-            _cache.Remove($"{universeKey}|{companyLabel}|xlsx-v11");
-            _cache.Remove($"{universeKey}|All Companies|xlsx-v11");
+            _cache.Remove(agingKey);
+            _cache.Remove(AgingReportCacheKey(universeKey, "All Companies", fromDate));
+            _cache.Remove($"{universeKey}|{companyLabel}|xlsx-v14|{fromDate:yyyy-MM-dd}");
+            _cache.Remove($"{universeKey}|All Companies|xlsx-v14|{fromDate:yyyy-MM-dd}");
+        }
+        else if (_cache.TryGetValue(agingKey, out ExportAgingReportDto? cachedReport) && cachedReport is not null)
+        {
+            return cachedReport;
         }
 
+        // Aging matches ERP FrmReceivable / FrmAgingReport1: do not strip intercompany.
         var universe = await GetOrLoadRowsAsync(universeKey, asOfDate, selectedGroup);
         var rows = await FilterRowsByCompanyAsync(universe, companyLabel);
-        return BuildAgingReport(rows, companyLabel, selectedGroup, fromDate, asOfDate);
+        var report = BuildAgingReport(rows, companyLabel, selectedGroup, fromDate, asOfDate);
+        _cache.Set(agingKey, report, CacheTtl);
+        return report;
     }
 
+    /// <summary>
+    /// ERP FrmAgingReport1: BETWEEN 1 AND 30, …, BETWEEN 91 AND 120, then &gt;=121.
+    /// Returns -1 for day 0 / On Account / future (Notoverdue — in totals, not in age slabs).
+    /// </summary>
     private static int AgingBucketIndex(int days)
     {
+        if (days < 1) return -1;
         if (days <= 30) return 0;
         if (days <= 60) return 1;
         if (days <= 90) return 2;
@@ -242,13 +264,19 @@ public class ExportBillOverdueService
     }
 
     /// <summary>
-    /// Stock statement / ERP FrmAgingReport1: DATEDIFF(DD, bill date, as-of).
-    /// Day 0–30 sit in 1–30 (no separate Not due column).
+    /// ERP FrmReceivable BillDateOverdueDays + FrmAgingReport1 Notoverdue:
+    /// On Account (1900-01-01) → 0 days (kept off slabs); else DATEDIFF(DD, bill date, as-of), floored at 0.
     /// </summary>
     private static int AgingDays(ExportBillOverdueItemDto row, DateTime asOfDate)
     {
-        if (!DateTime.TryParse(row.BillDate, CultureInfo.InvariantCulture, DateTimeStyles.None, out var billDate)
-            || billDate.Year <= 1900)
+        var s = row.BillDate;
+        // Fast path: On Account / epoch bills stay in Notoverdue (totals only).
+        if (string.IsNullOrEmpty(s) || s.StartsWith("1900", StringComparison.Ordinal))
+            return 0;
+        if (!DateTime.TryParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var billDate) &&
+            !DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out billDate))
+            return 0;
+        if (billDate.Year <= 1900)
             return 0;
         var days = (asOfDate.Date - billDate.Date).Days;
         return days < 0 ? 0 : days;
@@ -257,12 +285,32 @@ public class ExportBillOverdueService
     private static List<ExportBillOverdueItemDto> OverdueOnly(List<ExportBillOverdueItemDto> rows) =>
         rows.Where(r => r.OverdueDays > 0 && r.PendingAmount > 0).ToList();
 
+    /// <summary>
+    /// Portal overdue grid only: hide intercompany factory/ledger pairs.
+    /// ERP FrmReceivable does not apply this filter — aging keeps IC for parity.
+    /// </summary>
+    private static List<ExportBillOverdueItemDto> ExcludeIntercompany(
+        List<ExportBillOverdueItemDto> rows,
+        IcExclusion ic) =>
+        rows.Where(r => !IsIntercompanyRow(r, ic)).ToList();
+
     private static DateTime ResolveDateFrom(DateTime? dateFrom, DateTime asOfDate)
     {
         var from = (dateFrom ?? FinancialYearStart(asOfDate)).Date;
         return from > asOfDate ? asOfDate : from;
     }
 
+    private static string AgingCustomerName(ExportBillOverdueItemDto row)
+    {
+        var customer = string.IsNullOrWhiteSpace(row.CustomerName) ? row.LedgerName : row.CustomerName;
+        customer = (customer ?? "").Trim();
+        return customer.Length == 0 ? "Unknown" : customer;
+    }
+
+    /// <summary>
+    /// ERP FrmAgingReport1: signed bill lines (CR negative), age by BillDateOverdueDays slabs.
+    /// On Account + day 0 stay in party/grand total only (Notoverdue); not dumped into 1–30 or 121+.
+    /// </summary>
     private static ExportAgingReportDto BuildAgingReport(
         List<ExportBillOverdueItemDto> rows,
         string companyLabel,
@@ -279,17 +327,25 @@ public class ExportBillOverdueService
         }).ToList();
 
         var map = new Dictionary<(string Company, string Customer), ExportAgingCustomerDto>();
-        // ERP FrmAgingReport1: CR bills are signed negative and netted into the party total.
-        foreach (var row in rows.Where(r => Math.Round(Math.Abs(r.PendingAmount), 0) != 0))
-        {
-            var idx = AgingBucketIndex(AgingDays(row, asOfDate));
-            var pending = Math.Round(row.PendingAmount, 2, MidpointRounding.AwayFromZero);
-            buckets[idx].PendingAmount += pending;
-            buckets[idx].BillCount += 1;
+        var totalPending = 0d;
+        var totalBills = 0;
 
-            var customer = string.IsNullOrWhiteSpace(row.CustomerName) ? row.LedgerName : row.CustomerName;
-            customer = customer.Trim();
-            if (customer.Length == 0) customer = "Unknown";
+        foreach (var row in rows)
+        {
+            var pending = Math.Round(row.PendingAmount, 2, MidpointRounding.AwayFromZero);
+            if (Math.Round(Math.Abs(pending), 0) == 0)
+                continue;
+
+            var idx = AgingBucketIndex(AgingDays(row, asOfDate));
+            totalPending += pending;
+            totalBills += 1;
+            if (idx >= 0)
+            {
+                buckets[idx].PendingAmount += pending;
+                buckets[idx].BillCount += 1;
+            }
+
+            var customer = AgingCustomerName(row);
             var companyName = (row.CompanyName ?? "").Trim();
             var key = (companyName, customer);
             if (!map.TryGetValue(key, out var line))
@@ -303,7 +359,8 @@ public class ExportBillOverdueService
                 map[key] = line;
             }
 
-            line.Amounts[idx] += pending;
+            if (idx >= 0)
+                line.Amounts[idx] += pending;
             line.Total += pending;
             line.BillCount += 1;
         }
@@ -319,7 +376,7 @@ public class ExportBillOverdueService
                 c.Total = Math.Round(c.Total, 2, MidpointRounding.AwayFromZero);
                 return c;
             })
-            .Where(c => Math.Round(c.Total, 0) != 0)
+            .Where(c => Math.Round(Math.Abs(c.Total), 0) != 0)
             .OrderByDescending(c => c.Total)
             .ThenBy(c => c.CustomerName, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -330,30 +387,42 @@ public class ExportBillOverdueService
             DateFrom = fromDate.ToString("yyyy-MM-dd"),
             AsOf = asOfDate.ToString("yyyy-MM-dd"),
             GroupName = selectedGroup,
-            TotalPending = Math.Round(buckets.Sum(b => b.PendingAmount), 2, MidpointRounding.AwayFromZero),
-            TotalBills = rows.Count(r => Math.Round(Math.Abs(r.PendingAmount), 0) != 0),
+            TotalPending = Math.Round(totalPending, 2, MidpointRounding.AwayFromZero),
+            TotalBills = totalBills,
             Buckets = buckets,
             Customers = customers,
         };
     }
 
     /// <summary>
-    /// Preload companies, groups, and today's All-Companies overdue list so the UI is a cache hit.
+    /// Preload companies, groups, overdue + aging so the UI opens on a cache hit.
+    /// Aging reuses the same bill universe as overdue (no second SQL when already warm).
     /// </summary>
     public async Task WarmDefaultCachesAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        await GetCompanyOptionsAsync();
+        await Task.WhenAll(GetCompanyOptionsAsync(), GetGroupsAsync(), GetCompaniesAsync());
+
+        var today = DateTime.Today;
+        var yesterday = today.AddDays(-1);
+
         cancellationToken.ThrowIfCancellationRequested();
-        await GetGroupsAsync();
+        // Load universe once via overdue, then age in-memory (and cache the report DTO).
+        await GetOverdueBillsAsync("All Companies", today, DefaultGroupName, 1, DefaultPageSize);
         cancellationToken.ThrowIfCancellationRequested();
-        await GetCompaniesAsync();
+        await GetAgingReportAsync("All Companies", today, DefaultGroupName);
+
         cancellationToken.ThrowIfCancellationRequested();
-        await GetOverdueBillsAsync("All Companies", DateTime.Today, DefaultGroupName, 1, DefaultPageSize);
+        await GetOverdueBillsAsync("All Companies", yesterday, DefaultGroupName, 1, DefaultPageSize);
+        cancellationToken.ThrowIfCancellationRequested();
+        await GetAgingReportAsync("All Companies", yesterday, DefaultGroupName);
     }
 
     private static string UniverseCacheKey(DateTime asOfDate, string selectedGroup) =>
-        $"export-bill-overdue-v23|{asOfDate:yyyy-MM-dd}|{selectedGroup}";
+        $"export-bill-overdue-v26|{asOfDate:yyyy-MM-dd}|{selectedGroup}";
+
+    private static string AgingReportCacheKey(string universeKey, string companyLabel, DateTime fromDate) =>
+        $"{universeKey}|aging-signed-v1|{companyLabel}|{fromDate:yyyy-MM-dd}";
 
     public async Task<byte[]> BuildExportAsync(
         string company,
@@ -369,13 +438,20 @@ public class ExportBillOverdueService
         var asOfDate = asOf.Date;
         var fromDate = ResolveDateFrom(dateFrom, asOfDate);
         var universeKey = UniverseCacheKey(asOfDate, selectedGroup);
-        var excelKey = $"{universeKey}|{companyLabel}|xlsx-v11|{fromDate:yyyy-MM-dd}";
+        var excelKey = $"{universeKey}|{companyLabel}|xlsx-v14|{fromDate:yyyy-MM-dd}";
         if (_cache.TryGetValue(excelKey, out byte[]? cachedExcel) && cachedExcel is { Length: > 0 })
             return cachedExcel;
 
         var universe = await GetOrLoadRowsAsync(universeKey, asOfDate, selectedGroup);
         var rows = await FilterRowsByCompanyAsync(universe, companyLabel);
-        var bytes = BuildAttractiveWorkbook(rows, companyLabel, selectedGroup, fromDate, asOfDate);
+        var ic = await GetIntercompanyExclusionAsync();
+        var bytes = BuildAttractiveWorkbook(
+            ExcludeIntercompany(rows, ic),
+            rows,
+            companyLabel,
+            selectedGroup,
+            fromDate,
+            asOfDate);
         _cache.Set(excelKey, bytes, TimeSpan.FromMinutes(30));
         return bytes;
     }
@@ -385,17 +461,21 @@ public class ExportBillOverdueService
         var (rows, companyLabel, selectedGroup, asOfDate) = await LoadFilteredRowsAsync(company, asOf, groupName);
         var display = DisplayCompanyLabel(companyLabel);
         var fromDate = ResolveDateFrom(dateFrom, asOfDate);
+        var ic = await GetIntercompanyExclusionAsync();
         return new ExportBillOverduePdfDocument(
-                OverdueOnly(rows), display, selectedGroup, fromDate, asOfDate, ShowCompanyColumn(companyLabel))
+                OverdueOnly(ExcludeIntercompany(rows, ic)),
+                display,
+                selectedGroup,
+                fromDate,
+                asOfDate,
+                ShowCompanyColumn(companyLabel))
             .GeneratePdf();
     }
 
     public async Task<byte[]> BuildAgingPdfAsync(string company, DateTime asOf, string? groupName, DateTime? dateFrom = null)
     {
-        var (rows, companyLabel, selectedGroup, asOfDate) = await LoadFilteredRowsAsync(company, asOf, groupName);
-        var fromDate = ResolveDateFrom(dateFrom, asOfDate);
-        var report = BuildAgingReport(rows, companyLabel, selectedGroup, fromDate, asOfDate);
-        return new ExportBillAgingPdfDocument(report, DisplayCompanyLabel(companyLabel), ShowCompanyColumn(companyLabel))
+        var report = await GetAgingReportAsync(company, asOf, groupName, refresh: false, dateFrom);
+        return new ExportBillAgingPdfDocument(report, DisplayCompanyLabel(report.Company), ShowCompanyColumn(report.Company))
             .GeneratePdf();
     }
 
@@ -425,7 +505,8 @@ public class ExportBillOverdueService
         || companyLabel.StartsWith("G-", StringComparison.OrdinalIgnoreCase);
 
     private static byte[] BuildAttractiveWorkbook(
-        List<ExportBillOverdueItemDto> rows,
+        List<ExportBillOverdueItemDto> overdueUniverse,
+        List<ExportBillOverdueItemDto> agingUniverse,
         string companyLabel,
         string selectedGroup,
         DateTime fromDate,
@@ -434,7 +515,7 @@ public class ExportBillOverdueService
         var displayGroup = companyLabel.StartsWith("G-", StringComparison.OrdinalIgnoreCase)
             ? companyLabel[2..] + " (Group)"
             : companyLabel;
-        var overdueRows = OverdueOnly(rows);
+        var overdueRows = OverdueOnly(overdueUniverse);
         var totalPending = overdueRows.Sum(r => r.PendingAmount);
 
         using var workbook = new XLWorkbook();
@@ -561,7 +642,7 @@ public class ExportBillOverdueService
         sheet.PageSetup.Header.Left.AddText("Export Bill Overdue");
         sheet.PageSetup.Footer.Right.AddText("Page &P of &N");
 
-        WriteAgingSheet(workbook, rows, companyLabel, selectedGroup, fromDate, asOfDate, navy, headerBlue, gold, kpiFill);
+        WriteAgingSheet(workbook, agingUniverse, companyLabel, selectedGroup, fromDate, asOfDate, navy, headerBlue, gold, kpiFill);
 
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
@@ -603,7 +684,7 @@ public class ExportBillOverdueService
 
         sheet.Range(2, 1, 2, lastCol).Merge();
         var subtitle = sheet.Cell(2, 1);
-        subtitle.Value = $"Outstanding aging  ·  Opening + Debit − Credit  ·  {fromDate:dd-MMM-yyyy} to {asOfDate:dd-MMM-yyyy}  ·  Generated {DateTime.Now:dd-MMM-yyyy HH:mm}";
+        subtitle.Value = $"ERP aging (bill date, signed)  ·  Opening + Debit − Credit  ·  {fromDate:dd-MMM-yyyy} to {asOfDate:dd-MMM-yyyy}  ·  Generated {DateTime.Now:dd-MMM-yyyy HH:mm}";
         subtitle.Style.Font.FontColor = XLColor.White;
         subtitle.Style.Font.FontSize = 10;
         subtitle.Style.Fill.BackgroundColor = headerBlue;
@@ -816,16 +897,14 @@ public class ExportBillOverdueService
         if (factories.Count == 0)
             return new List<ExportBillOverdueItemDto>();
 
-        var icTask = GetIntercompanyExclusionAsync();
+        // Keep the full ERP outstanding universe (incl. IC). Overdue grid strips IC at read time.
         var fxTask = GetFxRatesAsync(asOfDate);
         var rowsTask = QueryAllSelectedAsync(asOfDate, selectedGroup);
-        await Task.WhenAll(icTask, fxTask, rowsTask);
-        var ic = await icTask;
+        await Task.WhenAll(fxTask, rowsTask);
         var fx = await fxTask;
         var rows = await rowsTask;
 
         return rows
-            .Where(r => !IsIntercompanyRow(r, ic))
             .Select(r => ApplyForeignAmount(r, fx))
             .OrderByDescending(r => r.OverdueDays)
             .ThenBy(r => r.LedgerName, StringComparer.OrdinalIgnoreCase)
