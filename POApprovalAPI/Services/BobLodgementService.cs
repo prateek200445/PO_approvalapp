@@ -355,7 +355,7 @@ public sealed class BobLodgementService
             form.SetField("untitled114", compact);
             form.SetField("untitled117", compact);
 
-            // Pre-fill authorised signatory image for PIL / KPW in the seal boxes.
+            // Authorised signatory left blank until a real signature is uploaded.
             StampCompanySignature(stamper, profile);
 
             stamper.FormFlattening = false;
@@ -493,7 +493,7 @@ public sealed class BobLodgementService
             "Plastene India Limited (PIL)",
             "PIL",
             "bob-lodgement-pil.pdf",
-            "signature-pil.png",
+            "", // signature blank until real sign uploaded
             "Plastene India Limited%",
             "PLASTENE INDIA%",
             "SME",
@@ -509,7 +509,7 @@ public sealed class BobLodgementService
             "KP Woven Private Limited (KPW)",
             "KPW",
             "bob-lodgement-kpw.pdf",
-            "signature-kpw.png",
+            "", // signature blank until real sign uploaded
             "K.P. WOVEN%",
             "KP WOVEN%",
             "SME",

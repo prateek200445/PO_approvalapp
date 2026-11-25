@@ -4,6 +4,9 @@ export type SalesTrendPeriod = "Last 6 Months" | "Last 12 Months";
 /** Top-level section within Sales Dashboard (not a separate route). */
 export type SalesDashboardSection = "Sales" | "FIBC Production";
 
+/** In-page tab within the Sales section (Dashboard vs Export analysis). */
+export type SalesDashboardSalesPage = "overview" | "export-analysis";
+
 export interface SalesDashboardFilters {
   company: string;
   companyValues: string[];
@@ -26,6 +29,8 @@ export interface SalesCompanyOption {
 
 export interface RankedPartyItem {
   rank: number;
+  /** Selling group / legal company (export customers). */
+  companyName?: string | null;
   name: string;
   country?: string | null;
   amount: number;

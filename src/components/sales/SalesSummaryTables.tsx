@@ -155,6 +155,7 @@ function RankingTable({
   );
 }
 
+/** Classic Top 10 sales / purchase ranking tables for the Overview page. */
 export function SalesSummaryTables({
   exportCustomers,
   domesticCustomers,
@@ -169,11 +170,16 @@ export function SalesSummaryTables({
 }: SalesSummaryTablesProps) {
   const [downloading, setDownloading] = useState(false);
   const icNote = includeIntercompany ? "Incl. intercompany" : "Excl. intercompany";
-  const exportSubtitle = includeIntercompany ? "Excl. India, including intercompany" : "Excl. India and intercompany";
-  const domesticSubtitle = includeIntercompany ? "India only, including intercompany" : "India only, excl. intercompany";
-  const countryBase = totalSales > 0
-    ? totalSales
-    : byCountry.reduce((sum, c) => sum + (Number(c.salesAmount) || 0), 0);
+  const exportSubtitle = includeIntercompany
+    ? "Excl. India, including intercompany"
+    : "Excl. India and intercompany";
+  const domesticSubtitle = includeIntercompany
+    ? "India only, including intercompany"
+    : "India only, excl. intercompany";
+  const countryBase =
+    totalSales > 0
+      ? totalSales
+      : byCountry.reduce((sum, c) => sum + (Number(c.salesAmount) || 0), 0);
 
   const totalAmount = pdfContext?.totalAmount;
   const pdfSections: SalesTopTenPdfSection[] = [
@@ -196,10 +202,16 @@ export function SalesSummaryTables({
           },
           {
             title: "Top 10 Countries by Sales",
-            subtitle: countryPeriodLabel ? `${exportSubtitle} · ${countryPeriodLabel}` : exportSubtitle,
+            subtitle: countryPeriodLabel
+              ? `${exportSubtitle} · ${countryPeriodLabel}`
+              : exportSubtitle,
             nameHeader: "Country",
             baseAmount: countryBase,
-            rows: byCountry.map((c) => ({ rank: c.rank, name: c.countryName, amount: Number(c.salesAmount) || 0 })),
+            rows: byCountry.map((c) => ({
+              rank: c.rank,
+              name: c.countryName,
+              amount: Number(c.salesAmount) || 0,
+            })),
           },
         ]),
     {
@@ -231,6 +243,7 @@ export function SalesSummaryTables({
       setDownloading(false);
     }
   }
+
   const countryPieData = byCountry.map((c, i) => {
     const value = Number(c.salesAmount) || 0;
     const percentage = countryBase > 0 ? Math.round((value / countryBase) * 1000) / 10 : 0;
@@ -256,13 +269,27 @@ export function SalesSummaryTables({
           <h2 className="text-sm font-semibold sm:text-base">
             {isPurchase ? "Top 10 purchase data" : "Top 10 sales data"}
           </h2>
-          <Button size="sm" variant="outline" onClick={handleDownloadPdf} disabled={!canDownload || downloading}>
-            {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleDownloadPdf}
+            disabled={!canDownload || downloading}
+          >
+            {downloading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileDown className="h-4 w-4" />
+            )}
             Download PDF
           </Button>
         </div>
       ) : null}
-      <div className={cn("grid grid-cols-1 gap-3 sm:gap-4", isPurchase ? "lg:grid-cols-1" : "lg:grid-cols-2")}>
+      <div
+        className={cn(
+          "grid grid-cols-1 gap-3 sm:gap-4",
+          isPurchase ? "lg:grid-cols-1" : "lg:grid-cols-2",
+        )}
+      >
         {!isPurchase && (
           <RankingTable
             title="Top 10 Export Customers"
@@ -289,10 +316,8 @@ export function SalesSummaryTables({
               <h2 className="text-sm font-semibold">Top 10 Countries by Sales</h2>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
                 {countryPeriodLabel
-                  ? `${includeIntercompany ? "Excl. India, including intercompany" : "Excl. India and intercompany"} · ${countryPeriodLabel}`
-                  : includeIntercompany
-                    ? "Excl. India, including intercompany"
-                    : "Excl. India and intercompany"}
+                  ? `${exportSubtitle} · ${countryPeriodLabel}`
+                  : exportSubtitle}
               </p>
             </header>
             <div className="p-3 sm:p-4">
@@ -317,10 +342,14 @@ export function SalesSummaryTables({
                             hideLabel
                             formatter={(value, name, item) => (
                               <div className="flex w-full max-w-[220px] items-center justify-between gap-3">
-                                <span className="truncate text-muted-foreground">{String(name)}</span>
+                                <span className="truncate text-muted-foreground">
+                                  {String(name)}
+                                </span>
                                 <span className="shrink-0 font-medium tabular-nums">
                                   {formatCrores(Number(value))}
-                                  {item?.payload?.percentage != null ? ` (${item.payload.percentage}%)` : ""}
+                                  {item?.payload?.percentage != null
+                                    ? ` (${item.payload.percentage}%)`
+                                    : ""}
                                 </span>
                               </div>
                             )}
@@ -346,7 +375,9 @@ export function SalesSummaryTables({
                       <li key={c.name} className="flex min-w-0 items-center gap-1.5">
                         <span
                           className="h-2 w-2 shrink-0 rounded-[2px]"
-                          style={{ backgroundColor: COUNTRY_COLORS[i % COUNTRY_COLORS.length] }}
+                          style={{
+                            backgroundColor: COUNTRY_COLORS[i % COUNTRY_COLORS.length],
+                          }}
                         />
                         <span className="truncate text-muted-foreground">{c.name}</span>
                         <span className="ml-auto font-medium tabular-nums">{c.percentage}%</span>

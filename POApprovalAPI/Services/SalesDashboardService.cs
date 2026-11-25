@@ -41,6 +41,14 @@ public class SalesDashboardService
     {
         "BillAMount", "BillAmount", "Amount", "TaxableAmount", "NetAmount", "InvoiceAmount",
     };
+    /// <summary>
+    /// ERP assessable / taxable value (SalesVoucher uses the misspelling AccessableValue).
+    /// Prefer native column over BillAMount − GST; voucher header has no full GST breakdown.
+    /// </summary>
+    private static readonly string[] AccessibleAmountColumnCandidates =
+    {
+        "AccessableValue", "AccessibleValue", "AssessableValue", "TaxableAmount", "TaxableValue",
+    };
     private static readonly string[] SalesAmountColumnCandidates =
     {
         "Amount", "AccessableValue", "TaxableAmount", "BillAMount", "BillAmount", "NetAmount",
@@ -208,7 +216,7 @@ public class SalesDashboardService
             Trend = trend,
             ByCountry = AggregateCountries(universe.Countries, slice, 10),
             CountryPeriodLabel = universe.CountryPeriodLabel,
-            ExportCustomers = AggregateParties(universe.ExportCustomers, slice, 10),
+            ExportCustomers = AggregateExportParties(universe.ExportCustomers, slice, 10),
             DomesticCustomers = AggregateParties(universe.DomesticCustomers, slice, 10),
         };
     }
@@ -252,7 +260,8 @@ public class SalesDashboardService
         bool includeIntercompany = false)
     {
         var icKey = includeIntercompany ? "ic" : "xic";
-        var key = $"sales-geo-v3-domestic:{icKey}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        // v5: CAST(date AS date) inclusive calendar range; PartyLeaf has BillAMount + AccessableValue.
+        var key = $"sales-geo-v5-accessible:{icKey}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
         return CachedAsync(key, refresh, async () =>
         {
             var invYears = GetInvYearsOverlapping(dateFrom, dateTo).ToList();
@@ -992,9 +1001,7 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
         bool refresh = false,
         bool includeIntercompany = false)
     {
-        if (top <= 0)
-            top = 10;
-        top = Math.Clamp(top, 1, 100);
+        top = ClampTop(top);
         var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh, includeIntercompany);
         var slice = await ResolveSliceCompaniesAsync(company);
         return new SalesByCountryResultDto
@@ -1068,6 +1075,7 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
         var partyCol = FirstExisting(cols, PurchasePartyColumnCandidates);
         var dateCol = FirstExisting(cols, DateColumnCandidates);
         var amountCol = FirstExisting(cols, AmountColumnCandidates);
+        var accessibleCol = FirstExisting(cols, AccessibleAmountColumnCandidates);
         var companyCol = FirstExisting(cols, CompanyColumnCandidates);
         var masterCols = await GetViewColumnsAsync(connection, "CommonLedgerMaster");
         var countryCol = FirstExisting(masterCols, CountryColumnCandidates);
@@ -1078,6 +1086,8 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))),
         var partySql = Bracket(partyCol);
         var dateSql = Bracket(dateCol);
         var amountSql = Bracket(amountCol);
+        // Native AccessableValue when present; else fall back to bill amount (no GST strip formula).
+        var accessibleSql = Bracket(accessibleCol ?? amountCol);
         var companySql = Bracket(companyCol);
         var countrySql = Bracket(countryCol);
         var countryExpr = $@"CASE
@@ -1109,11 +1119,12 @@ SELECT
     LTRIM(RTRIM(ISNULL(pv.{companySql}, N''))) AS CompanyName,
     LTRIM(RTRIM(pv.{partySql})) AS Name,
     MAX({countryExpr}) AS Country,
-    ROUND(SUM(CAST(pv.{amountSql} AS float)), 0) AS Amount
+    ROUND(SUM(CAST(pv.{amountSql} AS float)), 0) AS Amount,
+    ROUND(SUM(CAST(pv.{accessibleSql} AS float)), 0) AS AccessibleAmount
 FROM dbo.SalesVoucher pv WITH (NOLOCK)
 INNER JOIN dbo.CommonLedgerMaster cm WITH (NOLOCK)
     ON cm.LedgerName = pv.{partySql}
-WHERE pv.{dateSql} BETWEEN @DateFrom AND @DateTo
+WHERE CAST(pv.{dateSql} AS date) BETWEEN @DateFrom AND @DateTo
   AND pv.{partySql} IS NOT NULL
   AND pv.{partySql} <> N''
   AND LTRIM(RTRIM(ISNULL(cm.{countrySql}, N''))) <> N''
@@ -1209,15 +1220,17 @@ INNER JOIN CommonLedgerMaster m WITH (NOLOCK)
         )
   )";
 
+        // EBIDTA has Amount + partial GST (SGSTAmount only) — no AccessableValue. Mirror Amount for both.
         var sql = $@"
 SELECT
     LTRIM(RTRIM(ISNULL(v.CompanyName, N''))) AS CompanyName,
     LTRIM(RTRIM(v.{partySql})) AS Name,
     MAX({countryExpr}) AS Country,
-    ROUND(SUM(v.Amount), 0) AS Amount
+    ROUND(SUM(v.Amount), 0) AS Amount,
+    ROUND(SUM(v.Amount), 0) AS AccessibleAmount
 FROM dbo.vw_Sales_EBIDTA v WITH (NOLOCK)
 {joinLedger}
-WHERE v.invdate BETWEEN @DateFrom AND @DateTo
+WHERE CAST(v.invdate AS date) BETWEEN @DateFrom AND @DateTo
   {(includeIntercompany ? "" : $"AND (v.InterGroup <> N'Intergroup' OR {PartyIsFibco($"v.{partySql}")})")}
   AND v.{partySql} IS NOT NULL
   AND v.{partySql} <> N''
@@ -1234,6 +1247,8 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), LTRIM(RTRIM(v.{partySql}))";
 
     /// <summary>
     /// Top export customers (non-India), excl. intercompany.
+    /// When <paramref name="useAccessibleValue"/> is true, sums SalesVoucher.AccessableValue;
+    /// default / Export analysis uses BillAMount via the shared geo leaf Amount field.
     /// </summary>
     public async Task<RankedPartyResultDto> GetTopExportCustomersAsync(
         string company,
@@ -1241,16 +1256,25 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), LTRIM(RTRIM(v.{partySql}))";
         DateTime dateTo,
         int top = 5,
         bool refresh = false,
-        bool includeIntercompany = false)
+        bool includeIntercompany = false,
+        bool useAccessibleValue = false)
     {
         top = ClampTop(top);
         var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh, includeIntercompany);
         var slice = await ResolveSliceCompaniesAsync(company);
-        return ToRankedResult(AggregateParties(geo.ExportCustomers, slice, top), geo.Source, "", "");
+        var source = useAccessibleValue && geo.Source.Equals("SalesVoucher", StringComparison.OrdinalIgnoreCase)
+            ? "SalesVoucher.AccessableValue"
+            : geo.Source;
+        return ToRankedResult(
+            AggregateExportParties(geo.ExportCustomers, slice, top, useAccessibleValue),
+            source,
+            "",
+            "");
     }
 
     /// <summary>
     /// Top domestic customers (India), excl. intercompany.
+    /// When <paramref name="useAccessibleValue"/> is true, sums SalesVoucher.AccessableValue; default is BillAMount.
     /// </summary>
     public async Task<RankedPartyResultDto> GetTopDomesticCustomersAsync(
         string company,
@@ -1258,12 +1282,20 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), LTRIM(RTRIM(v.{partySql}))";
         DateTime dateTo,
         int top = 5,
         bool refresh = false,
-        bool includeIntercompany = false)
+        bool includeIntercompany = false,
+        bool useAccessibleValue = false)
     {
         top = ClampTop(top);
         var geo = await GetOrLoadGeoAsync(dateFrom, dateTo, refresh, includeIntercompany);
         var slice = await ResolveSliceCompaniesAsync(company);
-        return ToRankedResult(AggregateParties(geo.DomesticCustomers, slice, top), geo.Source, "", "");
+        var source = useAccessibleValue && geo.Source.Equals("SalesVoucher", StringComparison.OrdinalIgnoreCase)
+            ? "SalesVoucher.AccessableValue"
+            : geo.Source;
+        return ToRankedResult(
+            AggregateParties(geo.DomesticCustomers, slice, top, useAccessibleValue),
+            source,
+            "",
+            "");
     }
 
     /// <summary>
@@ -1614,7 +1646,8 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), v.{partySql}";
     private static List<RankedPartyDto> AggregateParties(
         IReadOnlyList<PartyLeaf> leaves,
         HashSet<string>? companies,
-        int top)
+        int top,
+        bool useAccessibleValue = false)
     {
         return FilterByCompany(leaves, companies, r => r.CompanyName)
             .GroupBy(r => string.IsNullOrWhiteSpace(r.Name) ? "Unknown" : r.Name.Trim(), StringComparer.OrdinalIgnoreCase)
@@ -1627,7 +1660,7 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), v.{partySql}";
                 {
                     Name = g.Key,
                     Country = string.IsNullOrWhiteSpace(country) ? null : country.Trim(),
-                    Amount = g.Sum(x => x.Amount),
+                    Amount = g.Sum(x => useAccessibleValue ? x.AccessibleAmount : x.Amount),
                 };
             })
             .OrderByDescending(r => r.Amount)
@@ -1638,6 +1671,58 @@ GROUP BY LTRIM(RTRIM(ISNULL(v.CompanyName, N''))), v.{partySql}";
                 return r;
             })
             .ToList();
+    }
+
+    /// <summary>
+    /// Top export customers keyed by selling group company + customer
+    /// (so All Companies view shows which entity sells to whom).
+    /// </summary>
+    private static List<RankedPartyDto> AggregateExportParties(
+        IReadOnlyList<PartyLeaf> leaves,
+        HashSet<string>? companies,
+        int top,
+        bool useAccessibleValue = false)
+    {
+        return FilterByCompany(leaves, companies, r => r.CompanyName)
+            .GroupBy(
+                r => (
+                    Company: string.IsNullOrWhiteSpace(r.CompanyName) ? "Unknown" : r.CompanyName.Trim(),
+                    Name: string.IsNullOrWhiteSpace(r.Name) ? "Unknown" : r.Name.Trim()
+                ),
+                new ExportPartyKeyComparer())
+            .Select(g =>
+            {
+                var country = g
+                    .Select(x => x.Country)
+                    .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
+                return new RankedPartyDto
+                {
+                    CompanyName = g.Key.Company,
+                    Name = g.Key.Name,
+                    Country = string.IsNullOrWhiteSpace(country) ? null : country.Trim(),
+                    Amount = g.Sum(x => useAccessibleValue ? x.AccessibleAmount : x.Amount),
+                };
+            })
+            .OrderByDescending(r => r.Amount)
+            .Take(top)
+            .Select((r, i) =>
+            {
+                r.Rank = i + 1;
+                return r;
+            })
+            .ToList();
+    }
+
+    private sealed class ExportPartyKeyComparer : IEqualityComparer<(string Company, string Name)>
+    {
+        public bool Equals((string Company, string Name) x, (string Company, string Name) y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(x.Company, y.Company)
+            && StringComparer.OrdinalIgnoreCase.Equals(x.Name, y.Name);
+
+        public int GetHashCode((string Company, string Name) obj) =>
+            HashCode.Combine(
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Company),
+                StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Name));
     }
 
     /// <summary>Indian FY labels (yy-yy+1) that overlap [dateFrom, dateTo].</summary>
@@ -2685,10 +2770,13 @@ ORDER BY fi.Name")).ToList();
             .Where(t => t.Length > 0)
             .ToList();
 
+    /// <summary>
+    /// Caps ranking size. top &lt;= 0 means all rows (full selected period).
+    /// </summary>
     private static int ClampTop(int top)
     {
-        if (top <= 0) top = 5;
-        return Math.Clamp(top, 1, 100);
+        if (top <= 0) return int.MaxValue;
+        return Math.Clamp(top, 1, 50_000);
     }
 
     private static string? FirstExisting(HashSet<string> columns, IEnumerable<string> candidates)
@@ -2933,7 +3021,10 @@ INNER JOIN (
         public string CompanyName { get; set; } = "";
         public string Name { get; set; } = "";
         public string? Country { get; set; }
+        /// <summary>Gross bill (SalesVoucher.BillAMount) — Dashboard Top 10 / country pie.</summary>
         public double Amount { get; set; }
+        /// <summary>Assessable / accessible value (SalesVoucher.AccessableValue); optional via valueBasis=accessible.</summary>
+        public double AccessibleAmount { get; set; }
     }
 }
 
@@ -2947,6 +3038,8 @@ public class SalesCompanyOptionDto
 public class RankedPartyDto
 {
     public int Rank { get; set; }
+    /// <summary>Selling group / legal company (set for export customers).</summary>
+    public string? CompanyName { get; set; }
     public string Name { get; set; } = "";
     public string? Country { get; set; }
     public double Amount { get; set; }

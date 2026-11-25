@@ -33,8 +33,7 @@ public class SalesDashboardController : ControllerBase
                 return BadRequest(new { message = "category must be Sales or Purchase." });
             }
 
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var data = await _salesDashboard.GetOverviewAsync(category, company, from, to, refresh, includeIntercompany);
             var totals = data.Totals;
             return Ok(new
@@ -67,13 +66,48 @@ public class SalesDashboardController : ControllerBase
     [HttpPost("top10/pdf")]
     public IActionResult TopTenPdf([FromBody] SalesTopTenPdfRequest request)
     {
-        if (request.Sections.Count is 0 or > 6 || request.Sections.Any(s => s.Rows.Count > 50))
+        // Custom-month export customers can be large; allow up to 5k rows per section (matches ranking ClampTop).
+        const int maxRowsPerSection = 5_000;
+        if (request?.Sections is null || request.Sections.Count is 0 or > 6)
             return BadRequest(new { message = "Nothing to export." });
+        if (request.Sections.Any(s => s.Rows is null || s.Rows.Count > maxRowsPerSection))
+            return BadRequest(new { message = $"Each PDF section can have at most {maxRowsPerSection:N0} rows." });
         try
         {
             var bytes = new SalesTopTenPdfDocument(request).GeneratePdf();
             var kind = string.Equals(request.Category, "Purchase", StringComparison.OrdinalIgnoreCase) ? "Purchase" : "Sales";
             return File(bytes, "application/pdf", $"{kind}_Top10_{request.DateFrom}_{request.DateTo}.pdf");
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Excel export for ranking sections (same payload as top10/pdf). Used by Export Customers → Excel.
+    /// </summary>
+    [HttpPost("top10/excel")]
+    public IActionResult TopTenExcel([FromBody] SalesTopTenPdfRequest request)
+    {
+        const int maxRowsPerSection = 5_000;
+        if (request?.Sections is null || request.Sections.Count is 0 or > 6)
+            return BadRequest(new { message = "Nothing to export." });
+        if (request.Sections.Any(s => s.Rows is null || s.Rows.Count > maxRowsPerSection))
+            return BadRequest(new { message = $"Each Excel section can have at most {maxRowsPerSection:N0} rows." });
+        try
+        {
+            var bytes = SalesTopTenExcelBuilder.Build(request);
+            var kind = string.Equals(request.Category, "Purchase", StringComparison.OrdinalIgnoreCase) ? "Purchase" : "Sales";
+            var fileName = $"{kind}_Top10_{request.DateFrom}_{request.DateTo}.xlsx";
+            return File(
+                bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                fileName);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -109,8 +143,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var totals = await _salesDashboard.GetSalesTotalsAsync(company, from, to, refresh, includeIntercompany);
 
             return Ok(new
@@ -157,8 +190,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var totals = await _salesDashboard.GetPurchaseTotalsAsync(company, from, to, refresh, includeIntercompany);
 
             return Ok(new
@@ -257,8 +289,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var result = await _salesDashboard.GetSalesByCountryAsync(company, from, to, top, refresh, includeIntercompany);
 
             return Ok(new
@@ -286,6 +317,7 @@ public class SalesDashboardController : ControllerBase
 
     /// <summary>
     /// Top 10 export customers (non-India), excl. intercompany.
+    /// valueBasis=bill (default, Export analysis) → BillAMount; accessible → AccessableValue.
     /// </summary>
     [HttpGet("top-export-customers")]
     public async Task<IActionResult> GetTopExportCustomers(
@@ -294,13 +326,15 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] DateTime? dateTo = null,
         [FromQuery] int top = 10,
         [FromQuery] bool refresh = false,
-        [FromQuery] bool includeIntercompany = false)
+        [FromQuery] bool includeIntercompany = false,
+        [FromQuery] string valueBasis = "bill")
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
-            var result = await _salesDashboard.GetTopExportCustomersAsync(company, from, to, top, refresh, includeIntercompany);
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
+            var useAccessible = IsAccessibleValueBasis(valueBasis);
+            var result = await _salesDashboard.GetTopExportCustomersAsync(
+                company, from, to, top, refresh, includeIntercompany, useAccessible);
             return Ok(new
             {
                 items = result.Items,
@@ -309,10 +343,15 @@ public class SalesDashboardController : ControllerBase
                 dateFrom = from.ToString("yyyy-MM-dd"),
                 dateTo = to.ToString("yyyy-MM-dd"),
                 top,
+                valueBasis = useAccessible ? "accessible" : "bill",
                 source = result.Source,
-                note = includeIntercompany
-                    ? "Top export customers excl. India, including intercompany."
-                    : "Top export customers excl. India and intercompany.",
+                note = useAccessible
+                    ? (includeIntercompany
+                        ? "Top export customers excl. India, including intercompany; amount = AccessableValue (assessable)."
+                        : "Top export customers excl. India and intercompany; amount = AccessableValue (assessable).")
+                    : (includeIntercompany
+                        ? "Top export customers excl. India, including intercompany; amount = BillAMount."
+                        : "Top export customers excl. India and intercompany; amount = BillAMount."),
             });
         }
         catch (Exception ex)
@@ -323,6 +362,7 @@ public class SalesDashboardController : ControllerBase
 
     /// <summary>
     /// Top 10 domestic customers (India), excl. intercompany.
+    /// valueBasis=bill (default, Export analysis) → BillAMount; accessible → AccessableValue.
     /// </summary>
     [HttpGet("top-domestic-customers")]
     public async Task<IActionResult> GetTopDomesticCustomers(
@@ -331,13 +371,15 @@ public class SalesDashboardController : ControllerBase
         [FromQuery] DateTime? dateTo = null,
         [FromQuery] int top = 10,
         [FromQuery] bool refresh = false,
-        [FromQuery] bool includeIntercompany = false)
+        [FromQuery] bool includeIntercompany = false,
+        [FromQuery] string valueBasis = "bill")
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
-            var result = await _salesDashboard.GetTopDomesticCustomersAsync(company, from, to, top, refresh, includeIntercompany);
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
+            var useAccessible = IsAccessibleValueBasis(valueBasis);
+            var result = await _salesDashboard.GetTopDomesticCustomersAsync(
+                company, from, to, top, refresh, includeIntercompany, useAccessible);
             return Ok(new
             {
                 items = result.Items,
@@ -346,10 +388,15 @@ public class SalesDashboardController : ControllerBase
                 dateFrom = from.ToString("yyyy-MM-dd"),
                 dateTo = to.ToString("yyyy-MM-dd"),
                 top,
+                valueBasis = useAccessible ? "accessible" : "bill",
                 source = result.Source,
-                note = includeIntercompany
-                    ? "Top domestic (India) customers, including intercompany."
-                    : "Top domestic (India) customers, excl. intercompany.",
+                note = useAccessible
+                    ? (includeIntercompany
+                        ? "Top domestic (India) customers, including intercompany; amount = AccessableValue (assessable)."
+                        : "Top domestic (India) customers, excl. intercompany; amount = AccessableValue (assessable).")
+                    : (includeIntercompany
+                        ? "Top domestic (India) customers, including intercompany; amount = BillAMount."
+                        : "Top domestic (India) customers, excl. intercompany; amount = BillAMount."),
             });
         }
         catch (Exception ex)
@@ -372,8 +419,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var result = await _salesDashboard.GetTopSuppliersAsync(company, from, to, top, refresh, includeIntercompany);
             return Ok(new
             {
@@ -411,8 +457,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
 
             if (rptType is < 0 or > 2)
                 return BadRequest(new { message = "rptType must be 0 (Summary), 1 (Detail), or 2 (Date Summary)." });
@@ -452,8 +497,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var data = await _salesDashboard.GetFibcProductionMonthlyAsync(company, from, to, refresh);
             return Ok(new
             {
@@ -472,5 +516,37 @@ public class SalesDashboardController : ControllerBase
         {
             return StatusCode(500, new { message = ex.Message });
         }
+    }
+
+    private static bool IsAccessibleValueBasis(string? valueBasis) =>
+        !string.IsNullOrWhiteSpace(valueBasis)
+        && (valueBasis.Equals("accessible", StringComparison.OrdinalIgnoreCase)
+            || valueBasis.Equals("accessable", StringComparison.OrdinalIgnoreCase)
+            || valueBasis.Equals("assessable", StringComparison.OrdinalIgnoreCase)
+            || valueBasis.Equals("taxable", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Calendar dates for filters. UTC midnight from query binding (e.g. 2026-10-01Z)
+    /// must not shift to the previous local day via .Date.
+    /// </summary>
+    private static (DateTime From, DateTime To) ResolveQueryDates(DateTime? dateFrom, DateTime? dateTo)
+    {
+        var from = ToCalendarDate(dateFrom) ?? new DateTime(DateTime.Today.Year, 4, 1);
+        var to = ToCalendarDate(dateTo) ?? DateTime.Today;
+        if (to < from)
+            (from, to) = (to, from);
+        return (from, to);
+    }
+
+    private static DateTime? ToCalendarDate(DateTime? value)
+    {
+        if (value is null) return null;
+        var d = value.Value;
+        // Date-only query strings often bind as UTC midnight; use the Y-M-D components as-is.
+        if (d.Kind == DateTimeKind.Utc && d.TimeOfDay == TimeSpan.Zero)
+            return new DateTime(d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        return d.Kind == DateTimeKind.Utc
+            ? d.ToLocalTime().Date
+            : d.Date;
     }
 }
