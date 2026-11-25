@@ -1,7 +1,7 @@
 namespace POApprovalAPI.Services;
 
 /// <summary>
-/// Warms lightweight dropdowns first, then one overdue universe, without fighting Sales warmup.
+/// Warms overdue + aging caches (gated so it does not fight Sales warmup).
 /// </summary>
 public sealed class ExportBillOverdueCacheWarmupService : BackgroundService
 {
@@ -38,7 +38,7 @@ public sealed class ExportBillOverdueCacheWarmupService : BackgroundService
                 await ErpCacheWarmupGate.RunAsync(
                     () => service.WarmDefaultCachesAsync(stoppingToken),
                     stoppingToken);
-                _logger.LogInformation("Export bill overdue caches warmed.");
+                _logger.LogInformation("Export bill overdue + aging caches warmed.");
             }
             catch (OperationCanceledException)
             {

@@ -183,7 +183,7 @@ public sealed class ExportBillAgingPdfDocument : IDocument
     {
         container.Row(row =>
         {
-            row.RelativeItem().Text("Confidential · Outstanding aging (Opening + Debit − Credit)").FontSize(7).FontColor("#5B6B7C");
+            row.RelativeItem().Text("Confidential · Bill-date aging · ERP signed · slabs 1–30…91–120, 121+").FontSize(7).FontColor("#5B6B7C");
             row.RelativeItem().AlignRight().Text(text =>
             {
                 text.Span("Page ").FontSize(7).FontColor("#5B6B7C");
