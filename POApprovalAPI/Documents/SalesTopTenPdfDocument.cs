@@ -13,6 +13,10 @@ public sealed class SalesTopTenPdfRequest
     public string? DateTo { get; set; }
     public bool IncludeIntercompany { get; set; }
     public decimal? TotalAmount { get; set; }
+    /// <summary>Optional banner label; default is Total sales/purchase for the period.</summary>
+    public string? TotalAmountLabel { get; set; }
+    /// <summary>Optional document title; default is Sales/Purchase — Top 10 Report.</summary>
+    public string? ReportTitle { get; set; }
     public List<SalesTopTenPdfSection> Sections { get; set; } = [];
 }
 
@@ -22,12 +26,15 @@ public sealed class SalesTopTenPdfSection
     public string? Subtitle { get; set; }
     public string NameHeader { get; set; } = "Name";
     public decimal? BaseAmount { get; set; }
+    /// <summary>Footer label for the section sum (e.g. Period total).</summary>
+    public string? TotalLabel { get; set; }
     public List<SalesTopTenPdfRow> Rows { get; set; } = [];
 }
 
 public sealed class SalesTopTenPdfRow
 {
     public int Rank { get; set; }
+    public string? CompanyName { get; set; }
     public string Name { get; set; } = "";
     public string? Country { get; set; }
     public decimal Amount { get; set; }
@@ -60,7 +67,10 @@ public sealed class SalesTopTenPdfDocument : IDocument
     }
 
     private bool IsPurchase => string.Equals(_request.Category, "Purchase", StringComparison.OrdinalIgnoreCase);
-    private string ReportTitle => IsPurchase ? "Purchase — Top 10 Report" : "Sales — Top 10 Report";
+    private string ReportTitle =>
+        !string.IsNullOrWhiteSpace(_request.ReportTitle)
+            ? _request.ReportTitle!.Trim()
+            : IsPurchase ? "Purchase — Top 10 Report" : "Sales — Top 10 Report";
 
     public DocumentMetadata GetMetadata() => new() { Title = ReportTitle, Author = "HCP Group" };
 
@@ -126,10 +136,12 @@ public sealed class SalesTopTenPdfDocument : IDocument
             col.Spacing(14);
             if (_request.TotalAmount is > 0)
             {
+                var totalLabel = !string.IsNullOrWhiteSpace(_request.TotalAmountLabel)
+                    ? _request.TotalAmountLabel!
+                    : IsPurchase ? "Total purchase for the period" : "Total sales for the period";
                 col.Item().Background("#F1F5F9").Padding(8).Row(row =>
                 {
-                    row.RelativeItem().Text(IsPurchase ? "Total purchase for the period" : "Total sales for the period")
-                        .FontColor(Muted);
+                    row.RelativeItem().Text(totalLabel).FontColor(Muted);
                     row.AutoItem().Text($"Rs. {Money(_request.TotalAmount.Value)}").Bold().FontSize(11);
                 });
             }
@@ -145,7 +157,9 @@ public sealed class SalesTopTenPdfDocument : IDocument
             {
                 var section = sections[i];
                 var colors = Palette[i % Palette.Length];
-                col.Item().ShowEntire().Element(c => ComposeSection(c, section, colors));
+                // Do not use ShowEntire — custom-month export lists often exceed one A4 page
+                // and QuestPDF then throws "conflicting size constraints".
+                col.Item().Element(c => ComposeSection(c, section, colors));
             }
         });
     }
@@ -153,6 +167,7 @@ public sealed class SalesTopTenPdfDocument : IDocument
     private void ComposeSection(IContainer container, SalesTopTenPdfSection section, (string Bar, string Soft, string Text) colors)
     {
         var showCountry = section.Rows.Any(r => !string.IsNullOrWhiteSpace(r.Country));
+        var showCompany = section.Rows.Any(r => !string.IsNullOrWhiteSpace(r.CompanyName));
         var sectionTotal = section.Rows.Sum(r => r.Amount);
 
         container.Border(1).BorderColor(Line).Column(col =>
@@ -169,7 +184,8 @@ public sealed class SalesTopTenPdfDocument : IDocument
                 table.ColumnsDefinition(c =>
                 {
                     c.ConstantColumn(28);
-                    c.RelativeColumn(5);
+                    if (showCompany) c.RelativeColumn(2.4f);
+                    c.RelativeColumn(showCompany ? 3.6f : 5);
                     if (showCountry) c.RelativeColumn(2);
                     c.RelativeColumn(2.2f);
                     c.ConstantColumn(80);
@@ -178,10 +194,11 @@ public sealed class SalesTopTenPdfDocument : IDocument
                 table.Header(header =>
                 {
                     HeaderCell(header.Cell(), "#");
+                    if (showCompany) HeaderCell(header.Cell(), "Group company");
                     HeaderCell(header.Cell(), section.NameHeader);
                     if (showCountry) HeaderCell(header.Cell(), "Country");
                     HeaderCell(header.Cell(), "Amount (Rs.)", right: true);
-                    HeaderCell(header.Cell(), "Share of top 10", right: true);
+                    HeaderCell(header.Cell(), section.Rows.Count > 10 ? "Share" : "Share of top 10", right: true);
                 });
 
                 for (var r = 0; r < section.Rows.Count; r++)
@@ -190,15 +207,21 @@ public sealed class SalesTopTenPdfDocument : IDocument
                     var bg = r % 2 == 1 ? Zebra : "#FFFFFF";
                     var share = sectionTotal > 0 ? row.Amount / sectionTotal * 100 : 0;
                     BodyCell(table.Cell(), bg).Text(row.Rank.ToString(In)).FontColor(Muted);
+                    if (showCompany) BodyCell(table.Cell(), bg).Text(row.CompanyName ?? "—").FontColor(Muted);
                     BodyCell(table.Cell(), bg).Text(row.Name).SemiBold();
                     if (showCountry) BodyCell(table.Cell(), bg).Text(row.Country ?? "—").FontColor(Muted);
                     BodyCell(table.Cell(), bg).AlignRight().Text(Money(row.Amount));
                     BodyCell(table.Cell(), bg).AlignRight().Text($"{share:0.0}%").FontColor(colors.Text);
                 }
 
-                var span = (uint)(showCountry ? 3 : 2);
+                var span = (uint)(2 + (showCompany ? 1 : 0) + (showCountry ? 1 : 0));
+                var rowTotalLabel = !string.IsNullOrWhiteSpace(section.TotalLabel)
+                    ? section.TotalLabel!
+                    : section.Rows.Count > 10
+                        ? $"Period total ({section.Rows.Count} customers)"
+                        : $"Total of top {section.Rows.Count}";
                 table.Cell().ColumnSpan(span).Background(colors.Soft).PaddingVertical(5).PaddingHorizontal(6)
-                    .Text($"Total of top {section.Rows.Count}").Bold();
+                    .Text(rowTotalLabel).Bold();
                 table.Cell().Background(colors.Soft).PaddingVertical(5).PaddingHorizontal(6).AlignRight()
                     .Text(Money(sectionTotal)).Bold();
                 table.Cell().Background(colors.Soft).PaddingVertical(5).PaddingHorizontal(6).AlignRight()

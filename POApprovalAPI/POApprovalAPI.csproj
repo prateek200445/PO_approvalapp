@@ -77,8 +77,7 @@
     <Compile Remove="bin_**\**" />
     <Content Remove="bin_**\**" />
     <None Remove="bin_**\**" />
-    <!-- Sales-dash WIP (depends on types not on this branch). -->
-    <Compile Remove="Documents\SalesTopTenExcelBuilder.cs" />
+    <!-- Local WIP not part of the API host. -->
     <Compile Remove="Services\HrCostingService.cs" />
   </ItemGroup>
 
