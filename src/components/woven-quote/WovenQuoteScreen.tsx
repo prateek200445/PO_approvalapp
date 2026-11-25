@@ -58,8 +58,18 @@ export function WovenQuoteScreen() {
   const [quoteId, setQuoteId] = useState<number | null>(null);
   const [listTab, setListTab] = useState<"saved" | "drafts">("saved");
   const leaveEditor = useRef<(() => Promise<"saved" | "draft" | "new" | false>) | null>(null);
-  const masters = useQuery({ queryKey: ["woven-masters"], queryFn: getWovenMasters });
-  const rates = useQuery({ queryKey: ["woven-rates"], queryFn: getWovenRates });
+  const masters = useQuery({
+    queryKey: ["woven-masters"],
+    queryFn: getWovenMasters,
+    staleTime: 30 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const rates = useQuery({
+    queryKey: ["woven-rates"],
+    queryFn: getWovenRates,
+    staleTime: 30 * 60_000,
+    refetchOnWindowFocus: false,
+  });
 
   async function leaveQuote() {
     if (view !== "edit" || !leaveEditor.current) return "new" as const;
@@ -203,6 +213,8 @@ function QuoteList({
       });
       return listWovenQuotes(`?${params.toString()}`);
     },
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
 
   const rows = query.data?.items ?? [];
@@ -310,7 +322,7 @@ function QuoteList({
         {selectedIds.size > 0 ? <Button variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear selection</Button> : null}
         <p className="text-xs text-muted-foreground">Filter by customer or date, select the matching bag or fabric quotes, then copy one merged table.</p>
       </div>
-      {query.isPending || query.isFetching ? (
+      {query.isPending ? (
         <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" />
           Loading quotations…
@@ -449,6 +461,7 @@ function QuoteEditor({
     queryFn: () => getWovenForex(draft.quoteDate),
     enabled: /^\d{4}-\d{2}-\d{2}$/.test(draft.quoteDate),
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
   const routeBlocker = useBlocker({
     shouldBlockFn: () => isDirty,

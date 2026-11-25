@@ -194,7 +194,7 @@ public class WovenQuoteService
               AND (@maxPrice IS NULL OR PricePerPiece <= @maxPrice);
 
             SELECT Id, ProductType, QuoteDate, Sector, CustomerName, OurRef, CustomerRef, Currency, Terms,
-                   PricePerPiece, TotalWeightGram, PayloadJson, ResultJson, CreatedBy, UpdatedAt, IsDraft
+                   PricePerPiece, TotalWeightGram, CreatedBy, UpdatedAt, IsDraft
             FROM dbo.WovenQuote
             WHERE (@sector IS NULL OR Sector = @sector)
               AND (@customer IS NULL OR CustomerName LIKE @customerLike)
@@ -239,41 +239,23 @@ public class WovenQuoteService
         using var resultSet = await con.QueryMultipleAsync(sql, parameters);
         var total = await resultSet.ReadSingleAsync<int>();
         var rows = (await resultSet.ReadAsync<QuoteStoreRow>()).ToList();
-        var materials = (await con.QueryAsync<WovenQuoteMaterialRow>("SELECT Code, Name, SortOrder, InFabric, InCoating, InLiner FROM dbo.WovenQuoteMaterial ORDER BY SortOrder")).ToList();
-        var constants = (await con.QueryAsync<WovenQuoteConstantRow>("SELECT [Key], Value, Label, GroupName FROM dbo.WovenQuoteConstant")).ToDictionary(x => x.Key, x => x.Value);
-        var allRates = (await con.QueryAsync<WovenQuoteRateRow>("SELECT Id, MaterialCode, Sector, EffectiveDate, Rate FROM dbo.WovenQuoteRmRate")).ToList();
-        var fabric = materials.Where(m => m.InFabric).Select(m => m.Code).ToList();
-        var coating = materials.Where(m => m.InCoating).Select(m => m.Code).ToList();
-        var liner = materials.Where(m => m.InLiner).Select(m => m.Code).ToList();
-        var list = new List<WovenQuoteListItem>(rows.Count);
-        foreach (var row in rows)
+        var list = rows.Select(row => new WovenQuoteListItem
         {
-            var draft = JsonSerializer.Deserialize<WovenQuoteDraft>(row.PayloadJson, JsonOptions) ?? new WovenQuoteDraft();
-            var quoteSector = string.IsNullOrWhiteSpace(draft.Sector) ? "Export" : draft.Sector.Trim();
-            var when = (draft.QuoteDate ?? row.QuoteDate).Date;
-            var rates = allRates
-                .Where(r => string.Equals(r.Sector, quoteSector, StringComparison.OrdinalIgnoreCase) && r.EffectiveDate.Date <= when)
-                .GroupBy(r => r.MaterialCode)
-                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.EffectiveDate).First().Rate);
-            var result = WovenQuoteMath.Calculate(draft, rates, constants, fabric, coating, liner);
-            list.Add(new WovenQuoteListItem
-            {
-                Id = row.Id,
-                ProductType = row.ProductType,
-                QuoteDate = row.QuoteDate,
-                Sector = row.Sector,
-                CustomerName = row.CustomerName,
-                OurRef = row.OurRef,
-                CustomerRef = row.CustomerRef,
-                Currency = row.Currency,
-                Terms = row.Terms,
-                PricePerPiece = result.PricePerPiece,
-                TotalWeightGram = result.TotalComponentGram,
-                CreatedBy = row.CreatedBy,
-                UpdatedAt = row.UpdatedAt,
-                IsDraft = row.IsDraft,
-            });
-        }
+            Id = row.Id,
+            ProductType = row.ProductType,
+            QuoteDate = row.QuoteDate,
+            Sector = row.Sector,
+            CustomerName = row.CustomerName,
+            OurRef = row.OurRef,
+            CustomerRef = row.CustomerRef,
+            Currency = row.Currency,
+            Terms = row.Terms,
+            PricePerPiece = row.PricePerPiece,
+            TotalWeightGram = row.TotalWeightGram,
+            CreatedBy = row.CreatedBy,
+            UpdatedAt = row.UpdatedAt,
+            IsDraft = row.IsDraft,
+        }).ToList();
         return new WovenQuoteListPage
         {
             Items = list,
