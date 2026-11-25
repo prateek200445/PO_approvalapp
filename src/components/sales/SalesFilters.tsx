@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { SalesCompanyOption, SalesDashboardFilters, SalesReportCategory, SalesDashboardSection } from "@/lib/sales-dashboard-types";
-import { indianFyDateRange, indianFyStartYear } from "@/lib/sales-dashboard-api";
+import { indianFyDateRange, indianFyStartYear, localIsoDate } from "@/lib/sales-dashboard-api";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -184,7 +184,7 @@ type FyPreset = "current" | "previous" | "custom";
 function detectFyPreset(dateFrom: string, dateTo: string): FyPreset {
   const current = indianFyDateRange(indianFyStartYear());
   const previous = indianFyDateRange(indianFyStartYear() - 1);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localIsoDate();
   if (dateFrom === current.dateFrom && (dateTo === current.dateTo || dateTo === today)) {
     return "current";
   }
@@ -240,7 +240,7 @@ export function SalesFilters({
     const range = indianFyDateRange(startYear);
     onChange({
       dateFrom: range.dateFrom,
-      dateTo: preset === "current" ? new Date().toISOString().slice(0, 10) : range.dateTo,
+      dateTo: preset === "current" ? localIsoDate() : range.dateTo,
     });
   }
 

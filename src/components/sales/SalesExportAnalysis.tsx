@@ -358,8 +358,8 @@ export function SalesExportAnalysis({
       <div className="min-w-0">
         <h2 className="text-sm font-semibold sm:text-base">Export analysis</h2>
         <p className="mt-0.5 text-[11px] text-muted-foreground">
-          Full-period customer lists with their own dates, PDF/Excel packs, and export sales by
-          group company · amounts are bill value (BillAMount)
+          Uses the Period / Date From–To above (Custom months apply here). Card dates can override
+          Export vs Domestic separately · PDF/Excel packs · amounts are bill value (BillAMount)
         </p>
       </div>
 

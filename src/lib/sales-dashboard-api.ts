@@ -11,6 +11,12 @@ import type {
 } from "@/lib/sales-dashboard-types";
 import { formatINR, formatMoneyAmount } from "@/lib/mock-data";
 
+/** Local calendar YYYY-MM-DD (avoids UTC off-by-one from toISOString). */
+export function localIsoDate(date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 /** Indian FY start year for a calendar date (Apr–Mar). */
 export function indianFyStartYear(date = new Date()): number {
   return date.getMonth() >= 3 ? date.getFullYear() : date.getFullYear() - 1;
@@ -32,7 +38,7 @@ export const DEFAULT_SALES_FILTERS: SalesDashboardFilters = (() => {
     company: "All Companies",
     companyValues: [],
     dateFrom: range.dateFrom,
-    dateTo: new Date().toISOString().slice(0, 10),
+    dateTo: localIsoDate(),
     view: "Summary" as const,
     category: "Sales" as const,
     trendPeriod: "Last 6 Months" as const,
@@ -45,7 +51,7 @@ export const DEFAULT_SALES_FILTERS: SalesDashboardFilters = (() => {
 export function isCustomSalesPeriod(dateFrom: string, dateTo: string): boolean {
   const current = indianFyDateRange(indianFyStartYear());
   const previous = indianFyDateRange(indianFyStartYear() - 1);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localIsoDate();
   if (dateFrom === current.dateFrom && (dateTo === current.dateTo || dateTo === today)) {
     return false;
   }

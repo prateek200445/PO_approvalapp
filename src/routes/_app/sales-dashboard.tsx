@@ -71,11 +71,22 @@ function SalesDashboardPage() {
   const companyFilter = filters.company?.trim() || "All Companies";
   const includeIntercompany = filters.includeIntercompany;
 
-  /** Export analysis page — independent of global Date From/To; always full selected period (top=0). */
-  const [exportDateFrom, setExportDateFrom] = useState(DEFAULT_SALES_FILTERS.dateFrom);
-  const [exportDateTo, setExportDateTo] = useState(DEFAULT_SALES_FILTERS.dateTo);
-  const [domesticDateFrom, setDomesticDateFrom] = useState(DEFAULT_SALES_FILTERS.dateFrom);
-  const [domesticDateTo, setDomesticDateTo] = useState(DEFAULT_SALES_FILTERS.dateTo);
+  /**
+   * Export analysis dates — follow the global Period/Date From/To by default so Custom
+   * selections at the top actually drive the page. Per-card pickers can still override
+   * Export vs Domestic independently until the global period changes again.
+   */
+  const [exportDateFrom, setExportDateFrom] = useState(filters.dateFrom);
+  const [exportDateTo, setExportDateTo] = useState(filters.dateTo);
+  const [domesticDateFrom, setDomesticDateFrom] = useState(filters.dateFrom);
+  const [domesticDateTo, setDomesticDateTo] = useState(filters.dateTo);
+
+  useEffect(() => {
+    setExportDateFrom(filters.dateFrom);
+    setExportDateTo(filters.dateTo);
+    setDomesticDateFrom(filters.dateFrom);
+    setDomesticDateTo(filters.dateTo);
+  }, [filters.dateFrom, filters.dateTo]);
 
   const { data: companyList, isLoading: companiesLoading } = useQuery({
     queryKey: ["sales-dashboard-companies"],
@@ -221,7 +232,15 @@ function SalesDashboardPage() {
     ...queryOptions,
   });
 
-  /** Export analysis — full period, dedicated dates. BillAMount (~74 Cr Oct-2026), not AccessableValue. */
+  /** No keepPreviousData — otherwise new From/To labels sit on the previous period's totals. */
+  const exportAnalysisQueryOptions = {
+    staleTime: queryOptions.staleTime,
+    gcTime: queryOptions.gcTime,
+    retry: queryOptions.retry,
+    refetchOnWindowFocus: queryOptions.refetchOnWindowFocus,
+  };
+
+  /** Export analysis — full period. BillAMount (~74 Cr Oct-2026), not AccessableValue. */
   const exportCustomersQuery = useQuery({
     queryKey: [
       "sales-export-customers-full",
@@ -243,7 +262,7 @@ function SalesDashboardPage() {
         valueBasis: "bill",
       }),
     enabled: showExportQueries,
-    ...queryOptions,
+    ...exportAnalysisQueryOptions,
   });
 
   const domesticCustomersQuery = useQuery({
@@ -267,7 +286,7 @@ function SalesDashboardPage() {
         valueBasis: "bill",
       }),
     enabled: showExportQueries,
-    ...queryOptions,
+    ...exportAnalysisQueryOptions,
   });
 
   const fibcProdQuery = useQuery({
@@ -359,8 +378,7 @@ function SalesDashboardPage() {
     (suppliersQuery.isFetching && !suppliersQuery.data);
 
   const exportAnalysisLoading =
-    (exportCustomersQuery.isFetching && !exportCustomersQuery.data) ||
-    (domesticCustomersQuery.isFetching && !domesticCustomersQuery.data);
+    exportCustomersQuery.isFetching || domesticCustomersQuery.isFetching;
 
   return (
     <div className="space-y-5 pb-2 sm:space-y-6 md:space-y-7">

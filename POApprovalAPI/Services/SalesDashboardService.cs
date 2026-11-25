@@ -260,8 +260,8 @@ public class SalesDashboardService
         bool includeIntercompany = false)
     {
         var icKey = includeIntercompany ? "ic" : "xic";
-        // v4: PartyLeaf carries both BillAMount (Amount) and AccessableValue (AccessibleAmount).
-        var key = $"sales-geo-v4-accessible:{icKey}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        // v5: CAST(date AS date) inclusive calendar range; PartyLeaf has BillAMount + AccessableValue.
+        var key = $"sales-geo-v5-accessible:{icKey}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
         return CachedAsync(key, refresh, async () =>
         {
             var invYears = GetInvYearsOverlapping(dateFrom, dateTo).ToList();
@@ -1124,7 +1124,7 @@ SELECT
 FROM dbo.SalesVoucher pv WITH (NOLOCK)
 INNER JOIN dbo.CommonLedgerMaster cm WITH (NOLOCK)
     ON cm.LedgerName = pv.{partySql}
-WHERE pv.{dateSql} BETWEEN @DateFrom AND @DateTo
+WHERE CAST(pv.{dateSql} AS date) BETWEEN @DateFrom AND @DateTo
   AND pv.{partySql} IS NOT NULL
   AND pv.{partySql} <> N''
   AND LTRIM(RTRIM(ISNULL(cm.{countrySql}, N''))) <> N''
@@ -1230,7 +1230,7 @@ SELECT
     ROUND(SUM(v.Amount), 0) AS AccessibleAmount
 FROM dbo.vw_Sales_EBIDTA v WITH (NOLOCK)
 {joinLedger}
-WHERE v.invdate BETWEEN @DateFrom AND @DateTo
+WHERE CAST(v.invdate AS date) BETWEEN @DateFrom AND @DateTo
   {(includeIntercompany ? "" : $"AND (v.InterGroup <> N'Intergroup' OR {PartyIsFibco($"v.{partySql}")})")}
   AND v.{partySql} IS NOT NULL
   AND v.{partySql} <> N''

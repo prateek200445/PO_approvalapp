@@ -33,8 +33,7 @@ public class SalesDashboardController : ControllerBase
                 return BadRequest(new { message = "category must be Sales or Purchase." });
             }
 
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var data = await _salesDashboard.GetOverviewAsync(category, company, from, to, refresh, includeIntercompany);
             var totals = data.Totals;
             return Ok(new
@@ -144,8 +143,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var totals = await _salesDashboard.GetSalesTotalsAsync(company, from, to, refresh, includeIntercompany);
 
             return Ok(new
@@ -192,8 +190,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var totals = await _salesDashboard.GetPurchaseTotalsAsync(company, from, to, refresh, includeIntercompany);
 
             return Ok(new
@@ -292,8 +289,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var result = await _salesDashboard.GetSalesByCountryAsync(company, from, to, top, refresh, includeIntercompany);
 
             return Ok(new
@@ -335,8 +331,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var useAccessible = IsAccessibleValueBasis(valueBasis);
             var result = await _salesDashboard.GetTopExportCustomersAsync(
                 company, from, to, top, refresh, includeIntercompany, useAccessible);
@@ -381,8 +376,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var useAccessible = IsAccessibleValueBasis(valueBasis);
             var result = await _salesDashboard.GetTopDomesticCustomersAsync(
                 company, from, to, top, refresh, includeIntercompany, useAccessible);
@@ -425,8 +419,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var result = await _salesDashboard.GetTopSuppliersAsync(company, from, to, top, refresh, includeIntercompany);
             return Ok(new
             {
@@ -464,8 +457,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
 
             if (rptType is < 0 or > 2)
                 return BadRequest(new { message = "rptType must be 0 (Summary), 1 (Detail), or 2 (Date Summary)." });
@@ -505,8 +497,7 @@ public class SalesDashboardController : ControllerBase
     {
         try
         {
-            var from = dateFrom ?? new DateTime(DateTime.Today.Year, 4, 1);
-            var to = dateTo ?? DateTime.Today;
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
             var data = await _salesDashboard.GetFibcProductionMonthlyAsync(company, from, to, refresh);
             return Ok(new
             {
@@ -533,4 +524,29 @@ public class SalesDashboardController : ControllerBase
             || valueBasis.Equals("accessable", StringComparison.OrdinalIgnoreCase)
             || valueBasis.Equals("assessable", StringComparison.OrdinalIgnoreCase)
             || valueBasis.Equals("taxable", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Calendar dates for filters. UTC midnight from query binding (e.g. 2026-10-01Z)
+    /// must not shift to the previous local day via .Date.
+    /// </summary>
+    private static (DateTime From, DateTime To) ResolveQueryDates(DateTime? dateFrom, DateTime? dateTo)
+    {
+        var from = ToCalendarDate(dateFrom) ?? new DateTime(DateTime.Today.Year, 4, 1);
+        var to = ToCalendarDate(dateTo) ?? DateTime.Today;
+        if (to < from)
+            (from, to) = (to, from);
+        return (from, to);
+    }
+
+    private static DateTime? ToCalendarDate(DateTime? value)
+    {
+        if (value is null) return null;
+        var d = value.Value;
+        // Date-only query strings often bind as UTC midnight; use the Y-M-D components as-is.
+        if (d.Kind == DateTimeKind.Utc && d.TimeOfDay == TimeSpan.Zero)
+            return new DateTime(d.Year, d.Month, d.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        return d.Kind == DateTimeKind.Utc
+            ? d.ToLocalTime().Date
+            : d.Date;
+    }
 }
