@@ -7,6 +7,7 @@ import { SalesKpiCards } from "@/components/sales/SalesKpiCards";
 import { SalesCharts } from "@/components/sales/SalesCharts";
 import { SalesSummaryTables } from "@/components/sales/SalesSummaryTables";
 import { SalesExportAnalysis } from "@/components/sales/SalesExportAnalysis";
+import { SalesMonthOnMonth } from "@/components/sales/SalesMonthOnMonth";
 import { FibcProductionMom } from "@/components/sales/FibcProductionMom";
 import {
   DEFAULT_SALES_FILTERS,
@@ -14,6 +15,7 @@ import {
   getSalesKpis,
   getSalesTables,
   getSalesYearlyTrend,
+  getSalesMonthlyTrend,
   getTopDomesticCustomers,
   getTopExportCustomers,
   getTopSuppliers,
@@ -57,6 +59,7 @@ const queryOptions = {
 const SALES_PAGES: { id: SalesDashboardSalesPage; label: string }[] = [
   { id: "overview", label: "Dashboard" },
   { id: "export-analysis", label: "Export analysis" },
+  { id: "month-on-month", label: "Month on Month" },
 ];
 
 function SalesDashboardPage() {
@@ -68,6 +71,7 @@ function SalesDashboardPage() {
   const isFibcSection = filters.section === "FIBC Production";
   const isOverview = salesPage === "overview";
   const isExportAnalysis = salesPage === "export-analysis";
+  const isMonthOnMonth = salesPage === "month-on-month";
   const companyFilter = filters.company?.trim() || "All Companies";
   const includeIntercompany = filters.includeIntercompany;
 
@@ -97,6 +101,7 @@ function SalesDashboardPage() {
   const showSalesContent = !isFibcSection;
   const showOverviewQueries = showSalesContent && isOverview;
   const showExportQueries = showSalesContent && isExportAnalysis && !isPurchase;
+  const showMomQueries = showSalesContent && isMonthOnMonth;
 
   const kpisQuery = useQuery({
     queryKey: [
@@ -308,22 +313,48 @@ function SalesDashboardPage() {
     ...queryOptions,
   });
 
+  const momQuery = useQuery({
+    queryKey: [
+      "sales-monthly-trend",
+      filters.category,
+      companyFilter,
+      filters.dateFrom,
+      filters.dateTo,
+      includeIntercompany,
+      refreshToken,
+    ],
+    queryFn: () =>
+      getSalesMonthlyTrend({
+        company: companyFilter,
+        dateFrom: filters.dateFrom,
+        dateTo: filters.dateTo,
+        category: filters.category,
+        includeIntercompany,
+        refresh: bypassCacheRef.current,
+      }),
+    enabled: showMomQueries,
+    ...queryOptions,
+  });
+
   useEffect(() => {
     const busy = isFibcSection
       ? fibcProdQuery.isFetching
       : isExportAnalysis
         ? exportCustomersQuery.isFetching || domesticCustomersQuery.isFetching
-        : kpisQuery.isFetching ||
-          trendQuery.isFetching ||
-          tablesQuery.isFetching ||
-          overviewExportQuery.isFetching ||
-          overviewDomesticQuery.isFetching ||
-          suppliersQuery.isFetching;
+        : isMonthOnMonth
+          ? momQuery.isFetching
+          : kpisQuery.isFetching ||
+            trendQuery.isFetching ||
+            tablesQuery.isFetching ||
+            overviewExportQuery.isFetching ||
+            overviewDomesticQuery.isFetching ||
+            suppliersQuery.isFetching;
     if (busy) return;
     bypassCacheRef.current = false;
   }, [
     isFibcSection,
     isExportAnalysis,
+    isMonthOnMonth,
     kpisQuery.isFetching,
     trendQuery.isFetching,
     tablesQuery.isFetching,
@@ -333,6 +364,7 @@ function SalesDashboardPage() {
     domesticCustomersQuery.isFetching,
     suppliersQuery.isFetching,
     fibcProdQuery.isFetching,
+    momQuery.isFetching,
   ]);
 
   const companyOptions = companyList?.options ?? [];
@@ -364,12 +396,14 @@ function SalesDashboardPage() {
     ? fibcProdQuery.isFetching
     : isExportAnalysis
       ? exportCustomersQuery.isFetching || domesticCustomersQuery.isFetching
-      : kpisQuery.isFetching ||
-        trendQuery.isFetching ||
-        tablesQuery.isFetching ||
-        overviewExportQuery.isFetching ||
-        overviewDomesticQuery.isFetching ||
-        suppliersQuery.isFetching;
+      : isMonthOnMonth
+        ? momQuery.isFetching
+        : kpisQuery.isFetching ||
+          trendQuery.isFetching ||
+          tablesQuery.isFetching ||
+          overviewExportQuery.isFetching ||
+          overviewDomesticQuery.isFetching ||
+          suppliersQuery.isFetching;
 
   const overviewTablesLoading =
     (overviewExportQuery.isFetching && !overviewExportQuery.data) ||
@@ -391,7 +425,9 @@ function SalesDashboardPage() {
             ? "FIBC bag production month-on-month from ERP. Use company and date filters below."
             : isExportAnalysis
               ? "Full-period export and domestic customer lists, PDF/Excel packs, and group company pivot."
-              : "Live ERP figures. Switch to Incl. intercompany for the same KPIs with IC, and tick companies to combine units."}
+              : isMonthOnMonth
+                ? "Month-by-month sales (or purchase) with MoM change. Same EBIDTA Amount basis as KPI totals; Excel download available."
+                : "Live ERP figures. Switch to Incl. intercompany for the same KPIs with IC, and tick companies to combine units."}
         </p>
       </div>
 
@@ -514,6 +550,46 @@ function SalesDashboardPage() {
                   />
                 </>
               )}
+            </>
+          ) : isMonthOnMonth ? (
+            <>
+              {momQuery.isFetching && !momQuery.data && (
+                <div
+                  className="flex items-center gap-2 text-xs text-muted-foreground"
+                  aria-live="polite"
+                >
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  Loading month-on-month…
+                </div>
+              )}
+              {isRefreshing && momQuery.data && (
+                <div
+                  className="flex items-center gap-2 text-xs text-muted-foreground"
+                  aria-live="polite"
+                >
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  Updating month-on-month…
+                </div>
+              )}
+              <SalesMonthOnMonth
+                months={momQuery.data?.months ?? []}
+                totalAmount={momQuery.data?.totalAmount ?? 0}
+                totalQuantity={momQuery.data?.totalQuantity ?? 0}
+                averageRate={momQuery.data?.averageRate ?? 0}
+                category={filters.category}
+                company={companyFilter}
+                dateFrom={filters.dateFrom}
+                dateTo={filters.dateTo}
+                includeIntercompany={includeIntercompany}
+                loading={momQuery.isFetching && !momQuery.data}
+                error={
+                  momQuery.isError
+                    ? momQuery.error instanceof Error
+                      ? momQuery.error.message
+                      : "Failed to load month-on-month"
+                    : null
+                }
+              />
             </>
           ) : (
             <>

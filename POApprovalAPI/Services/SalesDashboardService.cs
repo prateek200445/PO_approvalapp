@@ -851,6 +851,122 @@ GROUP BY GROUPING SETS (
     }
 
     /// <summary>
+    /// Sales / Purchase month-on-month from vw_*_EBIDTA Amount (same basis as KPI totals).
+    /// Breaks the selected date range into calendar months with MoM % change.
+    /// </summary>
+    public async Task<SalesMonthlyMomDto> GetMonthlyTrendAsync(
+        string company,
+        DateTime dateFrom,
+        DateTime dateTo,
+        string category = "Sales",
+        bool refresh = false,
+        bool includeIntercompany = false)
+    {
+        if (dateTo.Date < dateFrom.Date)
+            (dateFrom, dateTo) = (dateTo, dateFrom);
+
+        var from = dateFrom.Date;
+        var to = dateTo.Date;
+        var selected = NormalizeCategory(category);
+        var isPurchase = selected == "Purchase";
+        var leaves = await GetOrLoadMonthlyLeavesAsync(selected, from, to, refresh, includeIntercompany);
+        var slice = await ResolveSliceCompaniesAsync(company);
+        var filtered = FilterByCompany(leaves, slice, r => r.CompanyName).ToList();
+
+        var byMonth = filtered
+            .GroupBy(r => (r.Year, r.Month))
+            .ToDictionary(
+                g => g.Key,
+                g => (Amount: g.Sum(x => x.Amount), Qty: g.Sum(x => x.Netwt)));
+
+        var months = new List<SalesMonthlyMomMonthDto>();
+        SalesMonthlyMomMonthDto? prev = null;
+        var cursor = new DateTime(from.Year, from.Month, 1);
+        var end = new DateTime(to.Year, to.Month, 1);
+        while (cursor <= end)
+        {
+            byMonth.TryGetValue((cursor.Year, cursor.Month), out var totals);
+            var amount = totals.Amount;
+            var qty = totals.Qty;
+            var rate = qty > 0 ? amount / qty : 0;
+            var dto = new SalesMonthlyMomMonthDto
+            {
+                Period = cursor.ToString("MMM-yy"),
+                Year = cursor.Year,
+                Month = cursor.Month,
+                Amount = Math.Round(amount, 0),
+                Quantity = Math.Round(qty, 0),
+                AverageRate = Math.Round(rate, 2),
+                AmountChangePercent = prev == null || prev.Amount == 0
+                    ? 0
+                    : Math.Round((amount - prev.Amount) / prev.Amount * 100, 1),
+                QuantityChangePercent = prev == null || prev.Quantity == 0
+                    ? 0
+                    : Math.Round((qty - prev.Quantity) / prev.Quantity * 100, 1),
+            };
+            months.Add(dto);
+            prev = dto;
+            cursor = cursor.AddMonths(1);
+        }
+
+        var totalAmount = months.Sum(m => m.Amount);
+        var totalQty = months.Sum(m => m.Quantity);
+        return new SalesMonthlyMomDto
+        {
+            Months = months,
+            TotalAmount = Math.Round(totalAmount, 0),
+            TotalQuantity = Math.Round(totalQty, 0),
+            AverageRate = totalQty > 0 ? Math.Round(totalAmount / totalQty, 2) : 0,
+            Category = selected,
+            DateFrom = from.ToString("yyyy-MM-dd"),
+            DateTo = to.ToString("yyyy-MM-dd"),
+            IncludeIntercompany = includeIntercompany,
+            Source = isPurchase ? "vw_Purchase_EBIDTA" : "vw_Sales_EBIDTA",
+        };
+    }
+
+    private Task<List<MonthlyEbidtaLeaf>> GetOrLoadMonthlyLeavesAsync(
+        string category,
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool refresh,
+        bool includeIntercompany)
+    {
+        var selected = NormalizeCategory(category);
+        var icKey = includeIntercompany ? "ic" : "xic";
+        var key = $"sales-mom-v1:{icKey}:{selected}:{dateFrom:yyyy-MM-dd}:{dateTo:yyyy-MM-dd}";
+        return CachedAsync(key, refresh, () => LoadMonthlyEbidtaLeavesAsync(selected, dateFrom, dateTo, includeIntercompany));
+    }
+
+    private async Task<List<MonthlyEbidtaLeaf>> LoadMonthlyEbidtaLeavesAsync(
+        string category,
+        DateTime dateFrom,
+        DateTime dateTo,
+        bool includeIntercompany)
+    {
+        var isPurchase = category.Equals("Purchase", StringComparison.OrdinalIgnoreCase);
+        var viewName = isPurchase ? "vw_Purchase_EBIDTA" : "vw_Sales_EBIDTA";
+        using var connection = _database.CreateConnection();
+        var sql = $@"
+SELECT
+    LTRIM(RTRIM(ISNULL(CompanyName, N''))) AS CompanyName,
+    YEAR(invdate) AS Year,
+    MONTH(invdate) AS Month,
+    ROUND(SUM(Amount), 0) AS Amount,
+    ROUND(SUM(netwt), 0) AS Netwt
+FROM dbo.{viewName} WITH (NOLOCK)
+WHERE invdate BETWEEN @DateFrom AND @DateTo
+  {(includeIntercompany ? "" : "AND InterGroup <> N'Intergroup'")}
+GROUP BY LTRIM(RTRIM(ISNULL(CompanyName, N''))), YEAR(invdate), MONTH(invdate)";
+
+        var rows = await connection.QueryAsync<MonthlyEbidtaLeaf>(
+            sql,
+            new { DateFrom = dateFrom.Date, DateTo = dateTo.Date },
+            commandTimeout: QueryTimeoutSeconds);
+        return rows.ToList();
+    }
+
+    /// <summary>
     /// FIBC bag production month-on-month from VW_FIBCBagwiseProduction (BagPCS / BagWt).
     /// Respects the Sales Dashboard company slice (FactoryInfo / G- groups).
     /// </summary>
@@ -3001,6 +3117,15 @@ INNER JOIN (
         public double Amount { get; set; }
     }
 
+    private sealed class MonthlyEbidtaLeaf
+    {
+        public string CompanyName { get; set; } = "";
+        public int Year { get; set; }
+        public int Month { get; set; }
+        public double Amount { get; set; }
+        public double Netwt { get; set; }
+    }
+
     private sealed class TrendRange
     {
         public int StartYear { get; set; }
@@ -3133,6 +3258,31 @@ public class SalesTrendDto
 {
     public string Period { get; set; } = "";
     public double Amount { get; set; }
+}
+
+public class SalesMonthlyMomDto
+{
+    public List<SalesMonthlyMomMonthDto> Months { get; set; } = new();
+    public double TotalAmount { get; set; }
+    public double TotalQuantity { get; set; }
+    public double AverageRate { get; set; }
+    public string Category { get; set; } = "Sales";
+    public string DateFrom { get; set; } = "";
+    public string DateTo { get; set; } = "";
+    public bool IncludeIntercompany { get; set; }
+    public string Source { get; set; } = "vw_Sales_EBIDTA";
+}
+
+public class SalesMonthlyMomMonthDto
+{
+    public string Period { get; set; } = "";
+    public int Year { get; set; }
+    public int Month { get; set; }
+    public double Amount { get; set; }
+    public double Quantity { get; set; }
+    public double AverageRate { get; set; }
+    public double AmountChangePercent { get; set; }
+    public double QuantityChangePercent { get; set; }
 }
 
 public class FibcProductionMomDto
