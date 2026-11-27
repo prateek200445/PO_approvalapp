@@ -98,7 +98,7 @@ public class Gst2BSnapshotService
     public async Task<IReadOnlyList<Gst2BDocumentRow>> GetAmendmentsAfterAsync(string groupName, DateTime to, CancellationToken ct = default)
     {
         var next = new DateTime(to.Year, to.Month, 1).AddMonths(1);
-        var later = await GetDocumentsAsync(groupName, next, new DateTime(9999, 12, 1), purchaseOnly: true, ct);
+        var later = await GetDocumentsAsync(groupName, next, new DateTime(9999, 12, 1), purchaseOnly: true, ct, amendmentsOnly: true);
         return later.Where(document => IsAmendmentSection(document.Section)).ToList();
     }
 
@@ -362,7 +362,8 @@ ORDER BY ReturnPeriod, BuyerGstin";
         DateTime from,
         DateTime to,
         bool purchaseOnly,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool amendmentsOnly = false)
     {
         var periodFrom = new DateTime(from.Year, from.Month, 1);
         var periodTo = new DateTime(to.Year, to.Month, 1);
@@ -382,11 +383,13 @@ WHERE GroupName = @Group
   AND ReturnPeriod >= @From
   AND ReturnPeriod <= @To
   AND (@PurchaseOnly = 0 OR Section IN ('B2B','B2BA','B2B-CDNR','B2B-CDNRA','B2B-DNR','B2B-DNRA'))
+  AND (@AmendmentsOnly = 0 OR REPLACE(REPLACE(UPPER(Section), '-', ''), ' ', '') IN ('B2BA','B2BCDNRA','B2BDNRA'))
 ORDER BY ReturnPeriod, Section, SupplierName, DocumentDate, DocumentNumber";
         cmd.Parameters.Add("@Group", SqlDbType.NVarChar, 150).Value = groupName.Trim();
         cmd.Parameters.Add("@From", SqlDbType.Date).Value = periodFrom;
         cmd.Parameters.Add("@To", SqlDbType.Date).Value = periodTo;
         cmd.Parameters.Add("@PurchaseOnly", SqlDbType.Bit).Value = purchaseOnly;
+        cmd.Parameters.Add("@AmendmentsOnly", SqlDbType.Bit).Value = amendmentsOnly;
         var rows = new List<Gst2BDocumentRow>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -437,8 +440,12 @@ ORDER BY ReturnPeriod, Section, SupplierName, DocumentDate, DocumentNumber";
         };
     }
 
+    private static int _storeReady;
+
     private static async Task EnsureStoreAsync(SqlConnection connection, CancellationToken ct)
     {
+        if (Volatile.Read(ref _storeReady) == 1)
+            return;
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = @"
 IF OBJECT_ID('dbo.AppGst2BPeriod', 'U') IS NULL
@@ -500,6 +507,7 @@ BEGIN
     CREATE INDEX IX_AppGst2BDocument_GroupPeriod ON dbo.AppGst2BDocument (GroupName, ReturnPeriod, Section);
 END";
         await cmd.ExecuteNonQueryAsync(ct);
+        Volatile.Write(ref _storeReady, 1);
     }
 
     private static async Task<string> GroupForGstinAsync(SqlConnection connection, string gstin, CancellationToken ct)

@@ -132,9 +132,11 @@ ORDER BY GroupLabel";
             throw new ArgumentException($"Saved {saved} portal bills. None of them fall in the selected dates.");
 
         var billFrom = PreviousFinancialYearStart(from);
-        var earlier = await LoadEarlierPortalAsync(company, billFrom, from, inRange, ct);
-        var erpParts = await Task.WhenAll(matchingMembers.Select(member => LoadErpAsync(member.Name, from, to, billFrom, ct)));
-        var erpRows = erpParts.SelectMany(part => part).ToList();
+        var earlierTask = LoadEarlierPortalAsync(company, billFrom, from, inRange, ct);
+        var erpTask = Task.WhenAll(matchingMembers.Select(member => LoadErpAsync(member.Name, from, to, billFrom, ct)));
+        await Task.WhenAll(earlierTask, erpTask);
+        var earlier = earlierTask.Result;
+        var erpRows = erpTask.Result.SelectMany(part => part).ToList();
 
         var result = new GstBillRecoResult
         {
@@ -191,14 +193,16 @@ ORDER BY GroupLabel";
         if (amountTolerance < 0)
             amountTolerance = 0;
 
-        var documents = Gst2BSnapshotService.WithAmendmentsFrom(
-            await _snapshots.GetDocumentsAsync(company, from, to, purchaseOnly: true, ct),
-            await _snapshots.GetAmendmentsAfterAsync(company, to, ct));
+        var documentsTask = _snapshots.GetDocumentsAsync(company, from, to, purchaseOnly: true, ct);
+        var laterTask = _snapshots.GetAmendmentsAfterAsync(company, to, ct);
+        var membersTask = LoadGroupMembersAsync(company, ct);
+        await Task.WhenAll(documentsTask, laterTask, membersTask);
+        var documents = Gst2BSnapshotService.WithAmendmentsFrom(documentsTask.Result, laterTask.Result);
         var parsed = FromDocuments(documents);
         if (parsed.Rows.Count == 0)
             throw new ArgumentException("No frozen GSTR-2B purchase documents are stored for this group in those months.");
 
-        var members = await LoadGroupMembersAsync(company, ct);
+        var members = membersTask.Result;
         var buyerGstins = documents.Select(document => document.BuyerGstin).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var matchingMembers = members
             .Where(member => buyerGstins.Contains(member.Gstin, StringComparer.OrdinalIgnoreCase))
@@ -207,9 +211,11 @@ ORDER BY GroupLabel";
             throw new ArgumentException($"No ERP units in {company} use the stored GSTIN.");
 
         var billFrom = PreviousFinancialYearStart(from);
-        var earlier = await LoadEarlierPortalAsync(company, billFrom, from, parsed.Rows, ct);
-        var erpParts = await Task.WhenAll(matchingMembers.Select(member => LoadErpAsync(member.Name, from, to, billFrom, ct)));
-        var erpRows = erpParts.SelectMany(part => part).ToList();
+        var earlierTask = LoadEarlierPortalAsync(company, billFrom, from, parsed.Rows, ct);
+        var erpTask = Task.WhenAll(matchingMembers.Select(member => LoadErpAsync(member.Name, from, to, billFrom, ct)));
+        await Task.WhenAll(earlierTask, erpTask);
+        var earlier = earlierTask.Result;
+        var erpRows = erpTask.Result.SelectMany(part => part).ToList();
         var result = new GstBillRecoResult
         {
             CompanyName = company,
@@ -382,8 +388,9 @@ ORDER BY Name";
         if (erpRows.Count == 0)
             return;
 
-        foreach (var companyRows in erpRows.GroupBy(row => row.CompanyName, StringComparer.OrdinalIgnoreCase))
-            await AddCompanyAttachmentReferencesAsync(companyRows.Key, companyRows.ToList(), ct);
+        await Task.WhenAll(erpRows
+            .GroupBy(row => row.CompanyName, StringComparer.OrdinalIgnoreCase)
+            .Select(companyRows => AddCompanyAttachmentReferencesAsync(companyRows.Key, companyRows.ToList(), ct)));
     }
 
     private async Task AddCompanyAttachmentReferencesAsync(
@@ -407,6 +414,9 @@ BEGIN
     INNER JOIN dbo.dms_files f WITH (NOLOCK) ON f.RefId = r.RefId
     WHERE @Code <> ''
       AND r.RefEntryNo LIKE @Code + '/%'
+      AND (REPLACE(UPPER(r.RefType), ' ', '') IN ('AC_PUR', 'AC_JV')
+           OR REPLACE(UPPER(r.RefType), ' ', '') LIKE '%DEBIT%'
+           OR REPLACE(UPPER(r.RefType), ' ', '') LIKE '%[_]DN')
       AND ISNULL(f.IsDeleted, 0) = 0
     GROUP BY r.RefType, r.RefEntryNo;
 END
@@ -441,11 +451,16 @@ END
                 Convert.ToInt32(reader["AttachmentCount"], CultureInfo.InvariantCulture)));
         }
 
+        var byVoucher = references
+            .GroupBy(reference => LastSegment(reference.Entry), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToList(), StringComparer.OrdinalIgnoreCase);
         foreach (var row in rows)
         {
             var fy = FinancialYear(row.VoucherDate!.Value);
             var voucherNo = row.VoucherNo.Trim();
-            var match = references
+            if (!byVoucher.TryGetValue(voucherNo, out var candidates))
+                continue;
+            var match = candidates
                 .Where(reference => AttachmentTypeMatches(reference.Type, row.ErpSource)
                     && AttachmentReferenceMatches(reference.Code, reference.Entry, fy, voucherNo))
                 .OrderBy(reference => reference.Entry.Count(ch => ch == '/'))
@@ -457,6 +472,12 @@ END
             row.DmsRefType = match.Type;
             row.DmsRefEntryNo = match.Entry;
         }
+    }
+
+    private static string LastSegment(string entry)
+    {
+        var parts = entry.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length == 0 ? "" : parts[^1];
     }
 
     /// <summary>
@@ -521,11 +542,13 @@ END
     {
         if (billFrom.Date >= from.Date)
             return [];
-        var documents = Gst2BSnapshotService.WithAmendmentsFrom(
-            await _snapshots.GetDocumentsAsync(company, billFrom, from.AddDays(-1), purchaseOnly: true, ct),
-            await _snapshots.GetAmendmentsAfterAsync(company, from.AddMonths(-1), ct));
+        var documentsTask = _snapshots.GetDocumentsAsync(company, billFrom, from.AddDays(-1), purchaseOnly: true, ct);
+        var amendmentsTask = _snapshots.GetAmendmentsAfterAsync(company, from.AddMonths(-1), ct);
+        await Task.WhenAll(documentsTask, amendmentsTask);
+        var documents = Gst2BSnapshotService.WithAmendmentsFrom(documentsTask.Result, amendmentsTask.Result);
+        var currentKeys = current.Select(existing => existing.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var rows = FromDocuments(documents).Rows
-            .Where(row => current.All(existing => !string.Equals(existing.Key, row.Key, StringComparison.OrdinalIgnoreCase)))
+            .Where(row => !currentKeys.Contains(row.Key))
             .ToList();
         var nextId = current.Count == 0 ? 1 : current.Max(row => row.Id) + 1;
         foreach (var row in rows)
@@ -908,14 +931,13 @@ END";
         await using var cmd = connection.CreateCommand();
         cmd.CommandTimeout = TimeoutSeconds;
         cmd.CommandText = """
+WITH v AS (
 SELECT
-    ISNULL(j.JournalType, 'Journal') AS VoucherType,
-    CONVERT(varchar(40), j.JournalNo) AS VoucherNo,
-    j.sysdate AS VoucherDate,
+    j.JournalType,
+    j.JournalNo,
+    j.sysdate,
     MAX(CASE WHEN j.BillDate IS NOT NULL THEN LTRIM(RTRIM(ISNULL(j.MRNo, ''))) ELSE '' END) AS BillNo,
     MAX(j.BillDate) AS BillDate,
-    MAX(party.PartyName) AS Party,
-    MAX(party.Gstin) AS Gstin,
     SUM(CASE WHEN (j.PartyName LIKE '%CGST%INPUT%' OR j.PartyName LIKE '%INPUT%CGST%') AND j.PartyName NOT LIKE '%OUTPUT%'
         THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS Cgst,
     SUM(CASE WHEN (j.PartyName LIKE '%SGST%INPUT%' OR j.PartyName LIKE '%INPUT%SGST%') AND j.PartyName NOT LIKE '%OUTPUT%'
@@ -932,27 +954,44 @@ SELECT
         THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS Taxable,
     SUM(CASE WHEN j.PartyName LIKE '%FREIGHT%' AND j.PartyName LIKE '%WITH%GST%' AND j.PartyName NOT LIKE '%WITHOUT%'
         THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS FreightGst,
-    'Journal' AS Source,
-    CASE WHEN j.sysdate >= @ToExclusive THEN 1 ELSE 0 END AS Late
+    SUM(CASE WHEN j.PartyName LIKE '%GST%INPUT%' OR j.PartyName LIKE '%INPUT%GST%'
+        THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) AS GstInput
 FROM Journal j WITH (NOLOCK)
 LEFT JOIN LedgerMaster lm WITH (NOLOCK)
     ON lm.CompanyName = j.CompanyName AND lm.LedgerName = j.PartyName
+WHERE j.CompanyName = @Company
+  AND j.sysdate >= @From
+GROUP BY j.JournalType, j.JournalNo, j.sysdate
+)
+SELECT
+    ISNULL(v.JournalType, 'Journal') AS VoucherType,
+    CONVERT(varchar(40), v.JournalNo) AS VoucherNo,
+    v.sysdate AS VoucherDate,
+    v.BillNo,
+    v.BillDate,
+    party.PartyName AS Party,
+    party.Gstin AS Gstin,
+    v.Cgst,
+    v.Sgst,
+    v.Igst,
+    v.Taxable,
+    v.FreightGst,
+    'Journal' AS Source,
+    CASE WHEN v.sysdate >= @ToExclusive THEN 1 ELSE 0 END AS Late
+FROM v
 OUTER APPLY (
     SELECT TOP 1 p.PartyName, LTRIM(RTRIM(ISNULL(pl.NewGSTNo, ''))) AS Gstin
     FROM Journal p WITH (NOLOCK)
     INNER JOIN LedgerMaster pl WITH (NOLOCK)
         ON pl.CompanyName = p.CompanyName AND pl.LedgerName = p.PartyName
-    WHERE p.CompanyName = j.CompanyName AND p.JournalNo = j.JournalNo AND p.sysdate = j.sysdate
+    WHERE p.CompanyName = @Company AND p.JournalNo = v.JournalNo AND p.sysdate = v.sysdate
       AND pl.Category IN ('Customer-Supplier', 'Customer', 'Supplier', 'Service Provider')
       AND LTRIM(RTRIM(ISNULL(pl.NewGSTNo, ''))) <> ''
     ORDER BY ABS(ISNULL(p.Debit, 0) - ISNULL(p.Credit, 0)) DESC
 ) party
-WHERE j.CompanyName = @Company
-  AND j.sysdate >= @From
-GROUP BY j.JournalType, j.JournalNo, j.sysdate
-HAVING j.sysdate < @ToExclusive
-    OR SUM(CASE WHEN j.PartyName LIKE '%GST%INPUT%' OR j.PartyName LIKE '%INPUT%GST%'
-           THEN ISNULL(j.Debit, 0) - ISNULL(j.Credit, 0) ELSE 0 END) < 0
+WHERE (v.sysdate < @ToExclusive OR v.GstInput < 0)
+  AND v.BillNo <> '' AND v.BillDate IS NOT NULL
+  AND (ABS(v.Cgst) > 0.005 OR ABS(v.Igst) > 0.005)
 
 UNION ALL
 
@@ -981,6 +1020,7 @@ LEFT JOIN (
            SUM(TRY_CONVERT(decimal(18, 2), IGSTAmount)) AS Igst,
            SUM(TRY_CONVERT(decimal(18, 2), AmountDifference)) AS Taxable
     FROM DebitNoteItem WITH (NOLOCK)
+    WHERE CompanyName = @Company
     GROUP BY CompanyName, DebitNoteNumber
 ) i ON i.CompanyName = d.CompanyName AND i.DebitNoteNumber = d.DebitNoteNumber
 WHERE d.CompanyName = @Company

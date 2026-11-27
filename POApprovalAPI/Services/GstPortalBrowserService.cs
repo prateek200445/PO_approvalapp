@@ -886,11 +886,18 @@ WHERE COALESCE(NULLIF(LTRIM(RTRIM(GroupName)), ''), LTRIM(RTRIM(Name))) = @Group
         if (gstins.Count == 0)
             throw new ArgumentException($"No GSTIN is configured for company group {groupLabel}.");
 
+        var matches = new List<PortalCredential>();
         var workbookPath = CredentialWorkbookPath();
         if (!File.Exists(workbookPath))
-            throw new InvalidOperationException("GST credential workbook was not found on the API server.");
+        {
+            matches.AddRange(GstPortalCredentials.All
+                .Where(item => gstins.Contains(item.Gstin))
+                .Select(item => new PortalCredential(item.Gstin, item.Login, item.Password)));
+            return matches.Count > 0
+                ? matches
+                : throw new ArgumentException($"No GST portal credential matches the GSTINs in {groupLabel}.");
+        }
 
-        var matches = new List<PortalCredential>();
         using var file = new FileStream(workbookPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var workbook = new XLWorkbook(file);
         var sheet = workbook.Worksheets.First();
@@ -924,7 +931,12 @@ WHERE COALESCE(NULLIF(LTRIM(RTRIM(GroupName)), ''), LTRIM(RTRIM(Name))) = @Group
         var configured = _configuration["GstPortal:CredentialWorkbook"];
         if (!string.IsNullOrWhiteSpace(configured))
             return Path.GetFullPath(configured);
-        return Path.GetFullPath(Path.Combine(_environment.ContentRootPath, "..", "gst login credential.xls.xlsx"));
+        var folder = Path.GetFullPath(Path.Combine(_environment.ContentRootPath, ".."));
+        var match = Directory.Exists(folder)
+            ? Directory.EnumerateFiles(folder, "*.xlsx")
+                .FirstOrDefault(path => string.Equals(Path.GetFileName(path), "gst login credential.xls.xlsx", StringComparison.OrdinalIgnoreCase))
+            : null;
+        return match ?? Path.Combine(folder, "gst login credential.xls.xlsx");
     }
 
     private async Task<IBrowser> GetBrowserAsync()
@@ -942,7 +954,10 @@ WHERE COALESCE(NULLIF(LTRIM(RTRIM(GroupName)), ''), LTRIM(RTRIM(Name))) = @Group
                 Headless = false,
                 Channel = "chrome",
                 IgnoreDefaultArgs = ["--enable-automation"],
-                Args = ["--disable-blink-features=AutomationControlled"]
+                Args = OperatingSystem.IsLinux()
+                    // Containers run Chrome as root with a small /dev/shm; it needs a virtual display (xvfb-run) to stay headed.
+                    ? ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
+                    : ["--disable-blink-features=AutomationControlled"]
             };
             try
             {
