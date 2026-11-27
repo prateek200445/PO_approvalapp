@@ -10,7 +10,7 @@ export default defineConfig({
     },
     routeRules: {
       "/api/**": {
-        proxy: "https://po-approvalapp.onrender.com/api/**",
+        proxy: "https://po-approvalapp-sg.onrender.com/api/**",
       },
     },
   },

@@ -18,7 +18,7 @@ public sealed class DailyReportDigestOptions
     public string TimeZone { get; set; } = "Asia/Kolkata";
     public List<string> Recipients { get; set; } = new();
     /// <summary>Public base URL of this API; WhatsApp downloads the PDF from here.</summary>
-    public string PublicBaseUrl { get; set; } = "https://po-approvalapp.onrender.com";
+    public string PublicBaseUrl { get; set; } = "https://po-approvalapp-sg.onrender.com";
     /// <summary>Portal users allowed to trigger a manual send.</summary>
     public List<string> AdminUsers { get; set; } = new();
 }
