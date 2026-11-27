@@ -98,8 +98,22 @@ public class Gst2BSnapshotService
     public async Task<IReadOnlyList<Gst2BDocumentRow>> GetAmendmentsAfterAsync(string groupName, DateTime to, CancellationToken ct = default)
     {
         var next = new DateTime(to.Year, to.Month, 1).AddMonths(1);
-        var later = await GetDocumentsAsync(groupName, next, new DateTime(9999, 12, 1), purchaseOnly: true, ct, amendmentsOnly: true);
+        var later = await QueryDocumentsAsync(groupName, next, new DateTime(9999, 12, 1), purchaseOnly: true, amendmentsOnly: true, compact: true, ct);
         return later.Where(document => IsAmendmentSection(document.Section)).ToList();
+    }
+
+    /// <summary>
+    /// Purchase documents with only the fields reconciliation reads, one query per month in parallel.
+    /// Each connection to a distant API host is throughput-bound, so months load side by side.
+    /// </summary>
+    public async Task<IReadOnlyList<Gst2BDocumentRow>> GetMatchingDocumentsAsync(string groupName, DateTime from, DateTime to, CancellationToken ct = default)
+    {
+        var months = new List<DateTime>();
+        for (var month = new DateTime(from.Year, from.Month, 1); month <= new DateTime(to.Year, to.Month, 1); month = month.AddMonths(1))
+            months.Add(month);
+        var parts = await Task.WhenAll(months.Select(month =>
+            QueryDocumentsAsync(groupName, month, month, purchaseOnly: true, amendmentsOnly: false, compact: true, ct)));
+        return parts.SelectMany(part => part).ToList();
     }
 
     private static string AmendedKey(Gst2BDocumentRow amendment) =>
@@ -362,22 +376,44 @@ ORDER BY ReturnPeriod, BuyerGstin";
         DateTime from,
         DateTime to,
         bool purchaseOnly,
-        CancellationToken ct = default,
-        bool amendmentsOnly = false)
-    {
-        var periodFrom = new DateTime(from.Year, from.Month, 1);
-        var periodTo = new DateTime(to.Year, to.Month, 1);
-        await using var connection = _database.CreateConnection();
-        await EnsureStoreAsync(connection, ct);
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = @"
+        CancellationToken ct = default) =>
+        await QueryDocumentsAsync(groupName, from, to, purchaseOnly, amendmentsOnly: false, compact: false, ct);
+
+    private const string FullColumns = @"
 SELECT BuyerGstin, GroupName, ReturnPeriod, Section, SupplierGstin, SupplierName,
        DocumentType, InvoiceType, DocumentNumber, DocumentNumberNorm, DocumentDate,
        OriginalDocumentNumber, OriginalDocumentDate, PlaceOfSupply, ReverseCharge,
        DocumentValue, Taxable, Igst, Cgst, Sgst, CgstSgst, Cess,
        ItcAvailability, ItcReason, ApplicableTaxRate, ItcReduced,
        ReductionIgst, ReductionCgst, ReductionSgst, ReductionCess,
-       Source, Irn, IrnDate, Gstr1Period, Gstr1FilingDate, Remarks
+       Source, Irn, IrnDate, Gstr1Period, Gstr1FilingDate, Remarks";
+
+    // Same column order as FullColumns so ReadDocument works; fields reconciliation never reads come back empty.
+    private const string CompactColumns = @"
+SELECT BuyerGstin, N'' AS GroupName, ReturnPeriod, Section, SupplierGstin, SupplierName,
+       DocumentType, N'' AS InvoiceType, DocumentNumber, N'' AS DocumentNumberNorm, DocumentDate,
+       OriginalDocumentNumber, OriginalDocumentDate, N'' AS PlaceOfSupply, '' AS ReverseCharge,
+       CONVERT(decimal(18,2), 0) AS DocumentValue, Taxable, Igst, Cgst, Sgst, CgstSgst, CONVERT(decimal(18,2), 0) AS Cess,
+       '' AS ItcAvailability, N'' AS ItcReason, '' AS ApplicableTaxRate, '' AS ItcReduced,
+       CONVERT(decimal(18,2), 0) AS ReductionIgst, CONVERT(decimal(18,2), 0) AS ReductionCgst,
+       CONVERT(decimal(18,2), 0) AS ReductionSgst, CONVERT(decimal(18,2), 0) AS ReductionCess,
+       N'' AS Source, '' AS Irn, CAST(NULL AS date) AS IrnDate, '' AS Gstr1Period, CAST(NULL AS date) AS Gstr1FilingDate, N'' AS Remarks";
+
+    private async Task<IReadOnlyList<Gst2BDocumentRow>> QueryDocumentsAsync(
+        string groupName,
+        DateTime from,
+        DateTime to,
+        bool purchaseOnly,
+        bool amendmentsOnly,
+        bool compact,
+        CancellationToken ct)
+    {
+        var periodFrom = new DateTime(from.Year, from.Month, 1);
+        var periodTo = new DateTime(to.Year, to.Month, 1);
+        await using var connection = _database.CreateConnection();
+        await EnsureStoreAsync(connection, ct);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = (compact ? CompactColumns : FullColumns) + @"
 FROM dbo.AppGst2BDocument
 WHERE GroupName = @Group
   AND ReturnPeriod >= @From

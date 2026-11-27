@@ -193,7 +193,7 @@ ORDER BY GroupLabel";
         if (amountTolerance < 0)
             amountTolerance = 0;
 
-        var documentsTask = _snapshots.GetDocumentsAsync(company, from, to, purchaseOnly: true, ct);
+        var documentsTask = _snapshots.GetMatchingDocumentsAsync(company, from, to, ct);
         var laterTask = _snapshots.GetAmendmentsAfterAsync(company, to, ct);
         var membersTask = LoadGroupMembersAsync(company, ct);
         await Task.WhenAll(documentsTask, laterTask, membersTask);
@@ -412,16 +412,22 @@ BEGIN
     SELECT @Code AS IndentCode, r.RefType, r.RefEntryNo, COUNT_BIG(*) AS AttachmentCount
     FROM dbo.dms_ref r WITH (NOLOCK)
     INNER JOIN dbo.dms_files f WITH (NOLOCK) ON f.RefId = r.RefId
+    CROSS APPLY (SELECT RTRIM(r.RefEntryNo) AS Entry) e
+    CROSS APPLY (SELECT CASE WHEN RIGHT(e.Entry, 1) = '/' THEN RTRIM(LEFT(e.Entry, LEN(e.Entry) - 1)) ELSE e.Entry END AS Entry) t
+    CROSS APPLY (SELECT LTRIM(RTRIM(RIGHT(t.Entry, CHARINDEX('/', REVERSE(t.Entry) + '/') - 1))) AS VoucherNo) s
     WHERE @Code <> ''
       AND r.RefEntryNo LIKE @Code + '/%'
       AND (REPLACE(UPPER(r.RefType), ' ', '') IN ('AC_PUR', 'AC_JV')
            OR REPLACE(UPPER(r.RefType), ' ', '') LIKE '%DEBIT%'
            OR REPLACE(UPPER(r.RefType), ' ', '') LIKE '%[_]DN')
+      AND s.VoucherNo IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@Vouchers, CHAR(30)))
       AND ISNULL(f.IsDeleted, 0) = 0
     GROUP BY r.RefType, r.RefEntryNo;
 END
 """;
         cmd.Parameters.Add("@CompanyName", SqlDbType.VarChar, 150).Value = companyName;
+        cmd.Parameters.Add("@Vouchers", SqlDbType.NVarChar, -1).Value = string.Join('\u001e',
+            rows.Select(row => row.VoucherNo.Trim()).Where(no => no.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase));
         var years = rows
             .Where(row => row.VoucherDate.HasValue)
             .Select(row => FinancialYear(row.VoucherDate!.Value))
@@ -542,7 +548,7 @@ END
     {
         if (billFrom.Date >= from.Date)
             return [];
-        var documentsTask = _snapshots.GetDocumentsAsync(company, billFrom, from.AddDays(-1), purchaseOnly: true, ct);
+        var documentsTask = _snapshots.GetMatchingDocumentsAsync(company, billFrom, from.AddDays(-1), ct);
         var amendmentsTask = _snapshots.GetAmendmentsAfterAsync(company, from.AddMonths(-1), ct);
         await Task.WhenAll(documentsTask, amendmentsTask);
         var documents = Gst2BSnapshotService.WithAmendmentsFrom(documentsTask.Result, amendmentsTask.Result);
