@@ -22,8 +22,12 @@ RUN apt-get update \
 WORKDIR /App
 COPY --from=build-env /App/out .
 
-# Expose port 8080 (standard for Render and Cloud Run)
-EXPOSE 8080
-ENV ASPNETCORE_URLS=http://+:8080
+# Render ignores EXPOSE and scans 0.0.0.0:$PORT. The entrypoint binds that port.
+EXPOSE 10000
+ENV ASPNETCORE_URLS=http://0.0.0.0:10000
 
-ENTRYPOINT ["xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", "dotnet", "POApprovalAPI.dll"]
+COPY docker-entrypoint.sh /App/docker-entrypoint.sh
+# The script is authored on Windows; strip CR so the Linux shell can run it.
+RUN sed -i 's/\r$//' /App/docker-entrypoint.sh && chmod +x /App/docker-entrypoint.sh
+
+ENTRYPOINT ["/App/docker-entrypoint.sh"]

@@ -2,6 +2,9 @@ using POApprovalAPI.Services;
 using QuestPDF.Infrastructure;
 using POApprovalAPI.Interfaces;
 
+// Render captures stdout. Flush each line so a startup failure is visible in the deploy log.
+Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+
 LoadDotEnvFiles();
 
 var builder = WebApplication.CreateBuilder(args);
