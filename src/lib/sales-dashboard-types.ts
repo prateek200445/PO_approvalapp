@@ -4,8 +4,8 @@ export type SalesTrendPeriod = "Last 6 Months" | "Last 12 Months";
 /** Top-level section within Sales Dashboard (not a separate route). */
 export type SalesDashboardSection = "Sales" | "FIBC Production";
 
-/** In-page tab within the Sales section (Dashboard vs Export analysis). */
-export type SalesDashboardSalesPage = "overview" | "export-analysis";
+/** In-page tab within the Sales section (Dashboard / Export analysis / Month on Month). */
+export type SalesDashboardSalesPage = "overview" | "export-analysis" | "month-on-month";
 
 export interface SalesDashboardFilters {
   company: string;
@@ -100,6 +100,29 @@ export interface SalesBySubGroupItem {
   subGroupName: string;
   quantity: number;
   salesAmount: number;
+}
+
+export interface SalesMonthlyMomMonthItem {
+  period: string;
+  year: number;
+  month: number;
+  amount: number;
+  quantity: number;
+  averageRate: number;
+  amountChangePercent: number;
+  quantityChangePercent: number;
+}
+
+export interface SalesMonthlyMomData {
+  months: SalesMonthlyMomMonthItem[];
+  totalAmount: number;
+  totalQuantity: number;
+  averageRate: number;
+  category: string;
+  dateFrom: string;
+  dateTo: string;
+  includeIntercompany: boolean;
+  source: string;
 }
 
 export interface FibcProductionMonthItem {

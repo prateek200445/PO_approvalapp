@@ -8,6 +8,8 @@ import type {
   SalesCompanyOption,
   RankedPartyItem,
   FibcProductionMomData,
+  SalesMonthlyMomData,
+  SalesMonthlyMomMonthItem,
 } from "@/lib/sales-dashboard-types";
 import { formatINR, formatMoneyAmount } from "@/lib/mock-data";
 
@@ -264,6 +266,93 @@ export async function getFibcProductionMonthly(filters: {
     totalPcs: num(payload.totalPcs ?? payload.TotalPcs),
     totalWt: num(payload.totalWt ?? payload.TotalWt),
   };
+}
+
+function mapSalesMonthlyMomMonths(
+  monthsRaw: Array<Record<string, unknown>>,
+): SalesMonthlyMomMonthItem[] {
+  return monthsRaw.map((m) => ({
+    period: str(m.period ?? m.Period),
+    year: num(m.year ?? m.Year),
+    month: num(m.month ?? m.Month),
+    amount: num(m.amount ?? m.Amount),
+    quantity: num(m.quantity ?? m.Quantity),
+    averageRate: num(m.averageRate ?? m.AverageRate),
+    amountChangePercent: num(m.amountChangePercent ?? m.AmountChangePercent),
+    quantityChangePercent: num(m.quantityChangePercent ?? m.QuantityChangePercent),
+  }));
+}
+
+/** Sales / Purchase month-on-month (EBIDTA Amount — same basis as KPI totals). */
+export async function getSalesMonthlyTrend(filters: {
+  company: string;
+  dateFrom: string;
+  dateTo: string;
+  category?: string;
+  includeIntercompany?: boolean;
+  refresh?: boolean;
+}): Promise<SalesMonthlyMomData> {
+  const params = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    category: filters.category ?? "Sales",
+    includeIntercompany: filters.includeIntercompany ? "true" : "false",
+    refresh: filters.refresh ? "true" : "false",
+  });
+  const response = await fetch(getSalesApiUrl(`/api/SalesDashboard/monthly-trend?${params}`));
+  const payload = (await response.json()) as Record<string, unknown> & { message?: string };
+  if (!response.ok) {
+    throw new Error(payload.message || "Failed to load month-on-month sales");
+  }
+
+  const monthsRaw = (payload.months ?? payload.Months ?? []) as Array<Record<string, unknown>>;
+  return {
+    months: mapSalesMonthlyMomMonths(monthsRaw),
+    totalAmount: num(payload.totalAmount ?? payload.TotalAmount),
+    totalQuantity: num(payload.totalQuantity ?? payload.TotalQuantity),
+    averageRate: num(payload.averageRate ?? payload.AverageRate),
+    category: str(payload.category ?? payload.Category) || (filters.category ?? "Sales"),
+    dateFrom: str(payload.dateFrom ?? payload.DateFrom) || filters.dateFrom,
+    dateTo: str(payload.dateTo ?? payload.DateTo) || filters.dateTo,
+    includeIntercompany: Boolean(payload.includeIntercompany ?? payload.IncludeIntercompany),
+    source: str(payload.source ?? payload.Source),
+  };
+}
+
+/** Excel download for Sales / Purchase month-on-month. */
+export async function downloadSalesMonthlyTrendExcel(filters: {
+  company: string;
+  dateFrom: string;
+  dateTo: string;
+  category?: string;
+  includeIntercompany?: boolean;
+  refresh?: boolean;
+}): Promise<void> {
+  const category = filters.category ?? "Sales";
+  const params = new URLSearchParams({
+    company: filters.company,
+    dateFrom: filters.dateFrom,
+    dateTo: filters.dateTo,
+    category,
+    includeIntercompany: filters.includeIntercompany ? "true" : "false",
+    refresh: filters.refresh ? "true" : "false",
+  });
+  const response = await fetch(
+    getSalesApiUrl(`/api/SalesDashboard/monthly-trend/excel?${params}`),
+  );
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(payload.message || "Could not create the Excel file");
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${category}_MoM_${filters.dateFrom}_${filters.dateTo}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export async function getSalesTables(filters: {

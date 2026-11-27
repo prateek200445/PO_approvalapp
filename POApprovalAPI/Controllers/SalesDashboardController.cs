@@ -486,6 +486,99 @@ public class SalesDashboardController : ControllerBase
     }
 
     /// <summary>
+    /// Sales / Purchase month-on-month from vw_*_EBIDTA (same Amount basis as KPI totals).
+    /// </summary>
+    [HttpGet("monthly-trend")]
+    public async Task<IActionResult> GetMonthlyTrend(
+        [FromQuery] string company = "All Companies",
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] string category = "Sales",
+        [FromQuery] bool refresh = false,
+        [FromQuery] bool includeIntercompany = false)
+    {
+        try
+        {
+            if (!string.Equals(category, "Sales", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(category, "Purchase", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { message = "category must be Sales or Purchase." });
+            }
+
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
+            var data = await _salesDashboard.GetMonthlyTrendAsync(
+                company, from, to, category, refresh, includeIntercompany);
+            var isPurchase = string.Equals(category, "Purchase", StringComparison.OrdinalIgnoreCase);
+            return Ok(new
+            {
+                months = data.Months,
+                totalAmount = data.TotalAmount,
+                totalQuantity = data.TotalQuantity,
+                averageRate = data.AverageRate,
+                company,
+                category = data.Category,
+                includeIntercompany = data.IncludeIntercompany,
+                dateFrom = data.DateFrom,
+                dateTo = data.DateTo,
+                source = data.Source,
+                note = isPurchase
+                    ? "Month-on-month Purchase from vw_Purchase_EBIDTA Amount (same basis as Purchase KPI totals)."
+                    : "Month-on-month Sales from vw_Sales_EBIDTA Amount (same basis as Sales KPI totals).",
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Excel download for Sales / Purchase month-on-month (same data as monthly-trend).
+    /// </summary>
+    [HttpGet("monthly-trend/excel")]
+    public async Task<IActionResult> GetMonthlyTrendExcel(
+        [FromQuery] string company = "All Companies",
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] string category = "Sales",
+        [FromQuery] bool refresh = false,
+        [FromQuery] bool includeIntercompany = false)
+    {
+        try
+        {
+            if (!string.Equals(category, "Sales", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(category, "Purchase", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { message = "category must be Sales or Purchase." });
+            }
+
+            var (from, to) = ResolveQueryDates(dateFrom, dateTo);
+            var data = await _salesDashboard.GetMonthlyTrendAsync(
+                company, from, to, category, refresh, includeIntercompany);
+            if (data.Months.Count == 0)
+                return BadRequest(new { message = "Nothing to export for this period." });
+
+            var bytes = SalesMomExcelBuilder.Build(data, company, includeIntercompany);
+            var kind = string.Equals(data.Category, "Purchase", StringComparison.OrdinalIgnoreCase)
+                ? "Purchase"
+                : "Sales";
+            var fileName = $"{kind}_MoM_{data.DateFrom}_{data.DateTo}.xlsx";
+            return File(
+                bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                fileName);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// FIBC production month-on-month (BagPCS / BagWt) from VW_FIBCBagwiseProduction.
     /// </summary>
     [HttpGet("fibc-production-monthly")]
