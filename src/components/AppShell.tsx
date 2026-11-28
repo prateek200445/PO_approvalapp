@@ -70,6 +70,7 @@ type AppPath =
   | "/tds"
   | "/import-jv"
   | "/item-stock"
+  | "/pending-payment"
   | "/domestic-invoice"
   | "/export-bill-overdue"
   | "/daily-production"
@@ -322,6 +323,12 @@ export function AppShell() {
       icon: Package,
       label: "Item Stock",
       match: (p) => p.startsWith("/item-stock"),
+    },
+    {
+      to: "/pending-payment",
+      icon: CreditCard,
+      label: "Next Week Pending Payment",
+      match: (p) => p.startsWith("/pending-payment"),
     },
     {
       to: "/ledgers",
