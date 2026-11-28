@@ -19,6 +19,18 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends /tmp/chrome.deb xvfb xauth fonts-liberation \
     && rm -rf /var/lib/apt/lists/* /tmp/chrome.deb
 
+# Chatbot schema search shells out to Python (numpy + fastembed).
+# The model is downloaded here so a free-tier restart does not fetch it again.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-pip python-is-python3 \
+    && (python3 -m pip install --no-cache-dir --break-system-packages numpy fastembed \
+        || python3 -m pip install --no-cache-dir numpy fastembed) \
+    && rm -rf /var/lib/apt/lists/*
+ENV FASTEMBED_CACHE_PATH=/opt/fastembed
+RUN mkdir -p /opt/fastembed \
+    && python3 -c "from fastembed import TextEmbedding; TextEmbedding(model_name='sentence-transformers/all-MiniLM-L6-v2')" \
+    && chmod -R a+rX /opt/fastembed
+
 WORKDIR /App
 COPY --from=build-env /App/out .
 
