@@ -29,17 +29,17 @@ namespace ERP
         private void InitializeComponent()
         {
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(frmDomesticInvoice));
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle23 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle24 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle25 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle26 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle27 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle28 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle29 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle30 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle31 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle32 = new System.Windows.Forms.DataGridViewCellStyle();
-            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle33 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle1 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle2 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle3 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle4 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle5 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle6 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle7 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle8 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle9 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle10 = new System.Windows.Forms.DataGridViewCellStyle();
+            System.Windows.Forms.DataGridViewCellStyle dataGridViewCellStyle11 = new System.Windows.Forms.DataGridViewCellStyle();
             this.label2 = new System.Windows.Forms.Label();
             this.comboTypeInvoice = new System.Windows.Forms.ComboBox();
             this.label4 = new System.Windows.Forms.Label();
@@ -161,6 +161,11 @@ namespace ERP
             this.textSuffix = new System.Windows.Forms.TextBox();
             this.label33 = new System.Windows.Forms.Label();
             this.tabPage6 = new System.Windows.Forms.TabPage();
+            this.textdispfrm_add = new System.Windows.Forms.TextBox();
+            this.dispfrm_add = new System.Windows.Forms.Label();
+            this.combodispfrm = new System.Windows.Forms.ComboBox();
+            this.dispfrm = new System.Windows.Forms.Label();
+            this.chk_dispfrm = new System.Windows.Forms.CheckBox();
             this.textNotifier = new System.Windows.Forms.TextBox();
             this.label50 = new System.Windows.Forms.Label();
             this.comboConsigneeName = new System.Windows.Forms.ComboBox();
@@ -264,11 +269,6 @@ namespace ERP
             this.button2 = new System.Windows.Forms.Button();
             this.ComboInvoiceNo = new System.Windows.Forms.ComboBox();
             this.label69 = new System.Windows.Forms.Label();
-            this.chk_dispfrm = new System.Windows.Forms.CheckBox();
-            this.textdispfrm_add = new System.Windows.Forms.TextBox();
-            this.dispfrm_add = new System.Windows.Forms.Label();
-            this.combodispfrm = new System.Windows.Forms.ComboBox();
-            this.dispfrm = new System.Windows.Forms.Label();
             this.toolStrip1.SuspendLayout();
             this.tabControl1.SuspendLayout();
             this.tabPage1.SuspendLayout();
@@ -570,7 +570,7 @@ namespace ERP
             // 
             // textAddVat
             // 
-            this.textAddVat.Location = new System.Drawing.Point(297, 23);
+            this.textAddVat.Location = new System.Drawing.Point(297, 27);
             this.textAddVat.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
             this.textAddVat.Name = "textAddVat";
             this.textAddVat.Size = new System.Drawing.Size(86, 26);
@@ -1610,6 +1610,58 @@ namespace ERP
             this.tabPage6.Text = "Consignee";
             this.tabPage6.UseVisualStyleBackColor = true;
             // 
+            // textdispfrm_add
+            // 
+            this.textdispfrm_add.Location = new System.Drawing.Point(1136, 75);
+            this.textdispfrm_add.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.textdispfrm_add.Multiline = true;
+            this.textdispfrm_add.Name = "textdispfrm_add";
+            this.textdispfrm_add.Size = new System.Drawing.Size(297, 127);
+            this.textdispfrm_add.TabIndex = 418;
+            // 
+            // dispfrm_add
+            // 
+            this.dispfrm_add.AutoSize = true;
+            this.dispfrm_add.Location = new System.Drawing.Point(1056, 78);
+            this.dispfrm_add.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.dispfrm_add.Name = "dispfrm_add";
+            this.dispfrm_add.Size = new System.Drawing.Size(68, 20);
+            this.dispfrm_add.TabIndex = 417;
+            this.dispfrm_add.Text = "Address";
+            // 
+            // combodispfrm
+            // 
+            this.combodispfrm.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.combodispfrm.FormattingEnabled = true;
+            this.combodispfrm.Location = new System.Drawing.Point(1136, 25);
+            this.combodispfrm.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.combodispfrm.Name = "combodispfrm";
+            this.combodispfrm.Size = new System.Drawing.Size(298, 28);
+            this.combodispfrm.TabIndex = 415;
+            this.combodispfrm.SelectedIndexChanged += new System.EventHandler(this.combodispfrm_SelectedIndexChanged);
+            // 
+            // dispfrm
+            // 
+            this.dispfrm.AutoSize = true;
+            this.dispfrm.Location = new System.Drawing.Point(1014, 31);
+            this.dispfrm.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.dispfrm.Name = "dispfrm";
+            this.dispfrm.Size = new System.Drawing.Size(113, 20);
+            this.dispfrm.TabIndex = 416;
+            this.dispfrm.Text = "Dispatch From";
+            // 
+            // chk_dispfrm
+            // 
+            this.chk_dispfrm.AutoSize = true;
+            this.chk_dispfrm.Location = new System.Drawing.Point(10, 189);
+            this.chk_dispfrm.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
+            this.chk_dispfrm.Name = "chk_dispfrm";
+            this.chk_dispfrm.Size = new System.Drawing.Size(156, 24);
+            this.chk_dispfrm.TabIndex = 414;
+            this.chk_dispfrm.Text = "Is Dispatch From";
+            this.chk_dispfrm.UseVisualStyleBackColor = true;
+            this.chk_dispfrm.CheckedChanged += new System.EventHandler(this.chk_dispfrm_CheckedChanged);
+            // 
             // textNotifier
             // 
             this.textNotifier.Location = new System.Drawing.Point(718, 75);
@@ -2309,84 +2361,84 @@ namespace ERP
             // 
             // DOrderQty
             // 
-            dataGridViewCellStyle23.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
-            this.DOrderQty.DefaultCellStyle = dataGridViewCellStyle23;
+            dataGridViewCellStyle1.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
+            this.DOrderQty.DefaultCellStyle = dataGridViewCellStyle1;
             this.DOrderQty.HeaderText = "Order Qty";
             this.DOrderQty.Name = "DOrderQty";
             this.DOrderQty.Width = 80;
             // 
             // DUnitPrice
             // 
-            dataGridViewCellStyle24.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
-            this.DUnitPrice.DefaultCellStyle = dataGridViewCellStyle24;
+            dataGridViewCellStyle2.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
+            this.DUnitPrice.DefaultCellStyle = dataGridViewCellStyle2;
             this.DUnitPrice.HeaderText = "Unit Price";
             this.DUnitPrice.Name = "DUnitPrice";
             this.DUnitPrice.Width = 80;
             // 
             // DTotal
             // 
-            dataGridViewCellStyle25.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
-            this.DTotal.DefaultCellStyle = dataGridViewCellStyle25;
+            dataGridViewCellStyle3.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
+            this.DTotal.DefaultCellStyle = dataGridViewCellStyle3;
             this.DTotal.HeaderText = "Total";
             this.DTotal.Name = "DTotal";
             // 
             // colCGSTrate
             // 
-            dataGridViewCellStyle26.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
-            this.colCGSTrate.DefaultCellStyle = dataGridViewCellStyle26;
+            dataGridViewCellStyle4.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
+            this.colCGSTrate.DefaultCellStyle = dataGridViewCellStyle4;
             this.colCGSTrate.HeaderText = "CGST Rate";
             this.colCGSTrate.Name = "colCGSTrate";
             this.colCGSTrate.Width = 50;
             // 
             // colCGSTamt
             // 
-            dataGridViewCellStyle27.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
-            this.colCGSTamt.DefaultCellStyle = dataGridViewCellStyle27;
+            dataGridViewCellStyle5.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
+            this.colCGSTamt.DefaultCellStyle = dataGridViewCellStyle5;
             this.colCGSTamt.HeaderText = "CGST AMT";
             this.colCGSTamt.Name = "colCGSTamt";
             this.colCGSTamt.Width = 50;
             // 
             // colSGSTRate
             // 
-            dataGridViewCellStyle28.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
-            this.colSGSTRate.DefaultCellStyle = dataGridViewCellStyle28;
+            dataGridViewCellStyle6.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
+            this.colSGSTRate.DefaultCellStyle = dataGridViewCellStyle6;
             this.colSGSTRate.HeaderText = "SGST Rate";
             this.colSGSTRate.Name = "colSGSTRate";
             this.colSGSTRate.Width = 50;
             // 
             // ColSGSTAmt
             // 
-            dataGridViewCellStyle29.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
-            this.ColSGSTAmt.DefaultCellStyle = dataGridViewCellStyle29;
+            dataGridViewCellStyle7.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
+            this.ColSGSTAmt.DefaultCellStyle = dataGridViewCellStyle7;
             this.ColSGSTAmt.HeaderText = "SGST AMT";
             this.ColSGSTAmt.Name = "ColSGSTAmt";
             this.ColSGSTAmt.Width = 50;
             // 
             // colIGSTRate
             // 
-            dataGridViewCellStyle30.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
-            this.colIGSTRate.DefaultCellStyle = dataGridViewCellStyle30;
+            dataGridViewCellStyle8.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
+            this.colIGSTRate.DefaultCellStyle = dataGridViewCellStyle8;
             this.colIGSTRate.HeaderText = "IGST Rate";
             this.colIGSTRate.Name = "colIGSTRate";
             // 
             // colIGSTAmt
             // 
-            dataGridViewCellStyle31.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
-            this.colIGSTAmt.DefaultCellStyle = dataGridViewCellStyle31;
+            dataGridViewCellStyle9.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
+            this.colIGSTAmt.DefaultCellStyle = dataGridViewCellStyle9;
             this.colIGSTAmt.HeaderText = "IGST Amt";
             this.colIGSTAmt.Name = "colIGSTAmt";
             // 
             // DNetWt
             // 
-            dataGridViewCellStyle32.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
-            this.DNetWt.DefaultCellStyle = dataGridViewCellStyle32;
+            dataGridViewCellStyle10.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
+            this.DNetWt.DefaultCellStyle = dataGridViewCellStyle10;
             this.DNetWt.HeaderText = "Net Weight";
             this.DNetWt.Name = "DNetWt";
             // 
             // DGrossWt
             // 
-            dataGridViewCellStyle33.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
-            this.DGrossWt.DefaultCellStyle = dataGridViewCellStyle33;
+            dataGridViewCellStyle11.Alignment = System.Windows.Forms.DataGridViewContentAlignment.MiddleRight;
+            this.DGrossWt.DefaultCellStyle = dataGridViewCellStyle11;
             this.DGrossWt.HeaderText = "Gross Weight";
             this.DGrossWt.Name = "DGrossWt";
             // 
@@ -2573,58 +2625,6 @@ namespace ERP
             this.label69.TabIndex = 433;
             this.label69.Text = "Packing List :";
             this.label69.Visible = false;
-            // 
-            // chk_dispfrm
-            // 
-            this.chk_dispfrm.AutoSize = true;
-            this.chk_dispfrm.Location = new System.Drawing.Point(10, 189);
-            this.chk_dispfrm.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.chk_dispfrm.Name = "chk_dispfrm";
-            this.chk_dispfrm.Size = new System.Drawing.Size(156, 24);
-            this.chk_dispfrm.TabIndex = 414;
-            this.chk_dispfrm.Text = "Is Dispatch From";
-            this.chk_dispfrm.UseVisualStyleBackColor = true;
-            this.chk_dispfrm.CheckedChanged += new System.EventHandler(this.chk_dispfrm_CheckedChanged);
-            // 
-            // textdispfrm_add
-            // 
-            this.textdispfrm_add.Location = new System.Drawing.Point(1136, 75);
-            this.textdispfrm_add.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.textdispfrm_add.Multiline = true;
-            this.textdispfrm_add.Name = "textdispfrm_add";
-            this.textdispfrm_add.Size = new System.Drawing.Size(297, 127);
-            this.textdispfrm_add.TabIndex = 418;
-            // 
-            // dispfrm_add
-            // 
-            this.dispfrm_add.AutoSize = true;
-            this.dispfrm_add.Location = new System.Drawing.Point(1056, 78);
-            this.dispfrm_add.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
-            this.dispfrm_add.Name = "dispfrm_add";
-            this.dispfrm_add.Size = new System.Drawing.Size(68, 20);
-            this.dispfrm_add.TabIndex = 417;
-            this.dispfrm_add.Text = "Address";
-            // 
-            // combodispfrm
-            // 
-            this.combodispfrm.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
-            this.combodispfrm.FormattingEnabled = true;
-            this.combodispfrm.Location = new System.Drawing.Point(1136, 25);
-            this.combodispfrm.Margin = new System.Windows.Forms.Padding(4, 5, 4, 5);
-            this.combodispfrm.Name = "combodispfrm";
-            this.combodispfrm.Size = new System.Drawing.Size(298, 28);
-            this.combodispfrm.TabIndex = 415;
-            this.combodispfrm.SelectedIndexChanged += new System.EventHandler(this.combodispfrm_SelectedIndexChanged);
-            // 
-            // dispfrm
-            // 
-            this.dispfrm.AutoSize = true;
-            this.dispfrm.Location = new System.Drawing.Point(1014, 31);
-            this.dispfrm.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
-            this.dispfrm.Name = "dispfrm";
-            this.dispfrm.Size = new System.Drawing.Size(113, 20);
-            this.dispfrm.TabIndex = 416;
-            this.dispfrm.Text = "Dispatch From";
             // 
             // frmDomesticInvoice
             // 

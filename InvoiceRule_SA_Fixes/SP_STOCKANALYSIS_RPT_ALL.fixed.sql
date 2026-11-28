@@ -1,6 +1,23 @@
-﻿
-
- 
+﻿-- =============================================================================
+-- S3 COPY — RM Consumables Stock Adjustment sign on Cl.Factory Owned.
+-- Live object: dbo.SP_STOCKANALYSIS_RPT_ALL on MaterialProcessing.
+-- This file is a copy. Changing it does not ALTER the live SP until you deploy.
+-- Search tag: S3-CONSUMABLES
+--
+-- BUG: RM/SF/FG closing is  ... - NetCons - Adj
+--      RM Consumables @RptType 0 and 1 was  ... - (NetCons - Adj)
+--      which is  ... - NetCons + Adj  (write-off 100 kg -> closing +100 instead of -100).
+-- FIX: Adj outside the consumption brackets, same as RM/SF/FG and as @RptType 2.
+-- FY 25-26 Consumables Adj qty was 0 so this sat idle until they post one.
+-- @RptType 2 date-wise Consumables was already correct — do not change that block.
+--
+-- LINE MAP (this copy):
+--   1-20     this banner
+--   277      S2 pre-sales period (not Consumables)
+--   326-327  S1 stockjv from-date (not Consumables)
+--   615-627  S3 @RptType 0 RM Consumables Cl.Factory Owned (Adj outside NetCons)
+--   751-763  S3 @RptType 1 RM Consumables Cl.Factory Owned (Adj outside NetCons)
+-- =============================================================================
 
 CREATE PROCEDURE [dbo].[SP_STOCKANALYSIS_RPT_ALL]
 (
@@ -257,6 +274,7 @@ BEGIN
 		inner join @companyname t on vw_SalesRegister.companyname = t.StringValue
 		and vw_SalesRegister.companyname = i.CompanyName
 
+		-- S2: pre-sales must use report from/to (was unbounded, extra Sales).
 		where   CAST(DespatchDate AS DATE) between @DATEFROM and @DATEto and vw_SalesRegister.Invno not in(select Invno from MaterialProcessing..salesvoucher where vw_SalesRegister.aresuffix = InvYear 
                             and vw_SalesRegister.companyname = MaterialProcessing..salesvoucher.companyname and InvNo is not null
                         		union select InwardNo
@@ -305,6 +323,7 @@ BEGIN
 		select stockjv.companyname,sysdate,qty,item.deptt,item.groupname,type,item.subgroupname,item.itemname,srno,stockjv.itemcode,challanno from stockjv
 			inner join @companyname t on stockjv.companyname = t.StringValue
 		inner join item on item.ItemCode = StockJV.itemcode and item.CompanyName = StockJV.companyname
+		-- S1: from-date was missing; old stockjv rows leaked into this period.
 		where sysdate >= @DATEFROM and sysdate <= @DATEto
 		--- end comment
 
@@ -593,6 +612,7 @@ BEGIN
 			format(round(ISNULL(sum([Total Production Own+JW]),0) -  ISNULL(sum([Pord. of JW]),0),@qtyPar),'0.000')  as [Net Production Own],
 			format(round(ISNULL(sum([Total Consumption Own+JW]),0) -  ISNULL(sum([Consumption Of JW]),0),@qtyPar),'0.000')  as [Net Consumption Own],
 
+			-- S3-CONSUMABLES @RptType 0 (subgroup): Adj OUTSIDE NetCons. Live SP had Adj inside = plus Adj.
 			format(round(
 			ISNULL(sum([Op.Factory Owned]),0)+
 			ISNULL(sum([Branch Tfr Recd]),0) +
@@ -728,6 +748,7 @@ BEGIN
 			format(round(ISNULL(sum([Total Production Own+JW]),0) -  ISNULL(sum([Pord. of JW]),0),@qtyPar),'0.000')  as [Net Production Own],
 			format(round(ISNULL(sum([Total Consumption Own+JW]),0) -  ISNULL(sum([Consumption Of JW]),0),@qtyPar),'0.000')  as [Net Consumption Own],
 
+			-- S3-CONSUMABLES @RptType 1 (item-wise): Adj OUTSIDE NetCons. Live SP had Adj inside = plus Adj.
 			format(round(
 			ISNULL(sum([Op.Factory Owned]),0)+
 			ISNULL(sum([Branch Tfr Recd]),0) +

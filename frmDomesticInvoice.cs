@@ -341,8 +341,17 @@ namespace ERP
                         + comboBuyerName.Text + "'"));
                     if (newgstno.Length == 0)
                     {
-                        MessageBox.Show("Please Enter GSTIN No for This Customer");
-                        return;
+                        if (comboCompanyName.Text == "Fibco Plastic Industry LLC")
+                        {
+                            MessageBox.Show("Please Enter TRN No for This Customer");
+                            return;
+                        }
+
+                        else
+                        {
+                            MessageBox.Show("Please Enter GSTIN No for This Customer");
+                            return;
+                        }
                     }
                     if (newgstno == DespatchCommonFunction.CompanyGSTNo(comboCompanyName.Text))
                     {
@@ -538,7 +547,7 @@ namespace ERP
                         {
                             Int32 InvNo = 0;
                             //total = Calculation();
-                            if (dateTimePickerInvDate.Value > Convert.ToDateTime("2017-06-30 00:00:00"))
+                            if (dateTimePickerInvDate.Value > Convert.ToDateTime("2017-06-30 00:00:00") && comboCompanyName.Text != "Fibco Plastic Industry LLC")
                             {
                                 total = CalculationGST();
                             }
@@ -1777,7 +1786,7 @@ namespace ERP
 
         private void btnCalculation_Click(object sender, EventArgs e)
         {
-            if (dateTimePickerInvDate.Value > Convert.ToDateTime("2017-06-30 00:00:00"))
+            if (dateTimePickerInvDate.Value > Convert.ToDateTime("2017-06-30 00:00:00") && comboCompanyName.Text != "Fibco Plastic Industry LLC")
             {
                 CalculationGST();
             }
@@ -2894,19 +2903,19 @@ namespace ERP
 
         private void comboType_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (dateTimePickerInvDate.Value > Convert.ToDateTime("2017-07-01"))
+            if (dateTimePickerInvDate.Value > Convert.ToDateTime("2017-07-01") && comboCompanyName.Text != "Fibco Plastic Industry LLC")
                 return;
 
             if (comboType.SelectedIndex == 0) //VAT
             {
                 labelAddVat.Visible = true;
                 textAddVat.Visible = true;
-                if (DateTime.Now >= Convert.ToDateTime("2017-07-01"))
+                if (DateTime.Now >= Convert.ToDateTime("2017-07-01") && comboCompanyName.Text != "Fibco Plastic Industry LLC")
                     return;
 
                 labelVATCST.Text = " VAT %";
-                textVat.Text = "4";
-                textAddVat.Text = "1";
+                textVat.Text = "5";
+                textAddVat.Text = "0";
 
                 if (textRemarks.Text.Contains("SALES AGAINST C FORM"))
                 {
@@ -3302,7 +3311,7 @@ namespace ERP
 
         private void comboVatApp_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (dateTimePickerInvDate.Value >= Convert.ToDateTime("2017-07-01 00:00:00"))
+            if (dateTimePickerInvDate.Value >= Convert.ToDateTime("2017-07-01 00:00:00") && comboCompanyName.Text != "Fibco Plastic Industry LLC")
                 return;
 
             if (comboVatApp.SelectedIndex == 0)
