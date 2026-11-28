@@ -9,276 +9,88 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ExhibitionProductRouteImport } from './routes/exhibition.product'
-import { Route as ExhibitionDealerRouteImport } from './routes/exhibition.dealer'
-import { Route as AppWovenQuoteRouteImport } from './routes/_app/woven-quote'
-import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
-import { Route as AppTdsRouteImport } from './routes/_app/tds'
-import { Route as AppSalesDashboardRouteImport } from './routes/_app/sales-dashboard'
-import { Route as AppReconciliationRouteImport } from './routes/_app/reconciliation'
-import { Route as AppProfileRouteImport } from './routes/_app/profile'
-import { Route as AppPnlResultRouteImport } from './routes/_app/pnl-result'
-import { Route as AppPnlRouteImport } from './routes/_app/pnl'
-import { Route as AppPlantConsumptionRouteImport } from './routes/_app/plant-consumption'
-import { Route as AppPendingRouteImport } from './routes/_app/pending'
-import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
-import { Route as AppOrderBookSummaryRouteImport } from './routes/_app/order-book-summary'
-import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
-import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
-import { Route as AppItemStockRouteImport } from './routes/_app/item-stock'
-import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
-import { Route as AppIndentsRouteImport } from './routes/_app/indents'
-import { Route as AppImportJvRouteImport } from './routes/_app/import-jv'
-import { Route as AppHrReportsRouteImport } from './routes/_app/hr-reports'
-import { Route as AppHistoryRouteImport } from './routes/_app/history'
-import { Route as AppGstBillRecoRouteImport } from './routes/_app/gst-bill-reco'
-import { Route as AppGstRouteImport } from './routes/_app/gst'
-import { Route as AppGateRegisterRouteImport } from './routes/_app/gate-register'
-import { Route as AppGateRouteImport } from './routes/_app/gate'
-import { Route as AppFibcBuyersRouteImport } from './routes/_app/fibc-buyers'
-import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
-import { Route as AppExhibitionLeadsRouteImport } from './routes/_app/exhibition-leads'
-import { Route as AppDomesticInvoiceRouteImport } from './routes/_app/domestic-invoice'
-import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
-import { Route as AppDailyReportsRouteImport } from './routes/_app/daily-reports'
-import { Route as AppDailyProductionRouteImport } from './routes/_app/daily-production'
-import { Route as AppCustomReportRouteImport } from './routes/_app/custom-report'
-import { Route as AppCmaRouteImport } from './routes/_app/cma'
-import { Route as AppBomRouteImport } from './routes/_app/bom'
-import { Route as AppBankStatementImportRouteImport } from './routes/_app/bank-statement-import'
-import { Route as AppBankSalesProfileRouteImport } from './routes/_app/bank-sales-profile'
-import { Route as AppBankRequirementsRouteImport } from './routes/_app/bank-requirements'
-import { Route as AppAssistantRouteImport } from './routes/_app/assistant'
+import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppAdvancePaymentsRouteImport } from './routes/_app/advance-payments'
-import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
-import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
-import { Route as AppTdsLiabilityRouteImport } from './routes/_app/tds.liability'
-import { Route as AppTdsImportJvRouteImport } from './routes/_app/tds.import-jv'
-import { Route as AppTds94qRouteImport } from './routes/_app/tds.94q'
-import { Route as AppTds94jRouteImport } from './routes/_app/tds.94j'
-import { Route as AppTds94iRouteImport } from './routes/_app/tds.94i'
-import { Route as AppTds94hRouteImport } from './routes/_app/tds.94h'
-import { Route as AppTds94cRouteImport } from './routes/_app/tds.94c'
-import { Route as AppTds94aRouteImport } from './routes/_app/tds.94a'
-import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
-import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
-import { Route as AppIntercompanyTransactionsRouteImport } from './routes/_app/intercompany.transactions'
-import { Route as AppIntercompanySettlementRouteImport } from './routes/_app/intercompany.settlement'
-import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
-import { Route as AppHrReportsEmployeeMasterRouteImport } from './routes/_app/hr-reports_.employee-master'
-import { Route as AppHrReportsDocumentsRouteImport } from './routes/_app/hr-reports_.documents'
-import { Route as AppFibcBuyersBuyerIdRouteImport } from './routes/_app/fibc-buyers.$buyerId'
-import { Route as AppBomCustomersRouteImport } from './routes/_app/bom.customers'
-import { Route as AppBomCreateRouteImport } from './routes/_app/bom.create'
-import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
-import { Route as AppBankRequirementsDocumentPackRouteImport } from './routes/_app/bank-requirements_.document-pack'
-import { Route as AppBankRequirementsBobLodgementRouteImport } from './routes/_app/bank-requirements_.bob-lodgement'
+import { Route as AppAssistantRouteImport } from './routes/_app/assistant'
+import { Route as AppBankRequirementsRouteImport } from './routes/_app/bank-requirements'
+import { Route as AppBankSalesProfileRouteImport } from './routes/_app/bank-sales-profile'
+import { Route as AppBankStatementImportRouteImport } from './routes/_app/bank-statement-import'
+import { Route as AppBomRouteImport } from './routes/_app/bom'
+import { Route as AppCmaRouteImport } from './routes/_app/cma'
+import { Route as AppCustomReportRouteImport } from './routes/_app/custom-report'
+import { Route as AppDailyProductionRouteImport } from './routes/_app/daily-production'
+import { Route as AppDailyReportsRouteImport } from './routes/_app/daily-reports'
+import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
+import { Route as AppDomesticInvoiceRouteImport } from './routes/_app/domestic-invoice'
+import { Route as AppExhibitionLeadsRouteImport } from './routes/_app/exhibition-leads'
+import { Route as AppExportBillOverdueRouteImport } from './routes/_app/export-bill-overdue'
+import { Route as AppFibcBuyersRouteImport } from './routes/_app/fibc-buyers'
+import { Route as AppGateRouteImport } from './routes/_app/gate'
+import { Route as AppGateRegisterRouteImport } from './routes/_app/gate-register'
+import { Route as AppGstRouteImport } from './routes/_app/gst'
+import { Route as AppGstBillRecoRouteImport } from './routes/_app/gst-bill-reco'
+import { Route as AppHistoryRouteImport } from './routes/_app/history'
+import { Route as AppHrReportsRouteImport } from './routes/_app/hr-reports'
+import { Route as AppImportJvRouteImport } from './routes/_app/import-jv'
+import { Route as AppIndentsRouteImport } from './routes/_app/indents'
+import { Route as AppIntercompanyRouteImport } from './routes/_app/intercompany'
+import { Route as AppItemStockRouteImport } from './routes/_app/item-stock'
+import { Route as AppLedgerSummaryRouteImport } from './routes/_app/ledger-summary'
+import { Route as AppLedgersRouteImport } from './routes/_app/ledgers'
+import { Route as AppOrderBookSummaryRouteImport } from './routes/_app/order-book-summary'
+import { Route as AppPaymentsRouteImport } from './routes/_app/payments'
+import { Route as AppPendingRouteImport } from './routes/_app/pending'
+import { Route as AppPendingPaymentRouteImport } from './routes/_app/pending-payment'
+import { Route as AppPlantConsumptionRouteImport } from './routes/_app/plant-consumption'
+import { Route as AppPnlRouteImport } from './routes/_app/pnl'
+import { Route as AppPnlResultRouteImport } from './routes/_app/pnl-result'
+import { Route as AppProfileRouteImport } from './routes/_app/profile'
+import { Route as AppReconciliationRouteImport } from './routes/_app/reconciliation'
+import { Route as AppSalesDashboardRouteImport } from './routes/_app/sales-dashboard'
+import { Route as AppTdsRouteImport } from './routes/_app/tds'
+import { Route as AppWorkordersRouteImport } from './routes/_app/workorders'
+import { Route as AppWovenQuoteRouteImport } from './routes/_app/woven-quote'
+import { Route as ExhibitionDealerRouteImport } from './routes/exhibition.dealer'
+import { Route as ExhibitionProductRouteImport } from './routes/exhibition.product'
 import { Route as AppAdvancePaymentPaymentNoRouteImport } from './routes/_app/advance-payment.$paymentNo'
+import { Route as AppBankRequirementsBobLodgementRouteImport } from './routes/_app/bank-requirements_.bob-lodgement'
+import { Route as AppBankRequirementsDocumentPackRouteImport } from './routes/_app/bank-requirements_.document-pack'
+import { Route as AppBomIndexRouteImport } from './routes/_app/bom.index'
+import { Route as AppBomSplatRouteImport } from './routes/_app/bom.$'
+import { Route as AppBomCreateRouteImport } from './routes/_app/bom.create'
+import { Route as AppBomCustomersRouteImport } from './routes/_app/bom.customers'
+import { Route as AppFibcBuyersBuyerIdRouteImport } from './routes/_app/fibc-buyers.$buyerId'
+import { Route as AppHrReportsCostingRouteImport } from './routes/_app/hr-reports_.costing'
+import { Route as AppHrReportsDocumentsRouteImport } from './routes/_app/hr-reports_.documents'
+import { Route as AppHrReportsEmployeeMasterRouteImport } from './routes/_app/hr-reports_.employee-master'
+import { Route as AppIndentIndentNoRouteImport } from './routes/_app/indent.$indentNo'
+import { Route as AppIntercompanySettlementRouteImport } from './routes/_app/intercompany.settlement'
+import { Route as AppIntercompanyTransactionsRouteImport } from './routes/_app/intercompany.transactions'
+import { Route as AppPaymentPaymentNoRouteImport } from './routes/_app/payment.$paymentNo'
+import { Route as AppPoPoNoRouteImport } from './routes/_app/po.$poNo'
+import { Route as AppTds94aRouteImport } from './routes/_app/tds.94a'
+import { Route as AppTds94cRouteImport } from './routes/_app/tds.94c'
+import { Route as AppTds94hRouteImport } from './routes/_app/tds.94h'
+import { Route as AppTds94iRouteImport } from './routes/_app/tds.94i'
+import { Route as AppTds94jRouteImport } from './routes/_app/tds.94j'
+import { Route as AppTds94qRouteImport } from './routes/_app/tds.94q'
+import { Route as AppTdsImportJvRouteImport } from './routes/_app/tds.import-jv'
+import { Route as AppTdsLiabilityRouteImport } from './routes/_app/tds.liability'
+import { Route as AppWorkorderPoNoRouteImport } from './routes/_app/workorder.$poNo'
 
-const AppRoute = AppRouteImport.update({
-  id: '/_app',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ExhibitionProductRoute = ExhibitionProductRouteImport.update({
-  id: '/exhibition/product',
-  path: '/exhibition/product',
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ExhibitionDealerRoute = ExhibitionDealerRouteImport.update({
-  id: '/exhibition/dealer',
-  path: '/exhibition/dealer',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppWovenQuoteRoute = AppWovenQuoteRouteImport.update({
-  id: '/woven-quote',
-  path: '/woven-quote',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppWorkordersRoute = AppWorkordersRouteImport.update({
-  id: '/workorders',
-  path: '/workorders',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppTdsRoute = AppTdsRouteImport.update({
-  id: '/tds',
-  path: '/tds',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppSalesDashboardRoute = AppSalesDashboardRouteImport.update({
-  id: '/sales-dashboard',
-  path: '/sales-dashboard',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppReconciliationRoute = AppReconciliationRouteImport.update({
-  id: '/reconciliation',
-  path: '/reconciliation',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppProfileRoute = AppProfileRouteImport.update({
-  id: '/profile',
-  path: '/profile',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPnlResultRoute = AppPnlResultRouteImport.update({
-  id: '/pnl-result',
-  path: '/pnl-result',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPnlRoute = AppPnlRouteImport.update({
-  id: '/pnl',
-  path: '/pnl',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPlantConsumptionRoute = AppPlantConsumptionRouteImport.update({
-  id: '/plant-consumption',
-  path: '/plant-consumption',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPendingRoute = AppPendingRouteImport.update({
-  id: '/pending',
-  path: '/pending',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPaymentsRoute = AppPaymentsRouteImport.update({
-  id: '/payments',
-  path: '/payments',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppOrderBookSummaryRoute = AppOrderBookSummaryRouteImport.update({
-  id: '/order-book-summary',
-  path: '/order-book-summary',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppLedgersRoute = AppLedgersRouteImport.update({
-  id: '/ledgers',
-  path: '/ledgers',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppLedgerSummaryRoute = AppLedgerSummaryRouteImport.update({
-  id: '/ledger-summary',
-  path: '/ledger-summary',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppItemStockRoute = AppItemStockRouteImport.update({
-  id: '/item-stock',
-  path: '/item-stock',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppIntercompanyRoute = AppIntercompanyRouteImport.update({
-  id: '/intercompany',
-  path: '/intercompany',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppIndentsRoute = AppIndentsRouteImport.update({
-  id: '/indents',
-  path: '/indents',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppImportJvRoute = AppImportJvRouteImport.update({
-  id: '/import-jv',
-  path: '/import-jv',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppHrReportsRoute = AppHrReportsRouteImport.update({
-  id: '/hr-reports',
-  path: '/hr-reports',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppHistoryRoute = AppHistoryRouteImport.update({
-  id: '/history',
-  path: '/history',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppGstBillRecoRoute = AppGstBillRecoRouteImport.update({
-  id: '/gst-bill-reco',
-  path: '/gst-bill-reco',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppGstRoute = AppGstRouteImport.update({
-  id: '/gst',
-  path: '/gst',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppGateRegisterRoute = AppGateRegisterRouteImport.update({
-  id: '/gate-register',
-  path: '/gate-register',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppGateRoute = AppGateRouteImport.update({
-  id: '/gate',
-  path: '/gate',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppFibcBuyersRoute = AppFibcBuyersRouteImport.update({
-  id: '/fibc-buyers',
-  path: '/fibc-buyers',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppExportBillOverdueRoute = AppExportBillOverdueRouteImport.update({
-  id: '/export-bill-overdue',
-  path: '/export-bill-overdue',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppExhibitionLeadsRoute = AppExhibitionLeadsRouteImport.update({
-  id: '/exhibition-leads',
-  path: '/exhibition-leads',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDomesticInvoiceRoute = AppDomesticInvoiceRouteImport.update({
-  id: '/domestic-invoice',
-  path: '/domestic-invoice',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDashboardRoute = AppDashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDailyReportsRoute = AppDailyReportsRouteImport.update({
-  id: '/daily-reports',
-  path: '/daily-reports',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDailyProductionRoute = AppDailyProductionRouteImport.update({
-  id: '/daily-production',
-  path: '/daily-production',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppCustomReportRoute = AppCustomReportRouteImport.update({
-  id: '/custom-report',
-  path: '/custom-report',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppCmaRoute = AppCmaRouteImport.update({
-  id: '/cma',
-  path: '/cma',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppBomRoute = AppBomRouteImport.update({
-  id: '/bom',
-  path: '/bom',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppBankStatementImportRoute = AppBankStatementImportRouteImport.update({
-  id: '/bank-statement-import',
-  path: '/bank-statement-import',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppBankSalesProfileRoute = AppBankSalesProfileRouteImport.update({
-  id: '/bank-sales-profile',
-  path: '/bank-sales-profile',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppBankRequirementsRoute = AppBankRequirementsRouteImport.update({
-  id: '/bank-requirements',
-  path: '/bank-requirements',
+const AppAdvancePaymentsRoute = AppAdvancePaymentsRouteImport.update({
+  id: '/advance-payments',
+  path: '/advance-payments',
   getParentRoute: () => AppRoute,
 } as any)
 const AppAssistantRoute = AppAssistantRouteImport.update({
@@ -286,123 +98,210 @@ const AppAssistantRoute = AppAssistantRouteImport.update({
   path: '/assistant',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAdvancePaymentsRoute = AppAdvancePaymentsRouteImport.update({
-  id: '/advance-payments',
-  path: '/advance-payments',
+const AppBankRequirementsRoute = AppBankRequirementsRouteImport.update({
+  id: '/bank-requirements',
+  path: '/bank-requirements',
   getParentRoute: () => AppRoute,
 } as any)
-const AppBomIndexRoute = AppBomIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AppBomRoute,
-} as any)
-const AppWorkorderPoNoRoute = AppWorkorderPoNoRouteImport.update({
-  id: '/workorder/$poNo',
-  path: '/workorder/$poNo',
+const AppBankSalesProfileRoute = AppBankSalesProfileRouteImport.update({
+  id: '/bank-sales-profile',
+  path: '/bank-sales-profile',
   getParentRoute: () => AppRoute,
 } as any)
-const AppTdsLiabilityRoute = AppTdsLiabilityRouteImport.update({
-  id: '/liability',
-  path: '/liability',
-  getParentRoute: () => AppTdsRoute,
+const AppBankStatementImportRoute = AppBankStatementImportRouteImport.update({
+  id: '/bank-statement-import',
+  path: '/bank-statement-import',
+  getParentRoute: () => AppRoute,
 } as any)
-const AppTdsImportJvRoute = AppTdsImportJvRouteImport.update({
+const AppBomRoute = AppBomRouteImport.update({
+  id: '/bom',
+  path: '/bom',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCmaRoute = AppCmaRouteImport.update({
+  id: '/cma',
+  path: '/cma',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCustomReportRoute = AppCustomReportRouteImport.update({
+  id: '/custom-report',
+  path: '/custom-report',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDailyProductionRoute = AppDailyProductionRouteImport.update({
+  id: '/daily-production',
+  path: '/daily-production',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDailyReportsRoute = AppDailyReportsRouteImport.update({
+  id: '/daily-reports',
+  path: '/daily-reports',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardRoute = AppDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDomesticInvoiceRoute = AppDomesticInvoiceRouteImport.update({
+  id: '/domestic-invoice',
+  path: '/domestic-invoice',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppExhibitionLeadsRoute = AppExhibitionLeadsRouteImport.update({
+  id: '/exhibition-leads',
+  path: '/exhibition-leads',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppExportBillOverdueRoute = AppExportBillOverdueRouteImport.update({
+  id: '/export-bill-overdue',
+  path: '/export-bill-overdue',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFibcBuyersRoute = AppFibcBuyersRouteImport.update({
+  id: '/fibc-buyers',
+  path: '/fibc-buyers',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGateRoute = AppGateRouteImport.update({
+  id: '/gate',
+  path: '/gate',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGateRegisterRoute = AppGateRegisterRouteImport.update({
+  id: '/gate-register',
+  path: '/gate-register',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGstRoute = AppGstRouteImport.update({
+  id: '/gst',
+  path: '/gst',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppGstBillRecoRoute = AppGstBillRecoRouteImport.update({
+  id: '/gst-bill-reco',
+  path: '/gst-bill-reco',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppHistoryRoute = AppHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppHrReportsRoute = AppHrReportsRouteImport.update({
+  id: '/hr-reports',
+  path: '/hr-reports',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppImportJvRoute = AppImportJvRouteImport.update({
   id: '/import-jv',
   path: '/import-jv',
-  getParentRoute: () => AppTdsRoute,
-} as any)
-const AppTds94qRoute = AppTds94qRouteImport.update({
-  id: '/94q',
-  path: '/94q',
-  getParentRoute: () => AppTdsRoute,
-} as any)
-const AppTds94jRoute = AppTds94jRouteImport.update({
-  id: '/94j',
-  path: '/94j',
-  getParentRoute: () => AppTdsRoute,
-} as any)
-const AppTds94iRoute = AppTds94iRouteImport.update({
-  id: '/94i',
-  path: '/94i',
-  getParentRoute: () => AppTdsRoute,
-} as any)
-const AppTds94hRoute = AppTds94hRouteImport.update({
-  id: '/94h',
-  path: '/94h',
-  getParentRoute: () => AppTdsRoute,
-} as any)
-const AppTds94cRoute = AppTds94cRouteImport.update({
-  id: '/94c',
-  path: '/94c',
-  getParentRoute: () => AppTdsRoute,
-} as any)
-const AppTds94aRoute = AppTds94aRouteImport.update({
-  id: '/94a',
-  path: '/94a',
-  getParentRoute: () => AppTdsRoute,
-} as any)
-const AppPoPoNoRoute = AppPoPoNoRouteImport.update({
-  id: '/po/$poNo',
-  path: '/po/$poNo',
   getParentRoute: () => AppRoute,
 } as any)
-const AppPaymentPaymentNoRoute = AppPaymentPaymentNoRouteImport.update({
-  id: '/payment/$paymentNo',
-  path: '/payment/$paymentNo',
+const AppIndentsRoute = AppIndentsRouteImport.update({
+  id: '/indents',
+  path: '/indents',
   getParentRoute: () => AppRoute,
 } as any)
-const AppIntercompanyTransactionsRoute =
-  AppIntercompanyTransactionsRouteImport.update({
-    id: '/transactions',
-    path: '/transactions',
-    getParentRoute: () => AppIntercompanyRoute,
-  } as any)
-const AppIntercompanySettlementRoute =
-  AppIntercompanySettlementRouteImport.update({
-    id: '/settlement',
-    path: '/settlement',
-    getParentRoute: () => AppIntercompanyRoute,
-  } as any)
-const AppIndentIndentNoRoute = AppIndentIndentNoRouteImport.update({
-  id: '/indent/$indentNo',
-  path: '/indent/$indentNo',
+const AppIntercompanyRoute = AppIntercompanyRouteImport.update({
+  id: '/intercompany',
+  path: '/intercompany',
   getParentRoute: () => AppRoute,
 } as any)
-const AppHrReportsEmployeeMasterRoute =
-  AppHrReportsEmployeeMasterRouteImport.update({
-    id: '/hr-reports_/employee-master',
-    path: '/hr-reports/employee-master',
-    getParentRoute: () => AppRoute,
-  } as any)
-const AppHrReportsDocumentsRoute = AppHrReportsDocumentsRouteImport.update({
-  id: '/hr-reports_/documents',
-  path: '/hr-reports/documents',
+const AppItemStockRoute = AppItemStockRouteImport.update({
+  id: '/item-stock',
+  path: '/item-stock',
   getParentRoute: () => AppRoute,
 } as any)
-const AppFibcBuyersBuyerIdRoute = AppFibcBuyersBuyerIdRouteImport.update({
-  id: '/$buyerId',
-  path: '/$buyerId',
-  getParentRoute: () => AppFibcBuyersRoute,
+const AppLedgerSummaryRoute = AppLedgerSummaryRouteImport.update({
+  id: '/ledger-summary',
+  path: '/ledger-summary',
+  getParentRoute: () => AppRoute,
 } as any)
-const AppBomCustomersRoute = AppBomCustomersRouteImport.update({
-  id: '/customers',
-  path: '/customers',
-  getParentRoute: () => AppBomRoute,
+const AppLedgersRoute = AppLedgersRouteImport.update({
+  id: '/ledgers',
+  path: '/ledgers',
+  getParentRoute: () => AppRoute,
 } as any)
-const AppBomCreateRoute = AppBomCreateRouteImport.update({
-  id: '/create',
-  path: '/create',
-  getParentRoute: () => AppBomRoute,
+const AppOrderBookSummaryRoute = AppOrderBookSummaryRouteImport.update({
+  id: '/order-book-summary',
+  path: '/order-book-summary',
+  getParentRoute: () => AppRoute,
 } as any)
-const AppBomSplatRoute = AppBomSplatRouteImport.update({
-  id: '/$',
-  path: '/$',
-  getParentRoute: () => AppBomRoute,
+const AppPaymentsRoute = AppPaymentsRouteImport.update({
+  id: '/payments',
+  path: '/payments',
+  getParentRoute: () => AppRoute,
 } as any)
-const AppBankRequirementsDocumentPackRoute =
-  AppBankRequirementsDocumentPackRouteImport.update({
-    id: '/bank-requirements_/document-pack',
-    path: '/bank-requirements/document-pack',
+const AppPendingRoute = AppPendingRouteImport.update({
+  id: '/pending',
+  path: '/pending',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPendingPaymentRoute = AppPendingPaymentRouteImport.update({
+  id: '/pending-payment',
+  path: '/pending-payment',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPlantConsumptionRoute = AppPlantConsumptionRouteImport.update({
+  id: '/plant-consumption',
+  path: '/plant-consumption',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPnlRoute = AppPnlRouteImport.update({
+  id: '/pnl',
+  path: '/pnl',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPnlResultRoute = AppPnlResultRouteImport.update({
+  id: '/pnl-result',
+  path: '/pnl-result',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProfileRoute = AppProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReconciliationRoute = AppReconciliationRouteImport.update({
+  id: '/reconciliation',
+  path: '/reconciliation',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSalesDashboardRoute = AppSalesDashboardRouteImport.update({
+  id: '/sales-dashboard',
+  path: '/sales-dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTdsRoute = AppTdsRouteImport.update({
+  id: '/tds',
+  path: '/tds',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWorkordersRoute = AppWorkordersRouteImport.update({
+  id: '/workorders',
+  path: '/workorders',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWovenQuoteRoute = AppWovenQuoteRouteImport.update({
+  id: '/woven-quote',
+  path: '/woven-quote',
+  getParentRoute: () => AppRoute,
+} as any)
+const ExhibitionDealerRoute = ExhibitionDealerRouteImport.update({
+  id: '/exhibition/dealer',
+  path: '/exhibition/dealer',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ExhibitionProductRoute = ExhibitionProductRouteImport.update({
+  id: '/exhibition/product',
+  path: '/exhibition/product',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppAdvancePaymentPaymentNoRoute =
+  AppAdvancePaymentPaymentNoRouteImport.update({
+    id: '/advance-payment/$paymentNo',
+    path: '/advance-payment/$paymentNo',
     getParentRoute: () => AppRoute,
   } as any)
 const AppBankRequirementsBobLodgementRoute =
@@ -411,12 +310,125 @@ const AppBankRequirementsBobLodgementRoute =
     path: '/bank-requirements/bob-lodgement',
     getParentRoute: () => AppRoute,
   } as any)
-const AppAdvancePaymentPaymentNoRoute =
-  AppAdvancePaymentPaymentNoRouteImport.update({
-    id: '/advance-payment/$paymentNo',
-    path: '/advance-payment/$paymentNo',
+const AppBankRequirementsDocumentPackRoute =
+  AppBankRequirementsDocumentPackRouteImport.update({
+    id: '/bank-requirements_/document-pack',
+    path: '/bank-requirements/document-pack',
     getParentRoute: () => AppRoute,
   } as any)
+const AppBomIndexRoute = AppBomIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppBomRoute,
+} as any)
+const AppBomSplatRoute = AppBomSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
+  getParentRoute: () => AppBomRoute,
+} as any)
+const AppBomCreateRoute = AppBomCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
+  getParentRoute: () => AppBomRoute,
+} as any)
+const AppBomCustomersRoute = AppBomCustomersRouteImport.update({
+  id: '/customers',
+  path: '/customers',
+  getParentRoute: () => AppBomRoute,
+} as any)
+const AppFibcBuyersBuyerIdRoute = AppFibcBuyersBuyerIdRouteImport.update({
+  id: '/$buyerId',
+  path: '/$buyerId',
+  getParentRoute: () => AppFibcBuyersRoute,
+} as any)
+const AppHrReportsCostingRoute = AppHrReportsCostingRouteImport.update({
+  id: '/hr-reports_/costing',
+  path: '/hr-reports/costing',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppHrReportsDocumentsRoute = AppHrReportsDocumentsRouteImport.update({
+  id: '/hr-reports_/documents',
+  path: '/hr-reports/documents',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppHrReportsEmployeeMasterRoute =
+  AppHrReportsEmployeeMasterRouteImport.update({
+    id: '/hr-reports_/employee-master',
+    path: '/hr-reports/employee-master',
+    getParentRoute: () => AppRoute,
+  } as any)
+const AppIndentIndentNoRoute = AppIndentIndentNoRouteImport.update({
+  id: '/indent/$indentNo',
+  path: '/indent/$indentNo',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppIntercompanySettlementRoute =
+  AppIntercompanySettlementRouteImport.update({
+    id: '/settlement',
+    path: '/settlement',
+    getParentRoute: () => AppIntercompanyRoute,
+  } as any)
+const AppIntercompanyTransactionsRoute =
+  AppIntercompanyTransactionsRouteImport.update({
+    id: '/transactions',
+    path: '/transactions',
+    getParentRoute: () => AppIntercompanyRoute,
+  } as any)
+const AppPaymentPaymentNoRoute = AppPaymentPaymentNoRouteImport.update({
+  id: '/payment/$paymentNo',
+  path: '/payment/$paymentNo',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPoPoNoRoute = AppPoPoNoRouteImport.update({
+  id: '/po/$poNo',
+  path: '/po/$poNo',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTds94aRoute = AppTds94aRouteImport.update({
+  id: '/94a',
+  path: '/94a',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTds94cRoute = AppTds94cRouteImport.update({
+  id: '/94c',
+  path: '/94c',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTds94hRoute = AppTds94hRouteImport.update({
+  id: '/94h',
+  path: '/94h',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTds94iRoute = AppTds94iRouteImport.update({
+  id: '/94i',
+  path: '/94i',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTds94jRoute = AppTds94jRouteImport.update({
+  id: '/94j',
+  path: '/94j',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTds94qRoute = AppTds94qRouteImport.update({
+  id: '/94q',
+  path: '/94q',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTdsImportJvRoute = AppTdsImportJvRouteImport.update({
+  id: '/import-jv',
+  path: '/import-jv',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppTdsLiabilityRoute = AppTdsLiabilityRouteImport.update({
+  id: '/liability',
+  path: '/liability',
+  getParentRoute: () => AppTdsRoute,
+} as any)
+const AppWorkorderPoNoRoute = AppWorkorderPoNoRouteImport.update({
+  id: '/workorder/$poNo',
+  path: '/workorder/$poNo',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -450,6 +462,7 @@ export interface FileRoutesByFullPath {
   '/order-book-summary': typeof AppOrderBookSummaryRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
+  '/pending-payment': typeof AppPendingPaymentRoute
   '/plant-consumption': typeof AppPlantConsumptionRoute
   '/pnl': typeof AppPnlRoute
   '/pnl-result': typeof AppPnlResultRoute
@@ -468,6 +481,7 @@ export interface FileRoutesByFullPath {
   '/bom/create': typeof AppBomCreateRoute
   '/bom/customers': typeof AppBomCustomersRoute
   '/fibc-buyers/$buyerId': typeof AppFibcBuyersBuyerIdRoute
+  '/hr-reports/costing': typeof AppHrReportsCostingRoute
   '/hr-reports/documents': typeof AppHrReportsDocumentsRoute
   '/hr-reports/employee-master': typeof AppHrReportsEmployeeMasterRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
@@ -517,6 +531,7 @@ export interface FileRoutesByTo {
   '/order-book-summary': typeof AppOrderBookSummaryRoute
   '/payments': typeof AppPaymentsRoute
   '/pending': typeof AppPendingRoute
+  '/pending-payment': typeof AppPendingPaymentRoute
   '/plant-consumption': typeof AppPlantConsumptionRoute
   '/pnl': typeof AppPnlRoute
   '/pnl-result': typeof AppPnlResultRoute
@@ -535,6 +550,7 @@ export interface FileRoutesByTo {
   '/bom/create': typeof AppBomCreateRoute
   '/bom/customers': typeof AppBomCustomersRoute
   '/fibc-buyers/$buyerId': typeof AppFibcBuyersBuyerIdRoute
+  '/hr-reports/costing': typeof AppHrReportsCostingRoute
   '/hr-reports/documents': typeof AppHrReportsDocumentsRoute
   '/hr-reports/employee-master': typeof AppHrReportsEmployeeMasterRoute
   '/indent/$indentNo': typeof AppIndentIndentNoRoute
@@ -587,6 +603,7 @@ export interface FileRoutesById {
   '/_app/order-book-summary': typeof AppOrderBookSummaryRoute
   '/_app/payments': typeof AppPaymentsRoute
   '/_app/pending': typeof AppPendingRoute
+  '/_app/pending-payment': typeof AppPendingPaymentRoute
   '/_app/plant-consumption': typeof AppPlantConsumptionRoute
   '/_app/pnl': typeof AppPnlRoute
   '/_app/pnl-result': typeof AppPnlResultRoute
@@ -605,6 +622,7 @@ export interface FileRoutesById {
   '/_app/bom/create': typeof AppBomCreateRoute
   '/_app/bom/customers': typeof AppBomCustomersRoute
   '/_app/fibc-buyers/$buyerId': typeof AppFibcBuyersBuyerIdRoute
+  '/_app/hr-reports_/costing': typeof AppHrReportsCostingRoute
   '/_app/hr-reports_/documents': typeof AppHrReportsDocumentsRoute
   '/_app/hr-reports_/employee-master': typeof AppHrReportsEmployeeMasterRoute
   '/_app/indent/$indentNo': typeof AppIndentIndentNoRoute
@@ -657,6 +675,7 @@ export interface FileRouteTypes {
     | '/order-book-summary'
     | '/payments'
     | '/pending'
+    | '/pending-payment'
     | '/plant-consumption'
     | '/pnl'
     | '/pnl-result'
@@ -675,6 +694,7 @@ export interface FileRouteTypes {
     | '/bom/create'
     | '/bom/customers'
     | '/fibc-buyers/$buyerId'
+    | '/hr-reports/costing'
     | '/hr-reports/documents'
     | '/hr-reports/employee-master'
     | '/indent/$indentNo'
@@ -724,6 +744,7 @@ export interface FileRouteTypes {
     | '/order-book-summary'
     | '/payments'
     | '/pending'
+    | '/pending-payment'
     | '/plant-consumption'
     | '/pnl'
     | '/pnl-result'
@@ -742,6 +763,7 @@ export interface FileRouteTypes {
     | '/bom/create'
     | '/bom/customers'
     | '/fibc-buyers/$buyerId'
+    | '/hr-reports/costing'
     | '/hr-reports/documents'
     | '/hr-reports/employee-master'
     | '/indent/$indentNo'
@@ -793,6 +815,7 @@ export interface FileRouteTypes {
     | '/_app/order-book-summary'
     | '/_app/payments'
     | '/_app/pending'
+    | '/_app/pending-payment'
     | '/_app/plant-consumption'
     | '/_app/pnl'
     | '/_app/pnl-result'
@@ -811,6 +834,7 @@ export interface FileRouteTypes {
     | '/_app/bom/create'
     | '/_app/bom/customers'
     | '/_app/fibc-buyers/$buyerId'
+    | '/_app/hr-reports_/costing'
     | '/_app/hr-reports_/documents'
     | '/_app/hr-reports_/employee-master'
     | '/_app/indent/$indentNo'
@@ -839,13 +863,6 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/_app': {
-      id: '/_app'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AppRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -853,277 +870,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/exhibition/product': {
-      id: '/exhibition/product'
-      path: '/exhibition/product'
-      fullPath: '/exhibition/product'
-      preLoaderRoute: typeof ExhibitionProductRouteImport
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/exhibition/dealer': {
-      id: '/exhibition/dealer'
-      path: '/exhibition/dealer'
-      fullPath: '/exhibition/dealer'
-      preLoaderRoute: typeof ExhibitionDealerRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_app/woven-quote': {
-      id: '/_app/woven-quote'
-      path: '/woven-quote'
-      fullPath: '/woven-quote'
-      preLoaderRoute: typeof AppWovenQuoteRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/workorders': {
-      id: '/_app/workorders'
-      path: '/workorders'
-      fullPath: '/workorders'
-      preLoaderRoute: typeof AppWorkordersRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/tds': {
-      id: '/_app/tds'
-      path: '/tds'
-      fullPath: '/tds'
-      preLoaderRoute: typeof AppTdsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/sales-dashboard': {
-      id: '/_app/sales-dashboard'
-      path: '/sales-dashboard'
-      fullPath: '/sales-dashboard'
-      preLoaderRoute: typeof AppSalesDashboardRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/reconciliation': {
-      id: '/_app/reconciliation'
-      path: '/reconciliation'
-      fullPath: '/reconciliation'
-      preLoaderRoute: typeof AppReconciliationRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/profile': {
-      id: '/_app/profile'
-      path: '/profile'
-      fullPath: '/profile'
-      preLoaderRoute: typeof AppProfileRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/pnl-result': {
-      id: '/_app/pnl-result'
-      path: '/pnl-result'
-      fullPath: '/pnl-result'
-      preLoaderRoute: typeof AppPnlResultRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/pnl': {
-      id: '/_app/pnl'
-      path: '/pnl'
-      fullPath: '/pnl'
-      preLoaderRoute: typeof AppPnlRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/plant-consumption': {
-      id: '/_app/plant-consumption'
-      path: '/plant-consumption'
-      fullPath: '/plant-consumption'
-      preLoaderRoute: typeof AppPlantConsumptionRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/pending': {
-      id: '/_app/pending'
-      path: '/pending'
-      fullPath: '/pending'
-      preLoaderRoute: typeof AppPendingRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/payments': {
-      id: '/_app/payments'
-      path: '/payments'
-      fullPath: '/payments'
-      preLoaderRoute: typeof AppPaymentsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/order-book-summary': {
-      id: '/_app/order-book-summary'
-      path: '/order-book-summary'
-      fullPath: '/order-book-summary'
-      preLoaderRoute: typeof AppOrderBookSummaryRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/ledgers': {
-      id: '/_app/ledgers'
-      path: '/ledgers'
-      fullPath: '/ledgers'
-      preLoaderRoute: typeof AppLedgersRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/ledger-summary': {
-      id: '/_app/ledger-summary'
-      path: '/ledger-summary'
-      fullPath: '/ledger-summary'
-      preLoaderRoute: typeof AppLedgerSummaryRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/item-stock': {
-      id: '/_app/item-stock'
-      path: '/item-stock'
-      fullPath: '/item-stock'
-      preLoaderRoute: typeof AppItemStockRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/intercompany': {
-      id: '/_app/intercompany'
-      path: '/intercompany'
-      fullPath: '/intercompany'
-      preLoaderRoute: typeof AppIntercompanyRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/indents': {
-      id: '/_app/indents'
-      path: '/indents'
-      fullPath: '/indents'
-      preLoaderRoute: typeof AppIndentsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/import-jv': {
-      id: '/_app/import-jv'
-      path: '/import-jv'
-      fullPath: '/import-jv'
-      preLoaderRoute: typeof AppImportJvRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/hr-reports': {
-      id: '/_app/hr-reports'
-      path: '/hr-reports'
-      fullPath: '/hr-reports'
-      preLoaderRoute: typeof AppHrReportsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/history': {
-      id: '/_app/history'
-      path: '/history'
-      fullPath: '/history'
-      preLoaderRoute: typeof AppHistoryRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/gst-bill-reco': {
-      id: '/_app/gst-bill-reco'
-      path: '/gst-bill-reco'
-      fullPath: '/gst-bill-reco'
-      preLoaderRoute: typeof AppGstBillRecoRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/gst': {
-      id: '/_app/gst'
-      path: '/gst'
-      fullPath: '/gst'
-      preLoaderRoute: typeof AppGstRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/gate-register': {
-      id: '/_app/gate-register'
-      path: '/gate-register'
-      fullPath: '/gate-register'
-      preLoaderRoute: typeof AppGateRegisterRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/gate': {
-      id: '/_app/gate'
-      path: '/gate'
-      fullPath: '/gate'
-      preLoaderRoute: typeof AppGateRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/fibc-buyers': {
-      id: '/_app/fibc-buyers'
-      path: '/fibc-buyers'
-      fullPath: '/fibc-buyers'
-      preLoaderRoute: typeof AppFibcBuyersRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/export-bill-overdue': {
-      id: '/_app/export-bill-overdue'
-      path: '/export-bill-overdue'
-      fullPath: '/export-bill-overdue'
-      preLoaderRoute: typeof AppExportBillOverdueRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/exhibition-leads': {
-      id: '/_app/exhibition-leads'
-      path: '/exhibition-leads'
-      fullPath: '/exhibition-leads'
-      preLoaderRoute: typeof AppExhibitionLeadsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/domestic-invoice': {
-      id: '/_app/domestic-invoice'
-      path: '/domestic-invoice'
-      fullPath: '/domestic-invoice'
-      preLoaderRoute: typeof AppDomesticInvoiceRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/dashboard': {
-      id: '/_app/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof AppDashboardRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/daily-reports': {
-      id: '/_app/daily-reports'
-      path: '/daily-reports'
-      fullPath: '/daily-reports'
-      preLoaderRoute: typeof AppDailyReportsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/daily-production': {
-      id: '/_app/daily-production'
-      path: '/daily-production'
-      fullPath: '/daily-production'
-      preLoaderRoute: typeof AppDailyProductionRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/custom-report': {
-      id: '/_app/custom-report'
-      path: '/custom-report'
-      fullPath: '/custom-report'
-      preLoaderRoute: typeof AppCustomReportRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/cma': {
-      id: '/_app/cma'
-      path: '/cma'
-      fullPath: '/cma'
-      preLoaderRoute: typeof AppCmaRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/bom': {
-      id: '/_app/bom'
-      path: '/bom'
-      fullPath: '/bom'
-      preLoaderRoute: typeof AppBomRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/bank-statement-import': {
-      id: '/_app/bank-statement-import'
-      path: '/bank-statement-import'
-      fullPath: '/bank-statement-import'
-      preLoaderRoute: typeof AppBankStatementImportRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/bank-sales-profile': {
-      id: '/_app/bank-sales-profile'
-      path: '/bank-sales-profile'
-      fullPath: '/bank-sales-profile'
-      preLoaderRoute: typeof AppBankSalesProfileRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/bank-requirements': {
-      id: '/_app/bank-requirements'
-      path: '/bank-requirements'
-      fullPath: '/bank-requirements'
-      preLoaderRoute: typeof AppBankRequirementsRouteImport
+    '/_app/advance-payments': {
+      id: '/_app/advance-payments'
+      path: '/advance-payments'
+      fullPath: '/advance-payments'
+      preLoaderRoute: typeof AppAdvancePaymentsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/assistant': {
@@ -1133,165 +891,291 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAssistantRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/advance-payments': {
-      id: '/_app/advance-payments'
-      path: '/advance-payments'
-      fullPath: '/advance-payments'
-      preLoaderRoute: typeof AppAdvancePaymentsRouteImport
+    '/_app/bank-requirements': {
+      id: '/_app/bank-requirements'
+      path: '/bank-requirements'
+      fullPath: '/bank-requirements'
+      preLoaderRoute: typeof AppBankRequirementsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/bom/': {
-      id: '/_app/bom/'
-      path: '/'
-      fullPath: '/bom/'
-      preLoaderRoute: typeof AppBomIndexRouteImport
-      parentRoute: typeof AppBomRoute
-    }
-    '/_app/workorder/$poNo': {
-      id: '/_app/workorder/$poNo'
-      path: '/workorder/$poNo'
-      fullPath: '/workorder/$poNo'
-      preLoaderRoute: typeof AppWorkorderPoNoRouteImport
+    '/_app/bank-sales-profile': {
+      id: '/_app/bank-sales-profile'
+      path: '/bank-sales-profile'
+      fullPath: '/bank-sales-profile'
+      preLoaderRoute: typeof AppBankSalesProfileRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/tds/liability': {
-      id: '/_app/tds/liability'
-      path: '/liability'
-      fullPath: '/tds/liability'
-      preLoaderRoute: typeof AppTdsLiabilityRouteImport
-      parentRoute: typeof AppTdsRoute
+    '/_app/bank-statement-import': {
+      id: '/_app/bank-statement-import'
+      path: '/bank-statement-import'
+      fullPath: '/bank-statement-import'
+      preLoaderRoute: typeof AppBankStatementImportRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/_app/tds/import-jv': {
-      id: '/_app/tds/import-jv'
+    '/_app/bom': {
+      id: '/_app/bom'
+      path: '/bom'
+      fullPath: '/bom'
+      preLoaderRoute: typeof AppBomRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/cma': {
+      id: '/_app/cma'
+      path: '/cma'
+      fullPath: '/cma'
+      preLoaderRoute: typeof AppCmaRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/custom-report': {
+      id: '/_app/custom-report'
+      path: '/custom-report'
+      fullPath: '/custom-report'
+      preLoaderRoute: typeof AppCustomReportRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/daily-production': {
+      id: '/_app/daily-production'
+      path: '/daily-production'
+      fullPath: '/daily-production'
+      preLoaderRoute: typeof AppDailyProductionRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/daily-reports': {
+      id: '/_app/daily-reports'
+      path: '/daily-reports'
+      fullPath: '/daily-reports'
+      preLoaderRoute: typeof AppDailyReportsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard': {
+      id: '/_app/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/domestic-invoice': {
+      id: '/_app/domestic-invoice'
+      path: '/domestic-invoice'
+      fullPath: '/domestic-invoice'
+      preLoaderRoute: typeof AppDomesticInvoiceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/exhibition-leads': {
+      id: '/_app/exhibition-leads'
+      path: '/exhibition-leads'
+      fullPath: '/exhibition-leads'
+      preLoaderRoute: typeof AppExhibitionLeadsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/export-bill-overdue': {
+      id: '/_app/export-bill-overdue'
+      path: '/export-bill-overdue'
+      fullPath: '/export-bill-overdue'
+      preLoaderRoute: typeof AppExportBillOverdueRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/fibc-buyers': {
+      id: '/_app/fibc-buyers'
+      path: '/fibc-buyers'
+      fullPath: '/fibc-buyers'
+      preLoaderRoute: typeof AppFibcBuyersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/gate': {
+      id: '/_app/gate'
+      path: '/gate'
+      fullPath: '/gate'
+      preLoaderRoute: typeof AppGateRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/gate-register': {
+      id: '/_app/gate-register'
+      path: '/gate-register'
+      fullPath: '/gate-register'
+      preLoaderRoute: typeof AppGateRegisterRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/gst': {
+      id: '/_app/gst'
+      path: '/gst'
+      fullPath: '/gst'
+      preLoaderRoute: typeof AppGstRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/gst-bill-reco': {
+      id: '/_app/gst-bill-reco'
+      path: '/gst-bill-reco'
+      fullPath: '/gst-bill-reco'
+      preLoaderRoute: typeof AppGstBillRecoRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/history': {
+      id: '/_app/history'
+      path: '/history'
+      fullPath: '/history'
+      preLoaderRoute: typeof AppHistoryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/hr-reports': {
+      id: '/_app/hr-reports'
+      path: '/hr-reports'
+      fullPath: '/hr-reports'
+      preLoaderRoute: typeof AppHrReportsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/import-jv': {
+      id: '/_app/import-jv'
       path: '/import-jv'
-      fullPath: '/tds/import-jv'
-      preLoaderRoute: typeof AppTdsImportJvRouteImport
-      parentRoute: typeof AppTdsRoute
-    }
-    '/_app/tds/94q': {
-      id: '/_app/tds/94q'
-      path: '/94q'
-      fullPath: '/tds/94q'
-      preLoaderRoute: typeof AppTds94qRouteImport
-      parentRoute: typeof AppTdsRoute
-    }
-    '/_app/tds/94j': {
-      id: '/_app/tds/94j'
-      path: '/94j'
-      fullPath: '/tds/94j'
-      preLoaderRoute: typeof AppTds94jRouteImport
-      parentRoute: typeof AppTdsRoute
-    }
-    '/_app/tds/94i': {
-      id: '/_app/tds/94i'
-      path: '/94i'
-      fullPath: '/tds/94i'
-      preLoaderRoute: typeof AppTds94iRouteImport
-      parentRoute: typeof AppTdsRoute
-    }
-    '/_app/tds/94h': {
-      id: '/_app/tds/94h'
-      path: '/94h'
-      fullPath: '/tds/94h'
-      preLoaderRoute: typeof AppTds94hRouteImport
-      parentRoute: typeof AppTdsRoute
-    }
-    '/_app/tds/94c': {
-      id: '/_app/tds/94c'
-      path: '/94c'
-      fullPath: '/tds/94c'
-      preLoaderRoute: typeof AppTds94cRouteImport
-      parentRoute: typeof AppTdsRoute
-    }
-    '/_app/tds/94a': {
-      id: '/_app/tds/94a'
-      path: '/94a'
-      fullPath: '/tds/94a'
-      preLoaderRoute: typeof AppTds94aRouteImport
-      parentRoute: typeof AppTdsRoute
-    }
-    '/_app/po/$poNo': {
-      id: '/_app/po/$poNo'
-      path: '/po/$poNo'
-      fullPath: '/po/$poNo'
-      preLoaderRoute: typeof AppPoPoNoRouteImport
+      fullPath: '/import-jv'
+      preLoaderRoute: typeof AppImportJvRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/payment/$paymentNo': {
-      id: '/_app/payment/$paymentNo'
-      path: '/payment/$paymentNo'
-      fullPath: '/payment/$paymentNo'
-      preLoaderRoute: typeof AppPaymentPaymentNoRouteImport
+    '/_app/indents': {
+      id: '/_app/indents'
+      path: '/indents'
+      fullPath: '/indents'
+      preLoaderRoute: typeof AppIndentsRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/intercompany/transactions': {
-      id: '/_app/intercompany/transactions'
-      path: '/transactions'
-      fullPath: '/intercompany/transactions'
-      preLoaderRoute: typeof AppIntercompanyTransactionsRouteImport
-      parentRoute: typeof AppIntercompanyRoute
-    }
-    '/_app/intercompany/settlement': {
-      id: '/_app/intercompany/settlement'
-      path: '/settlement'
-      fullPath: '/intercompany/settlement'
-      preLoaderRoute: typeof AppIntercompanySettlementRouteImport
-      parentRoute: typeof AppIntercompanyRoute
-    }
-    '/_app/indent/$indentNo': {
-      id: '/_app/indent/$indentNo'
-      path: '/indent/$indentNo'
-      fullPath: '/indent/$indentNo'
-      preLoaderRoute: typeof AppIndentIndentNoRouteImport
+    '/_app/intercompany': {
+      id: '/_app/intercompany'
+      path: '/intercompany'
+      fullPath: '/intercompany'
+      preLoaderRoute: typeof AppIntercompanyRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/hr-reports_/employee-master': {
-      id: '/_app/hr-reports_/employee-master'
-      path: '/hr-reports/employee-master'
-      fullPath: '/hr-reports/employee-master'
-      preLoaderRoute: typeof AppHrReportsEmployeeMasterRouteImport
+    '/_app/item-stock': {
+      id: '/_app/item-stock'
+      path: '/item-stock'
+      fullPath: '/item-stock'
+      preLoaderRoute: typeof AppItemStockRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/hr-reports_/documents': {
-      id: '/_app/hr-reports_/documents'
-      path: '/hr-reports/documents'
-      fullPath: '/hr-reports/documents'
-      preLoaderRoute: typeof AppHrReportsDocumentsRouteImport
+    '/_app/ledger-summary': {
+      id: '/_app/ledger-summary'
+      path: '/ledger-summary'
+      fullPath: '/ledger-summary'
+      preLoaderRoute: typeof AppLedgerSummaryRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/fibc-buyers/$buyerId': {
-      id: '/_app/fibc-buyers/$buyerId'
-      path: '/$buyerId'
-      fullPath: '/fibc-buyers/$buyerId'
-      preLoaderRoute: typeof AppFibcBuyersBuyerIdRouteImport
-      parentRoute: typeof AppFibcBuyersRoute
+    '/_app/ledgers': {
+      id: '/_app/ledgers'
+      path: '/ledgers'
+      fullPath: '/ledgers'
+      preLoaderRoute: typeof AppLedgersRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/_app/bom/customers': {
-      id: '/_app/bom/customers'
-      path: '/customers'
-      fullPath: '/bom/customers'
-      preLoaderRoute: typeof AppBomCustomersRouteImport
-      parentRoute: typeof AppBomRoute
+    '/_app/order-book-summary': {
+      id: '/_app/order-book-summary'
+      path: '/order-book-summary'
+      fullPath: '/order-book-summary'
+      preLoaderRoute: typeof AppOrderBookSummaryRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/_app/bom/create': {
-      id: '/_app/bom/create'
-      path: '/create'
-      fullPath: '/bom/create'
-      preLoaderRoute: typeof AppBomCreateRouteImport
-      parentRoute: typeof AppBomRoute
+    '/_app/payments': {
+      id: '/_app/payments'
+      path: '/payments'
+      fullPath: '/payments'
+      preLoaderRoute: typeof AppPaymentsRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/_app/bom/$': {
-      id: '/_app/bom/$'
-      path: '/$'
-      fullPath: '/bom/$'
-      preLoaderRoute: typeof AppBomSplatRouteImport
-      parentRoute: typeof AppBomRoute
+    '/_app/pending': {
+      id: '/_app/pending'
+      path: '/pending'
+      fullPath: '/pending'
+      preLoaderRoute: typeof AppPendingRouteImport
+      parentRoute: typeof AppRoute
     }
-    '/_app/bank-requirements_/document-pack': {
-      id: '/_app/bank-requirements_/document-pack'
-      path: '/bank-requirements/document-pack'
-      fullPath: '/bank-requirements/document-pack'
-      preLoaderRoute: typeof AppBankRequirementsDocumentPackRouteImport
+    '/_app/pending-payment': {
+      id: '/_app/pending-payment'
+      path: '/pending-payment'
+      fullPath: '/pending-payment'
+      preLoaderRoute: typeof AppPendingPaymentRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/plant-consumption': {
+      id: '/_app/plant-consumption'
+      path: '/plant-consumption'
+      fullPath: '/plant-consumption'
+      preLoaderRoute: typeof AppPlantConsumptionRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pnl': {
+      id: '/_app/pnl'
+      path: '/pnl'
+      fullPath: '/pnl'
+      preLoaderRoute: typeof AppPnlRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/pnl-result': {
+      id: '/_app/pnl-result'
+      path: '/pnl-result'
+      fullPath: '/pnl-result'
+      preLoaderRoute: typeof AppPnlResultRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/profile': {
+      id: '/_app/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof AppProfileRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/reconciliation': {
+      id: '/_app/reconciliation'
+      path: '/reconciliation'
+      fullPath: '/reconciliation'
+      preLoaderRoute: typeof AppReconciliationRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/sales-dashboard': {
+      id: '/_app/sales-dashboard'
+      path: '/sales-dashboard'
+      fullPath: '/sales-dashboard'
+      preLoaderRoute: typeof AppSalesDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/tds': {
+      id: '/_app/tds'
+      path: '/tds'
+      fullPath: '/tds'
+      preLoaderRoute: typeof AppTdsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/workorders': {
+      id: '/_app/workorders'
+      path: '/workorders'
+      fullPath: '/workorders'
+      preLoaderRoute: typeof AppWorkordersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/woven-quote': {
+      id: '/_app/woven-quote'
+      path: '/woven-quote'
+      fullPath: '/woven-quote'
+      preLoaderRoute: typeof AppWovenQuoteRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/exhibition/dealer': {
+      id: '/exhibition/dealer'
+      path: '/exhibition/dealer'
+      fullPath: '/exhibition/dealer'
+      preLoaderRoute: typeof ExhibitionDealerRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/exhibition/product': {
+      id: '/exhibition/product'
+      path: '/exhibition/product'
+      fullPath: '/exhibition/product'
+      preLoaderRoute: typeof ExhibitionProductRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/advance-payment/$paymentNo': {
+      id: '/_app/advance-payment/$paymentNo'
+      path: '/advance-payment/$paymentNo'
+      fullPath: '/advance-payment/$paymentNo'
+      preLoaderRoute: typeof AppAdvancePaymentPaymentNoRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/bank-requirements_/bob-lodgement': {
@@ -1301,11 +1185,165 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBankRequirementsBobLodgementRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/advance-payment/$paymentNo': {
-      id: '/_app/advance-payment/$paymentNo'
-      path: '/advance-payment/$paymentNo'
-      fullPath: '/advance-payment/$paymentNo'
-      preLoaderRoute: typeof AppAdvancePaymentPaymentNoRouteImport
+    '/_app/bank-requirements_/document-pack': {
+      id: '/_app/bank-requirements_/document-pack'
+      path: '/bank-requirements/document-pack'
+      fullPath: '/bank-requirements/document-pack'
+      preLoaderRoute: typeof AppBankRequirementsDocumentPackRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/bom/': {
+      id: '/_app/bom/'
+      path: '/'
+      fullPath: '/bom/'
+      preLoaderRoute: typeof AppBomIndexRouteImport
+      parentRoute: typeof AppBomRoute
+    }
+    '/_app/bom/$': {
+      id: '/_app/bom/$'
+      path: '/$'
+      fullPath: '/bom/$'
+      preLoaderRoute: typeof AppBomSplatRouteImport
+      parentRoute: typeof AppBomRoute
+    }
+    '/_app/bom/create': {
+      id: '/_app/bom/create'
+      path: '/create'
+      fullPath: '/bom/create'
+      preLoaderRoute: typeof AppBomCreateRouteImport
+      parentRoute: typeof AppBomRoute
+    }
+    '/_app/bom/customers': {
+      id: '/_app/bom/customers'
+      path: '/customers'
+      fullPath: '/bom/customers'
+      preLoaderRoute: typeof AppBomCustomersRouteImport
+      parentRoute: typeof AppBomRoute
+    }
+    '/_app/fibc-buyers/$buyerId': {
+      id: '/_app/fibc-buyers/$buyerId'
+      path: '/$buyerId'
+      fullPath: '/fibc-buyers/$buyerId'
+      preLoaderRoute: typeof AppFibcBuyersBuyerIdRouteImport
+      parentRoute: typeof AppFibcBuyersRoute
+    }
+    '/_app/hr-reports_/costing': {
+      id: '/_app/hr-reports_/costing'
+      path: '/hr-reports/costing'
+      fullPath: '/hr-reports/costing'
+      preLoaderRoute: typeof AppHrReportsCostingRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/hr-reports_/documents': {
+      id: '/_app/hr-reports_/documents'
+      path: '/hr-reports/documents'
+      fullPath: '/hr-reports/documents'
+      preLoaderRoute: typeof AppHrReportsDocumentsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/hr-reports_/employee-master': {
+      id: '/_app/hr-reports_/employee-master'
+      path: '/hr-reports/employee-master'
+      fullPath: '/hr-reports/employee-master'
+      preLoaderRoute: typeof AppHrReportsEmployeeMasterRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/indent/$indentNo': {
+      id: '/_app/indent/$indentNo'
+      path: '/indent/$indentNo'
+      fullPath: '/indent/$indentNo'
+      preLoaderRoute: typeof AppIndentIndentNoRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/intercompany/settlement': {
+      id: '/_app/intercompany/settlement'
+      path: '/settlement'
+      fullPath: '/intercompany/settlement'
+      preLoaderRoute: typeof AppIntercompanySettlementRouteImport
+      parentRoute: typeof AppIntercompanyRoute
+    }
+    '/_app/intercompany/transactions': {
+      id: '/_app/intercompany/transactions'
+      path: '/transactions'
+      fullPath: '/intercompany/transactions'
+      preLoaderRoute: typeof AppIntercompanyTransactionsRouteImport
+      parentRoute: typeof AppIntercompanyRoute
+    }
+    '/_app/payment/$paymentNo': {
+      id: '/_app/payment/$paymentNo'
+      path: '/payment/$paymentNo'
+      fullPath: '/payment/$paymentNo'
+      preLoaderRoute: typeof AppPaymentPaymentNoRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/po/$poNo': {
+      id: '/_app/po/$poNo'
+      path: '/po/$poNo'
+      fullPath: '/po/$poNo'
+      preLoaderRoute: typeof AppPoPoNoRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/tds/94a': {
+      id: '/_app/tds/94a'
+      path: '/94a'
+      fullPath: '/tds/94a'
+      preLoaderRoute: typeof AppTds94aRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/94c': {
+      id: '/_app/tds/94c'
+      path: '/94c'
+      fullPath: '/tds/94c'
+      preLoaderRoute: typeof AppTds94cRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/94h': {
+      id: '/_app/tds/94h'
+      path: '/94h'
+      fullPath: '/tds/94h'
+      preLoaderRoute: typeof AppTds94hRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/94i': {
+      id: '/_app/tds/94i'
+      path: '/94i'
+      fullPath: '/tds/94i'
+      preLoaderRoute: typeof AppTds94iRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/94j': {
+      id: '/_app/tds/94j'
+      path: '/94j'
+      fullPath: '/tds/94j'
+      preLoaderRoute: typeof AppTds94jRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/94q': {
+      id: '/_app/tds/94q'
+      path: '/94q'
+      fullPath: '/tds/94q'
+      preLoaderRoute: typeof AppTds94qRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/import-jv': {
+      id: '/_app/tds/import-jv'
+      path: '/import-jv'
+      fullPath: '/tds/import-jv'
+      preLoaderRoute: typeof AppTdsImportJvRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/tds/liability': {
+      id: '/_app/tds/liability'
+      path: '/liability'
+      fullPath: '/tds/liability'
+      preLoaderRoute: typeof AppTdsLiabilityRouteImport
+      parentRoute: typeof AppTdsRoute
+    }
+    '/_app/workorder/$poNo': {
+      id: '/_app/workorder/$poNo'
+      path: '/workorder/$poNo'
+      fullPath: '/workorder/$poNo'
+      preLoaderRoute: typeof AppWorkorderPoNoRouteImport
       parentRoute: typeof AppRoute
     }
   }
@@ -1410,6 +1448,7 @@ interface AppRouteChildren {
   AppOrderBookSummaryRoute: typeof AppOrderBookSummaryRoute
   AppPaymentsRoute: typeof AppPaymentsRoute
   AppPendingRoute: typeof AppPendingRoute
+  AppPendingPaymentRoute: typeof AppPendingPaymentRoute
   AppPlantConsumptionRoute: typeof AppPlantConsumptionRoute
   AppPnlRoute: typeof AppPnlRoute
   AppPnlResultRoute: typeof AppPnlResultRoute
@@ -1422,6 +1461,7 @@ interface AppRouteChildren {
   AppAdvancePaymentPaymentNoRoute: typeof AppAdvancePaymentPaymentNoRoute
   AppBankRequirementsBobLodgementRoute: typeof AppBankRequirementsBobLodgementRoute
   AppBankRequirementsDocumentPackRoute: typeof AppBankRequirementsDocumentPackRoute
+  AppHrReportsCostingRoute: typeof AppHrReportsCostingRoute
   AppHrReportsDocumentsRoute: typeof AppHrReportsDocumentsRoute
   AppHrReportsEmployeeMasterRoute: typeof AppHrReportsEmployeeMasterRoute
   AppIndentIndentNoRoute: typeof AppIndentIndentNoRoute
@@ -1461,6 +1501,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppOrderBookSummaryRoute: AppOrderBookSummaryRoute,
   AppPaymentsRoute: AppPaymentsRoute,
   AppPendingRoute: AppPendingRoute,
+  AppPendingPaymentRoute: AppPendingPaymentRoute,
   AppPlantConsumptionRoute: AppPlantConsumptionRoute,
   AppPnlRoute: AppPnlRoute,
   AppPnlResultRoute: AppPnlResultRoute,
@@ -1473,6 +1514,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdvancePaymentPaymentNoRoute: AppAdvancePaymentPaymentNoRoute,
   AppBankRequirementsBobLodgementRoute: AppBankRequirementsBobLodgementRoute,
   AppBankRequirementsDocumentPackRoute: AppBankRequirementsDocumentPackRoute,
+  AppHrReportsCostingRoute: AppHrReportsCostingRoute,
   AppHrReportsDocumentsRoute: AppHrReportsDocumentsRoute,
   AppHrReportsEmployeeMasterRoute: AppHrReportsEmployeeMasterRoute,
   AppIndentIndentNoRoute: AppIndentIndentNoRoute,
